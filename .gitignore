@@ -20,6 +20,9 @@ tmp/
 temp/
 *.pid
 
+# CodeGraph local index
+.codegraph/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -62,4 +65,3 @@ coverage/
 # Docker local overrides
 compose.override.yaml
 docker-compose.override.yml
-

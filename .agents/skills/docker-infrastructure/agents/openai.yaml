@@ -1,0 +1,6 @@
+interface:
+  display_name: "Docker 基建"
+  short_description: "设计和验证三个独立服务的 Docker 与 Compose 基础设施"
+  default_prompt: "Use $docker-infrastructure to design Docker infrastructure for this repository."
+policy:
+  allow_implicit_invocation: true
