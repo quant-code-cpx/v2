@@ -52,7 +52,7 @@ services:
       [
         "/bin/sh",
         "-ec",
-        "./node_modules/.bin/prisma generate && exec ./node_modules/.bin/tsx watch src/main.ts",
+        "./node_modules/.bin/prisma generate && exec ./node_modules/.bin/nest start --watch",
       ]
     environment:
       NODE_ENV: development

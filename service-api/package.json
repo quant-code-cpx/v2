@@ -11,7 +11,7 @@
   "scripts": {
     "build": "prisma generate && nest build",
     "start": "node dist/main.js",
-    "start:dev": "tsx watch src/main.ts",
+    "start:dev": "nest start --watch",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

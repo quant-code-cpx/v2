@@ -22,9 +22,11 @@ FROM dependencies AS development
 ENV NODE_ENV=development
 COPY --chown=node:node . .
 RUN DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build ./node_modules/.bin/prisma generate \
-  && chown -R node:node /app/src/generated
+  && mkdir -p /app/dist \
+  && chown node:node /app \
+  && chown -R node:node /app/src/generated /app/dist
 USER node
-CMD ["./node_modules/.bin/tsx", "watch", "src/main.ts"]
+CMD ["./node_modules/.bin/nest", "start", "--watch"]
 
 FROM dependencies AS test
 COPY . .
