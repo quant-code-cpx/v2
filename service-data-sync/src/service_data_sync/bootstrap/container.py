@@ -19,12 +19,15 @@ class ServiceContainer:
     source_registry: SourceRegistry
 
     def close(self) -> None:
+        """Best-effort close dependencies in reverse-use order during process shutdown."""
+        # Continue closing remaining dependencies even when one driver's shutdown fails.
         for dependency in (self.object_storage, self.broker, self.database):
             with suppress(Exception):
                 dependency.close()
 
 
 def build_container(settings: Settings) -> ServiceContainer:
+    """Compose infrastructure clients without registering provider-specific adapters."""
     return ServiceContainer(
         settings=settings,
         database=DatabaseClient.from_settings(settings),

@@ -15,6 +15,7 @@ class RedisClient:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> RedisClient:
+        """Create timeout-bounded Redis client from validated broker URL."""
         return cls(
             client=redis.Redis.from_url(
                 settings.broker_url.get_secret_value(),
@@ -24,10 +25,12 @@ class RedisClient:
         )
 
     def ping(self) -> None:
+        """Check Redis reachability and translate driver errors to domain error."""
         try:
             self.client.ping()
         except RedisError as error:
             raise DependencyUnavailable("redis", "ping") from error
 
     def close(self) -> None:
+        """Close Redis client during container shutdown."""
         self.client.close()

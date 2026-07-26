@@ -12,6 +12,7 @@ export interface AnalysisPoint {
   benchmark: number;
 }
 
+/** Build ECharts-only option for non-candlestick relative-performance analysis. */
 function buildPerformanceOption(
   data: readonly AnalysisPoint[],
   tokens: ChartVisualTokens,
@@ -22,6 +23,7 @@ function buildPerformanceOption(
     color: [...tokens.series],
     dataset: {
       dimensions: ["date", "close", "benchmark"],
+      // Clone data so chart engine cannot retain or mutate caller-owned point objects.
       source: data.map((point) => ({ ...point })),
     },
     grid: { top: 48, right: 20, bottom: 32, left: 52 },
@@ -57,8 +59,10 @@ function buildPerformanceOption(
   };
 }
 
+/** Render responsive ECharts comparison of close price against benchmark. */
 export function AnalysisChart({ data }: { data: readonly AnalysisPoint[] }) {
   const tokens = useChartVisualTokens();
+  // Rebuild option only when visual tokens or immutable series changes.
   const option = useMemo(() => buildPerformanceOption(data, tokens), [data, tokens]);
   const containerRef = useECharts(option);
 

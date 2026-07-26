@@ -18,6 +18,7 @@ class ObjectStorageClient:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> ObjectStorageClient:
+        """Create S3-compatible client with bounded timeouts and one retry attempt."""
         client = boto3.client(
             "s3",
             endpoint_url=settings.s3_endpoint_url,
@@ -33,10 +34,12 @@ class ObjectStorageClient:
         return cls(client=client, bucket=settings.s3_bucket)
 
     def ping(self) -> None:
+        """Verify configured bucket access without reading or writing business data."""
         try:
             self.client.head_bucket(Bucket=self.bucket)
         except (BotoCoreError, ClientError) as error:
             raise DependencyUnavailable("s3", "head_bucket") from error
 
     def close(self) -> None:
+        """Close object-storage client during container shutdown."""
         self.client.close()

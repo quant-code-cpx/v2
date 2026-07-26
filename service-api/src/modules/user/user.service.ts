@@ -29,8 +29,10 @@ type AuditContext = {
 
 @Injectable()
 export class UserService {
+  /** Provide user persistence operations through injected database client. */
   public constructor(private readonly database: DatabaseService) {}
 
+  /** Verify normalized email credentials while equalizing nonexistent-user hash work. */
   public async authenticate(email: string, password: string): Promise<AuthenticatedUser | null> {
     const user = await this.database.client.user.findUnique({
       where: { normalizedEmail: normalizeEmail(email) },
@@ -38,6 +40,7 @@ export class UserService {
     });
 
     if (!user?.credential) {
+      // Keep absent-user path comparably expensive to avoid email-enumeration timing signal.
       await hashPassword(password);
       return null;
     }
@@ -50,11 +53,13 @@ export class UserService {
     return this.toAuthenticatedUser(user);
   }
 
+  /** Read mutable authorization fields needed for token and refresh validation. */
   public async getAuthenticationSnapshot(userId: string): Promise<AuthenticatedUser | null> {
     const user = await this.database.client.user.findUnique({ where: { id: userId } });
     return user ? this.toAuthenticatedUser(user) : null;
   }
 
+  /** Record latest successful-login timestamp. */
   public async markLogin(userId: string): Promise<void> {
     await this.database.client.user.update({
       where: { id: userId },
@@ -62,6 +67,7 @@ export class UserService {
     });
   }
 
+  /** Return one user's public resource or explicit not-found response. */
   public async getMe(userId: string): Promise<UserResource> {
     const user = await this.database.client.user.findUnique({ where: { id: userId } });
     if (!user) {
@@ -70,11 +76,13 @@ export class UserService {
     return this.toResource(user);
   }
 
+  /** Update self-service profile and matching audit record atomically. */
   public async updateMe(
     userId: string,
     input: UpdateProfileDto,
     context: AuditContext,
   ): Promise<UserResource> {
+    // Profile mutation and audit evidence must either both persist or both roll back.
     const user = await this.database.client.$transaction(async (transaction) => {
       const updated = await transaction.user.update({
         where: { id: userId },
@@ -93,6 +101,7 @@ export class UserService {
     return this.toResource(user);
   }
 
+  /** Verify current password, replace hash, invalidate security state, and audit atomically. */
   public async changePassword(
     userId: string,
     input: ChangePasswordDto,
@@ -104,6 +113,7 @@ export class UserService {
     }
 
     const passwordHash = await hashPassword(input.newPassword);
+    // Incrementing securityVersion invalidates every access token and refresh session from earlier state.
     await this.database.client.$transaction(async (transaction) => {
       await transaction.credential.update({
         where: { userId },
@@ -124,7 +134,9 @@ export class UserService {
     });
   }
 
+  /** Fetch stable cursor page of public users. */
   public async listUsers(query: ListUsersQueryDto): Promise<UserPage> {
+    // Request one extra row to derive next cursor without a separate count query.
     const users = await this.database.client.user.findMany({
       orderBy: { id: 'asc' },
       take: query.pageSize + 1,
@@ -138,6 +150,7 @@ export class UserService {
     };
   }
 
+  /** Create user credentials and matching audit record, translating duplicate-email constraint. */
   public async createUser(input: CreateUserDto, context: AuditContext): Promise<UserResource> {
     const passwordHash = await hashPassword(input.password);
     try {
@@ -176,6 +189,7 @@ export class UserService {
     }
   }
 
+  /** Update administrator-controlled fields and invalidate sessions when authorization changes. */
   public async updateUser(
     userId: string,
     input: UpdateUserDto,
@@ -191,6 +205,7 @@ export class UserService {
         if (!current) {
           throw new NotFoundException('User not found');
         }
+        // Role or status changes alter authorization, so prior token security version must expire.
         const securityChanged =
           (input.role !== undefined && input.role !== current.role) ||
           (input.status !== undefined && input.status !== current.status);
@@ -223,10 +238,12 @@ export class UserService {
     }
   }
 
+  /** Report whether bootstrap-safe user database is already populated. */
   public async hasUsers(): Promise<boolean> {
     return (await this.database.client.user.count()) > 0;
   }
 
+  /** Project database record into minimal mutable authorization snapshot. */
   private toAuthenticatedUser(user: {
     id: string;
     email: string;
@@ -245,6 +262,7 @@ export class UserService {
     };
   }
 
+  /** Project database record into public API resource with serialized timestamps. */
   private toResource(user: {
     id: string;
     email: string;
@@ -266,10 +284,12 @@ export class UserService {
   }
 }
 
+/** Normalize email identifiers for case-insensitive uniqueness and lookup. */
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+/** Hash password using configured Argon2 parameters. */
 async function hashPassword(password: string): Promise<string> {
   return argon2.hash(password, PASSWORD_OPTIONS);
 }

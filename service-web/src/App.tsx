@@ -8,6 +8,7 @@ import { ColorModeProvider, useAppTheme } from "./styles/theme";
 
 const router = createAppRouter(queryClient);
 
+/** Render router under MUI theme derived from current color-mode context. */
 function RoutedApplication() {
   const theme = useAppTheme();
 
@@ -19,6 +20,7 @@ function RoutedApplication() {
   );
 }
 
+/** Compose global query, color-mode, theme, and router providers. */
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>

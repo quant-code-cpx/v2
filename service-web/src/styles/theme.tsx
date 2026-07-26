@@ -27,6 +27,7 @@ interface ColorModeContextValue {
 
 const ColorModeContext = createContext<ColorModeContextValue | null>(null);
 
+/** Prefer persisted color mode, otherwise follow browser preference. */
 function getInitialColorMode(): PaletteMode {
   const storedMode = window.localStorage.getItem(COLOR_MODE_STORAGE_KEY);
 
@@ -37,6 +38,7 @@ function getInitialColorMode(): PaletteMode {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
+/** Build complete MUI theme from shared design tokens for requested palette mode. */
 export function createAppTheme(mode: PaletteMode): Theme {
   const dark = mode === "dark";
 
@@ -295,18 +297,23 @@ export function createAppTheme(mode: PaletteMode): Theme {
   });
 }
 
+/** Persist color-mode state and expose toggle action to descendant UI. */
 export function ColorModeProvider({ children }: PropsWithChildren) {
   const [mode, setMode] = useState<PaletteMode>(getInitialColorMode);
 
+  /** Synchronize React color choice with browser storage and document color-scheme hint. */
   useEffect(() => {
     window.localStorage.setItem(COLOR_MODE_STORAGE_KEY, mode);
     document.documentElement.dataset.colorScheme = mode;
   }, [mode]);
 
+  /** Keep provider value stable until mode changes, avoiding unnecessary context updates. */
   const value = useMemo<ColorModeContextValue>(
     () => ({
       mode,
+      /** Switch only between supported palette modes. */
       toggleColorMode: () => {
+        // Functional update avoids stale closure when toggles occur before React commits.
         setMode((currentMode) => (currentMode === "dark" ? "light" : "dark"));
       },
     }),
@@ -316,6 +323,7 @@ export function ColorModeProvider({ children }: PropsWithChildren) {
   return <ColorModeContext.Provider value={value}>{children}</ColorModeContext.Provider>;
 }
 
+/** Read color-mode context, enforcing provider placement for consumers. */
 export function useColorMode() {
   const context = useContext(ColorModeContext);
 
@@ -326,6 +334,7 @@ export function useColorMode() {
   return context;
 }
 
+/** Memoize active MUI theme from contextual color mode. */
 export function useAppTheme() {
   const { mode } = useColorMode();
 

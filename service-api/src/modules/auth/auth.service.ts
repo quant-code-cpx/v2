@@ -11,6 +11,7 @@ import { SecurityRateLimitService } from './security-rate-limit.service.js';
 
 @Injectable()
 export class AuthService {
+  /** Compose authentication workflows from persistence, user, token, config, and rate-limit services. */
   public constructor(
     private readonly database: DatabaseService,
     private readonly users: UserService,
@@ -19,6 +20,7 @@ export class AuthService {
     private readonly rateLimit: SecurityRateLimitService,
   ) {}
 
+  /** Verify credentials, create session tokens, then record successful-login side effects. */
   public async login(
     email: string,
     password: string,
@@ -49,6 +51,9 @@ export class AuthService {
     return tokenPair;
   }
 
+  /**
+   * Validate and atomically rotate a refresh token while detecting reuse of an older token.
+   */
   public async refresh(rawRefreshToken: string, ip: string, origin?: string): Promise<TokenPair> {
     this.assertAllowedOrigin(origin);
     const parsed = parseRefreshToken(rawRefreshToken);
@@ -71,6 +76,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
+    // A valid secret for revoked session proves replay; revoke whole family before rejecting it.
     if (session.revokedAt) {
       await this.revokeSessionFamily(session.userId, session.id);
       await this.rateLimit.markRefreshReplay(session.id);
@@ -89,7 +95,9 @@ export class AuthService {
     return this.rotateSession(session.id, user.id, user.role, user.securityVersion, parsed.secret);
   }
 
+  /** Revoke caller session and record audit event as one transaction. */
   public async logout(context: AuthContext, requestId?: string): Promise<void> {
+    // Session mutation and audit log must commit together to preserve forensic traceability.
     await this.database.client.$transaction(async (transaction) => {
       await transaction.session.updateMany({
         where: { id: context.sessionId, userId: context.userId, revokedAt: null },
@@ -106,6 +114,7 @@ export class AuthService {
     });
   }
 
+  /** Revalidate JWT claims against mutable session and user security state. */
   public async validateAccessToken(payload: JwtPayload): Promise<AuthContext> {
     const session = await this.database.client.session.findUnique({ where: { id: payload.sid } });
     if (
@@ -131,6 +140,7 @@ export class AuthService {
     return { userId: user.id, sessionId: session.id, role: user.role };
   }
 
+  /** Create persisted refresh-session state before issuing its matching token pair. */
   private async createSessionAndTokens(
     userId: string,
     role: Role,
@@ -149,6 +159,7 @@ export class AuthService {
     return this.signTokenPair(session.id, userId, role, securityVersion, secret, refreshExpiresAt);
   }
 
+  /** Atomically consume current refresh session and create its one-time successor. */
   private async rotateSession(
     previousSessionId: string,
     userId: string,
@@ -158,6 +169,7 @@ export class AuthService {
   ): Promise<TokenPair> {
     const secret = randomBytes(32).toString('base64url');
     const refreshExpiresAt = new Date(Date.now() + this.config.refreshTokenTtlSeconds * 1_000);
+    // Hash match in update predicate makes simultaneous refreshes race safely: only one can rotate.
     const newSession = await this.database.client.$transaction(async (transaction) => {
       const revoked = await transaction.session.updateMany({
         where: {
@@ -196,6 +208,7 @@ export class AuthService {
     );
   }
 
+  /** Sign access token and combine session identifier with opaque refresh secret. */
   private async signTokenPair(
     sessionId: string,
     userId: string,
@@ -217,12 +230,14 @@ export class AuthService {
     };
   }
 
+  /** Reject cross-origin refresh attempts that bypass configured browser boundary. */
   private assertAllowedOrigin(origin: string | undefined): void {
     if (origin !== undefined && origin !== this.config.corsOrigin) {
       throw new ForbiddenException('Unexpected refresh origin');
     }
   }
 
+  /** Revoke all active user sessions after confirmed refresh-token replay and audit it. */
   private async revokeSessionFamily(userId: string, sessionId: string): Promise<void> {
     await this.database.client.session.updateMany({
       where: { userId, revokedAt: null },
@@ -238,6 +253,7 @@ export class AuthService {
   }
 }
 
+/** Parse only non-empty `sessionId.secret` refresh-token representation. */
 function parseRefreshToken(value: string): { sessionId: string; secret: string } | null {
   const separator = value.indexOf('.');
   if (separator <= 0 || separator === value.length - 1) {
@@ -246,12 +262,15 @@ function parseRefreshToken(value: string): { sessionId: string; secret: string }
   return { sessionId: value.slice(0, separator), secret: value.slice(separator + 1) };
 }
 
+/** Produce storage-safe SHA-256 digest for opaque refresh secret. */
 function hashSecret(secret: string): string {
   return createHash('sha256').update(secret).digest('base64url');
 }
 
+/** Compare refresh-secret digests without leaking equality through timing. */
 function safeTokenHashEquals(expectedHash: string, secret: string): boolean {
   const expected = Buffer.from(expectedHash);
   const actual = Buffer.from(hashSecret(secret));
+  // `timingSafeEqual` requires equal-length buffers; preserve constant-time comparison otherwise.
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }

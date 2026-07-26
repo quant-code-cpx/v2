@@ -31,14 +31,17 @@ import type { UserPage, UserResource } from './user.types.js';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('users')
 export class UserController {
+  /** Wire guarded user routes to application service. */
   public constructor(private readonly users: UserService) {}
 
   @Get('me')
+  /** Return authenticated user's current public profile. */
   public getMe(@Req() request: AuthenticatedRequest): Promise<UserResource> {
     return this.users.getMe(request.user.userId);
   }
 
   @Patch('me')
+  /** Update authenticated user's own mutable profile fields and audit request. */
   public updateMe(
     @Req() request: AuthenticatedRequest,
     @Body() input: UpdateProfileDto,
@@ -52,6 +55,7 @@ export class UserController {
   @Post('me/password')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse()
+  /** Change caller password, invalidating prior authenticated state. */
   public async changePassword(
     @Req() request: AuthenticatedRequest,
     @Body() input: ChangePasswordDto,
@@ -64,6 +68,7 @@ export class UserController {
 
   @Get()
   @Roles('ADMIN')
+  /** Return administrator-visible cursor page of users. */
   public list(@Query() query: ListUsersQueryDto): Promise<UserPage> {
     return this.users.listUsers(query);
   }
@@ -71,6 +76,7 @@ export class UserController {
   @Post()
   @Roles('ADMIN')
   @ApiCreatedResponse()
+  /** Create a user under administrator authority with auditable actor context. */
   public create(
     @Req() request: AuthenticatedRequest,
     @Body() input: CreateUserDto,
@@ -83,6 +89,7 @@ export class UserController {
 
   @Patch(':id')
   @Roles('ADMIN')
+  /** Update target user's profile, role, or status under administrator authority. */
   public update(
     @Req() request: AuthenticatedRequest,
     @Param('id', new ParseUUIDPipe({ version: '4' })) userId: string,

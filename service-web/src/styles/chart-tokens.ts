@@ -14,9 +14,11 @@ export interface ChartVisualTokens {
   series: readonly string[];
 }
 
+/** Map active MUI palette and semantic tokens into chart-engine color contract. */
 export function useChartVisualTokens(): ChartVisualTokens {
   const theme = useTheme();
 
+  // Keep token object referentially stable so chart effects run only for visual changes.
   return useMemo(
     () => ({
       background: theme.palette.background.paper,

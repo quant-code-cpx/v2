@@ -9,9 +9,11 @@ class FakeDataSource:
     provider_id = "fake"
 
     def capabilities(self) -> frozenset[str]:
+        """Expose only health capability for contract-test fake adapter."""
         return frozenset({"health"})
 
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
+        """Return deterministic batch or reject capability outside fake's contract."""
         if request.capability not in self.capabilities():
             raise ValueError(request.capability)
         return ProviderBatch(

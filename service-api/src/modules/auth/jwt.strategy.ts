@@ -8,6 +8,7 @@ import type { AuthContext, JwtPayload } from './auth.types.js';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
+  /** Configure bearer-token extraction and delegate stateful claim validation. */
   public constructor(
     config: AppConfigService,
     private readonly auth: AuthService,
@@ -22,6 +23,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
+  /** Convert verified JWT payload into currently authorized request context. */
   public validate(payload: JwtPayload): Promise<AuthContext> {
     return this.auth.validateAccessToken(payload);
   }

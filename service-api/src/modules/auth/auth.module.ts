@@ -17,6 +17,7 @@ import { SecurityRateLimitService } from './security-rate-limit.service.js';
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       inject: [AppConfigService],
+      /** Derive JWT signing settings exclusively from validated application config. */
       useFactory: (config: AppConfigService) => ({
         secret: config.jwtAccessSecret,
         signOptions: {

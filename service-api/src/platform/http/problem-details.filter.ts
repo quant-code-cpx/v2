@@ -18,6 +18,7 @@ type ProblemResponse = {
 export class ProblemDetailsFilter implements ExceptionFilter {
   private readonly logger = new Logger(ProblemDetailsFilter.name);
 
+  /** Translate every thrown error into RFC 9457-style problem response and log server failures. */
   public catch(exception: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp();
     const response = context.getResponse<Response>();
@@ -48,6 +49,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       });
   }
 
+  /** Extract safe human-readable detail from Nest exception response payload. */
   private detailFrom(payload: string | object | undefined, status: number): string {
     if (typeof payload === 'string') {
       return payload;
@@ -66,6 +68,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     return this.titleFor(status);
   }
 
+  /** Map common status codes to stable problem-type path segments. */
   private problemType(status: number): string {
     const types: Record<number, string> = {
       400: 'validation-error',
@@ -79,6 +82,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     return types[status] ?? 'internal-error';
   }
 
+  /** Return standard HTTP status title with safe fallback for unknown status. */
   private titleFor(status: number): string {
     return HttpStatus[status] ?? 'Internal Server Error';
   }

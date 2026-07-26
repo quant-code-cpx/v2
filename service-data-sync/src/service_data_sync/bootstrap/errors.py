@@ -9,6 +9,7 @@ class DependencyUnavailable(RuntimeError):
     """A local infrastructure dependency cannot be reached safely."""
 
     def __init__(self, dependency: str, operation: str) -> None:
+        """Format operationally useful dependency failure without leaking connection details."""
         super().__init__(f"{dependency} unavailable during {operation}")
         self.dependency = dependency
         self.operation = operation

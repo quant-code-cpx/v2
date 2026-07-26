@@ -7,6 +7,7 @@ from service_data_sync.bootstrap.settings import Environment, LogFormat, load_se
 
 
 def test_settings_loads_typed_environment(configured_environment: None) -> None:
+    """Load test environment into typed settings and secret wrappers."""
     settings = load_settings()
 
     assert settings.environment is Environment.TEST
@@ -15,6 +16,7 @@ def test_settings_loads_typed_environment(configured_environment: None) -> None:
 
 
 def test_settings_hides_validation_details(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace raw Pydantic error with safe configuration-domain message."""
     monkeypatch.delenv("DATA_SYNC_DATABASE_URL", raising=False)
 
     with pytest.raises(ConfigurationError, match="invalid service-data-sync configuration"):
@@ -35,6 +37,7 @@ def test_settings_rejects_invalid_values(
     variable: str,
     value: str,
 ) -> None:
+    """Reject invalid level, endpoint scheme, and blank bucket configuration."""
     monkeypatch.setenv(variable, value)
 
     with pytest.raises(ConfigurationError):

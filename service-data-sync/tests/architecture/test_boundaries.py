@@ -9,6 +9,7 @@ FORBIDDEN_PROVIDER_SYMBOLS = {"akshare", "tushare", "ts_code", "dataframe"}
 
 
 def _imports(path: Path) -> set[str]:
+    """Return imported module names from one source file without executing it."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     imports: set[str] = set()
     for node in ast.walk(tree):
@@ -20,10 +21,12 @@ def _imports(path: Path) -> set[str]:
 
 
 def _source_files() -> list[Path]:
+    """Return all package Python files subject to architecture constraints."""
     return sorted(PACKAGE_ROOT.rglob("*.py"))
 
 
 def test_application_does_not_depend_on_infrastructure() -> None:
+    """Keep application layer independent from infrastructure implementations."""
     violations = [
         path
         for path in (PACKAGE_ROOT / "application").rglob("*.py")
@@ -34,6 +37,7 @@ def test_application_does_not_depend_on_infrastructure() -> None:
 
 
 def test_provider_sdk_imports_are_scoped_to_provider_adapters() -> None:
+    """Allow provider SDK imports only inside dedicated provider-adapter boundary."""
     violations: list[Path] = []
     provider_root = PACKAGE_ROOT / "infrastructure" / "providers"
     for path in _source_files():
@@ -45,6 +49,7 @@ def test_provider_sdk_imports_are_scoped_to_provider_adapters() -> None:
 
 
 def test_provider_adapters_cannot_depend_on_persistence_or_messaging() -> None:
+    """Prevent adapters from bypassing canonical persistence and messaging ports."""
     provider_root = PACKAGE_ROOT / "infrastructure" / "providers"
     violations = [
         path
@@ -60,6 +65,7 @@ def test_provider_adapters_cannot_depend_on_persistence_or_messaging() -> None:
 
 
 def test_provider_specific_symbols_are_absent_from_port_contract() -> None:
+    """Keep provider-neutral port free of vendor-specific vocabulary."""
     port_source = (
         (PACKAGE_ROOT / "application" / "ports" / "data_source.py")
         .read_text(encoding="utf-8")

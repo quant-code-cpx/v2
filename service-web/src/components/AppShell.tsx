@@ -24,6 +24,7 @@ const navigationItems = [
   { label: "标的分析", to: "/instruments/600519", icon: <InsightsOutlinedIcon fontSize="small" /> },
 ] as const;
 
+/** Render persistent application navigation, color-mode control, and nested route outlet. */
 export function AppShell() {
   const { mode, toggleColorMode } = useColorMode();
   const location = useLocation();
@@ -48,6 +49,7 @@ export function AppShell() {
               quant-v2
             </Typography>
             <Stack direction="row" spacing={0.5} sx={{ flex: 1, overflowX: "auto" }}>
+              {/* Map route metadata into navigation controls while preserving selected state. */}
               {navigationItems.map((item) => (
                 <Button
                   key={item.to}

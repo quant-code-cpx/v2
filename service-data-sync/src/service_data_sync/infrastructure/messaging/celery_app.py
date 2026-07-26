@@ -6,6 +6,7 @@ from service_data_sync.bootstrap.settings import Settings
 
 
 def create_worker_app(settings: Settings) -> Celery:
+    """Create broker-only worker with bounded startup retries and no result backend."""
     app = Celery("service_data_sync", broker=settings.broker_url.get_secret_value())
     app.conf.update(
         broker_connection_timeout=5,

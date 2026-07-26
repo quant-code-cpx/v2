@@ -20,6 +20,7 @@ class ProviderError(RuntimeError):
     """A provider-neutral failure emitted by an adapter."""
 
     def __init__(self, code: ProviderErrorCode, message: str, *, retryable: bool) -> None:
+        """Capture portable provider failure classification and retry policy."""
         super().__init__(message)
         self.code = code
         self.retryable = retryable
@@ -33,6 +34,7 @@ class SourceRequest:
     parameters: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
+        """Reject requests that cannot name a usable provider capability."""
         if not self.capability.strip():
             raise ValueError("capability must not be blank")
 
@@ -48,6 +50,7 @@ class ProviderBatch:
     content_type: str = "application/octet-stream"
 
     def __post_init__(self) -> None:
+        """Ensure opaque adapter output retains provider, capability, and timezone provenance."""
         if not self.provider_id.strip():
             raise ValueError("provider_id must not be blank")
         if not self.capability.strip():
@@ -57,6 +60,7 @@ class ProviderBatch:
 
     @classmethod
     def empty(cls, provider_id: str, capability: str) -> ProviderBatch:
+        """Create timezone-aware empty provider result for a supported capability."""
         return cls(
             provider_id=provider_id,
             capability=capability,

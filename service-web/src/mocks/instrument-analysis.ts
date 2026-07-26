@@ -1,10 +1,12 @@
 import type { Candle, CandleDto } from "../types/candle";
 import { normalizeCandle } from "../utils/candle";
 
+/** Generate deterministic-looking fixture candles for chart integration before API contract freezes. */
 function createDemoCandleDtos(): CandleDto[] {
   const firstOpenTime = Date.UTC(2026, 0, 2);
   let previousClose = 1_420;
 
+  // Index-driven values make fixture reproducible while still exercising normal chart variation.
   return Array.from({ length: 160 }, (_, index) => {
     const trend = index * 0.42;
     const wave = Math.sin(index / 7) * 18 + Math.cos(index / 17) * 7;
@@ -35,6 +37,7 @@ function createDemoCandleDtos(): CandleDto[] {
 
 export const demoCandles: readonly Candle[] = createDemoCandleDtos().map(normalizeCandle);
 
+/** Derive companion ECharts fixture from same candles to keep both panels temporally aligned. */
 export const demoAnalysisSeries = demoCandles.map((candle, index) => ({
   date: new Date(candle.timestamp).toLocaleDateString("zh-CN", {
     month: "numeric",

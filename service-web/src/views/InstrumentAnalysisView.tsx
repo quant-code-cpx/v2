@@ -5,22 +5,26 @@ import { useParams } from "react-router-dom";
 
 import { demoAnalysisSeries, demoCandles } from "../mocks/instrument-analysis";
 
+/** Code-split KLineChart engine panel away from market-overview initial route. */
 const KlinePanel = lazy(async () => {
   const { KlinePanel: Component } = await import("../components/KlinePanel");
 
   return { default: Component };
 });
 
+/** Code-split ECharts analysis panel until instrument page needs it. */
 const AnalysisChart = lazy(async () => {
   const { AnalysisChart: Component } = await import("../components/AnalysisChart");
 
   return { default: Component };
 });
 
+/** Reserve chart layout while a lazily imported visualization bundle loads. */
 function ChartSkeleton({ height }: { height: number }) {
   return <Skeleton variant="rounded" height={height} aria-label="正在载入图表" />;
 }
 
+/** Render fixture-backed instrument analysis with separated K-line and analytical chart engines. */
 export function InstrumentAnalysisView() {
   const { symbol = "600519" } = useParams();
 

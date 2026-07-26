@@ -5,6 +5,7 @@ import type { AppConfigService } from '../config/app-config.service.js';
 import { ProblemDetailsFilter } from './problem-details.filter.js';
 import { requestIdMiddleware } from './request-id.middleware.js';
 
+/** Apply shared HTTP trust, CORS, validation, request-id, and error-response policy. */
 export function configureHttp(app: NestExpressApplication, config: AppConfigService): void {
   app.set('trust proxy', config.trustProxy);
   app.setGlobalPrefix(config.apiPrefix, { exclude: ['health', 'ready'] });

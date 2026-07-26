@@ -15,6 +15,7 @@ class DatabaseClient:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> DatabaseClient:
+        """Create resilient PostgreSQL engine from validated secret connection URL."""
         return cls(
             engine=create_engine(
                 settings.database_url.get_secret_value(),
@@ -25,6 +26,7 @@ class DatabaseClient:
         )
 
     def ping(self) -> None:
+        """Execute minimal query and convert SQL driver failure to domain error."""
         try:
             with self.engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
@@ -32,4 +34,5 @@ class DatabaseClient:
             raise DependencyUnavailable("postgres", "ping") from error
 
     def close(self) -> None:
+        """Dispose all database-engine pools during shutdown."""
         self.engine.dispose()

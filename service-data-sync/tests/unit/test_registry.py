@@ -20,6 +20,7 @@ from service_data_sync.application.source_registry import (
 
 
 def test_fake_adapter_satisfies_port_contract() -> None:
+    """Confirm fake provider remains structurally compatible with neutral port."""
     fake = FakeDataSource()
 
     assert isinstance(fake, DataSourcePort)
@@ -30,6 +31,7 @@ def test_fake_adapter_satisfies_port_contract() -> None:
 
 
 def test_registry_keeps_provider_implementation_replaceable() -> None:
+    """Resolve registered provider through ID without exposing its concrete type."""
     registry = SourceRegistry()
     fake = FakeDataSource()
     registry.register(fake)
@@ -39,6 +41,7 @@ def test_registry_keeps_provider_implementation_replaceable() -> None:
 
 
 def test_registry_rejects_duplicate_or_unknown_provider() -> None:
+    """Reject ambiguous registrations and lookups absent from registry."""
     registry = SourceRegistry()
     registry.register(FakeDataSource())
 
@@ -49,6 +52,7 @@ def test_registry_rejects_duplicate_or_unknown_provider() -> None:
 
 
 def test_port_value_objects_reject_invalid_inputs() -> None:
+    """Reject malformed provider-neutral request and batch values."""
     with pytest.raises(ValueError, match="capability"):
         SourceRequest(capability=" ")
     with pytest.raises(ValueError, match="provider_id"):
@@ -63,6 +67,7 @@ def test_port_value_objects_reject_invalid_inputs() -> None:
 
 
 def test_registry_rejects_blank_provider_identifier() -> None:
+    """Reject provider IDs that normalize to empty names."""
     fake = FakeDataSource()
     fake.provider_id = " "
 

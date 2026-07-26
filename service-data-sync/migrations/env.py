@@ -17,10 +17,12 @@ target_metadata = None
 
 
 def _database_url() -> str:
+    """Read migration database URL from validated settings without logging its secret value."""
     return load_settings().database_url.get_secret_value()
 
 
 def run_migrations_offline() -> None:
+    """Generate SQL migration statements without opening a database connection."""
     context.configure(
         url=_database_url(),
         target_metadata=target_metadata,
@@ -33,6 +35,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    """Apply migrations through a short-lived non-pooled SQLAlchemy connection."""
     configuration = config.get_section(config.config_ini_section) or {}
     configuration["sqlalchemy.url"] = _database_url()
     connectable = engine_from_config(

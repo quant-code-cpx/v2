@@ -39,11 +39,13 @@ class DiagnosticsReport:
 
     @property
     def exit_code(self) -> DiagnosticsExitCode:
+        """Collapse check outcomes into stable CLI exit code."""
         failed = {result.dependency for result in self.results if not result.ok}
         if not failed:
             return DiagnosticsExitCode.OK
         if failed == {"configuration"}:
             return DiagnosticsExitCode.CONFIGURATION_ERROR
+        # A mixed failure must not masquerade as any single dependency outage.
         if len(failed) > 1:
             return DiagnosticsExitCode.MULTIPLE_DEPENDENCIES_UNAVAILABLE
         return {
@@ -53,6 +55,7 @@ class DiagnosticsReport:
         }.get(next(iter(failed)), DiagnosticsExitCode.INTERNAL_ERROR)
 
     def as_dict(self) -> dict[str, Any]:
+        """Serialize report into deterministic machine-readable diagnostics payload."""
         return {
             "ok": self.exit_code is DiagnosticsExitCode.OK,
             "exit_code": int(self.exit_code),
@@ -65,6 +68,7 @@ def run_diagnostics(
     *,
     timeout_seconds: int,
 ) -> DiagnosticsReport:
+    """Run independent dependency checks concurrently and classify failures or timeout."""
     started_at = {name: time.monotonic() for name in checks}
     executor = ThreadPoolExecutor(max_workers=len(checks), thread_name_prefix="dependency-check")
     futures: dict[Future[None], str] = {
@@ -75,6 +79,7 @@ def run_diagnostics(
 
     for future, dependency in futures.items():
         duration_ms = int((time.monotonic() - started_at[dependency]) * 1000)
+        # Executor cancellation cannot stop running I/O, but report timeout without waiting for it.
         if future in pending:
             future.cancel()
             results.append(
@@ -105,6 +110,7 @@ def run_diagnostics(
 
 
 def _checks(container: ServiceContainer) -> dict[str, Callable[[], None]]:
+    """Expose dependency probes under stable externally documented names."""
     return {
         "postgres": container.database.ping,
         "redis": container.broker.ping,
@@ -113,6 +119,7 @@ def _checks(container: ServiceContainer) -> dict[str, Callable[[], None]]:
 
 
 def diagnose(settings: Settings) -> DiagnosticsReport:
+    """Build temporary container, run all probes, and always release its clients."""
     container = build_container(settings)
     try:
         return run_diagnostics(
@@ -124,6 +131,7 @@ def diagnose(settings: Settings) -> DiagnosticsReport:
 
 
 def _render(report: DiagnosticsReport, output_format: str) -> str:
+    """Render diagnostics as stable JSON or concise human-readable lines."""
     if output_format == "json":
         return json.dumps(report.as_dict(), ensure_ascii=False, sort_keys=True)
     lines = [
@@ -134,6 +142,7 @@ def _render(report: DiagnosticsReport, output_format: str) -> str:
 
 
 def _configuration_report() -> DiagnosticsReport:
+    """Create safe failure report when settings could not be loaded."""
     return DiagnosticsReport(
         results=(
             CheckResult(
@@ -147,6 +156,7 @@ def _configuration_report() -> DiagnosticsReport:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse CLI output-format option without binding process arguments in tests."""
     parser = argparse.ArgumentParser(
         description="Check service-data-sync infrastructure dependencies."
     )
@@ -155,6 +165,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run diagnostics CLI and return documented status code without exposing secrets."""
     args = parse_args(argv)
     try:
         settings = load_settings()

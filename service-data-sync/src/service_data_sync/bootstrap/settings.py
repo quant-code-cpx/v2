@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, value: str) -> str:
+        """Normalize and constrain configured level to standard Python logging levels."""
         normalized = value.upper()
         if normalized not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ValueError("must be a standard Python log level")
@@ -58,6 +59,7 @@ class Settings(BaseSettings):
     @field_validator("s3_endpoint_url")
     @classmethod
     def validate_s3_endpoint_url(cls, value: str) -> str:
+        """Require HTTP(S) object-storage endpoint and remove trailing separator."""
         if not value.startswith(("http://", "https://")):
             raise ValueError("must use http or https")
         return value.rstrip("/")
@@ -65,6 +67,7 @@ class Settings(BaseSettings):
     @field_validator("s3_bucket")
     @classmethod
     def validate_s3_bucket(cls, value: str) -> str:
+        """Trim bucket input and reject empty object-storage target."""
         normalized = value.strip()
         if not normalized:
             raise ValueError("must not be blank")
@@ -72,6 +75,7 @@ class Settings(BaseSettings):
 
 
 def load_settings() -> Settings:
+    """Load validated settings while hiding detailed validation values from callers."""
     try:
         return Settings()  # type: ignore[call-arg]  # Values are loaded through Pydantic settings sources.
     except ValidationError as error:

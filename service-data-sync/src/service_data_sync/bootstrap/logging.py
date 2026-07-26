@@ -21,10 +21,12 @@ _SENSITIVE_MARKERS = (
 
 
 def _is_sensitive(key: str) -> bool:
+    """Return whether a log-field name may carry credentials or connection secrets."""
     return any(marker in key.lower() for marker in _SENSITIVE_MARKERS)
 
 
 def _redact(value: Any, key: str | None = None) -> Any:
+    """Recursively redact sensitive mappings while preserving safe event structure."""
     if key is not None and _is_sensitive(key):
         return "[REDACTED]"
     if isinstance(value, Mapping):
@@ -44,6 +46,7 @@ def redact_secrets(
     _method_name: str,
     event_dict: structlog.types.EventDict,
 ) -> structlog.types.EventDict:
+    """Apply recursive secret redaction as a structlog processor."""
     return cast(structlog.types.EventDict, _redact(event_dict))
 
 
@@ -55,6 +58,7 @@ def add_service_context(
     settings: Settings,
     process_role: str,
 ) -> structlog.types.EventDict:
+    """Attach stable service, environment, and process-role fields to every event."""
     event_dict["service"] = "service-data-sync"
     event_dict["environment"] = settings.environment
     event_dict["process_role"] = process_role
@@ -62,6 +66,7 @@ def add_service_context(
 
 
 def configure_logging(settings: Settings, *, process_role: str) -> None:
+    """Configure stderr-compatible structured logging with mandatory secret redaction."""
     logging.basicConfig(level=settings.log_level, format="%(message)s", force=True)
     renderer: structlog.types.Processor
     if settings.log_format is LogFormat.JSON:
@@ -75,6 +80,7 @@ def configure_logging(settings: Settings, *, process_role: str) -> None:
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", utc=True),
             structlog.processors.EventRenamer("event"),
+            # Adapter callback injects runtime context before redaction and final rendering.
             lambda logger, method_name, event_dict: add_service_context(
                 logger,
                 method_name,

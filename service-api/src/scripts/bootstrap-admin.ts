@@ -8,6 +8,7 @@ import { Role } from '../generated/prisma/client.js';
 import { UserService } from '../modules/user/user.service.js';
 import { AppConfigService } from '../platform/config/app-config.service.js';
 
+/** Create initial administrator only when validated bootstrap credentials and empty user store exist. */
 async function bootstrapAdmin(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule, { bufferLogs: true });
   const logger = new Logger('BootstrapAdmin');

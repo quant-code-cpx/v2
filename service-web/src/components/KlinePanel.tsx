@@ -12,6 +12,7 @@ interface KlinePanelProps {
   candles: readonly Candle[];
 }
 
+/** Convert validated domain candle into KLineChart's engine-specific data shape. */
 function toKlineData(candle: Candle): KLineData {
   return {
     timestamp: candle.timestamp,
@@ -24,10 +25,12 @@ function toKlineData(candle: Candle): KLineData {
   };
 }
 
+/** Lazily initialize KLineChart and keep its imperative engine synchronized with props. */
 export function KlinePanel({ symbol, period, candles }: KlinePanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<Chart | null>(null);
   const barsRef = useRef<KLineData[]>([]);
+  // Stable loader reads mutable ref, avoiding chart reinitialization when candle props update.
   const dataLoaderRef = useRef(createKlineDataLoader(() => barsRef.current));
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -35,6 +38,7 @@ export function KlinePanel({ symbol, period, candles }: KlinePanelProps) {
 
   barsRef.current = candles.map(toKlineData);
 
+  /** Derive engine style object only when theme tokens change. */
   const styles = useMemo(
     () => ({
       grid: {
@@ -58,6 +62,7 @@ export function KlinePanel({ symbol, period, candles }: KlinePanelProps) {
     [chartTokens],
   );
 
+  // Lazy import keeps the heavy candlestick engine out of initial SPA bundle.
   useEffect(() => {
     let cancelled = false;
     let disposeChart: (() => void) | undefined;
@@ -84,6 +89,7 @@ export function KlinePanel({ symbol, period, candles }: KlinePanelProps) {
         chart.setDataLoader(dataLoaderRef.current);
         chart.createIndicator("MA", true);
         chart.createIndicator("VOL");
+        // Dispose exact engine instance during React cleanup to prevent canvas and listener leaks.
         disposeChart = () => dispose(chart);
         setIsLoading(false);
       })
@@ -101,6 +107,7 @@ export function KlinePanel({ symbol, period, candles }: KlinePanelProps) {
     };
   }, []);
 
+  // Symbols and periods share engine instance; reset data after switching either dimension.
   useEffect(() => {
     const chart = chartRef.current;
 
@@ -113,10 +120,12 @@ export function KlinePanel({ symbol, period, candles }: KlinePanelProps) {
     chart.resetData();
   }, [period, symbol]);
 
+  /** Apply visual changes independently from chart data lifecycle. */
   useEffect(() => {
     chartRef.current?.setStyles(styles);
   }, [styles]);
 
+  /** Reload chart bars after source props change while retaining configured indicators. */
   useEffect(() => {
     chartRef.current?.resetData();
   }, [candles]);

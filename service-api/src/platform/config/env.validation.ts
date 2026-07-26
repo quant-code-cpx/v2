@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+// Parse explicit environment strings so cookie policy receives deterministic booleans.
 const booleanFromEnvironment = z.enum(['true', 'false']).transform((value) => value === 'true');
 
 const environmentSchema = z.object({
@@ -34,9 +35,11 @@ const environmentSchema = z.object({
 
 export type Environment = z.infer<typeof environmentSchema>;
 
+/** Parse environment variables and enforce secure cross-field cookie invariants. */
 export function validateEnvironment(input: Record<string, unknown>): Environment {
   const result = environmentSchema.safeParse(input);
   if (result.success) {
+    // Production and cross-site cookies both require HTTPS-only transport.
     if (result.data.NODE_ENV === 'production' && !result.data.COOKIE_SECURE) {
       throw new Error('COOKIE_SECURE must be true in production');
     }
@@ -49,6 +52,7 @@ export function validateEnvironment(input: Record<string, unknown>): Environment
   }
 
   throw new Error(
+    // Keep only validation messages; Zod's raw input can contain secrets.
     `Invalid service-api environment: ${result.error.issues.map((issue) => issue.message).join('; ')}`,
   );
 }

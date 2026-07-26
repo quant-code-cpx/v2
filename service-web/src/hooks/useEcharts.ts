@@ -3,10 +3,12 @@ import type { ECharts, EChartsOption } from "echarts";
 
 import { echarts } from "../libs/echarts";
 
+/** Bind one ECharts canvas to a React element and apply latest immutable option. */
 export function useECharts(option: EChartsOption) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ECharts | null>(null);
 
+  /** Create responsive chart engine once and dispose it with component. */
   useEffect(() => {
     const element = containerRef.current;
 
@@ -15,6 +17,7 @@ export function useECharts(option: EChartsOption) {
     }
 
     const chart = echarts.init(element);
+    /** Resize engine whenever container dimensions change. */
     const resize = () => chart.resize();
     const observer = new ResizeObserver(resize);
 
@@ -28,6 +31,7 @@ export function useECharts(option: EChartsOption) {
     };
   }, []);
 
+  /** Replace chart option without recreating engine. */
   useEffect(() => {
     chartRef.current?.setOption(option, { lazyUpdate: true, notMerge: true });
   }, [option]);

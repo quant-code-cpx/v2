@@ -2,6 +2,7 @@ import { ErrorOutline as ErrorOutlineIcon } from "@mui/icons-material";
 import { Alert, Box, Button, Stack, Typography } from "@mui/material";
 import { isRouteErrorResponse, Link as RouterLink, useRouteError } from "react-router-dom";
 
+/** Render safe recovery UI for route-loader and lazy-import failures. */
 export function RouteErrorView() {
   const error = useRouteError();
   const message = isRouteErrorResponse(error)

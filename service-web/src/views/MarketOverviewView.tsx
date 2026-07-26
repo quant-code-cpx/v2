@@ -20,6 +20,7 @@ const compactNumberFormatter = new Intl.NumberFormat("zh-CN", {
   maximumFractionDigits: 1,
 });
 
+/** Render China-market directional percentage using explicit icon and semantic color. */
 function ChangeValue({ value }: { value: number }) {
   const positive = value >= 0;
 
@@ -42,6 +43,7 @@ function ChangeValue({ value }: { value: number }) {
   );
 }
 
+/** Render one navigable market mover row with compact turnover and signed change. */
 function MarketMoverRow({ mover }: { mover: MarketMover }) {
   return (
     <Box
@@ -72,6 +74,7 @@ function MarketMoverRow({ mover }: { mover: MarketMover }) {
   );
 }
 
+/** Render stable overview skeleton while query cache is populated. */
 function OverviewLoading() {
   return (
     <Stack spacing={3}>
@@ -81,6 +84,7 @@ function OverviewLoading() {
   );
 }
 
+/** Render fixture-backed market summary once routed query data is available. */
 export function MarketOverviewView() {
   const { data, isPending } = useQuery(marketOverviewQueryOptions);
 
@@ -166,6 +170,7 @@ export function MarketOverviewView() {
             进入标的页验证 K 线与分析图表双引擎。
           </Typography>
           <Stack divider={<Divider flexItem />} sx={{ mt: 1 }}>
+            {/* Project each API mover into its own accessible instrument navigation row. */}
             {data.movers.map((mover) => (
               <MarketMoverRow key={mover.symbol} mover={mover} />
             ))}

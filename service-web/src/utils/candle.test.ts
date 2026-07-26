@@ -17,7 +17,9 @@ const validCandle: CandleDto = {
   isClosed: true,
 };
 
+// Group chart-boundary conversion and invariant-rejection callbacks.
 describe("normalizeCandle", () => {
+  // Verify decimal wire values become numbers suitable for chart engines.
   it("converts decimal strings at chart boundary", () => {
     expect(normalizeCandle(validCandle)).toMatchObject({
       open: 1460,
@@ -29,6 +31,7 @@ describe("normalizeCandle", () => {
     });
   });
 
+  // Verify invalid low/high ordering cannot enter candlestick renderer.
   it("rejects invalid OHLC data", () => {
     expect(() => normalizeCandle({ ...validCandle, low: "1470.00" })).toThrow(
       "Candle violates OHLC or volume invariants",

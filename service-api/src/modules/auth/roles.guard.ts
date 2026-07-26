@@ -6,8 +6,10 @@ import { ROLES_KEY } from './roles.decorator.js';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
+  /** Receive reflector used to read route-level role metadata. */
   public constructor(private readonly reflector: Reflector) {}
 
+  /** Permit unannotated routes, otherwise require authenticated user role to match metadata. */
   public canActivate(context: ExecutionContext): boolean {
     const requiredRoles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [
       context.getHandler(),

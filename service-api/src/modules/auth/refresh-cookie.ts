@@ -4,6 +4,7 @@ import type { AppConfigService } from '../../platform/config/app-config.service.
 
 export const REFRESH_COOKIE_NAME = 'refresh_token';
 
+/** Store refresh token using common security options and its absolute expiry. */
 export function setRefreshCookie(
   response: Response,
   refreshToken: string,
@@ -13,10 +14,12 @@ export function setRefreshCookie(
   response.cookie(REFRESH_COOKIE_NAME, refreshToken, cookieOptions(config, expiresAt));
 }
 
+/** Delete refresh cookie using identical scope attributes. */
 export function clearRefreshCookie(response: Response, config: AppConfigService): void {
   response.clearCookie(REFRESH_COOKIE_NAME, cookieOptions(config));
 }
 
+/** Extract refresh token from raw Cookie header without adding parser middleware. */
 export function readRefreshCookie(request: Request): string | null {
   const header = request.header('cookie');
   if (!header) {
@@ -31,6 +34,7 @@ export function readRefreshCookie(request: Request): string | null {
   return null;
 }
 
+/** Build the shared cookie scope required for setting and reliably clearing token. */
 function cookieOptions(config: AppConfigService, expires?: Date): CookieOptions {
   return {
     httpOnly: true,

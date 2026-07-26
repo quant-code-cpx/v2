@@ -27,6 +27,7 @@ type AccessTokenResponse = {
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
+  /** Wire HTTP handlers to authentication orchestration and cookie settings. */
   public constructor(
     private readonly auth: AuthService,
     private readonly config: AppConfigService,
@@ -34,6 +35,7 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  /** Authenticate credentials, persist refresh token in cookie, return access token body. */
   public async login(
     @Body() input: LoginDto,
     @Req() request: Request,
@@ -51,6 +53,7 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  /** Rotate refresh session from cookie and replace cookie with successor token. */
   public async refresh(
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
@@ -73,6 +76,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiNoContentResponse()
+  /** Revoke caller session and remove browser refresh cookie. */
   public async logout(
     @Req() request: AuthenticatedRequest,
     @Res({ passthrough: true }) response: Response,
@@ -82,6 +86,7 @@ export class AuthController {
   }
 }
 
+/** Select Express-resolved IP, then socket address, for rate-limit identity. */
 function clientIp(request: Request): string {
   return request.ip ?? request.socket.remoteAddress ?? 'unknown';
 }

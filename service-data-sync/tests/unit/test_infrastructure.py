@@ -19,7 +19,9 @@ def test_database_client_builds_pings_and_closes(
     configured_environment: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Build PostgreSQL wrapper and translate driver probe failure."""
     engine = MagicMock()
+    # Return fixture engine so wrapper behavior stays independent from real PostgreSQL.
     monkeypatch.setattr(database_module, "create_engine", lambda *_args, **_kwargs: engine)
     client = database_module.DatabaseClient.from_settings(load_settings())
 
@@ -38,7 +40,9 @@ def test_redis_client_builds_pings_and_closes(
     configured_environment: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Build Redis wrapper and translate driver probe failure."""
     backend = MagicMock()
+    # Return fixture backend so wrapper behavior stays independent from real Redis.
     monkeypatch.setattr(redis_module.redis.Redis, "from_url", lambda *_args, **_kwargs: backend)
     client = redis_module.RedisClient.from_settings(load_settings())
 
@@ -55,7 +59,9 @@ def test_object_storage_client_builds_pings_and_closes(
     configured_environment: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Build S3 wrapper and translate object-store probe failure."""
     backend = MagicMock()
+    # Return fixture backend so wrapper behavior stays independent from real object storage.
     monkeypatch.setattr(storage_module.boto3, "client", lambda *_args, **_kwargs: backend)
     client = storage_module.ObjectStorageClient.from_settings(load_settings())
 
@@ -73,22 +79,26 @@ def test_container_composes_dependencies_without_registering_provider_adapters(
     configured_environment: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Compose only infrastructure clients and leave provider registry intentionally empty."""
     database = MagicMock()
     broker = MagicMock()
     object_storage = MagicMock()
     monkeypatch.setattr(
         container_module.DatabaseClient,
         "from_settings",
+        # Inject fixture database instead of opening an external connection.
         classmethod(lambda _cls, _settings: database),
     )
     monkeypatch.setattr(
         container_module.RedisClient,
         "from_settings",
+        # Inject fixture broker instead of opening an external connection.
         classmethod(lambda _cls, _settings: broker),
     )
     monkeypatch.setattr(
         container_module.ObjectStorageClient,
         "from_settings",
+        # Inject fixture object storage instead of opening an external connection.
         classmethod(lambda _cls, _settings: object_storage),
     )
 

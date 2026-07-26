@@ -8,7 +8,9 @@ const minimumEnvironment = {
   JWT_ACCESS_SECRET: 'a-32-character-development-secret-key',
 };
 
+// Group callbacks asserting defaults and cross-field cookie security policy.
 describe('validateEnvironment', () => {
+  // Verify development defaults remain deliberate and stable.
   it('applies safe development defaults', () => {
     const environment = validateEnvironment(minimumEnvironment);
 
@@ -18,12 +20,14 @@ describe('validateEnvironment', () => {
     expect(environment.REDIS_KEY_PREFIX).toBe('quant-v2:api');
   });
 
+  // Verify production cannot emit refresh cookies over insecure transport.
   it('rejects insecure production cookies', () => {
     expect(() => validateEnvironment({ ...minimumEnvironment, NODE_ENV: 'production' })).toThrow(
       'COOKIE_SECURE must be true in production',
     );
   });
 
+  // Verify cross-site cookies always require secure transport regardless of environment.
   it('requires secure cookies for SameSite=None', () => {
     expect(() => validateEnvironment({ ...minimumEnvironment, COOKIE_SAME_SITE: 'none' })).toThrow(
       'COOKIE_SECURE must be true when COOKIE_SAME_SITE is none',

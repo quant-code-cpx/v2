@@ -8,21 +8,25 @@ class FakeRedis {
   private readonly values = new Map<string, string>();
   private readonly counters = new Map<string, number>();
 
+  /** Return current fixture value for rate-limit-key assertions. */
   public get(key: string): Promise<string | null> {
     return Promise.resolve(this.values.get(key) ?? null);
   }
 
+  /** Store fixture value for rate-limit-key assertions. */
   public set(key: string, value: string): Promise<void> {
     this.values.set(key, value);
     return Promise.resolve();
   }
 
+  /** Remove fixture counter and lock state for supplied key. */
   public delete(key: string): Promise<void> {
     this.values.delete(key);
     this.counters.delete(key);
     return Promise.resolve();
   }
 
+  /** Simulate monotonically increasing fixed-window counter for unit tests. */
   public incrementWithTtl(key: string): Promise<number> {
     const value = (this.counters.get(key) ?? 0) + 1;
     this.counters.set(key, value);
@@ -39,7 +43,9 @@ const configuration = {
   refreshTokenTtlSeconds: 3_600,
 } as AppConfigService;
 
+// Group security-control callbacks around observable lock, throttle, and replay outcomes.
 describe('SecurityRateLimitService', () => {
+  // Verify failure threshold produces a temporary login lock.
   it('locks login after configured failures', async () => {
     const service = new SecurityRateLimitService(
       new FakeRedis() as unknown as RedisService,
@@ -56,6 +62,7 @@ describe('SecurityRateLimitService', () => {
     );
   });
 
+  // Verify refresh counter scopes repeated attempts to session and client address.
   it('limits refresh requests per session and address', async () => {
     const service = new SecurityRateLimitService(
       new FakeRedis() as unknown as RedisService,
@@ -70,6 +77,7 @@ describe('SecurityRateLimitService', () => {
     });
   });
 
+  // Verify detected refresh reuse leaves a lookupable fail-closed marker.
   it('retains a short-lived replay marker for a detected refresh-token replay', async () => {
     const service = new SecurityRateLimitService(
       new FakeRedis() as unknown as RedisService,

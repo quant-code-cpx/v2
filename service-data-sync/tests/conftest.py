@@ -7,6 +7,7 @@ import pytest
 
 @pytest.fixture
 def configured_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Provide complete non-secret test configuration for settings-dependent tests."""
     values = {
         "DATA_SYNC_ENV": "test",
         "DATA_SYNC_LOG_LEVEL": "INFO",

@@ -3,11 +3,14 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { normalizeEmail, UserService } from './user.service.js';
 
+// Group normalization and cursor-pagination callback assertions for UserService.
 describe('normalizeEmail', () => {
+  // Verify identifier normalization used consistently by authentication lookup.
   it('trims and lowercases login identifiers', () => {
     expect(normalizeEmail('  USER@Example.COM ')).toBe('user@example.com');
   });
 
+  // Verify extra-row pagination retains only requested records and advances from final visible ID.
   it('uses the final returned item as the next cursor without dropping the extra record', async () => {
     const findMany = vi
       .fn()
@@ -29,6 +32,7 @@ describe('normalizeEmail', () => {
   });
 });
 
+/** Build minimal persisted-user fixture for cursor pagination assertions. */
 function user(id: string) {
   const now = new Date('2026-07-26T00:00:00.000Z');
   return {

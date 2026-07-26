@@ -9,6 +9,7 @@ from service_data_sync.bootstrap.settings import load_settings
 
 
 def test_redact_secrets_redacts_nested_sensitive_fields() -> None:
+    """Redact sensitive keys recursively while preserving safe nested fields."""
     rendered = redact_secrets(
         None,
         "info",
@@ -28,6 +29,7 @@ def test_redact_secrets_redacts_nested_sensitive_fields() -> None:
 def test_logging_context_is_attached_without_exposing_secrets(
     configured_environment: None,
 ) -> None:
+    """Attach service identity fields before configured renderer consumes event."""
     settings = load_settings()
     event = add_service_context(
         None, "info", {"event": "worker.ready"}, settings=settings, process_role="worker"

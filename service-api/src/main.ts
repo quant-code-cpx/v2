@@ -9,6 +9,7 @@ import { AppModule } from './app.module.js';
 import { AppConfigService } from './platform/config/app-config.service.js';
 import { configureHttp } from './platform/http/configure-http.js';
 
+/** Create and expose configured API process, including generated OpenAPI metadata. */
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
   const logger = new Logger('Bootstrap');
