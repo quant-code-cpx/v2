@@ -1,0 +1,1270 @@
+openapi: 3.1.1
+info:
+  title: service-data-sync equity internal API
+  version: 1.0.0-proposed
+  description: |
+    Proposed service-to-service contract owned by service-data-sync. It exposes
+    published A-share master, bar, adjustment, corporate-action, valuation and
+    financial data without exposing storage tables or provider-specific fields.
+  x-contract-status: Proposed
+servers:
+  - url: http://service-data-sync:8000
+    description: Compose service network
+tags:
+  - name: operations
+  - name: equities
+  - name: sync-runs
+security:
+  - serviceBearer: []
+paths:
+  /health:
+    get:
+      tags: [operations]
+      operationId: getDataSyncLiveness
+      summary: Process liveness
+      security: []
+      responses:
+        '200':
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /ready:
+    get:
+      tags: [operations]
+      operationId: getDataSyncReadiness
+      summary: Required query dependencies and publication catalog are ready
+      security: []
+      responses:
+        '200':
+          description: Service is ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /internal/v1/equities:
+    get:
+      tags: [equities]
+      operationId: listInternalEquities
+      summary: Search the published A-share instrument catalog
+      parameters:
+        - $ref: '#/components/parameters/Query'
+        - $ref: '#/components/parameters/Exchange'
+        - $ref: '#/components/parameters/ListingStatus'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize100'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Deterministic cursor page ordered by exchange, symbol and instrumentId.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquityPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /internal/v1/equities/{instrumentId}:
+    get:
+      tags: [equities]
+      operationId: getInternalEquity
+      summary: Get one published instrument and current company profile
+      parameters:
+        - $ref: '#/components/parameters/InstrumentId'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Instrument detail.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquityDetailResponse'
+        '304':
+          description: Representation matches If-None-Match.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /internal/v1/equities/{instrumentId}/bars:
+    get:
+      tags: [equities]
+      operationId: listInternalEquityBars
+      summary: Read raw or adjusted daily, weekly or monthly bars
+      description: |
+        start and end are inclusive. qfq is anchored to adjustAsOf; when omitted,
+        adjustAsOf defaults to end, capped at the latest published session. Weekly
+        and monthly adjusted bars are built by adjusting daily OHLC before aggregation.
+      parameters:
+        - $ref: '#/components/parameters/InstrumentId'
+        - $ref: '#/components/parameters/Interval'
+        - $ref: '#/components/parameters/StartDate'
+        - $ref: '#/components/parameters/EndDate'
+        - $ref: '#/components/parameters/AdjustmentMode'
+        - $ref: '#/components/parameters/AdjustAsOf'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize2000'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Bar page ordered by periodStart ascending.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BarPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/DataNotFinal'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /internal/v1/equities/{instrumentId}/adjustment-factors:
+    get:
+      tags: [equities]
+      operationId: listInternalAdjustmentFactors
+      summary: Read sparse cumulative adjustment-factor revisions
+      parameters:
+        - $ref: '#/components/parameters/InstrumentId'
+        - $ref: '#/components/parameters/StartDateOptional'
+        - $ref: '#/components/parameters/EndDateOptional'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize500'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Current cumulative factor events ordered by effectiveDate.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdjustmentFactorPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /internal/v1/equities/{instrumentId}/corporate-actions:
+    get:
+      tags: [equities]
+      operationId: listInternalCorporateActions
+      summary: Read versioned dividend and share-distribution events
+      parameters:
+        - $ref: '#/components/parameters/InstrumentId'
+        - $ref: '#/components/parameters/StartDateOptional'
+        - $ref: '#/components/parameters/EndDateOptional'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize100'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Corporate-action page.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorporateActionPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /internal/v1/equities/{instrumentId}/financial-reports:
+    get:
+      tags: [equities]
+      operationId: listInternalFinancialReports
+      summary: List current financial-statement versions
+      parameters:
+        - $ref: '#/components/parameters/InstrumentId'
+        - $ref: '#/components/parameters/StatementType'
+        - $ref: '#/components/parameters/StartReportPeriod'
+        - $ref: '#/components/parameters/EndReportPeriod'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize50'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Report headers ordered by reportPeriod descending.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinancialReportPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /internal/v1/equities/{instrumentId}/financial-reports/{reportId}:
+    get:
+      tags: [equities]
+      operationId: getInternalFinancialReport
+      summary: Get one financial statement and its canonical items
+      parameters:
+        - $ref: '#/components/parameters/InstrumentId'
+        - $ref: '#/components/parameters/ReportId'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Financial report detail.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinancialReportDetailResponse'
+        '304':
+          description: Representation matches If-None-Match.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /internal/v1/equities/{instrumentId}/financial-metrics:
+    get:
+      tags: [equities]
+      operationId: listInternalFinancialMetrics
+      summary: Read provider-reported or internally derived financial metrics
+      parameters:
+        - $ref: '#/components/parameters/InstrumentId'
+        - $ref: '#/components/parameters/MetricCodes'
+        - $ref: '#/components/parameters/MetricBasis'
+        - $ref: '#/components/parameters/StartReportPeriod'
+        - $ref: '#/components/parameters/EndReportPeriod'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize500'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Financial metric page.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinancialMetricPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /internal/v1/sync-runs:
+    post:
+      tags: [sync-runs]
+      operationId: createInternalSyncRun
+      summary: Submit one bounded manual sync or backfill
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSyncRunRequest'
+      responses:
+        '202':
+          description: Run accepted or existing idempotent run returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncRun'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /internal/v1/sync-runs/{runId}:
+    get:
+      tags: [sync-runs]
+      operationId: getInternalSyncRun
+      summary: Read authoritative run and partition counters
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Sync run status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncRun'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+components:
+  securitySchemes:
+    serviceBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Rotatable service credential injected by secret; never forwarded to browsers.
+
+  parameters:
+    InstrumentId:
+      name: instrumentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ReportId:
+      name: reportId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RunId:
+      name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Query:
+      name: q
+      in: query
+      required: false
+      description: Exact or prefix match on normalized symbol or current name.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+    Exchange:
+      name: exchange
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/Exchange'
+    ListingStatus:
+      name: status
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/ListingStatus'
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 512
+    PageSize100:
+      name: pageSize
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    PageSize2000:
+      name: pageSize
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 2000
+        default: 500
+    PageSize500:
+      name: pageSize
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+    PageSize50:
+      name: pageSize
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 20
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 160
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+    Interval:
+      name: interval
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/BarInterval'
+    StartDate:
+      name: start
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+    EndDate:
+      name: end
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+    StartDateOptional:
+      name: start
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+    EndDateOptional:
+      name: end
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+    AdjustmentMode:
+      name: adjust
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/AdjustmentMode'
+    AdjustAsOf:
+      name: adjustAsOf
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+    StatementType:
+      name: statementType
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/StatementType'
+    StartReportPeriod:
+      name: reportPeriodFrom
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+    EndReportPeriod:
+      name: reportPeriodTo
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+    MetricCodes:
+      name: metric
+      in: query
+      required: false
+      description: Repeat the parameter to request up to 50 canonical metric codes.
+      schema:
+        type: array
+        maxItems: 50
+        uniqueItems: true
+        items:
+          type: string
+          pattern: '^[a-z][a-z0-9_.-]{1,79}$'
+    MetricBasis:
+      name: basis
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [reported, single-quarter, ttm]
+
+  headers:
+    ETag:
+      description: Strong hash of normalized query and publication/data versions.
+      schema:
+        type: string
+
+  responses:
+    ValidationProblem:
+      description: Request validation failed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Service credential is missing or invalid.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Requested published resource does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: Request conflicts with an active incompatible run.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    DataNotFinal:
+      description: Requested final-only range contains unpublished or quarantined partitions.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    RateLimited:
+      description: Query or control request exceeded its bounded budget.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    DependencyUnavailable:
+      description: Required database, publication catalog or worker control dependency is unavailable.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          const: ok
+
+    Exchange:
+      type: string
+      enum: [SSE, SZSE, BSE]
+
+    ListingStatus:
+      type: string
+      enum: [PENDING, LISTED, SUSPENDED, DELISTED]
+
+    BarInterval:
+      type: string
+      enum: [1d, 1w, 1mo]
+
+    AdjustmentMode:
+      type: string
+      enum: [none, qfq, hfq]
+      default: none
+
+    StatementType:
+      type: string
+      enum: [balance-sheet, income-statement, cash-flow]
+
+    QualityStatus:
+      type: string
+      enum: [passed, warned, partial]
+
+    DecimalString:
+      type: string
+      pattern: '^-?(0|[1-9]\d*)(\.\d+)?$'
+
+    DataMeta:
+      type: object
+      required:
+        - dataset
+        - dataVersion
+        - publishedAt
+        - qualityStatus
+        - stale
+      additionalProperties: false
+      properties:
+        dataset:
+          type: string
+          pattern: '^[a-z][a-z0-9_.-]+$'
+        dataVersion:
+          type: string
+          minLength: 1
+          maxLength: 160
+        publishedAt:
+          type: string
+          format: date-time
+        qualityStatus:
+          $ref: '#/components/schemas/QualityStatus'
+        stale:
+          type: boolean
+        methodologyVersion:
+          type: [string, 'null']
+          maxLength: 160
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 512
+
+    Equity:
+      type: object
+      required:
+        - instrumentId
+        - exchange
+        - symbol
+        - qualifiedSymbol
+        - name
+        - listingStatus
+        - listDate
+        - delistDate
+        - board
+        - currency
+      additionalProperties: false
+      properties:
+        instrumentId:
+          type: string
+          format: uuid
+        exchange:
+          $ref: '#/components/schemas/Exchange'
+        symbol:
+          type: string
+          pattern: '^\d{6}$'
+        qualifiedSymbol:
+          type: string
+          pattern: '^(SSE|SZSE|BSE)\.\d{6}$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        listingStatus:
+          $ref: '#/components/schemas/ListingStatus'
+        listDate:
+          type: [string, 'null']
+          format: date
+        delistDate:
+          type: [string, 'null']
+          format: date
+        board:
+          type: [string, 'null']
+          maxLength: 64
+        currency:
+          type: string
+          const: CNY
+
+    CompanyProfile:
+      type: object
+      required:
+        - companyName
+        - englishName
+        - foundedDate
+        - website
+        - registeredAddress
+        - officeAddress
+        - primaryBusiness
+        - businessScope
+        - profileVersion
+      additionalProperties: false
+      properties:
+        companyName:
+          type: [string, 'null']
+          maxLength: 300
+        englishName:
+          type: [string, 'null']
+          maxLength: 300
+        foundedDate:
+          type: [string, 'null']
+          format: date
+        website:
+          type: [string, 'null']
+          maxLength: 2048
+        registeredAddress:
+          type: [string, 'null']
+          maxLength: 1000
+        officeAddress:
+          type: [string, 'null']
+          maxLength: 1000
+        primaryBusiness:
+          type: [string, 'null']
+          maxLength: 8000
+        businessScope:
+          type: [string, 'null']
+          maxLength: 16000
+        profileVersion:
+          type: integer
+          minimum: 1
+
+    EquityPage:
+      type: object
+      required: [items, meta]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/Equity'
+        meta:
+          $ref: '#/components/schemas/DataMeta'
+
+    EquityDetailResponse:
+      type: object
+      required: [item, profile, meta]
+      additionalProperties: false
+      properties:
+        item:
+          $ref: '#/components/schemas/Equity'
+        profile:
+          oneOf:
+            - $ref: '#/components/schemas/CompanyProfile'
+            - type: 'null'
+        meta:
+          $ref: '#/components/schemas/DataMeta'
+
+    Bar:
+      type: object
+      required:
+        - periodStart
+        - periodEnd
+        - open
+        - high
+        - low
+        - close
+        - volumeShares
+        - amountCny
+        - turnoverRate
+        - sessionCount
+        - final
+        - revision
+      additionalProperties: false
+      properties:
+        periodStart:
+          type: string
+          format: date
+        periodEnd:
+          type: string
+          format: date
+        open:
+          type: number
+        high:
+          type: number
+        low:
+          type: number
+        close:
+          type: number
+        volumeShares:
+          type: integer
+          minimum: 0
+        amountCny:
+          type: number
+          minimum: 0
+        turnoverRate:
+          type: [number, 'null']
+          minimum: 0
+          description: Decimal ratio; 0.01 means 1 percent.
+        sessionCount:
+          type: integer
+          minimum: 1
+        final:
+          type: boolean
+        revision:
+          type: integer
+          minimum: 1
+
+    AdjustmentDescriptor:
+      type: object
+      required: [mode, adjustAsOf, factorVersion, formulaVersion]
+      additionalProperties: false
+      properties:
+        mode:
+          $ref: '#/components/schemas/AdjustmentMode'
+        adjustAsOf:
+          type: [string, 'null']
+          format: date
+        factorVersion:
+          type: [string, 'null']
+          maxLength: 160
+        formulaVersion:
+          type: string
+          const: cumulative-hfq-v1
+
+    BarPage:
+      type: object
+      required: [instrumentId, interval, adjustment, items, meta]
+      additionalProperties: false
+      properties:
+        instrumentId:
+          type: string
+          format: uuid
+        interval:
+          $ref: '#/components/schemas/BarInterval'
+        adjustment:
+          $ref: '#/components/schemas/AdjustmentDescriptor'
+        items:
+          type: array
+          maxItems: 2000
+          items:
+            $ref: '#/components/schemas/Bar'
+        meta:
+          $ref: '#/components/schemas/DataMeta'
+
+    AdjustmentFactor:
+      type: object
+      required: [effectiveDate, cumulativeFactor, revision, observedAt]
+      additionalProperties: false
+      properties:
+        effectiveDate:
+          type: string
+          format: date
+        cumulativeFactor:
+          $ref: '#/components/schemas/DecimalString'
+        revision:
+          type: integer
+          minimum: 1
+        observedAt:
+          type: string
+          format: date-time
+
+    AdjustmentFactorPage:
+      type: object
+      required: [instrumentId, formulaVersion, items, meta]
+      additionalProperties: false
+      properties:
+        instrumentId:
+          type: string
+          format: uuid
+        formulaVersion:
+          type: string
+          const: cumulative-hfq-v1
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/AdjustmentFactor'
+        meta:
+          $ref: '#/components/schemas/DataMeta'
+
+    CorporateAction:
+      type: object
+      required:
+        - actionId
+        - reportPeriod
+        - actionType
+        - status
+        - announcementDate
+        - recordDate
+        - exDate
+        - cashDividendPer10Shares
+        - stockDividendPer10Shares
+        - capitalTransferPer10Shares
+        - revision
+      additionalProperties: false
+      properties:
+        actionId:
+          type: string
+          format: uuid
+        reportPeriod:
+          type: [string, 'null']
+          format: date
+        actionType:
+          type: string
+          enum: [cash-dividend, stock-dividend, capital-transfer, mixed, other]
+        status:
+          type: string
+          enum: [proposed, approved, implemented, cancelled, unknown]
+        announcementDate:
+          type: [string, 'null']
+          format: date
+        recordDate:
+          type: [string, 'null']
+          format: date
+        exDate:
+          type: [string, 'null']
+          format: date
+        cashDividendPer10Shares:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        stockDividendPer10Shares:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        capitalTransferPer10Shares:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        revision:
+          type: integer
+          minimum: 1
+
+    CorporateActionPage:
+      type: object
+      required: [instrumentId, items, meta]
+      additionalProperties: false
+      properties:
+        instrumentId:
+          type: string
+          format: uuid
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/CorporateAction'
+        meta:
+          $ref: '#/components/schemas/DataMeta'
+
+    FinancialReportSummary:
+      type: object
+      required:
+        - reportId
+        - statementType
+        - reportPeriod
+        - reportType
+        - periodBasis
+        - announcedAt
+        - sourceUpdatedAt
+        - currency
+        - revision
+      additionalProperties: false
+      properties:
+        reportId:
+          type: string
+          format: uuid
+        statementType:
+          $ref: '#/components/schemas/StatementType'
+        reportPeriod:
+          type: string
+          format: date
+        reportType:
+          type: string
+          enum: [q1, half-year, q3, annual, unknown]
+        periodBasis:
+          type: string
+          enum: [instant, ytd-reported]
+        announcedAt:
+          type: [string, 'null']
+          format: date-time
+        sourceUpdatedAt:
+          type: [string, 'null']
+          format: date-time
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        revision:
+          type: integer
+          minimum: 1
+
+    FinancialItem:
+      type: object
+      required: [code, label, value, unit]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          pattern: '^[a-z][a-z0-9_.-]{1,119}$'
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        value:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        unit:
+          type: string
+          enum: [CNY, shares, ratio, count, days, times, none]
+
+    FinancialReportPage:
+      type: object
+      required: [instrumentId, items, meta]
+      additionalProperties: false
+      properties:
+        instrumentId:
+          type: string
+          format: uuid
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/FinancialReportSummary'
+        meta:
+          $ref: '#/components/schemas/DataMeta'
+
+    FinancialReportDetailResponse:
+      type: object
+      required: [instrumentId, report, items, meta]
+      additionalProperties: false
+      properties:
+        instrumentId:
+          type: string
+          format: uuid
+        report:
+          $ref: '#/components/schemas/FinancialReportSummary'
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/FinancialItem'
+        meta:
+          $ref: '#/components/schemas/DataMeta'
+
+    FinancialMetric:
+      type: object
+      required:
+        - reportPeriod
+        - code
+        - label
+        - basis
+        - value
+        - unit
+        - methodologyVersion
+        - revision
+      additionalProperties: false
+      properties:
+        reportPeriod:
+          type: string
+          format: date
+        code:
+          type: string
+          pattern: '^[a-z][a-z0-9_.-]{1,79}$'
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        basis:
+          type: string
+          enum: [reported, single-quarter, ttm]
+        value:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        unit:
+          type: string
+          enum: [CNY, CNY-per-share, ratio, percent, days, times, shares, none]
+        methodologyVersion:
+          type: string
+          minLength: 1
+          maxLength: 160
+        revision:
+          type: integer
+          minimum: 1
+
+    FinancialMetricPage:
+      type: object
+      required: [instrumentId, items, meta]
+      additionalProperties: false
+      properties:
+        instrumentId:
+          type: string
+          format: uuid
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/FinancialMetric'
+        meta:
+          $ref: '#/components/schemas/DataMeta'
+
+    CreateSyncRunRequest:
+      type: object
+      required: [capability, mode, partitions]
+      additionalProperties: false
+      properties:
+        capability:
+          type: string
+          enum:
+            - equity.master
+            - equity.bar.1d.raw
+            - equity.adjustment_factor
+            - equity.profile
+            - equity.corporate_action
+            - equity.valuation.1d
+            - financial.statement
+            - financial.metric
+        mode:
+          type: string
+          enum: [incremental, backfill, repair]
+        partitions:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [key]
+            additionalProperties: false
+            properties:
+              key:
+                type: string
+                minLength: 1
+                maxLength: 240
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    SyncRun:
+      type: object
+      required:
+        - runId
+        - capability
+        - mode
+        - status
+        - requestedAt
+        - startedAt
+        - finishedAt
+        - partitionCounts
+      additionalProperties: false
+      properties:
+        runId:
+          type: string
+          format: uuid
+        capability:
+          type: string
+        mode:
+          type: string
+          enum: [incremental, backfill, repair]
+        status:
+          type: string
+          enum: [queued, running, succeeded, partial, failed, cancelled]
+        requestedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: [string, 'null']
+          format: date-time
+        finishedAt:
+          type: [string, 'null']
+          format: date-time
+        partitionCounts:
+          type: object
+          required: [total, queued, running, succeeded, quarantined, failed]
+          additionalProperties: false
+          properties:
+            total:
+              type: integer
+              minimum: 0
+            queued:
+              type: integer
+              minimum: 0
+            running:
+              type: integer
+              minimum: 0
+            succeeded:
+              type: integer
+              minimum: 0
+            quarantined:
+              type: integer
+              minimum: 0
+            failed:
+              type: integer
+              minimum: 0
+
+    Problem:
+      type: object
+      required: [type, title, status, detail, instance, requestId, code]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+        requestId:
+          type: string
+          maxLength: 128
+        code:
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'

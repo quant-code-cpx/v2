@@ -1,3 +1,5 @@
+"""数据源端口值对象与注册表的单元测试。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -20,7 +22,7 @@ from service_data_sync.application.source_registry import (
 
 
 def test_fake_adapter_satisfies_port_contract() -> None:
-    """Confirm fake provider remains structurally compatible with neutral port."""
+    """确认数据源替身始终在结构上兼容中立端口。"""
     fake = FakeDataSource()
 
     assert isinstance(fake, DataSourcePort)
@@ -31,7 +33,7 @@ def test_fake_adapter_satisfies_port_contract() -> None:
 
 
 def test_registry_keeps_provider_implementation_replaceable() -> None:
-    """Resolve registered provider through ID without exposing its concrete type."""
+    """通过标识解析已注册数据源，不暴露其具体类型。"""
     registry = SourceRegistry()
     fake = FakeDataSource()
     registry.register(fake)
@@ -41,7 +43,7 @@ def test_registry_keeps_provider_implementation_replaceable() -> None:
 
 
 def test_registry_rejects_duplicate_or_unknown_provider() -> None:
-    """Reject ambiguous registrations and lookups absent from registry."""
+    """拒绝歧义注册和注册表中不存在的查询。"""
     registry = SourceRegistry()
     registry.register(FakeDataSource())
 
@@ -52,7 +54,7 @@ def test_registry_rejects_duplicate_or_unknown_provider() -> None:
 
 
 def test_port_value_objects_reject_invalid_inputs() -> None:
-    """Reject malformed provider-neutral request and batch values."""
+    """拒绝格式错误的数据源无关请求和批次值。"""
     with pytest.raises(ValueError, match="capability"):
         SourceRequest(capability=" ")
     with pytest.raises(ValueError, match="provider_id"):
@@ -67,7 +69,7 @@ def test_port_value_objects_reject_invalid_inputs() -> None:
 
 
 def test_registry_rejects_blank_provider_identifier() -> None:
-    """Reject provider IDs that normalize to empty names."""
+    """拒绝规范化后为空的数据源标识。"""
     fake = FakeDataSource()
     fake.provider_id = " "
 

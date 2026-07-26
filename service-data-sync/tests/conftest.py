@@ -1,3 +1,5 @@
+"""数据同步服务测试共享 fixture。"""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -7,7 +9,7 @@ import pytest
 
 @pytest.fixture
 def configured_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Provide complete non-secret test configuration for settings-dependent tests."""
+    """为依赖配置的测试提供完整且不含真实密钥的环境变量。"""
     values = {
         "DATA_SYNC_ENV": "test",
         "DATA_SYNC_LOG_LEVEL": "INFO",
@@ -20,6 +22,7 @@ def configured_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "DATA_SYNC_S3_BUCKET": "quant-data-sync-test",
         "DATA_SYNC_S3_REGION": "us-east-1",
         "DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS": "10",
+        "DATA_SYNC_INTERNAL_API_BEARER_TOKEN": "test-only-internal-api-bearer-token-000000000000",
     }
     for key, value in values.items():
         monkeypatch.setenv(key, value)

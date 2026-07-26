@@ -1,3 +1,5 @@
+"""基础设施客户端与组合根的单元测试。"""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -19,9 +21,9 @@ def test_database_client_builds_pings_and_closes(
     configured_environment: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Build PostgreSQL wrapper and translate driver probe failure."""
+    """构建 PostgreSQL 封装，并转换驱动探测失败。"""
     engine = MagicMock()
-    # Return fixture engine so wrapper behavior stays independent from real PostgreSQL.
+    # 返回 fixture 引擎，使封装行为不依赖真实 PostgreSQL。
     monkeypatch.setattr(database_module, "create_engine", lambda *_args, **_kwargs: engine)
     client = database_module.DatabaseClient.from_settings(load_settings())
 
@@ -40,9 +42,9 @@ def test_redis_client_builds_pings_and_closes(
     configured_environment: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Build Redis wrapper and translate driver probe failure."""
+    """构建 Redis 封装，并转换驱动探测失败。"""
     backend = MagicMock()
-    # Return fixture backend so wrapper behavior stays independent from real Redis.
+    # 返回 fixture 后端，使封装行为不依赖真实 Redis。
     monkeypatch.setattr(redis_module.redis.Redis, "from_url", lambda *_args, **_kwargs: backend)
     client = redis_module.RedisClient.from_settings(load_settings())
 
@@ -59,9 +61,9 @@ def test_object_storage_client_builds_pings_and_closes(
     configured_environment: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Build S3 wrapper and translate object-store probe failure."""
+    """构建 S3 封装，并转换对象存储探测失败。"""
     backend = MagicMock()
-    # Return fixture backend so wrapper behavior stays independent from real object storage.
+    # 返回 fixture 后端，使封装行为不依赖真实对象存储。
     monkeypatch.setattr(storage_module.boto3, "client", lambda *_args, **_kwargs: backend)
     client = storage_module.ObjectStorageClient.from_settings(load_settings())
 
@@ -79,26 +81,26 @@ def test_container_composes_dependencies_without_registering_provider_adapters(
     configured_environment: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Compose only infrastructure clients and leave provider registry intentionally empty."""
+    """仅组合基础设施客户端，并刻意保持数据源注册表为空。"""
     database = MagicMock()
     broker = MagicMock()
     object_storage = MagicMock()
     monkeypatch.setattr(
         container_module.DatabaseClient,
         "from_settings",
-        # Inject fixture database instead of opening an external connection.
+        # 注入 fixture 数据库，避免打开外部连接。
         classmethod(lambda _cls, _settings: database),
     )
     monkeypatch.setattr(
         container_module.RedisClient,
         "from_settings",
-        # Inject fixture broker instead of opening an external connection.
+        # 注入 fixture broker，避免打开外部连接。
         classmethod(lambda _cls, _settings: broker),
     )
     monkeypatch.setattr(
         container_module.ObjectStorageClient,
         "from_settings",
-        # Inject fixture object storage instead of opening an external connection.
+        # 注入 fixture 对象存储，避免打开外部连接。
         classmethod(lambda _cls, _settings: object_storage),
     )
 
@@ -109,3 +111,39 @@ def test_container_composes_dependencies_without_registering_provider_adapters(
     database.close.assert_called_once()
     broker.close.assert_called_once()
     object_storage.close.assert_called_once()
+
+
+def test_container_registers_sector_adapter_only_when_both_source_policies_are_enabled(
+    configured_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AKShare 总开关和板块开关同时开启时才暴露板块三周期能力。"""
+    database = MagicMock()
+    broker = MagicMock()
+    object_storage = MagicMock()
+    monkeypatch.setenv("DATA_SYNC_AKSHARE_ENABLED", "true")
+    monkeypatch.setenv("DATA_SYNC_SECTOR_ENABLED", "true")
+    # 组合测试只验证注册策略，所有基础设施客户端均替换为内存替身。
+    monkeypatch.setattr(
+        container_module.DatabaseClient,
+        "from_settings",
+        classmethod(lambda _cls, _settings: database),
+    )
+    monkeypatch.setattr(
+        container_module.RedisClient,
+        "from_settings",
+        classmethod(lambda _cls, _settings: broker),
+    )
+    monkeypatch.setattr(
+        container_module.ObjectStorageClient,
+        "from_settings",
+        classmethod(lambda _cls, _settings: object_storage),
+    )
+
+    container = container_module.build_container(load_settings())
+    container.close()
+
+    assert container.source_registry.provider_ids() == {
+        "akshare-eastmoney-sector",
+        "akshare-tencent",
+    }

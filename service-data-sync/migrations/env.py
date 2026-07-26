@@ -1,3 +1,5 @@
+"""Alembic 迁移环境：从安全配置读取连接并执行显式 SQL 迁移。"""
+
 from __future__ import annotations
 
 from logging.config import fileConfig
@@ -12,17 +14,17 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Business models and migration revisions are deliberately absent in foundation 0001.
+# 分区和当前行索引依赖 PostgreSQL 特性，因此迁移使用显式 SQL。
 target_metadata = None
 
 
 def _database_url() -> str:
-    """Read migration database URL from validated settings without logging its secret value."""
+    """从已校验配置读取迁移数据库 URL，且不记录其中的密钥。"""
     return load_settings().database_url.get_secret_value()
 
 
 def run_migrations_offline() -> None:
-    """Generate SQL migration statements without opening a database connection."""
+    """生成 SQL 迁移语句，不打开数据库连接。"""
     context.configure(
         url=_database_url(),
         target_metadata=target_metadata,
@@ -35,7 +37,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Apply migrations through a short-lived non-pooled SQLAlchemy connection."""
+    """通过短生命周期、无连接池的 SQLAlchemy 连接执行迁移。"""
     configuration = config.get_section(config.config_ini_section) or {}
     configuration["sqlalchemy.url"] = _database_url()
     connectable = engine_from_config(

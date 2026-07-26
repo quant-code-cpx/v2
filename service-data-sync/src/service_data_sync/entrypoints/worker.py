@@ -1,3 +1,5 @@
+"""启动当前不注册业务任务的 Celery worker 进程。"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -8,7 +10,7 @@ from service_data_sync.infrastructure.messaging.celery_app import create_worker_
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Configure and start intentionally task-empty Celery worker process."""
+    """配置并启动刻意保持任务为空的 Celery worker 进程。"""
     settings = load_settings()
     configure_logging(settings, process_role="worker")
     app = create_worker_app(settings)

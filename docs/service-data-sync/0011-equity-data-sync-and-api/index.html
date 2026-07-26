@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>个股数据同步与查询 API 技术方案</title>
+  <style>
+    :root {
+      --ink: #18212f;
+      --muted: #5c6778;
+      --paper: #fbfaf7;
+      --panel: #ffffff;
+      --line: #dfe3e8;
+      --brand: #153e75;
+      --brand-soft: #eaf1fb;
+      --good: #176b50;
+      --good-soft: #e9f6f1;
+      --warn: #9a5b13;
+      --warn-soft: #fff5e6;
+      --bad: #a33131;
+      --bad-soft: #fff0f0;
+      --code: #111827;
+      --shadow: 0 12px 34px rgb(32 45 64 / 8%);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 15px/1.68 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+    a { color: var(--brand); text-underline-offset: 3px; }
+    code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+    code {
+      padding: .1em .35em;
+      border-radius: 5px;
+      background: #eef1f5;
+      font-size: .9em;
+      overflow-wrap: anywhere;
+    }
+    pre {
+      margin: 16px 0;
+      padding: 18px;
+      width: 100%;
+      max-width: 100%;
+      overflow: auto;
+      color: #e5e7eb;
+      background: var(--code);
+      border-radius: 10px;
+      font-size: 12.5px;
+      line-height: 1.55;
+    }
+    pre code { padding: 0; color: inherit; background: transparent; overflow-wrap: normal; }
+    .shell { max-width: 1440px; margin: 0 auto; padding: 0 30px 80px; }
+    .hero {
+      margin: 24px 0;
+      padding: 46px 48px;
+      color: white;
+      background: linear-gradient(130deg, #102a4c, #153e75 60%, #246b91);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: #b9d6f4;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1 { max-width: 900px; margin: 0; font-size: 38px; line-height: 1.18; }
+    .subtitle { max-width: 900px; margin: 18px 0 0; color: #e2edf8; font-size: 17px; }
+    .hero-meta { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 25px; color: #c9dcef; }
+    .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 26px; }
+    .toc {
+      position: sticky;
+      top: 18px;
+      align-self: start;
+      max-height: calc(100vh - 36px);
+      padding: 20px;
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+    }
+    .toc strong { display: block; margin-bottom: 10px; }
+    .toc a {
+      display: block;
+      padding: 5px 0;
+      color: var(--muted);
+      font-size: 13px;
+      text-decoration: none;
+    }
+    .toc a:hover { color: var(--brand); }
+    main { min-width: 0; }
+    section {
+      margin-bottom: 22px;
+      padding: 30px 34px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+    }
+    h2 { margin: 0 0 18px; color: #102a4c; font-size: 25px; line-height: 1.3; }
+    h3 { margin: 28px 0 10px; color: #183b63; font-size: 18px; }
+    h4 { margin: 20px 0 8px; font-size: 15px; }
+    p { margin: 10px 0; }
+    ul, ol { padding-left: 22px; }
+    li + li { margin-top: 5px; }
+    .lead { color: #344154; font-size: 16px; }
+    .decision {
+      margin: 14px 0;
+      padding: 16px 18px;
+      background: var(--brand-soft);
+      border-left: 4px solid var(--brand);
+      border-radius: 8px;
+    }
+    .warning { background: var(--warn-soft); border-left-color: var(--warn); }
+    .danger { background: var(--bad-soft); border-left-color: var(--bad); }
+    .success { background: var(--good-soft); border-left-color: var(--good); }
+    .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .card { padding: 17px; border: 1px solid var(--line); border-radius: 10px; background: #fcfdff; }
+    .card strong { display: block; margin-bottom: 6px; color: #183b63; }
+    .metric { color: var(--brand); font-size: 27px; font-weight: 750; line-height: 1.2; }
+    .small { color: var(--muted); font-size: 12.5px; }
+    .table-wrap {
+      width: 100%;
+      max-width: 100%;
+      margin: 14px 0;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    table { width: 100%; border-collapse: collapse; background: white; font-size: 13px; }
+    th, td { padding: 10px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+    th { color: #26384e; background: #f2f5f8; font-weight: 700; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .tag {
+      display: inline-block;
+      margin: 1px 3px 1px 0;
+      padding: 2px 7px;
+      color: var(--brand);
+      background: var(--brand-soft);
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .tag.good { color: var(--good); background: var(--good-soft); }
+    .tag.warn { color: var(--warn); background: var(--warn-soft); }
+    .tag.bad { color: var(--bad); background: var(--bad-soft); }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(110px, 1fr));
+      align-items: stretch;
+      gap: 11px;
+      margin: 18px 0;
+    }
+    .flow div {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 86px;
+      padding: 12px;
+      text-align: center;
+      background: #f4f7fb;
+      border: 1px solid #cfd9e5;
+      border-radius: 9px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .flow div:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      right: -12px;
+      z-index: 1;
+      color: var(--brand);
+      font-size: 17px;
+    }
+    .formula {
+      margin: 14px 0;
+      padding: 18px;
+      overflow-x: auto;
+      color: #102a4c;
+      background: #f4f7fb;
+      border: 1px solid #d7e0ea;
+      border-radius: 10px;
+      font: 600 14px/1.9 "SFMono-Regular", Consolas, monospace;
+    }
+    .checklist { list-style: none; padding-left: 0; }
+    .checklist li { position: relative; padding-left: 25px; }
+    .checklist li::before { content: "□"; position: absolute; left: 0; color: var(--brand); font-weight: 700; }
+    .foot { margin-top: 24px; color: var(--muted); text-align: center; font-size: 12px; }
+    @media (max-width: 1000px) {
+      .shell { padding: 0 16px 50px; }
+      .layout { grid-template-columns: 1fr; }
+      .toc { position: static; max-height: none; }
+      .cards { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr; }
+      .flow div:not(:last-child)::after { content: "↓"; right: 50%; bottom: -17px; top: auto; }
+    }
+    @media (max-width: 620px) {
+      .hero { padding: 30px 24px; }
+      h1 { font-size: 29px; }
+      section { padding: 24px 20px; }
+    }
+    @media print {
+      body { background: white; }
+      .shell { max-width: none; padding: 0; }
+      .hero, section, .toc { box-shadow: none; }
+      .layout { display: block; }
+      .toc { display: none; }
+      section { break-inside: avoid-page; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="hero">
+      <p class="eyebrow">QUANT V2 · Executable Technical Design</p>
+      <h1>个股数据同步、存储与查询 API 技术方案</h1>
+      <p class="subtitle">
+        面向沪深北 A 股，落地个股主数据、日/周/月行情、复权因子、公司行动、估值及财务报表。
+        方案以 AKShare 1.18.78 官方文档与 2026-07-26 独立容器实测为依据，不沿用 Tushare 或旧项目口径。
+      </p>
+      <div class="hero-meta">
+        <span>状态：Proposed</span>
+        <span>版本：1.0</span>
+        <span>日期：2026-07-26</span>
+        <span>责任服务：service-data-sync / service-api</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <nav class="toc" aria-label="目录">
+        <strong>目录</strong>
+        <a href="#summary">1. 执行摘要</a>
+        <a href="#scope">2. 范围与目标</a>
+        <a href="#research">3. AKShare 研究结论</a>
+        <a href="#architecture">4. 总体架构</a>
+        <a href="#sync">5. 数据同步逻辑</a>
+        <a href="#adjustment">6. 复权与派生算法</a>
+        <a href="#quality">7. 数据质量与一致性</a>
+        <a href="#schema">8. 表设计与索引</a>
+        <a href="#api">9. API 设计</a>
+        <a href="#operations">10. 可靠性与运维</a>
+        <a href="#security">11. 安全与合规</a>
+        <a href="#delivery">12. 实施计划</a>
+        <a href="#acceptance">13. 验收标准</a>
+        <a href="#references">14. 参考与契约</a>
+      </nav>
+
+      <main>
+        <section id="summary">
+          <h2>1. 执行摘要</h2>
+          <p class="lead">
+            本方案建立一条可追溯、可重跑、可版本化发布的个股数据链路。核心原则是：
+            <strong>同一 canonical 数据集在同一发布时间点只允许一种明确口径</strong>，来源切换必须显式产生新版本，
+            不能在失败时静默混入另一来源。
+          </p>
+          <div class="cards">
+            <div class="card">
+              <strong>事实基线</strong>
+              <div class="metric">1d raw</div>
+              <span class="small">原始未复权日线是唯一行情事实；周/月线内部派生。</span>
+            </div>
+            <div class="card">
+              <strong>复权基线</strong>
+              <div class="metric">F(d)</div>
+              <span class="small">保存稳定的累计后复权因子；前/后复权查询时按版本计算。</span>
+            </div>
+            <div class="card">
+              <strong>服务边界</strong>
+              <div class="metric">HTTP</div>
+              <span class="small">service-api 仅通过内部版本化 API 读取，不直连同步库。</span>
+            </div>
+          </div>
+          <div class="decision success">
+            <strong>推荐立项：</strong>P0 先落地主数据、交易日历和未复权日线；P1 接入复权、公司行动、
+            三大财务报表与财务指标；估值作为 P1.5。实时行情、分钟线、资金流、股东与资讯不在本期。
+          </div>
+          <div class="decision warning">
+            <strong>上线前硬门槛：</strong>AKShare 明确主要用于学术研究，上游网站也可能存在授权限制。
+            生产使用前必须由法务/合规确认许可、访问频率和再分发边界；未通过时只允许研发环境使用。
+          </div>
+        </section>
+
+        <section id="scope">
+          <h2>2. 范围、优先级与非目标</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>优先级</th><th>数据集</th><th>用途</th><th>交付口径</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="tag good">P0</span></td>
+                  <td>交易日历、证券主数据、上市/退市、名称历史</td>
+                  <td>全链路维度、调度、代码消歧</td>
+                  <td>沪深北交易所维度；UUID 对外、bigint 对内</td>
+                </tr>
+                <tr>
+                  <td><span class="tag good">P0</span></td>
+                  <td>未复权日线</td>
+                  <td>回测、K 线、收益率</td>
+                  <td>OHLC、成交量（股）、成交额（元）、换手率（小数）</td>
+                </tr>
+                <tr>
+                  <td><span class="tag good">P1</span></td>
+                  <td>周线、月线</td>
+                  <td>中长周期研究</td>
+                  <td>从已发布日线派生，不同步第三方周/月线</td>
+                </tr>
+                <tr>
+                  <td><span class="tag good">P1</span></td>
+                  <td>累计复权因子、分红送转</td>
+                  <td>前/后复权、总回报、除权解释</td>
+                  <td>保存稀疏因子事件及修订；价格查询时计算</td>
+                </tr>
+                <tr>
+                  <td><span class="tag good">P1</span></td>
+                  <td>资产负债表、利润表、现金流量表、财务指标</td>
+                  <td>基本面分析</td>
+                  <td>报告期、公告/更新时间、修订版本、原始/YTD 语义</td>
+                </tr>
+                <tr>
+                  <td><span class="tag">P1.5</span></td>
+                  <td>公司资料、历史估值</td>
+                  <td>标的详情、估值带</td>
+                  <td>带方法版本的 PE/PB/PS/股息率等</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>本期非目标</h3>
+          <ul>
+            <li>实时/盘口/分钟行情、Level-2、逐笔成交。</li>
+            <li>个股资金流、龙虎榜、股东、机构持仓、研报、公告全文和新闻。</li>
+            <li>浏览器直接触发同步、下载 raw 文件或读取 provider 字段。</li>
+            <li>全市场横截面选股 DSL；本期 API 只提供证券维度的确定性读取。</li>
+          </ul>
+          <p class="small">
+            后续数据集只有在完成来源许可、字段口径、质量规则、容量和契约评审后才能扩展；不得借用本方案的
+            “AKShare adapter” 名义直接写库。
+          </p>
+        </section>
+
+        <section id="research">
+          <h2>3. AKShare 研究结论与来源路由</h2>
+          <p>
+            AKShare 是聚合库，不是单一数据源。相同领域接口背后可能分别来自交易所、东方财富、腾讯、
+            新浪或巨潮资讯；可用性、单位和修订语义不同。适配器必须按 <code>capability</code> 路由，
+            而不是按“AKShare”整体降级。
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>能力</th><th>AKShare 接口 / 上游</th><th>角色</th><th>实测与约束</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>交易日历</td>
+                  <td><code>tool_trade_date_hist_sina</code> / 新浪</td>
+                  <td><span class="tag good">主</span></td>
+                  <td>8,797 行，覆盖 1990-12-19 至 2026-12-31；年底前验证下一年覆盖。</td>
+                </tr>
+                <tr>
+                  <td>证券主数据</td>
+                  <td><code>stock_info_{sh,sz,bj}_name_code</code> / 交易所</td>
+                  <td><span class="tag good">主</span></td>
+                  <td>分交易所独立抓取与发布；单一交易所失败不得影响另两家，也不得把缺失误判为退市。</td>
+                </tr>
+                <tr>
+                  <td>发现/巡检</td>
+                  <td><code>stock_zh_a_spot_tx</code> / 腾讯</td>
+                  <td><span class="tag">辅</span></td>
+                  <td>实测 5,531 行、约 21.7 秒；只发现主数据差异，不直接覆盖交易所事实。</td>
+                </tr>
+                <tr>
+                  <td>未复权日线</td>
+                  <td><code>stock_zh_a_hist_tx</code> / 腾讯</td>
+                  <td><span class="tag warn">试点主</span></td>
+                  <td>实测可用；AKShare 1.18.78 对 <code>sz000*</code> 成交量存在指数误判，适配器须按证券类型将手×100为股。</td>
+                </tr>
+                <tr>
+                  <td>日线影子比对</td>
+                  <td><code>stock_zh_a_hist</code> / 东方财富</td>
+                  <td><span class="tag">影子</span></td>
+                  <td>本次多次断连；完成认证前不进入生产 fallback，更不能与腾讯按天拼接。</td>
+                </tr>
+                <tr>
+                  <td>复权因子</td>
+                  <td><code>stock_zh_a_daily</code> factor / 新浪</td>
+                  <td><span class="tag good">主</span></td>
+                  <td>qfq/hfq factor 实测可用；存在限流/IP 风险，低并发、缓存 raw、周期修订扫描。</td>
+                </tr>
+                <tr>
+                  <td>公司资料</td>
+                  <td><code>stock_profile_cninfo</code> / 巨潮资讯</td>
+                  <td><span class="tag good">主</span></td>
+                  <td>实测返回 26 个字段；版本化保存，空字段不覆盖已发布非空值，除非来源明确删除。</td>
+                </tr>
+                <tr>
+                  <td>分红送转</td>
+                  <td><code>stock_fhps_detail_em</code> / 东方财富</td>
+                  <td><span class="tag good">主</span></td>
+                  <td>实测可返回跨年方案；方案状态和实施日期会修订，不能只追加。</td>
+                </tr>
+                <tr>
+                  <td>三大财务报表</td>
+                  <td>Eastmoney report API / 东方财富</td>
+                  <td><span class="tag good">主</span></td>
+                  <td>单股三表分别约 34–45 秒，字段 200–319；必须先用全市场报告期摘要做变更清单，再拉变化个股。</td>
+                </tr>
+                <tr>
+                  <td>财务指标</td>
+                  <td>Eastmoney financial analysis / 东方财富</td>
+                  <td><span class="tag good">主</span></td>
+                  <td>单股实测约 0.8 秒、141 字段；区分 provider-reported 与内部派生方法。</td>
+                </tr>
+                <tr>
+                  <td>历史估值</td>
+                  <td><code>stock_value_em</code> / 东方财富</td>
+                  <td><span class="tag good">主</span></td>
+                  <td>实测单股 2,076 行，覆盖 2018-01-02 至 2026-07-24；保留方法版本。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="decision danger">
+            <strong>禁止静默 fallback：</strong>主来源失败时分区进入 <code>failed/quarantined</code>，
+            对外保持上一已发布版本并标记 stale。切换来源需要配置审批、全量比对、数据版本升级和重新发布。
+          </div>
+          <h3>日线生产认证门槛</h3>
+          <ol>
+            <li>覆盖沪深北、主板/科创板/创业板/北交所、ST/停牌/退市样本，至少 300 只证券、连续 5 个交易日。</li>
+            <li>与交易所可核验样本或独立可信基准比对 OHLC、成交量、成交额；分板块输出偏差分布。</li>
+            <li>成交量单位修复必须以 <code>instrument_type</code> 判断，不以代码字符串特判。</li>
+            <li>认证结果固定到 <code>provider_version + adapter_version + methodology_version</code>；任一变化重跑。</li>
+          </ol>
+        </section>
+
+        <section id="architecture">
+          <h2>4. 总体架构与边界</h2>
+          <div class="flow" role="group" aria-label="数据链路">
+            <div>Scheduler<br>DB 生成 run / partition</div>
+            <div>Celery + Redis<br>只负责投递</div>
+            <div>Provider-neutral Port<br>capability 路由</div>
+            <div>AKShare Adapters<br>抓取并落 raw</div>
+            <div>Normalize + Quality<br>隔离与校验</div>
+            <div>PostgreSQL<br>canonical + publication</div>
+            <div>Internal FastAPI<br>→ NestJS EquityModule</div>
+          </div>
+          <ul>
+            <li><strong>service-data-sync</strong> 拥有同步任务、raw 对象、canonical 表、发布目录及内部查询 API。</li>
+            <li><strong>service-api</strong> 拥有浏览器 API、鉴权、限流、错误映射和下游客户端；禁止直连同步数据库。</li>
+            <li><strong>Redis</strong> 只作为 Celery broker/短期控制状态；<code>sync_run</code> 与分区状态以 PostgreSQL 为准。</li>
+            <li><strong>S3/MinIO</strong> 保存压缩 raw 响应、请求参数、响应头和校验和；canonical 数据不从 Redis 恢复。</li>
+            <li>每次发布产生不可变 <code>data_version</code>；API 只能读已通过质量闸门的 publication。</li>
+          </ul>
+          <h3>组件增量</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>服务</th><th>新增组件</th><th>职责</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>service-data-sync</td>
+                  <td><code>market_data</code>、<code>financials</code>、<code>publication</code>、<code>query_api</code></td>
+                  <td>领域模型、适配器编排、归一化、质量、持久化、派生、内部读取。</td>
+                </tr>
+                <tr>
+                  <td>service-api</td>
+                  <td><code>EquityModule</code>、<code>DataSyncClient</code></td>
+                  <td>认证用户 API、输入限制、超时/熔断、Problem Details、ETag 透传。</td>
+                </tr>
+                <tr>
+                  <td>基础设施</td>
+                  <td>PostgreSQL schema、S3 raw prefix、Celery 队列</td>
+                  <td>权威状态、归档、按能力隔离的限流与重试。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="sync">
+          <h2>5. 数据同步逻辑</h2>
+          <h3>5.1 通用状态机与幂等</h3>
+          <p>
+            调度器先在一个事务中创建 <code>sync_run</code> 与确定性 <code>sync_partition</code>，
+            再发送 Celery 消息。消息采用至少一次投递；worker 使用
+            <code>(capability, partition_key, requested_window, methodology_version)</code> 生成幂等键。
+          </p>
+          <div class="formula">
+            queued → running → succeeded → published<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↘ quarantined<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↘ retry_wait → running<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↘ failed<br>
+            run = succeeded | partial | failed | cancelled
+          </div>
+          <ol>
+            <li>worker 通过 <code>SELECT … FOR UPDATE SKIP LOCKED</code> 获取租约；同分区只允许一个有效 worker。</li>
+            <li>请求成功后先写 S3 raw，记录 SHA-256、provider/adapter 版本、请求参数和观测时间。</li>
+            <li>归一化到 staging；执行 schema、单位、业务和跨批次校验。</li>
+            <li>通过后在事务中关闭旧版本、插入新版本、更新分区计数；相同业务哈希不产生新修订。</li>
+            <li>整批质量闸门通过后原子切换 <code>dataset_publication</code>；查询永远不读 staging。</li>
+          </ol>
+
+          <h3>5.2 任务与时间表（Asia/Shanghai）</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>任务</th><th>分区</th><th>调度</th><th>增量窗口 / 发布条件</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>market.calendar</code></td>
+                  <td>year</td>
+                  <td>周日 05:30；11–12 月每日检查下一年</td>
+                  <td>当前年未覆盖时阻止 EOD 调度，不猜交易日。</td>
+                </tr>
+                <tr>
+                  <td><code>equity.master</code></td>
+                  <td>exchange</td>
+                  <td>交易日 06:00；每周含退市/名称修订</td>
+                  <td>三交易所独立发布；缺失不能自动退市，连续证据+退市表确认。</td>
+                </tr>
+                <tr>
+                  <td><code>equity.profile</code></td>
+                  <td>security_id</td>
+                  <td>新股立即；存量每月 1 日 07:00</td>
+                  <td>内容哈希变化才新建版本。</td>
+                </tr>
+                <tr>
+                  <td><code>equity.bar.1d.raw</code></td>
+                  <td>security_id + year/window</td>
+                  <td>16:10；20:30；次日 06:00 修订</td>
+                  <td>首次全历史；日常滚动最近 10 个交易日。全市场完成且闸门通过后按交易日发布。</td>
+                </tr>
+                <tr>
+                  <td><code>equity.bar.aggregate</code></td>
+                  <td>interval + period</td>
+                  <td>日线 publication 后</td>
+                  <td>当周/月全部已结束交易日为 final 后重算；日线修订触发受影响周期重算。</td>
+                </tr>
+                <tr>
+                  <td><code>equity.corporate_action</code></td>
+                  <td>security_id</td>
+                  <td>交易日 19:00；报告季加密</td>
+                  <td>滚动 3 年 + 历史方案哈希；状态/日期变化形成修订。</td>
+                </tr>
+                <tr>
+                  <td><code>equity.adjustment_factor</code></td>
+                  <td>security_id</td>
+                  <td>新除权事件后；周六滚动扫描</td>
+                  <td>完整稀疏序列比较；任何历史因子变化都发布新 factor_version。</td>
+                </tr>
+                <tr>
+                  <td><code>financial.manifest</code></td>
+                  <td>report_period</td>
+                  <td>报告季每日 20:00；其他时期每周</td>
+                  <td>全市场摘要只做变更清单；公告/更新时间或摘要哈希变化才拉单股全量。</td>
+                </tr>
+                <tr>
+                  <td><code>financial.statement</code></td>
+                  <td>security_id + statement_type</td>
+                  <td>manifest 触发</td>
+                  <td>三表独立；报告期修订关闭旧版本。初次回填使用低优先级队列分批执行。</td>
+                </tr>
+                <tr>
+                  <td><code>financial.metric</code></td>
+                  <td>security_id</td>
+                  <td>财务报表发布后</td>
+                  <td>provider-reported 与 derived 分开；方法版本变化触发重算。</td>
+                </tr>
+                <tr>
+                  <td><code>equity.valuation.1d</code></td>
+                  <td>security_id + year</td>
+                  <td>交易日 20:45；周末滚动修订</td>
+                  <td>只发布有对应 final 日线的日期；同日历史修订保留版本。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>5.3 抓取节流、重试与变更探测</h3>
+          <ul>
+            <li>每个上游建立独立 Celery 队列和 token bucket；初始安全值为并发 1、请求间隔至少 2 秒并加抖动，压测与授权确认后再调整。</li>
+            <li>连接/超时/5xx 最多重试 3 次，指数退避加全抖动；4xx、字段缺失或解析漂移直接隔离，不盲重试。</li>
+            <li>财务单股接口按实测设置连接/读取总预算 90 秒，单任务软上限 120 秒；队列不得占用日线 worker。</li>
+            <li>连续 10 次或 5 分钟窗口 50% 失败打开 circuit breaker；半开探测成功后逐步恢复。</li>
+            <li>全市场摘要只产生“可能变化”的 manifest，最终仍以单股完整响应的业务哈希判断是否修订。</li>
+          </ul>
+
+          <h3>5.4 初始回填与修复</h3>
+          <ol>
+            <li>先加载交易日历与证券主数据，冻结 <code>instrument_id</code>。</li>
+            <li>日线按“证券×年份”分区，从最近 2 年向历史倒推；近年先服务 API，历史后台补齐。</li>
+            <li>公司行动与因子完成后才开放 adjusted 查询；否则只开放 <code>adjust=none</code>。</li>
+            <li>财务先回填最近 12 个报告期，再补全历史；每个 statement_type 独立发布。</li>
+            <li><code>repair</code> 只针对已知分区，必须填写 reason；不允许无边界的全市场人工重跑。</li>
+          </ol>
+        </section>
+
+        <section id="adjustment">
+          <h2>6. 复权与周/月线算法</h2>
+          <p>
+            canonical 只保存未复权价格 <code>P(d)</code> 与稳定的累计后复权因子 <code>F(d)</code>。
+            AKShare 源码语义经实测确认：后复权价为 raw × hfq factor；前复权价可由后复权累计因子相对锚点得到。
+          </p>
+          <div class="formula">
+            hfq(d) = P(d) × F(d)<br>
+            qfq(d, A) = P(d) × F(d) ÷ F(A)<br>
+            none(d) = P(d)<br>
+            其中 A = adjustAsOf；默认 min(请求 end, 最新已发布交易日)
+          </div>
+          <ul>
+            <li><code>F(d)</code> 使用 <code>numeric(38,18)</code> 保存，禁止 float；每次因子修订生成新的 <code>factor_version</code>。</li>
+            <li>查询响应必须返回 <code>factorVersion</code>、<code>formulaVersion=cumulative-hfq-v1</code> 和 <code>adjustAsOf</code>。</li>
+            <li>成交量、成交额不复权；换手率为小数，<code>0.01</code> 表示 1%。</li>
+            <li>复权结果在 API 查询层按 publication 版本计算，不落一套不断漂移的 qfq 表。</li>
+          </ul>
+          <h3>周/月线</h3>
+          <p>
+            未复权周/月线从日线聚合。复权周/月线必须先逐日复权，再聚合，不能先聚合 raw OHLC 后只乘期末因子；
+            周/月内发生除权时，后者会产生错误的开高低收。
+          </p>
+          <div class="formula">
+            open = first(adjusted_open)<br>
+            high = max(adjusted_high)<br>
+            low = min(adjusted_low)<br>
+            close = last(adjusted_close)<br>
+            volume_shares = Σ daily_volume_shares<br>
+            amount_cny = Σ daily_amount_cny
+          </div>
+          <p class="small">停牌日不造零值 K 线；周期的 <code>session_count</code> 是实际有行情记录的交易日数量。</p>
+        </section>
+
+        <section id="quality">
+          <h2>7. 数据质量、口径与发布闸门</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>数据集</th><th>硬失败 / 隔离</th><th>告警 / 观察</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>主数据</td>
+                  <td>交易所内代码重复；代码格式非法；单次在册数量下降 &gt;1%；上市日晚于退市日。</td>
+                  <td>腾讯发现表与交易所集合差异；名称变化未在历史表出现。</td>
+                </tr>
+                <tr>
+                  <td>日线</td>
+                  <td><code>low ≤ min(open,close) ≤ max(open,close) ≤ high</code>；负成交量/额；非交易日记录；单位校验失败。</td>
+                  <td>长时间缺失但证券状态为 LISTED；日收益异常；与影子来源偏差。</td>
+                </tr>
+                <tr>
+                  <td>复权因子</td>
+                  <td>因子 ≤0；日期乱序；重建源 qfq/hfq 误差 &gt;0.02 元；锚点缺失。</td>
+                  <td>因子跳变却无公司行动；公司行动存在但因子未变。</td>
+                </tr>
+                <tr>
+                  <td>财务</td>
+                  <td>报告期非法；主键字段缺失；未知字段比例超阈值；结构漂移；数值无法无损解析。</td>
+                  <td>资产=负债+权益误差超过 <code>max(1元, 资产×1e-6)</code>；公告日异常。</td>
+                </tr>
+                <tr>
+                  <td>估值</td>
+                  <td>日期无 final 行情；分母语义缺失；单位未知。</td>
+                  <td>市值与价格×股本偏差 &gt;1%；负 PE 允许但需保留，不改为 null。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="decision">
+            <strong>成交量 100 倍错误的自动识别：</strong>对成交量&gt;0的样本计算
+            <code>implied_vwap = amount_cny / volume_shares</code>。若其不在
+            <code>[low×0.99, high×1.01]</code>，该分区隔离。此规则可以捕获“手被误当成股”的常见错误。
+          </div>
+          <h3>缺失、零值与修订</h3>
+          <ul>
+            <li>来源缺失是 <code>null</code>，绝不写 0；只有来源明确报告 0 才写 0。</li>
+            <li>财务利润表/现金流量表保持来源的年初至今（YTD）语义；单季度和 TTM 是带方法版本的派生指标。</li>
+            <li>每个版本保留 <code>observed_at/source_updated_at/valid_from/valid_to/source_batch_id</code>；API 默认只读 current。</li>
+            <li>跨来源比对只产生质量证据，不按字段“择优拼接”；来源差异应在 adapter/methodology 升级中解决。</li>
+          </ul>
+        </section>
+
+        <section id="schema">
+          <h2>8. PostgreSQL 表设计、分区与索引</h2>
+          <p>
+            使用 PostgreSQL canonical schema；金额和价格不使用浮点数。对外 <code>instrument_id UUID</code>
+            永久稳定，对内关联使用 <code>security_id bigint</code> 降低大表索引体积。
+          </p>
+
+          <h3>8.1 运维与血缘表</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>表</th><th>关键列</th><th>约束与索引</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><code>sync_run</code></td>
+                  <td><code>run_id uuid</code>、capability、mode、status、request_key、methodology_version、各时间戳、计数</td>
+                  <td><code>UNIQUE(request_key)</code>；<code>(capability, requested_at DESC)</code>；状态 CHECK。</td>
+                </tr>
+                <tr>
+                  <td><code>sync_partition</code></td>
+                  <td>run_id、partition_key、status、attempt、next_retry_at、lease_owner/lease_until、error_code、row_count</td>
+                  <td><code>UNIQUE(run_id, partition_key)</code>；claim partial index
+                    <code>(status,next_retry_at,lease_until) WHERE status IN (...)</code>。</td>
+                </tr>
+                <tr>
+                  <td><code>source_batch</code></td>
+                  <td>provider、capability、request_json、raw_uri、payload_sha256、adapter_version、observed_at</td>
+                  <td><code>UNIQUE(provider, capability, payload_sha256)</code>；raw URI 不可覆盖。</td>
+                </tr>
+                <tr>
+                  <td><code>dataset_publication</code></td>
+                  <td>dataset、partition_key、data_version、quality_status、published_at、supersedes_version</td>
+                  <td><code>UNIQUE(dataset, partition_key, data_version)</code>；current partial unique index。</td>
+                </tr>
+                <tr>
+                  <td><code>data_quality_issue</code></td>
+                  <td>run/partition/batch、rule_code、severity、sample_json、resolved_at</td>
+                  <td><code>(severity, created_at DESC) WHERE resolved_at IS NULL</code>。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>8.2 Canonical 业务表</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>表</th><th>关键字段与类型</th><th>主键 / 索引策略</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><code>market_session</code></td>
+                  <td>market、trade_date、is_open、previous_open_date、source_batch_id</td>
+                  <td>PK <code>(market, trade_date)</code>；<code>(market, trade_date DESC) WHERE is_open</code>。</td>
+                </tr>
+                <tr>
+                  <td><code>equity_instrument</code></td>
+                  <td>security_id bigint、instrument_id uuid、exchange、symbol char(6)、name、board、type、status、list/delist_date、currency</td>
+                  <td>PK security_id；UNIQUE instrument_id；UNIQUE(exchange,symbol)；<code>(exchange,status,symbol)</code>；名称/代码前缀 B-tree。</td>
+                </tr>
+                <tr>
+                  <td><code>equity_name_history</code></td>
+                  <td>security_id、name、effective_from/to、source_batch_id</td>
+                  <td>PK <code>(security_id,effective_from)</code>；有效区间排斥重叠；<code>(security_id,effective_from DESC)</code>。</td>
+                </tr>
+                <tr>
+                  <td><code>equity_profile_version</code></td>
+                  <td>security_id、revision、公司中英文名、地址、网址、主营/范围、content_hash、valid_from/to</td>
+                  <td>PK <code>(security_id,revision)</code>；UNIQUE(security_id,content_hash)；current partial unique index。</td>
+                </tr>
+                <tr>
+                  <td><code>equity_daily_bar</code></td>
+                  <td>security_id、trade_date、revision、OHLC <code>numeric(20,6)</code>、volume_shares bigint、amount_cny <code>numeric(24,4)</code>、turnover_rate <code>numeric(16,10)</code>、final、valid_from/to</td>
+                  <td>按 trade_date 年度 RANGE 分区；PK <code>(security_id,trade_date,revision)</code>；各分区 current partial index 见下。</td>
+                </tr>
+                <tr>
+                  <td><code>equity_period_bar</code></td>
+                  <td>security_id、interval、period_start/end、revision、raw OHLCV、session_count、source_data_version</td>
+                  <td>按 period_end 年度 RANGE 分区；current unique <code>(security_id,interval,period_end) WHERE valid_to IS NULL</code>。</td>
+                </tr>
+                <tr>
+                  <td><code>equity_adjustment_factor</code></td>
+                  <td>security_id、effective_date、revision、cumulative_factor <code>numeric(38,18)</code>、factor_version、valid_from/to</td>
+                  <td>PK <code>(security_id,effective_date,revision)</code>；current lookup <code>(security_id,effective_date DESC) WHERE valid_to IS NULL</code>。</td>
+                </tr>
+                <tr>
+                  <td><code>equity_corporate_action_version</code></td>
+                  <td>action_id uuid、security_id、source_event_key、report_period、type/status、公告/登记/除权日、每10股派送转、revision、valid_from/to</td>
+                  <td>PK <code>(action_id,revision)</code>；UNIQUE provider event identity；<code>(security_id,ex_date DESC) WHERE valid_to IS NULL</code>。</td>
+                </tr>
+                <tr>
+                  <td><code>equity_daily_valuation</code></td>
+                  <td>security_id、trade_date、revision、PE/PB/PS/PCF、股息率、市值、methodology_version、valid_from/to</td>
+                  <td>按 trade_date 年分区；current <code>(security_id,trade_date DESC)</code>；不预建全指标横截面索引。</td>
+                </tr>
+                <tr>
+                  <td><code>financial_manifest</code></td>
+                  <td>security_id、report_period、report_type、notice/update_time、summary_hash、observed_at</td>
+                  <td>PK <code>(security_id,report_period,observed_at)</code>；变更查找 <code>(report_period,source_updated_at DESC)</code>。</td>
+                </tr>
+                <tr>
+                  <td><code>financial_statement_version</code></td>
+                  <td>report_id uuid、security_id、statement_type、report_period/type、period_basis、公告/源更新时间、revision、<code>facts jsonb</code>、schema_version、valid_from/to</td>
+                  <td>PK <code>(report_id,revision)</code>；current <code>(security_id,statement_type,report_period DESC) INCLUDE(...)</code>；首期不建 GIN。</td>
+                </tr>
+                <tr>
+                  <td><code>financial_metric_value</code></td>
+                  <td>security_id、report_period、metric_code、basis、value <code>numeric(30,6)</code>、unit、origin、methodology_version、revision、valid_from/to</td>
+                  <td>PK 业务键+revision；current <code>(security_id,metric_code,report_period DESC)</code>；横截面索引按真实慢查询再加。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>8.3 关键 DDL 模板</h3>
+          <pre><code>CREATE TABLE equity_daily_bar (
+  security_id       bigint          NOT NULL REFERENCES equity_instrument(security_id),
+  trade_date        date            NOT NULL,
+  revision          integer         NOT NULL CHECK (revision &gt; 0),
+  open_price        numeric(20,6)   NOT NULL CHECK (open_price &gt;= 0),
+  high_price        numeric(20,6)   NOT NULL CHECK (high_price &gt;= 0),
+  low_price         numeric(20,6)   NOT NULL CHECK (low_price &gt;= 0),
+  close_price       numeric(20,6)   NOT NULL CHECK (close_price &gt;= 0),
+  volume_shares     bigint          NOT NULL CHECK (volume_shares &gt;= 0),
+  amount_cny        numeric(24,4)   NOT NULL CHECK (amount_cny &gt;= 0),
+  turnover_rate     numeric(16,10),
+  final             boolean         NOT NULL,
+  content_hash      bytea           NOT NULL,
+  source_batch_id   uuid            NOT NULL REFERENCES source_batch(source_batch_id),
+  valid_from        timestamptz     NOT NULL,
+  valid_to          timestamptz,
+  PRIMARY KEY (security_id, trade_date, revision),
+  CHECK (low_price &lt;= LEAST(open_price, close_price)),
+  CHECK (high_price &gt;= GREATEST(open_price, close_price)),
+  CHECK (low_price &lt;= high_price)
+) PARTITION BY RANGE (trade_date);
+
+CREATE TABLE equity_daily_bar_2026 PARTITION OF equity_daily_bar
+  FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+
+CREATE UNIQUE INDEX uq_equity_daily_bar_2026_current
+  ON equity_daily_bar_2026 (security_id, trade_date)
+  WHERE valid_to IS NULL;
+
+CREATE INDEX ix_equity_daily_bar_2026_read
+  ON equity_daily_bar_2026 (security_id, trade_date DESC)
+  INCLUDE (open_price, high_price, low_price, close_price,
+           volume_shares, amount_cny, turnover_rate, final, revision)
+  WHERE valid_to IS NULL;</code></pre>
+
+          <h3>8.4 财务 facts 取舍</h3>
+          <p>
+            三表接口单表可达 200–319 列。第一阶段采用“版本头 + canonical JSONB facts”，数值以十进制字符串保存，
+            避免 JSON float 精度损失；常用且需时间序列查询的指标另写 <code>financial_metric_value</code>。
+            这比全量 EAV 少一个数量级的行数和索引写放大。
+          </p>
+          <ul>
+            <li>不对 <code>facts</code> 建通用 GIN；财报详情按 report_id 读取整行。</li>
+            <li>只有进入公开契约的 canonical item code 才写 facts；未知源字段保留在 raw，不自动进入 API。</li>
+            <li>预计约 5,500 只在册证券，current 日线 2,500–4,000 万行；达到 8,000 万行或单年分区 &gt;20GB 时复评月分区。</li>
+            <li>以上容量为规划假设，P0 pilot 后以真实平均行宽、索引命中率和 VACUUM 指标修正。</li>
+          </ul>
+        </section>
+
+        <section id="api">
+          <h2>9. API 设计</h2>
+          <p>
+            使用两层契约：service-data-sync 暴露服务间 API，service-api 暴露认证用户 API。
+            路径与数据模型已落入 OpenAPI；禁止 controller 直接读取同步库。
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>公开端点（均为 GET）</th><th>职责</th><th>关键限制</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><code>/api/v1/equities</code></td>
+                  <td>代码/名称前缀搜索，交易所与状态过滤</td>
+                  <td>cursor；默认 50，最大 100；稳定排序 exchange,symbol,instrumentId。</td>
+                </tr>
+                <tr>
+                  <td><code>/api/v1/equities/{instrumentId}</code></td>
+                  <td>主数据和当前公司资料</td>
+                  <td>UUID 标识；provider 字段不外露。</td>
+                </tr>
+                <tr>
+                  <td><code>…/{instrumentId}/bars</code></td>
+                  <td>1d/1w/1mo，none/qfq/hfq</td>
+                  <td>start/end 必填；默认 500、最大 2,000；调整锚点显式返回。</td>
+                </tr>
+                <tr>
+                  <td><code>…/{instrumentId}/adjustment-factors</code></td>
+                  <td>稀疏累计因子序列</td>
+                  <td>最大 500；只返回 current revision 与 factorVersion。</td>
+                </tr>
+                <tr>
+                  <td><code>…/{instrumentId}/corporate-actions</code></td>
+                  <td>分红、送股、转增及状态</td>
+                  <td>最大 100；日期范围过滤。</td>
+                </tr>
+                <tr>
+                  <td><code>…/{instrumentId}/financial-reports</code></td>
+                  <td>财报版本头列表</td>
+                  <td>三表过滤；默认 20、最大 50。</td>
+                </tr>
+                <tr>
+                  <td><code>…/financial-reports/{reportId}</code></td>
+                  <td>单张报表 canonical items</td>
+                  <td>最大 500 项；缺失值为 null。</td>
+                </tr>
+                <tr>
+                  <td><code>…/{instrumentId}/financial-metrics</code></td>
+                  <td>reported / single-quarter / TTM 指标</td>
+                  <td>最多 50 个 metric code；最大 500 行；返回 methodologyVersion。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>9.1 数据语义</h3>
+          <ul>
+            <li>每个响应含 <code>dataVersion</code>、<code>publishedAt</code>、<code>qualityStatus</code>、<code>stale</code> 和可选 <code>methodologyVersion</code>。</li>
+            <li>金额与财务精确数值在财报 item/factor 使用十进制字符串；行情价格为 JSON number，数据库仍用 numeric。</li>
+            <li>cursor 是不透明、带签名的查询位置，编码排序键、过滤哈希和 publication version；版本变化时旧 cursor 返回 400。</li>
+            <li><code>ETag = hash(normalized_query + data_version + factor_version + formula_version)</code>；支持 <code>If-None-Match/304</code>。</li>
+            <li>只读已发布 final 数据；请求区间含隔离/未发布分区时返回 409，而不是悄悄缺行。</li>
+          </ul>
+
+          <h3>9.2 service-api 行为</h3>
+          <ul>
+            <li>沿用全局 bearer 鉴权；有效 USER、ADMIN、SUPER_ADMIN 均可读。同步控制端点不公开。</li>
+            <li><code>EquityModule → DataSyncClient</code> 单向依赖；默认请求预算 2 秒，财报详情 5 秒。</li>
+            <li>幂等 GET 可在总预算内重试 1 次；熔断开启或下游失败统一映射 503 Problem Details，并返回 Retry-After。</li>
+            <li>首期不在 service-api 建业务缓存或读模型，直接透传 ETag；Redis 仅可保存短期滥用计数，不能成为行情权威副本。</li>
+            <li>所有错误采用现有 Problem Details 结构，保留 <code>requestId</code>，不返回上游 URL、异常栈或服务凭证。</li>
+          </ul>
+
+          <h3>9.3 内部同步控制</h3>
+          <p>
+            仅内部服务凭证可调用 <code>POST /internal/v1/sync-runs</code>，请求必须带
+            <code>Idempotency-Key</code>、能力、模式和最多 1,000 个有界分区。API 用户和前端不具备该权限。
+          </p>
+          <pre><code>{
+  "capability": "equity.bar.1d.raw",
+  "mode": "repair",
+  "partitions": [
+    { "key": "SSE.600519/2026-07-01..2026-07-24" }
+  ],
+  "reason": "DQ-2026-071: repair certified volume-unit normalization"
+}</code></pre>
+        </section>
+
+        <section id="operations">
+          <h2>10. 可靠性、可观测性与运行手册</h2>
+          <h3>SLO 与新鲜度预算</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>数据集</th><th>目标新鲜度</th><th>完整性 / 可用性目标</th></tr></thead>
+              <tbody>
+                <tr><td>主数据</td><td>交易日 07:00 前</td><td>三个交易所独立成功；上一版可读。</td></tr>
+                <tr><td>日线</td><td>95% 在 17:30 前，最终修订在次日 07:00 前</td><td>在册可交易证券成功或有解释性缺失 ≥99.5%。</td></tr>
+                <tr><td>复权/公司行动</td><td>除权日前一晚或事件观测后 4 小时</td><td>调整查询只有完整 factor publication 才开放。</td></tr>
+                <tr><td>财务</td><td>来源公告可见后 24 小时</td><td>manifest 命中证券三表独立追踪，不因一表失败丢失另两表。</td></tr>
+                <tr><td>查询 API</td><td>读取已发布数据</td><td>月可用性 99.9%；列表/日线 p95 &lt;300ms（同步服务内网）。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>指标、日志与告警</h3>
+          <ul>
+            <li>指标：run/partition 状态数、抓取延迟、重试率、上游错误率、raw 字节、解析行数、DQ 失败、publication lag、API p50/p95/p99。</li>
+            <li>标签只使用 provider、capability、exchange、status、error_code；不得用 symbol/run_id 作为指标标签造成高基数。</li>
+            <li>结构化日志包含 request_id、run_id、partition_id、source_batch_id；请求参数脱敏，响应体不进日志。</li>
+            <li>告警：日线 17:30 未发布、交易所主数据下降 &gt;1%、VWAP 单位规则失败、财务 schema drift、断路器持续 15 分钟。</li>
+          </ul>
+          <h3>恢复规则</h3>
+          <ol>
+            <li>worker 崩溃：租约过期扫描器依据 PostgreSQL 重排，不依赖 Redis 中残留状态。</li>
+            <li>raw 已写、canonical 未写：使用同一 source_batch 重放归一化，无需再次访问上游。</li>
+            <li>坏 publication：原子回指上一 data_version；已发布事实不原地 UPDATE。</li>
+            <li>provider 漂移：打开断路器、隔离新批次、保留上一版本、升级 adapter/schema 并用 raw 回放验证。</li>
+            <li>灾难恢复：PostgreSQL 恢复 publication/catalog 后，按 raw URI + checksum 重建 canonical；Redis 可直接清空重建。</li>
+          </ol>
+        </section>
+
+        <section id="security">
+          <h2>11. 安全、配置与合规</h2>
+          <ul>
+            <li>内部 API 使用可轮换 service bearer；只注入 service-api，浏览器永远不可见。健康检查无需认证但不输出依赖细节。</li>
+            <li>对外 API 继续使用 service-api 现有 JWT、全局守卫和用户状态校验；记录用户级限流审计，不记录查询结果。</li>
+            <li>S3 raw bucket 默认私有、服务身份最小权限、生命周期按许可和审计要求配置；raw URI 不进入公开 API。</li>
+            <li>新增环境变量同时更新 <code>.env.example</code>；生产 secret 不入库，不在日志或 Problem Details 出现。</li>
+          </ul>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>配置</th><th>用途</th><th>建议默认值</th></tr></thead>
+              <tbody>
+                <tr><td><code>DATA_SYNC_INTERNAL_BEARER_SECRET</code></td><td>内部 API 凭证</td><td>无默认，必填 secret</td></tr>
+                <tr><td><code>DATA_SYNC_BASE_URL</code></td><td>service-api 下游地址</td><td><code>http://service-data-sync:8000</code></td></tr>
+                <tr><td><code>AKSHARE_PROVIDER_ENABLED</code></td><td>环境级开关</td><td>研发 true；生产需合规审批</td></tr>
+                <tr><td><code>AKSHARE_REQUEST_INTERVAL_SECONDS</code></td><td>单 provider 初始节流</td><td><code>2</code></td></tr>
+                <tr><td><code>EQUITY_QUERY_TIMEOUT_MS</code></td><td>普通读取预算</td><td><code>2000</code></td></tr>
+                <tr><td><code>FINANCIAL_DETAIL_TIMEOUT_MS</code></td><td>财报详情读取预算</td><td><code>5000</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="decision warning">
+            provider 可用不等于允许商业使用或再分发。生产环境开关必须绑定已审批的来源清单、用途、保留期和访问频率；
+            授权不明确时方案停在研发/验证阶段。
+          </div>
+        </section>
+
+        <section id="delivery">
+          <h2>12. 可执行实施计划</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>阶段</th><th>交付</th><th>退出条件</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>0. 来源认证（3–5 天）</td>
+                  <td>许可核对；日线 300 股×5 日认证；单位和 schema fixtures；AKShare 版本锁定。</td>
+                  <td>合规门槛通过；认证报告无 P0 口径错误。</td>
+                </tr>
+                <tr>
+                  <td>1. P0 基础（5–8 天）</td>
+                  <td>Alembic 表/分区；交易日历/主数据 adapter；run/partition/raw/publication；质量框架。</td>
+                  <td>主数据可重跑、可回滚；架构测试保证 adapter 不写 canonical。</td>
+                </tr>
+                <tr>
+                  <td>2. P0 日线（7–10 天）</td>
+                  <td>腾讯 adapter 与单位归一化；COPY staging；历史回填；日线 publication；内部 bars API。</td>
+                  <td>连续 5 个交易日达到新鲜度/完整性；故障演练保留上一版本。</td>
+                </tr>
+                <tr>
+                  <td>3. P1 复权/周期（5–7 天）</td>
+                  <td>Sina factor、公司行动、factor version、周/月派生、qfq/hfq 查询。</td>
+                  <td>样本重建误差 ≤0.02 元；除权跨周/月回归测试通过。</td>
+                </tr>
+                <tr>
+                  <td>4. P1 财务（8–12 天）</td>
+                  <td>manifest + 三表 adapter、字段映射版本、financial facts/metric、修订与详情 API。</td>
+                  <td>最近 12 期回填完成；财务修订、null、YTD/TTM 测试通过。</td>
+                </tr>
+                <tr>
+                  <td>5. service-api（4–6 天）</td>
+                  <td>EquityModule、DataSyncClient、认证/限流、ETag、熔断、公开 OpenAPI 与契约测试。</td>
+                  <td>公开契约一致；下游超时/失败映射正确；无 DB 跨服务连接。</td>
+                </tr>
+                <tr>
+                  <td>6. P1.5/运行验证（3–5 天）</td>
+                  <td>估值、SLO dashboard、告警、备份恢复/回滚演练、容量复测。</td>
+                  <td>7 天 shadow 运行稳定；值班手册和生产开关审批完成。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>建议代码落点</h3>
+          <pre><code>service-data-sync/src/data_sync/
+  application/tasks/equity_*.py
+  domain/equity/                 # canonical types, rules, factor formulas
+  infrastructure/providers/akshare/
+    exchange_master_adapter.py
+    tencent_daily_bar_adapter.py
+    sina_factor_adapter.py
+    cninfo_profile_adapter.py
+    eastmoney_financial_adapter.py
+  infrastructure/persistence/    # repositories, COPY staging, publication
+  interfaces/http/internal_v1/   # FastAPI read/control routes
+
+service-api/src/equity/
+  equity.module.ts
+  equity.controller.ts
+  equity.service.ts
+  data-sync.client.ts
+  dto/</code></pre>
+          <h3>测试矩阵</h3>
+          <ul>
+            <li>unit：字段映射、单位、日期、复权、周/月聚合、财务 YTD→单季/TTM、content hash。</li>
+            <li>contract：raw fixture→canonical snapshot；两份 OpenAPI 的请求/响应；service-api downstream mock。</li>
+            <li>architecture：领域/应用层不能导入 AKShare；adapter 不能写 canonical；service-api 不能连接同步 DB。</li>
+            <li>integration：PostgreSQL/S3/Redis/Celery，重复投递、租约超时、部分失败、publication 原子切换。</li>
+            <li>shadow：生产候选环境只采不发布，对认证基准和上一数据版本做差异报告。</li>
+          </ul>
+        </section>
+
+        <section id="acceptance">
+          <h2>13. 验收标准与上线清单</h2>
+          <ul class="checklist">
+            <li>AKShare 与上游许可、频率、保留和再分发范围已有书面结论。</li>
+            <li>日线来源认证覆盖 300 只证券、四类板块、特殊状态和连续 5 个交易日。</li>
+            <li>任何 provider/adapter/schema/methodology 版本变化都会产生可追溯新版本。</li>
+            <li>重复任务、Redis 丢失、worker 崩溃不会重复写 current 数据或丢失权威状态。</li>
+            <li>主数据异常下降、成交量 100 倍、OHLC 违反、因子不一致、财务 schema drift 均会阻止发布。</li>
+            <li>日线修订能只重算受影响周/月；前/后复权响应返回锚点、因子和公式版本。</li>
+            <li>财报保留报告期、公告/更新时间、YTD 语义和历史修订；缺失不转换为 0。</li>
+            <li>关键查询在预期容量下使用分区裁剪和目标索引，EXPLAIN 无全表扫描。</li>
+            <li>service-api 只通过内部 HTTP 读取，认证、限流、超时、熔断、503 和 ETag 测试通过。</li>
+            <li>迁移可回滚，上一 publication 可恢复，raw 可重放，告警和运行手册经过演练。</li>
+          </ul>
+          <h3>Go / No-Go</h3>
+          <p>
+            只有“来源合规、日线认证、数据质量、故障回滚、API 契约”五项同时通过才允许生产发布。
+            任一项未通过，系统只能继续 shadow 抓取或仅提供上一已认证版本。
+          </p>
+        </section>
+
+        <section id="references">
+          <h2>14. 方案依据、ADR 与机器契约</h2>
+          <h3>仓库内文档</h3>
+          <ul>
+            <li><a href="../../decisions/0009-equity-data-source-and-serving-boundary.md">ADR-0009：个股来源、复权和服务边界</a></li>
+            <li><a href="../../contracts/0003-data-sync-equity-internal.openapi.yaml">内部 API OpenAPI</a></li>
+            <li><a href="../../contracts/0004-service-api-equity.openapi.yaml">公开 API OpenAPI</a></li>
+            <li><a href="../../decisions/0002-data-sync-ownership-and-access.md">ADR-0002：数据库所有权与跨服务访问</a></li>
+            <li><a href="../../decisions/0004-market-data-provider-adapters.md">ADR-0004：provider-neutral 边界</a></li>
+            <li><a href="../../decisions/0008-default-deny-auth-and-hierarchical-rbac.md">ADR-0008：service-api 授权模型</a></li>
+          </ul>
+          <h3>外部一手资料</h3>
+          <ul>
+            <li><a href="https://akshare.akfamily.xyz/data/stock/stock.html">AKShare 股票数据官方文档</a></li>
+            <li><a href="https://akshare.akfamily.xyz/data/tool/tool.html">AKShare 工具数据官方文档</a></li>
+            <li><a href="https://github.com/akfamily/akshare">AKShare 官方 GitHub 仓库</a></li>
+          </ul>
+          <p class="small">
+            研究环境：<code>python:3.13-slim</code>、<code>akshare==1.18.78</code>；
+            实测日期 2026-07-26。外部接口的可用性随上游变化，实测结果用于设计风险与认证门槛，
+            不构成永久 SLA。
+          </p>
+        </section>
+      </main>
+    </div>
+    <p class="foot">QUANT V2 · service-data-sync / service-api · Proposed 1.0</p>
+  </div>
+</body>
+</html>

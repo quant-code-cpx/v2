@@ -1,17 +1,19 @@
 import { Role, UserStatus } from '../../../generated/prisma/client.js';
-import { IsEnum, IsOptional, IsString, Length } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsIn, IsString, Length, ValidateIf } from 'class-validator';
 
 export class UpdateUserDto {
-  @IsOptional()
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @Length(1, 120)
   public readonly displayName?: string;
 
-  @IsOptional()
-  @IsEnum(Role)
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsIn([Role.USER, Role.ADMIN])
   public readonly role?: Role;
 
-  @IsOptional()
-  @IsEnum(UserStatus)
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsIn([UserStatus.ACTIVE, UserStatus.DISABLED])
   public readonly status?: UserStatus;
 }

@@ -1,4 +1,4 @@
-"""Foundation package for service-data-sync."""
+"""数据同步服务基础包。"""
 
 __all__ = ["__version__"]
 

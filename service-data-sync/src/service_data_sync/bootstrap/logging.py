@@ -1,3 +1,5 @@
+"""结构化日志配置与递归敏感信息脱敏。"""
+
 from __future__ import annotations
 
 import logging
@@ -21,12 +23,12 @@ _SENSITIVE_MARKERS = (
 
 
 def _is_sensitive(key: str) -> bool:
-    """Return whether a log-field name may carry credentials or connection secrets."""
+    """判断日志字段名是否可能携带凭证或连接密钥。"""
     return any(marker in key.lower() for marker in _SENSITIVE_MARKERS)
 
 
 def _redact(value: Any, key: str | None = None) -> Any:
-    """Recursively redact sensitive mappings while preserving safe event structure."""
+    """递归脱敏敏感映射，同时保留安全的事件结构。"""
     if key is not None and _is_sensitive(key):
         return "[REDACTED]"
     if isinstance(value, Mapping):
@@ -46,7 +48,7 @@ def redact_secrets(
     _method_name: str,
     event_dict: structlog.types.EventDict,
 ) -> structlog.types.EventDict:
-    """Apply recursive secret redaction as a structlog processor."""
+    """作为 structlog 处理器递归执行密钥脱敏。"""
     return cast(structlog.types.EventDict, _redact(event_dict))
 
 
@@ -58,7 +60,7 @@ def add_service_context(
     settings: Settings,
     process_role: str,
 ) -> structlog.types.EventDict:
-    """Attach stable service, environment, and process-role fields to every event."""
+    """为每条事件附加稳定的服务、环境与进程角色字段。"""
     event_dict["service"] = "service-data-sync"
     event_dict["environment"] = settings.environment
     event_dict["process_role"] = process_role
@@ -66,7 +68,7 @@ def add_service_context(
 
 
 def configure_logging(settings: Settings, *, process_role: str) -> None:
-    """Configure stderr-compatible structured logging with mandatory secret redaction."""
+    """配置兼容标准错误输出且强制脱敏的结构化日志。"""
     logging.basicConfig(level=settings.log_level, format="%(message)s", force=True)
     renderer: structlog.types.Processor
     if settings.log_format is LogFormat.JSON:
@@ -80,7 +82,7 @@ def configure_logging(settings: Settings, *, process_role: str) -> None:
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", utc=True),
             structlog.processors.EventRenamer("event"),
-            # Adapter callback injects runtime context before redaction and final rendering.
+            # 回调必须先注入运行时上下文，再脱敏并完成最终渲染。
             lambda logger, method_name, event_dict: add_service_context(
                 logger,
                 method_name,

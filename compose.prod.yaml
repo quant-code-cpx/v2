@@ -19,6 +19,22 @@ services:
 
   service-api-migrate:
     image: ${SERVICE_API_MIGRATION_IMAGE_REF:?set SERVICE_API_MIGRATION_IMAGE_REF to an immutable digest}
+    environment:
+      NODE_ENV: production
+      COOKIE_SECURE: "true"
+      CORS_ORIGIN: ${SERVICE_API_PROD_CORS_ORIGIN:?set SERVICE_API_PROD_CORS_ORIGIN}
+      TRUST_PROXY: ${SERVICE_API_PROD_TRUST_PROXY:-false}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  service-api-bootstrap:
+    image: ${SERVICE_API_MIGRATION_IMAGE_REF:?set SERVICE_API_MIGRATION_IMAGE_REF to an immutable digest}
+    environment:
+      NODE_ENV: production
+      COOKIE_SECURE: "true"
+      CORS_ORIGIN: ${SERVICE_API_PROD_CORS_ORIGIN:?set SERVICE_API_PROD_CORS_ORIGIN}
+      TRUST_PROXY: ${SERVICE_API_PROD_TRUST_PROXY:-false}
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
@@ -32,6 +48,27 @@ services:
       TRUST_PROXY: ${SERVICE_API_PROD_TRUST_PROXY:-false}
     ports:
       - "${SERVICE_API_BIND_ADDRESS:-0.0.0.0}:${SERVICE_API_PORT:-13000}:3000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  data-sync-migrate:
+    image: ${DATA_SYNC_IMAGE_REF:?set DATA_SYNC_IMAGE_REF to an immutable digest}
+    environment:
+      DATA_SYNC_ENV: production
+      DATA_SYNC_LOG_FORMAT: json
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  data-sync-api:
+    image: ${DATA_SYNC_IMAGE_REF:?set DATA_SYNC_IMAGE_REF to an immutable digest}
+    environment:
+      DATA_SYNC_ENV: production
+      DATA_SYNC_LOG_FORMAT: json
     read_only: true
     tmpfs:
       - /tmp

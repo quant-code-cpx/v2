@@ -1,0 +1,1409 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="行业、概念板块与申万分类的数据同步、标准模型、质量门、恢复和实施技术方案；明确排除分时数据。">
+  <title>行业与板块数据同步｜技术方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #dfe4ec;
+      --surface: #f6f8fb;
+      --accent: #3157d5;
+      --accent-soft: #eef2ff;
+      --success: #176b4d;
+      --success-soft: #eaf7f1;
+      --warning: #8a4b08;
+      --warning-soft: #fff5e8;
+      --danger: #a33131;
+      --danger-soft: #fff0f0;
+      --radius: 14px;
+      --shadow: 0 12px 30px rgb(23 32 51 / 7%);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    a { color: var(--accent); text-underline-offset: .2em; }
+    a:focus-visible {
+      outline: 3px solid rgb(49 87 213 / 28%);
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
+    code {
+      padding: .1em .34em;
+      border-radius: 5px;
+      background: #eef1f5;
+      font: .9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+    .shell { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+    header {
+      padding: 58px 0 40px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, var(--surface), #fff);
+    }
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: .78rem;
+      font-weight: 760;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3, h4 { line-height: 1.27; letter-spacing: -.02em; }
+    h1 { max-width: 860px; margin: 0; font-size: clamp(2rem, 5.6vw, 3.8rem); }
+    h2 { margin: 0 0 20px; font-size: clamp(1.45rem, 3vw, 2rem); }
+    h3 { margin: 28px 0 9px; font-size: 1.12rem; }
+    h4 { margin: 20px 0 7px; font-size: 1rem; }
+    p { max-width: 82ch; }
+    .lede { max-width: 820px; margin: 18px 0 0; color: var(--muted); font-size: 1.08rem; }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 30px 0 0;
+    }
+    .meta div {
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgb(255 255 255 / 84%);
+    }
+    .meta dt { color: var(--muted); font-size: .78rem; }
+    .meta dd { margin: 3px 0 0; font-weight: 680; }
+    .status { color: var(--warning); }
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 95%);
+      backdrop-filter: blur(12px);
+    }
+    nav ul {
+      display: flex;
+      gap: 21px;
+      width: max-content;
+      margin: 0;
+      padding: 12px 0;
+      list-style: none;
+    }
+    nav a { color: var(--muted); font-size: .88rem; font-weight: 680; text-decoration: none; }
+    nav a:hover { color: var(--accent); }
+    main { padding: 18px 0 72px; }
+    section {
+      padding: 50px 0;
+      border-bottom: 1px solid var(--line);
+      scroll-margin-top: 56px;
+    }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .card {
+      min-width: 0;
+      padding: 21px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow);
+      overflow-wrap: anywhere;
+    }
+    .card p:last-child, .card ul:last-child, .card ol:last-child { margin-bottom: 0; }
+    .label, .tag {
+      display: inline-block;
+      color: var(--accent);
+      font-size: .76rem;
+      font-weight: 780;
+      letter-spacing: .055em;
+    }
+    .label { margin-bottom: 9px; text-transform: uppercase; }
+    .tag {
+      margin: 0 6px 4px 0;
+      padding: 2px 8px;
+      border: 1px solid #c9d8f6;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+    .tag.fact { color: var(--success); border-color: #b9dfd0; background: var(--success-soft); }
+    .tag.pending { color: var(--warning); border-color: #efd09f; background: var(--warning-soft); }
+    .tag.blocked { color: var(--danger); border-color: #efc1c1; background: var(--danger-soft); }
+    .callout {
+      margin-top: 18px;
+      padding: 18px 21px;
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      background: var(--accent-soft);
+    }
+    .callout.warning { border-left-color: var(--warning); background: var(--warning-soft); }
+    .callout.danger { border-left-color: var(--danger); background: var(--danger-soft); }
+    .callout strong { display: block; margin-bottom: 3px; }
+    .flow, pre {
+      overflow-x: auto;
+      padding: 20px;
+      border: 1px solid #273249;
+      border-radius: var(--radius);
+      background: #111827;
+      color: #e5e7eb;
+      font: .86rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      -webkit-overflow-scrolling: touch;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      -webkit-overflow-scrolling: touch;
+    }
+    table { width: 100%; min-width: 780px; border-collapse: collapse; }
+    th, td {
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: var(--surface); font-size: .83rem; white-space: nowrap; }
+    td { font-size: .94rem; }
+    tr:last-child td { border-bottom: 0; }
+    .decision { color: var(--success); font-weight: 750; }
+    .risk { color: var(--warning); font-weight: 720; }
+    .no { color: var(--danger); font-weight: 720; }
+    .steps { padding-left: 1.25rem; }
+    .steps li { padding: 3px 0 13px 8px; }
+    .checklist { padding-left: 1.1rem; list-style: "✓  "; }
+    .checklist li { padding: 3px 0 7px 6px; }
+    .state-line {
+      overflow-x: auto;
+      padding: 14px 17px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      font: .87rem/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: nowrap;
+    }
+    .top-gap { margin-top: 20px; }
+    .small { color: var(--muted); font-size: .88rem; }
+    footer { padding: 26px 0 46px; color: var(--muted); font-size: .88rem; }
+
+    @media (max-width: 800px) {
+      .shell { width: min(100% - 28px, 1120px); }
+      header { padding-top: 38px; }
+      .meta, .grid, .grid.two { grid-template-columns: 1fr; }
+      section { padding: 38px 0; }
+    }
+
+    @media print {
+      nav { display: none; }
+      header, main, section { padding-top: 18px; }
+      .shell { width: 100%; }
+      .card { box-shadow: none; break-inside: avoid; }
+      .flow, pre {
+        white-space: pre-wrap;
+        color: #111;
+        background: #fff;
+        border-color: #999;
+      }
+      a { color: inherit; text-decoration: none; }
+      .table-wrap, .callout { break-inside: avoid; }
+      h2, h3 { break-after: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Technical solution · service-data-sync · 0012</p>
+      <h1>行业与板块数据同步技术方案</h1>
+      <p class="lede">
+        建立东方财富行业/概念板块、申万三级行业和供应商板块资金流的数据链路。
+        分类体系、方法论和观测时间全部显式留痕；日线、周线、月线分别调用上游接口并独立存储。
+        分时数据、分钟任务和分钟存储明确排除。
+      </p>
+      <dl class="meta">
+        <div><dt>状态</dt><dd class="status">P0 目录、三周期与 API 已实现；其余 Proposed</dd></div>
+        <div><dt>负责人</dt><dd>service-data-sync</dd></div>
+        <div><dt>最后修改</dt><dd>2026-07-26</dd></div>
+        <div><dt>关联决策</dt><dd><a href="../../decisions/0010-sector-taxonomy-and-derived-data-boundary.md">ADR-0010</a></dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">摘要</a></li>
+        <li><a href="#facts">事实与边界</a></li>
+        <li><a href="#contract">任务契约</a></li>
+        <li><a href="#sources">来源接口</a></li>
+        <li><a href="#architecture">功能划分</a></li>
+        <li><a href="#execution">执行与恢复</a></li>
+        <li><a href="#flows">核心流程</a></li>
+        <li><a href="#data">数据模型</a></li>
+        <li><a href="#quality">质量与口径</a></li>
+        <li><a href="#operations">运行与安全</a></li>
+        <li><a href="#delivery">实施与迁移</a></li>
+        <li><a href="#acceptance">验收</a></li>
+        <li><a href="#open">待决与依据</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>1. 摘要</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">问题</span>
+          <h3>“行业”不是单一事实</h3>
+          <p>东方财富行业、概念和申万行业有不同代码、层级、成份与调整语义。按名称合并会制造不可审计的伪等价。</p>
+        </article>
+        <article class="card">
+          <span class="label">决策</span>
+          <h3>scheme 与方法论隔离</h3>
+          <p>每种分类独立保存。东方财富提供当前成份和日线；申万提供层级与估值快照；资金流按来源独立发布。</p>
+        </article>
+        <article class="card">
+          <span class="label">主要风险</span>
+          <h3 class="risk">接口稳定性与许可未过门</h3>
+          <p>东方财富板块和资金流候选已有断连、超时与解析失败证据。生产 source policy 默认关闭。</p>
+        </article>
+      </div>
+      <aside class="callout">
+        <strong>推荐范围</strong>
+        P0：分类清单、当前成份、日/周/月三套上游周期行情和收盘后横截面快照；P1：申万层级与估值；
+        P2：资金流独立方法论序列。周/月线不从日线计算。任何分时接口均不进入实现。
+      </aside>
+      <aside class="callout warning">
+        <strong>评审状态</strong>
+        本文给出完整目标设计，不代表全部来源已获生产批准。资金流因连续探针失败和方法论未知，
+        只能先实现 research/shadow 路径，满足准入条件后再打开发布。
+      </aside>
+      <aside class="callout">
+        <strong>当前实施</strong>
+        已交付东方财富行业/概念板块的日、周、月原生行情纵切：独立 capability、adapter 参数、
+        raw evidence、canonical revision/publication、三张物理表、迁移与有界 CLI。行业/概念分类清单、
+        内部 HTTP 读取和公开 API 已实现；成份、申万、EOD quote、资金流、调度和生产准入仍按后续阶段实施。
+        跨服务读取边界见 <a href="../../service-api/0003-sector-market-data-access/index.html">0003：板块行情 API 访问技术方案</a>。
+      </aside>
+    </section>
+
+    <section id="facts">
+      <h2>2. 事实、决策、假设与边界</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="tag fact">事实</span>
+          <h3>当前工程基线</h3>
+          <ul>
+            <li>已有 provider-neutral <code>DataSourcePort</code>、registry 和 AKShare adapter 边界。</li>
+            <li>已有 S3 raw evidence、PostgreSQL revision/publication 和人工日线 CLI 闭环。</li>
+            <li>Celery worker 当前空载；定时器、通用 run/partition/checkpoint 尚未实现。</li>
+            <li>仓库锁定 <code>akshare==1.18.78</code>；官方文档调研版本为 1.18.79。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="tag">决策</span>
+          <h3>本方案冻结的边界</h3>
+          <ul>
+            <li>scheme：<code>eastmoney.industry</code>、<code>eastmoney.concept</code>、<code>sw.industry</code>。</li>
+            <li>未复权日线、周线、月线是三个独立上游事实，各自发布和修订。</li>
+            <li>收盘后只取一次批量 quote 快照，不构建盘中序列。</li>
+            <li>资金流不同来源不 fallback、不拼接、不交叉计算。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="tag pending">待决</span>
+          <h3>生产前必须关闭</h3>
+          <ul>
+            <li>上游商业使用、访问频率、原始数据保存和再分发许可。</li>
+            <li>板块成交量原始单位、资金流占比分母和供应商分桶方法。</li>
+            <li>生产 cadence、调用间隔和 raw retention 的最终值。</li>
+            <li>首次历史回填起点及接口可见历史深度。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3>目标</h3>
+      <ul>
+        <li>可按 scheme 查询板块稳定身份、名称修订、层级、当前成份与成份观测历史。</li>
+        <li>可分别同步、修订、回补行业和概念板块的日线、周线、月线。</li>
+        <li>可保存收盘后板块横截面、申万估值和供应商资金流快照，同时保留完整方法论血缘。</li>
+        <li>重复运行、worker 中断、schema 漂移和数据库失败不会产生重复 current 数据或静默缺口。</li>
+        <li>下游未来只能通过版本化内部 API 或事件读取，不直连数据库或 AKShare。</li>
+      </ul>
+
+      <h3>非目标</h3>
+      <ul>
+        <li class="no">不接入 <code>stock_board_industry_hist_min_em</code>、<code>stock_board_concept_hist_min_em</code> 或任何分钟/分时数据。</li>
+        <li>不自动建立东方财富行业、概念与申万行业之间的语义映射。</li>
+        <li>不回造首次采集日前的历史成份，不把首次看到日期描述为真实调入日期。</li>
+        <li>不在本方案中新增 service-api/service-web 页面或冻结跨服务 OpenAPI。</li>
+        <li>不把资金流解释为市场真实新增现金，不计算未获知分母的占比。</li>
+      </ul>
+      <p>
+        三个周期均固定请求 <code>adjust=""</code>，不保存 qfq/hfq 结果。板块成份调整和指数编制变化属于
+        上游指数方法的一部分，可能产生序列断点；本服务保留来源版本和修订，不用个股公司行动自行复权板块指数。
+      </p>
+    </section>
+
+    <section id="contract">
+      <h2>3. 数据集与任务契约</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">市场语义</span>
+          <h3>中国 A 股板块</h3>
+          <p><strong>范围：</strong>东方财富沪深京行业/概念，申万一级至三级行业。</p>
+          <p><strong>时区：</strong><code>Asia/Shanghai</code>；内部时间戳保存 UTC。</p>
+          <p><strong>日历：</strong>依赖已发布的中国 A 股权威交易日历；未知日期不得推断为休市。</p>
+        </article>
+        <article class="card">
+          <span class="label">粒度与版本</span>
+          <h3>快照 + 日频事实</h3>
+          <p>清单、成份、quote、估值和资金流都是观测快照；行情只保存未复权日线。每批记录 source、methodology、observed/effective time、finality 和 data version。</p>
+        </article>
+        <article class="card">
+          <span class="label">消费者</span>
+          <h3>研究与未来业务 API</h3>
+          <p>首期服务内研究、策略筛选和数据质量分析；后续由 service-data-sync 内部 API 提供给 service-api。数据库和 raw bucket 不对其他服务开放。</p>
+        </article>
+      </div>
+
+      <div class="table-wrap top-gap">
+        <table>
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th>分区键</th>
+              <th>建议验证 cadence</th>
+              <th>修订/回补</th>
+              <th>发布角色</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>sector.taxonomy.snapshot</code></td>
+              <td><code>scheme/snapshot_date</code></td>
+              <td>交易日收盘后；申万每日一次</td>
+              <td>同日重跑形成 revision；历史从首次观测开始</td>
+              <td>P0/P1 canonical</td>
+            </tr>
+            <tr>
+              <td><code>sector.membership.snapshot</code></td>
+              <td><code>scheme/sector_code/snapshot_date</code></td>
+              <td>东方财富板块每日完整抓取；单 provider 串行节流</td>
+              <td>当前接口无历史回补；完整快照保留</td>
+              <td>P0 canonical</td>
+            </tr>
+            <tr>
+              <td><code>sector.bar.1d.raw</code></td>
+              <td><code>scheme/sector_code/date_window</code></td>
+              <td>交易日收盘后；重拉最近 10 个交易日</td>
+              <td>按年回补；值变化追加 revision</td>
+              <td>P0 canonical</td>
+            </tr>
+            <tr>
+              <td><code>sector.bar.1w.raw</code></td>
+              <td><code>scheme/sector_code/week_window</code></td>
+              <td>每周最后一个交易日收盘后；重拉最近 8 个供应商周周期</td>
+              <td>直接调用周线参数；按年回补；独立 revision</td>
+              <td>P0 canonical</td>
+            </tr>
+            <tr>
+              <td><code>sector.bar.1mo.raw</code></td>
+              <td><code>scheme/sector_code/month_window</code></td>
+              <td>每月最后一个交易日收盘后；重拉最近 6 个供应商月周期</td>
+              <td>直接调用月线参数；按年回补；独立 revision</td>
+              <td>P0 canonical</td>
+            </tr>
+            <tr>
+              <td><code>sector.quote.eod.snapshot</code></td>
+              <td><code>scheme/snapshot_date</code></td>
+              <td>每日收盘后只抓一次批量横截面</td>
+              <td>同日重跑；不形成盘中时间序列</td>
+              <td>P0 canonical</td>
+            </tr>
+            <tr>
+              <td><code>sector.valuation.snapshot</code></td>
+              <td><code>sw.industry/level/snapshot_date</code></td>
+              <td>交易日每日一次</td>
+              <td>同日修订；不可用其他 scheme 补洞</td>
+              <td>P1 canonical</td>
+            </tr>
+            <tr>
+              <td><code>sector.moneyflow.snapshot</code></td>
+              <td><code>scheme/source_policy/window/as_of</code></td>
+              <td>收盘后一次；各窗口分别保存</td>
+              <td>只向前采集；供应商滚动值不由日值回算</td>
+              <td>P2 research → canonical</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Shadow 默认调度（Asia/Shanghai）</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>触发</th><th>任务顺序</th><th>初始完成目标</th><th>前置条件</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>交易日 16:20</td>
+              <td>东方财富 catalog + EOD quote</td>
+              <td>17:00 前</td>
+              <td>目标日期在已发布交易日历中明确为开市日。</td>
+            </tr>
+            <tr>
+              <td>catalog 成功后</td>
+              <td>按 scheme/sector 扇出 membership</td>
+              <td>20:00 前完成全部 active 板块</td>
+              <td>provider 串行预算允许；不因超时提高并发。</td>
+            </tr>
+            <tr>
+              <td>交易日 18:00</td>
+              <td>日线滚动修订</td>
+              <td>20:00 前推进完整日线 release</td>
+              <td>日历与 catalog 已发布；成交单位认证通过。</td>
+            </tr>
+            <tr>
+              <td>每周最后交易日 20:00</td>
+              <td>周线独立上游同步</td>
+              <td>次日 07:00 前推进周线 release</td>
+              <td>由已发布交易日历判断周期结束；不读取日线计算。</td>
+            </tr>
+            <tr>
+              <td>每月最后交易日 21:00</td>
+              <td>月线独立上游同步</td>
+              <td>次日 07:00 前推进月线 release</td>
+              <td>由已发布交易日历判断周期结束；不读取日线计算。</td>
+            </tr>
+            <tr>
+              <td>交易日 18:30</td>
+              <td>申万 hierarchy/valuation</td>
+              <td>21:00 前</td>
+              <td>独立 scheme；失败不阻塞东方财富。</td>
+            </tr>
+            <tr>
+              <td>交易日 18:45</td>
+              <td>东方财富/同花顺 moneyflow shadow</td>
+              <td>21:00 前完成或明确失败</td>
+              <td>research source policy 开启；不会推进 production release。</td>
+            </tr>
+            <tr>
+              <td>人工触发</td>
+              <td>有界 backfill/repair/replay</td>
+              <td>按 run 预算</td>
+              <td>必须指定分区、原因、幂等键和调用上限。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout warning">
+        <strong>cadence 状态</strong>
+        表中时间与完成目标是 shadow 验证默认值，不是生产 SLA。连续探针需测出单日调用量、限流和完成时长；
+        生产频率由许可与容量结果批准后写入配置。
+      </aside>
+
+      <h3>容量假设</h3>
+      <p>
+        规划先按约 90 个东方财富行业、约 400 个概念、申万约 31/124/258 个一级/二级/三级行业、
+        约 5,500 只证券估算。500 个板块每年约产生 12.5 万条日线、2.6 万条周线和 6,000 条月线；
+        十年约 156 万条三周期行情；
+        概念成份重叠会使 membership 行数远高于证券数。以上均为
+        <span class="tag pending">容量假设</span>，P0 probe 必须以实际行数、平均 payload、平均调用时长和索引尺寸替换。
+      </p>
+    </section>
+
+    <section id="sources">
+      <h2>4. AKShare 接口与来源角色</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>数据</th>
+              <th>AKShare 接口</th>
+              <th>关键返回</th>
+              <th>设计角色</th>
+              <th>状态/限制</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>东方财富行业清单 + quote</td>
+              <td><code>stock_board_industry_name_em</code></td>
+              <td>板块代码/名称、最新价、涨跌、总市值、换手率、涨跌家数、领涨股</td>
+              <td>行业身份发现、属性修订、EOD 横截面</td>
+              <td><span class="tag blocked">待连续验证</span> 当前环境曾断连</td>
+            </tr>
+            <tr>
+              <td>东方财富概念清单 + quote</td>
+              <td><code>stock_board_concept_name_em</code></td>
+              <td>字段与行业清单同构</td>
+              <td>概念身份发现、属性修订、EOD 横截面</td>
+              <td><span class="tag blocked">待连续验证</span></td>
+            </tr>
+            <tr>
+              <td>当前成份</td>
+              <td><code>stock_board_industry_cons_em</code><br><code>stock_board_concept_cons_em</code></td>
+              <td>股票代码/名称及当时行情、PE、PB</td>
+              <td>完整 membership 快照；只使用身份字段</td>
+              <td>无生效日期、无历史；未匹配证券进入隔离</td>
+            </tr>
+            <tr>
+              <td>板块日/周/月行情</td>
+              <td>
+                <code>stock_board_industry_hist_em</code>：
+                <code>日k</code>/<code>周k</code>/<code>月k</code><br>
+                <code>stock_board_concept_hist_em</code>：
+                <code>daily</code>/<code>weekly</code>/<code>monthly</code>
+              </td>
+              <td>日期、OHLC、涨跌、成交量/额、振幅、换手率</td>
+              <td>三个未复权周期的独立主候选</td>
+              <td>按周期分别存储；成交量单位、历史深度、周期标签语义和修订窗口待实测</td>
+            </tr>
+            <tr>
+              <td>单板块当前行情</td>
+              <td><code>stock_board_industry_spot_em</code><br><code>stock_board_concept_spot_em</code></td>
+              <td>最新、OHLC、成交量/额、换手率、涨跌、振幅</td>
+              <td>仅诊断/抽样对账</td>
+              <td>不定时调用，避免与批量清单重复和 N+1</td>
+            </tr>
+            <tr>
+              <td>申万层级与估值</td>
+              <td><code>sw_index_first_info</code><br><code>sw_index_second_info</code><br><code>sw_index_third_info</code></td>
+              <td>行业代码/名称、父行业、成份数、静态/TTM PE、PB、股息率</td>
+              <td>独立 scheme 的层级与估值快照</td>
+              <td>AKShare 上游为乐咕展示；方法论版本需留痕</td>
+            </tr>
+            <tr>
+              <td>东方财富板块资金流</td>
+              <td><code>stock_sector_fund_flow_rank</code></td>
+              <td>行业/概念/地域；主力与超大/大/中/小单净额、占比</td>
+              <td><code>order_size_flow</code> 独立序列</td>
+              <td><span class="tag blocked">research only</span> 两轮失败；分桶与分母未知</td>
+            </tr>
+            <tr>
+              <td>同花顺行业/概念资金流</td>
+              <td><code>stock_fund_flow_industry</code><br><code>stock_fund_flow_concept</code></td>
+              <td>即时或 3/5/10/20 日，流入、流出、净额、公司数、领涨股</td>
+              <td><code>trade_direction_flow</code> 独立序列</td>
+              <td><span class="tag blocked">research only</span> 不与东方财富拼接</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout danger">
+        <strong>禁用接口</strong>
+        <code>stock_board_industry_hist_min_em</code> 与 <code>stock_board_concept_hist_min_em</code>
+        不注册 capability、不加入 adapter、不创建任务、不写 raw，也不保留“以后顺手加”的分钟表。
+      </aside>
+    </section>
+
+    <section id="architecture">
+      <h2>5. 功能划分与架构边界</h2>
+      <pre class="flow" role="img" aria-label="行业与板块数据同步架构">scheduler / manual CLI
+        │  只产生 capability + scheme + partition
+        ▼
+run coordinator ── PostgreSQL lock / checkpoint / status
+        │
+        ▼
+provider router ── source policy + health + research/production gate
+        │
+        ▼
+AKShare adapter ── SDK / URL / 原字段 / 单位转换仅存在于此
+        │
+        ├── raw response ──▶ S3 immutable object
+        ▼
+provider-neutral batch ──▶ normalize ──▶ quality gate
+                                            │
+                    reject / quarantine ◀───┼───▶ canonical repository
+                                            │          │
+                                            └──────────┴──▶ atomic publication
+                                                                  │
+                                                          future internal API</pre>
+
+      <div class="grid">
+        <article class="card">
+          <span class="label">任务定义与协调</span>
+          <h3>SectorSyncCoordinator</h3>
+          <p><strong>职责：</strong>生成有界分区、租约、重试与 checkpoint，汇总 release 覆盖率。</p>
+          <p><strong>输入/输出：</strong>capability、scheme、mode、日期窗口 → run/partition 状态。</p>
+          <p><strong>状态：</strong>PostgreSQL 权威；Redis 只投递。</p>
+          <p><strong>失败边界：</strong>单板块失败不丢失其他板块；完整 release 不越过失败分区。</p>
+        </article>
+        <article class="card">
+          <span class="label">来源隔离</span>
+          <h3>AKShare sector adapters</h3>
+          <p><strong>职责：</strong>调用一个上游来源，保留原响应并输出固定 schema 的中立 batch。</p>
+          <p><strong>输入/输出：</strong>标准 scheme/code/window → versioned JSON batch。</p>
+          <p><strong>状态：</strong>无数据库状态；只持有超时和 client 配置。</p>
+          <p><strong>失败边界：</strong>timeout/rate/schema/empty 映射为 <code>ProviderError</code>。</p>
+        </article>
+        <article class="card">
+          <span class="label">标准化与质量</span>
+          <h3>SectorNormalizer / QualityGate</h3>
+          <p><strong>职责：</strong>解析中立 batch、单位转换、身份关联、方法论准入与质量处置。</p>
+          <p><strong>输入/输出：</strong>provider-neutral records → canonical rows + quality results。</p>
+          <p><strong>状态：</strong>不保存；依赖日历和已发布证券目录。</p>
+          <p><strong>失败边界：</strong>schema 漂移隔离整个分区；单条身份失败进入 reject 明细。</p>
+        </article>
+        <article class="card">
+          <span class="label">证据与持久化</span>
+          <h3>RawPayloadStore / SectorRepository</h3>
+          <p><strong>职责：</strong>raw 先写 S3，再事务写 source batch、revision、quality 和 publication。</p>
+          <p><strong>输入/输出：</strong>不可变 raw + canonical batch → data version 和计数。</p>
+          <p><strong>状态：</strong>S3 raw、PostgreSQL canonical/publication。</p>
+          <p><strong>失败边界：</strong>raw 成功 DB 失败时允许从 raw 重放；adapter 永不持有仓储。</p>
+        </article>
+        <article class="card">
+          <span class="label">周期行情</span>
+          <h3>SectorBarSyncService</h3>
+          <p><strong>职责：</strong>按 <code>1d</code>、<code>1w</code>、<code>1mo</code> 三个 capability 分别同步上游行情。</p>
+          <p><strong>输入/输出：</strong>周期、板块和日期窗口 → 对应周期的独立 publication。</p>
+          <p><strong>状态：</strong>每个周期独立 checkpoint、revision 和 data version。</p>
+          <p><strong>失败边界：</strong>一个周期失败不阻断其他周期，也不允许跨周期计算补洞。</p>
+        </article>
+        <article class="card">
+          <span class="label">未来读取</span>
+          <h3>SectorReadService</h3>
+          <p><strong>职责：</strong>只读取已发布 current revision，向未来内部 API 投影 scheme、版本和质量状态。</p>
+          <p><strong>输入/输出：</strong>有界查询 → provider-neutral DTO。</p>
+          <p><strong>状态：</strong>无。</p>
+          <p><strong>失败边界：</strong>不完整 release 返回显式 stale/partial，不读 raw 或 provider。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="execution">
+      <h2>6. 执行、幂等、checkpoint 与恢复</h2>
+      <h3>状态机</h3>
+      <div class="state-line">queued → running → succeeded | partial | quarantined | failed | cancelled</div>
+      <ul>
+        <li><code>partial</code>：部分分区成功且覆盖率可量化；不自动推进完整 release。</li>
+        <li><code>quarantined</code>：数据已保留 raw，但 schema、口径或质量阻止 canonical publication。</li>
+        <li><code>failed</code>：没有可发布结果；是否重试由中立错误和预算决定。</li>
+        <li><code>cancelled</code>：停止产生新调用；已进入 DB 事务的分区完成或回滚后退出。</li>
+      </ul>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>机制</th>
+              <th>设计</th>
+              <th>关键约束</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>幂等键</td>
+              <td><code>capability + scheme + source_policy + methodology_id + partition + schema_version</code></td>
+              <td>同键只允许一个 active partition；重复消息复用状态，不重复抓取或发布。</td>
+            </tr>
+            <tr>
+              <td>租约</td>
+              <td>PostgreSQL 保存 <code>lease_owner</code>、<code>lease_expires_at</code>；worker 心跳续租。</td>
+              <td>Redis 丢失不改变权威状态；过期分区由扫描器重排。</td>
+            </tr>
+            <tr>
+              <td>checkpoint</td>
+              <td>catalog 按 scheme；membership 按 sector；行情按 sector/period；backfill 按 sector/period/year。</td>
+              <td>只在 publication 事务成功后推进；raw 写入不是完成信号。</td>
+            </tr>
+            <tr>
+              <td>并发</td>
+              <td>provider 级 semaphore 初始为 1；全局调用间隔由配置控制。</td>
+              <td>来源许可和连续探针通过前不提高并发；不同上游使用独立预算。</td>
+            </tr>
+            <tr>
+              <td>超时</td>
+              <td>单调用硬超时；分区和 run 另有墙钟预算。</td>
+              <td>AKShare 阻塞调用通过线程移出事件循环；取消不遗留无限线程。</td>
+            </tr>
+            <tr>
+              <td>重试</td>
+              <td>timeout/unavailable/rate-limited：指数退避 + jitter，最多 3 次；schema/invalid：不重试。</td>
+              <td>同一次 run 共享 provider 预算，避免 500 个板块同时放大故障。</td>
+            </tr>
+            <tr>
+              <td>断路器</td>
+              <td>连续失败率达到阈值后暂停该 source policy，新分区保持 queued。</td>
+              <td>不自动切换到另一方法论；恢复需探针成功或人工解除。</td>
+            </tr>
+            <tr>
+              <td>全量 release</td>
+              <td>catalog/quote 单批原子；membership 按板块提交，manifest 达到预期覆盖后推进完整 release。</td>
+              <td>partial release 可诊断，但默认消费者继续读取上一完整版本。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>回补与修订</h3>
+      <ul>
+        <li><strong>三周期首次回补：</strong>分别探测每个 scheme/板块/period 的最早可用日期，再按年倒序分区；不预设文档外历史深度。</li>
+        <li><strong>日线修订：</strong>每个交易日重拉最近 10 个权威交易日；值变化关闭 current revision 并追加后继。</li>
+        <li><strong>周线修订：</strong>每个周周期完成后重拉最近 8 个供应商周周期；不从日线判断 OHLCV。</li>
+        <li><strong>月线修订：</strong>每个月周期完成后重拉最近 6 个供应商月周期；不从日线判断 OHLCV。</li>
+        <li><strong>跨周期隔离：</strong>日/周/月的日期标签、content hash、revision 和 publication 互不复用；任一缺失保持缺口。</li>
+        <li><strong>成份：</strong>接口只有当前快照，不能历史回补。每天完整保存，差异只表示“在两次观测之间发生”。</li>
+        <li><strong>资金流：</strong>即时/滚动排行从启用日起向前保存；供应商 5/10/20 日窗口不能拆成伪日值。</li>
+        <li><strong>手动修复：</strong>必须指定 capability、scheme、分区、reason 和幂等键；repair 不覆盖历史审计。</li>
+      </ul>
+    </section>
+
+    <section id="flows">
+      <h2>7. 正常与失败流程</h2>
+      <h3>正常路径</h3>
+      <ol class="steps">
+        <li>scheduler 读取已发布交易日历，生成 scheme/date 或 sector/window 分区。</li>
+        <li>coordinator 获取租约；router 校验 source policy、环境开关、许可状态和断路器。</li>
+        <li>adapter 调用 AKShare，将原始 DataFrame/字段转换为版本化中立 JSON，同时保留 raw JSON。</li>
+        <li>raw 以内容 hash 写入 S3；重复内容复用对象。</li>
+        <li>normalizer 校验 schema、身份、单位、时间、方法论与不变量，生成 quality results。</li>
+        <li>repository 在单一 PostgreSQL 事务中登记 source batch、追加变化 revision、写质量结果并推进 publication。</li>
+        <li>coordinator 推进对应 capability checkpoint；完整 manifest 成功后发布该周期 release，并触发未来 API 缓存失效。</li>
+      </ol>
+
+      <h3>关键失败路径</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>场景</th><th>检测</th><th>处置</th><th>恢复</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>重复消息/重复运行</td>
+              <td>幂等键和 active unique index 命中</td>
+              <td>返回已有状态或比较 content hash；不新增 current revision</td>
+              <td>无需人工处理</td>
+            </tr>
+            <tr>
+              <td>provider timeout/断连/限流</td>
+              <td>中立错误、调用耗时、HTTP/SDK 异常分类</td>
+              <td>预算内退避；达到阈值打开断路器，partition 失败/partial</td>
+              <td>探针成功后重跑原分区；不跨来源补洞</td>
+            </tr>
+            <tr>
+              <td>schema drift</td>
+              <td>字段 fingerprint、必填列、类型转换失败</td>
+              <td>raw 保留，整个分区 quarantine；上一 publication 继续服务</td>
+              <td>升级 fixture/adapter/schema 后从 raw 重放</td>
+            </tr>
+            <tr>
+              <td>身份无法关联</td>
+              <td>成份代码无法映射已发布证券目录</td>
+              <td>item reject；超过阈值则整个 membership 分区 quarantine</td>
+              <td>主数据补齐后使用同一 raw 重放</td>
+            </tr>
+            <tr>
+              <td>DB 事务失败</td>
+              <td>SQLAlchemy/PostgreSQL 错误</td>
+              <td>事务回滚，checkpoint 不动；raw 对象保留</td>
+              <td>恢复 DB 后按 raw URI 重放，不再次请求来源</td>
+            </tr>
+            <tr>
+              <td>S3 写入失败</td>
+              <td>对象写入/校验失败</td>
+              <td>禁止 canonical 写入，分区失败</td>
+              <td>恢复对象存储后重试抓取或使用内存批次重试</td>
+            </tr>
+            <tr>
+              <td>资金流方法论缺失</td>
+              <td>methodology/denominator/bucket gate 未通过</td>
+              <td>research raw + quarantine，不进入公开 canonical release</td>
+              <td>补充证据并版本化重新发布；不改写旧序列</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="data">
+      <h2>8. Canonical 数据模型与时间语义</h2>
+      <h3>核心表</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>表</th><th>主身份/分区</th><th>职责</th><th>关键字段与约束</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>sector_scheme</code></td>
+              <td><code>scheme_id</code>；<code>scheme_code</code> 唯一</td>
+              <td>分类体系与方法论身份</td>
+              <td>owner、kind、methodology_id/version/status；三个 scheme 不互相覆盖。</td>
+            </tr>
+            <tr>
+              <td><code>sector_entity</code></td>
+              <td><code>sector_id</code>；唯一 <code>(scheme_id, source_code)</code></td>
+              <td>稳定板块身份</td>
+              <td>industry/concept、current name/status；UUID 对外，bigint 可作内部代理键。</td>
+            </tr>
+            <tr>
+              <td><code>sector_revision</code></td>
+              <td><code>(sector_id, revision)</code></td>
+              <td>名称、父级和属性修订</td>
+              <td>parent_sector_id、content hash、source_batch、observed_at、valid_from/to；名称不是身份。</td>
+            </tr>
+            <tr>
+              <td><code>sector_membership_snapshot</code></td>
+              <td><code>(sector_id, snapshot_date, revision)</code></td>
+              <td>完整成份观测头</td>
+              <td>observed_at、item_count、content hash、quality、source batch；不声称精确生效日。</td>
+            </tr>
+            <tr>
+              <td><code>sector_membership_item</code></td>
+              <td><code>(snapshot_id, security_id)</code></td>
+              <td>一次快照中的证券集合</td>
+              <td>只关联已验证证券；源代码/名称留在 raw，未知证券不猜交易所。</td>
+            </tr>
+            <tr>
+              <td><code>sector_daily_bar</code></td>
+              <td><code>(sector_id, trade_date, revision)</code>；按年分区</td>
+              <td>未复权板块日线</td>
+              <td>OHLC、volume_value/unit、amount_cny、turnover_rate、finality、content hash、source batch。</td>
+            </tr>
+            <tr>
+              <td><code>sector_weekly_bar</code></td>
+              <td><code>(sector_id, source_period_date, revision)</code>；按年分区</td>
+              <td>供应商未复权板块周线</td>
+              <td>独立 OHLCV、原始周期日期、finality、content hash、source batch；不引用日线版本。</td>
+            </tr>
+            <tr>
+              <td><code>sector_monthly_bar</code></td>
+              <td><code>(sector_id, source_period_date, revision)</code>；按年分区</td>
+              <td>供应商未复权板块月线</td>
+              <td>独立 OHLCV、原始周期日期、finality、content hash、source batch；不引用日线版本。</td>
+            </tr>
+            <tr>
+              <td><code>sector_quote_snapshot</code></td>
+              <td><code>(sector_id, as_of_time, revision)</code>；按月分区</td>
+              <td>收盘后横截面</td>
+              <td>rank、last/change、market_cap、turnover、rise/fall counts、leading security、<code>eod_observed</code>。</td>
+            </tr>
+            <tr>
+              <td><code>sector_valuation_snapshot</code></td>
+              <td><code>(sector_id, snapshot_date, revision)</code></td>
+              <td>申万行业估值观测</td>
+              <td>component_count、static_pe、ttm_pe、pb、dividend_yield；百分比统一保存小数。</td>
+            </tr>
+            <tr>
+              <td><code>sector_moneyflow_snapshot</code></td>
+              <td><code>(sector_id, methodology_id, window_type, window_size, as_of_time, bucket, revision)</code></td>
+              <td>供应商派生资金流</td>
+              <td>semantic_family、gross in/out、net amount/ratio、currency、raw/standard unit、denominator、finality、coverage。</td>
+            </tr>
+            <tr>
+              <td><code>sync_run</code> / <code>sync_partition</code></td>
+              <td>UUID；partition 幂等唯一</td>
+              <td>状态、租约、checkpoint、重试与恢复</td>
+              <td>queued/running/succeeded/partial/quarantined/failed/cancelled；Redis 非权威。</td>
+            </tr>
+            <tr>
+              <td><code>quality_result</code></td>
+              <td><code>(partition_id, rule_code)</code></td>
+              <td>质量证据与处置</td>
+              <td>severity、actual/expected、disposition、sample；不保存敏感 payload。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>扩展现有血缘表</h3>
+      <ul>
+        <li><code>source_batch</code> 增加 <code>upstream_source</code>、<code>source_dataset</code>、
+          <code>adapter_version</code>、<code>schema_fingerprint</code>、<code>methodology_id/version/status</code>、
+          <code>as_of_time</code>、<code>finality</code> 和 raw byte count。</li>
+        <li><code>dataset_publication</code> 增加 source policy、methodology、coverage、expected/actual partition count、
+          period、calendar version 和 release_id；旧个股日线字段保持可空兼容。</li>
+        <li>每个分区先写 immutable raw，再在一个事务内登记 batch、revision、quality 和 publication。
+          canonical identity 永远包含 scheme；资金流 identity 额外包含方法论与窗口。</li>
+      </ul>
+
+      <h3>时间与最终态</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>概念</th><th>含义</th><th>禁止事项</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>observed_at</code></td>
+              <td>本服务看到响应的 UTC 时间</td>
+              <td>不能替代供应商生效时间。</td>
+            </tr>
+            <tr>
+              <td><code>snapshot_date</code></td>
+              <td>由任务目标与已发布交易日历确定的 Asia/Shanghai 日期</td>
+              <td>日历未知或任务跨截止点时不得猜测。</td>
+            </tr>
+            <tr>
+              <td><code>trade_date</code></td>
+              <td>日线源明确返回的交易日期</td>
+              <td>缺行不自动等于休市。</td>
+            </tr>
+            <tr>
+              <td><code>source_period_date</code></td>
+              <td>周/月接口原样返回的周期日期标签</td>
+              <td>未确认上游定义前，不擅自解释为自然周/月起止日。</td>
+            </tr>
+            <tr>
+              <td><code>finality</code></td>
+              <td><code>eod_observed</code>、<code>provider_final</code>、<code>revised</code> 等明确状态</td>
+              <td>收盘后抓取不自动获得“官方最终”语义。</td>
+            </tr>
+            <tr>
+              <td><code>valid_from/to</code></td>
+              <td>canonical revision 在本系统内可见的区间</td>
+              <td>不能当成板块真实调入/调出时点。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>三周期独立存储规则</h3>
+      <ul>
+        <li>行业接口分别传入 <code>日k</code>、<code>周k</code>、<code>月k</code>；概念接口分别传入 <code>daily</code>、<code>weekly</code>、<code>monthly</code>。</li>
+        <li>adapter 为三个 capability 分别输出固定 schema；原始周期参数、返回日期和 payload 各自留痕。</li>
+        <li>日/周/月分别写入三张 canonical 表；不读取另一个周期做 OHLCV 聚合、缺口填充或质量修复。</li>
+        <li>三个周期不做跨周期算术对账；质量规则只检查各自上游序列，禁止用日线计算周/月结果。</li>
+        <li>周/月是否完成由调度日历和来源 finality 共同判断；未完成周期不覆盖上一已发布完整周期。</li>
+      </ul>
+    </section>
+
+    <section id="quality">
+      <h2>9. 质量门、来源可比性与发布处置</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>规则族</th><th>可量化检查</th><th>处置</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>schema</td>
+              <td>schema id/fingerprint、必填字段、类型、未知列；AKShare 升级前后 fixture diff。</td>
+              <td>任何身份/数值必填漂移：partition quarantine。</td>
+            </tr>
+            <tr>
+              <td>分类身份</td>
+              <td>scheme 内代码唯一；名称非空；申万 L2/L3 父级必须在同批或上一已发布版本存在。</td>
+              <td>重复/孤儿父级：reject；超过 0 条关键错误则阻断该 scheme release。</td>
+            </tr>
+            <tr>
+              <td>成份</td>
+              <td>板块内证券唯一；匹配已发布证券目录；空成份；相邻快照 item count 与 Jaccard 差异。</td>
+              <td>未匹配率 &gt;0.5% 或 active 板块空集合：quarantine；大幅变化先 warn，需人工确认。</td>
+            </tr>
+            <tr>
+              <td>三周期行情</td>
+              <td>每个 period 内 low ≤ open/close ≤ high；值非负；来源日期唯一递增；未来日期拒绝；成交单位必须已认证。</td>
+              <td>OHLC/单位错误：仅 quarantine 对应周期；gap 仅告警，不用其他周期填补。</td>
+            </tr>
+            <tr>
+              <td>横截面</td>
+              <td>代码唯一、rank 唯一或可解释；涨跌家数非负；领涨代码可解析；总市值非负。</td>
+              <td>身份错误阻断；非关键展示字段缺失可 warned publication。</td>
+            </tr>
+            <tr>
+              <td>申万估值</td>
+              <td>父级闭包；PE/PB/股息率有限数；成份数非负；相邻日极端变化报告。</td>
+              <td>非法数值 quarantine；方法论正常波动不做跨源相等门。</td>
+            </tr>
+            <tr>
+              <td>资金流</td>
+              <td>当源端同时给出三项时校验 <code>net = inflow - outflow</code>；单位、方向、窗口、分桶、分母、finality 完整。</td>
+              <td>方法论或分母未知时 research/quarantine；不由字段名反推。</td>
+            </tr>
+            <tr>
+              <td>完整性</td>
+              <td>catalog 预期数来自上一完整 release；下降 &gt;10% 阻断；membership release 需覆盖当日全部 active 板块。</td>
+              <td>不完整 run 标为 partial；上一完整 release 保持 current。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout">
+        <strong>资金流可比性门</strong>
+        只有语义族、上游方法、版本/状态、scheme、样本池、交易日、截点、窗口、币种、单位、方向、
+        分桶、占比分母和修订规则全部一致或存在可审计转换时，才允许加减、拼接、回填或比较排名。
+        东方财富和同花顺默认不满足。
+      </aside>
+
+      <h3>处置等级</h3>
+      <ul>
+        <li><strong>reject：</strong>拒绝单条记录，保留 raw 和质量样本；超过阈值升级为 partition quarantine。</li>
+        <li><strong>quarantine：</strong>不写或不发布 canonical current，等待 adapter/schema/口径修复。</li>
+        <li><strong>warn：</strong>数据可发布但响应必须携带 <code>quality_status=warned</code> 和规则摘要。</li>
+        <li><strong>publish：</strong>所有阻断规则通过，事务推进 partition publication；完整 release 另做覆盖检查。</li>
+      </ul>
+    </section>
+
+    <section id="operations">
+      <h2>10. 可靠性、安全与可观测性</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">运行拓扑</span>
+          <h3>复用现有四类角色</h3>
+          <p>同一镜像运行 scheduler/dispatcher、Celery worker、diagnostics 和未来内部 API；PostgreSQL 权威，Redis broker，S3 raw。当前 Compose 新增 scheduler profile 前必须先完成实现。</p>
+        </article>
+        <article class="card">
+          <span class="label">安全</span>
+          <h3>环境开关 + egress 控制</h3>
+          <p>AKShare 无凭据不等于无授权风险。生产 source policy 默认 false；只允许批准域名出站，频率配置受限且不进入任务参数。</p>
+        </article>
+        <article class="card">
+          <span class="label">数据保护</span>
+          <h3>raw 私有、输出中立</h3>
+          <p>S3 bucket 不对其他服务开放；日志不含响应体、URL 查询秘密或堆栈。API 不暴露 provider 字段、raw URI 或内部代理键。</p>
+        </article>
+      </div>
+
+      <h3>结构化日志与关联</h3>
+      <p>
+        每条任务日志包含 <code>run_id</code>、<code>partition_id</code>、<code>capability</code>、
+        <code>scheme</code>、<code>source_policy</code>、<code>provider_id</code>、
+        <code>source_batch_id</code>、<code>attempt</code>、<code>duration_ms</code> 和稳定错误码。
+        指标标签禁止 sector_code/run_id 等高基数值。
+      </p>
+      <ul>
+        <li>每个 run、partition、provider request、raw put、DB publication 创建可选 trace span；未决定 exporter 时只传播 trace context。</li>
+        <li>liveness 只验证进程；readiness 验证 PostgreSQL、Redis 和 S3，不把外部 provider 短时失败变成进程重启循环。</li>
+        <li>provider health 由独立探针、断路器和 dashboard 表达；diagnostics 默认不产生外网请求。</li>
+        <li>每个 partition 设置最大记录数、raw byte 数和 DataFrame 内存预算；超过上限立即 quarantine，禁止整市场结果无限驻留。</li>
+      </ul>
+
+      <h3>配置增量</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>环境变量</th><th>用途</th><th>初始值/约束</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>DATA_SYNC_AKSHARE_ENABLED</code></td>
+              <td>现有 AKShare 总开关</td>
+              <td>默认 <code>false</code>；生产需许可审批。</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_AKSHARE_REQUEST_TIMEOUT_SECONDS</code></td>
+              <td>现有单请求墙钟超时</td>
+              <td>默认 30，允许 1–120 秒；不得由任务任意放宽。</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_SECTOR_ENABLED</code></td>
+              <td>行业/概念基础任务开关</td>
+              <td>新增，默认 <code>false</code>。</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_SECTOR_MONEYFLOW_ENABLED</code></td>
+              <td>资金流 shadow 开关</td>
+              <td>新增，默认 <code>false</code>；不能绕过 methodology gate。</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_PROVIDER_MIN_INTERVAL_SECONDS</code></td>
+              <td>同一上游两次调用间隔</td>
+              <td>shadow 初始 2 秒；生产值由许可和探针批准。</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_SECTOR_DAILY_REVISION_LOOKBACK_PERIODS</code></td>
+              <td>日线滚动修订交易日数</td>
+              <td>初始 10；按交易日历计数，不是自然日。</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_SECTOR_WEEKLY_REVISION_LOOKBACK_PERIODS</code></td>
+              <td>周线滚动修订周期数</td>
+              <td>初始 8；按供应商周周期计数。</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_SECTOR_MONTHLY_REVISION_LOOKBACK_PERIODS</code></td>
+              <td>月线滚动修订周期数</td>
+              <td>初始 6；按供应商月周期计数。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>指标/告警</th><th>维度</th><th>初始触发条件</th><th>处理</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>provider request success/latency/retry</td>
+              <td>source、capability、status</td>
+              <td>5 分钟窗口失败率 ≥50% 且请求 ≥5</td>
+              <td>打开 source policy 断路器，停止新调用。</td>
+            </tr>
+            <tr>
+              <td>publication lag</td>
+              <td>dataset、scheme</td>
+              <td>验证 cadence 后超过目标窗口</td>
+              <td>检查 provider、队列、quality 和 DB。</td>
+            </tr>
+            <tr>
+              <td>membership coverage</td>
+              <td>scheme、quality_status</td>
+              <td>完整 release 覆盖 &lt;100%</td>
+              <td>保持上一完整版本，生成缺失板块清单。</td>
+            </tr>
+            <tr>
+              <td>schema drift</td>
+              <td>provider、capability、fingerprint</td>
+              <td>任意未知 fingerprint</td>
+              <td>立即 quarantine，创建适配器修复事件。</td>
+            </tr>
+            <tr>
+              <td>raw/canonical divergence</td>
+              <td>capability、status</td>
+              <td>raw 成功但 DB 失败持续 15 分钟</td>
+              <td>暂停新抓取，优先 raw replay。</td>
+            </tr>
+            <tr>
+              <td>moneyflow methodology gate</td>
+              <td>source、methodology_status</td>
+              <td>unknown 数据尝试进入 production release</td>
+              <td>硬失败并审计 source policy 配置。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>保留与清理</h3>
+      <ul>
+        <li>canonical current 与历史 revision 首期保留；删除策略只能由容量和许可评审后的迁移实施。</li>
+        <li>raw retention 是生产阻断项：未获得上游保存期结论前，生产 source policy 不可启用。</li>
+        <li>research/local raw 使用独立 bucket/prefix 和显式生命周期；不能混入 production publication。</li>
+        <li><code>sync_run</code>、日志和 quality 明细保留期由运维策略配置；聚合指标可长期保留，run_id 不做指标标签。</li>
+      </ul>
+    </section>
+
+    <section id="delivery">
+      <h2>11. 实施、迁移、发布与回滚</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>阶段</th><th>交付</th><th>退出条件</th><th>失败回滚</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0. 来源认证</td>
+              <td>固定 AKShare 版本；行业/概念/申万/资金流 fixtures；单位、许可、频率与连续探针。</td>
+              <td>基础接口连续 5 个交易日成功率 ≥99%；schema/单位已确认。资金流单独判定。</td>
+              <td>保持所有新 source policy 关闭，无 DB 迁移。</td>
+            </tr>
+            <tr>
+              <td>1. 运行控制与血缘</td>
+              <td><code>sync_run</code>、partition、quality、source_batch/publication 扩展；租约与 raw replay。</td>
+              <td>重复消息、worker crash、Redis 清空和 DB 失败集成测试通过。</td>
+              <td>Alembic downgrade；旧日线字段保持兼容，旧 CLI 继续工作。</td>
+            </tr>
+            <tr>
+              <td>2. P0 分类与成份</td>
+              <td>东方财富 catalog/membership adapters、领域模型、repository、CLI、每日 snapshot。</td>
+              <td>身份唯一、成份 100% 分区覆盖、同分区重跑不产生重复 current。</td>
+              <td>关闭 source policy；publication 回指上一版本；保留 raw。</td>
+            </tr>
+            <tr>
+              <td>3. P0 三周期行情与 EOD quote</td>
+              <td>行业/概念日线、周线、月线独立 adapter/表/publication；周期级修订、历史 backfill、批量 quote。</td>
+              <td>三个周期分别通过 OHLC/单位/日期标签规则；独立重跑幂等；10 个交易日 shadow 无阻断错误。</td>
+              <td>停止 dispatcher；回指上一 data version；必要时降级只读。</td>
+            </tr>
+            <tr>
+              <td>4. P1 申万</td>
+              <td>三级 hierarchy、估值 snapshot、父级闭包和方法论血缘。</td>
+              <td>三级代码唯一、父级完整、估值 null/异常规则通过。</td>
+              <td>独立 scheme 下线，不影响东方财富 release。</td>
+            </tr>
+            <tr>
+              <td>5. P2 资金流</td>
+              <td>东方财富/同花顺独立 adapters、语义族模型、窗口与分桶 quality gate。</td>
+              <td>连续性、单位、分母、finality 和方法论准入完成；跨源污染负例通过。</td>
+              <td>保持 research profile；不推进 production publication。</td>
+            </tr>
+            <tr>
+              <td>6. 运行验收</td>
+              <td>scheduler/dispatcher、dashboard、告警、恢复手册、备份恢复与容量复测。</td>
+              <td>7 个交易日 shadow；故障演练、raw replay、publication rollback 全部成功。</td>
+              <td>停 scheduler，人工 CLI 仍可有界运行；上一完整 release 可读。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>建议代码落点</h3>
+      <pre><code>service-data-sync/src/service_data_sync/
+  domain/sector/                         # scheme、entity、snapshot、bar、moneyflow
+  application/sector/                    # 同步用例、质量、三周期独立发布
+  application/ports/sector_data.py       # repository/read port
+  infrastructure/providers/akshare/
+    eastmoney_sector_catalog.py
+    eastmoney_sector_membership.py
+    eastmoney_sector_bars.py             # 日/周/月独立 capability 与 schema
+    eastmoney_sector_moneyflow.py
+    ths_sector_moneyflow.py
+    sw_industry_snapshot.py
+  infrastructure/persistence/
+    sector_repository.py
+    sync_run_repository.py
+  entrypoints/
+    sector_sync.py                       # 有界人工 CLI
+    scheduler.py                         # 通过后再加入 Compose role
+
+service-data-sync/tests/
+  contract/fixtures/sector/
+  unit/sector/
+  integration/test_sector_repository.py
+  architecture/test_boundaries.py</code></pre>
+
+      <h3>迁移与数据库回滚</h3>
+      <ol class="steps">
+        <li>先添加兼容列与新表，不修改现有 P0 个股表的语义；旧代码可在兼容窗口内继续运行。</li>
+        <li>新 source policy 保持关闭，迁移后仅运行 fixture/replay；生产 shadow 不推进 consumer release。</li>
+        <li>回滚代码前先停止 scheduler/worker 新任务，等待或取消 active partition，再回指上一 publication。</li>
+        <li>仅当新表没有被正式 consumer 使用时执行 downgrade；已有 publication 时保留表并做向前修复。</li>
+        <li>S3 raw 不随数据库 downgrade 删除；是否清理由许可和生命周期策略单独控制。</li>
+      </ol>
+    </section>
+
+    <section id="acceptance">
+      <h2>12. 验收标准与计划命令</h2>
+      <ul class="checklist">
+        <li>三个 scheme 的代码、名称、层级和来源可追溯，中文同名不会自动合并。</li>
+        <li>成份快照只表达观测事实；首次采集前没有伪造历史，未知证券不会按代码规则猜交易所。</li>
+        <li>日线、周线、月线分别重复运行结果一致，值变化只追加对应周期 revision。</li>
+        <li>周/月 canonical 值来自 AKShare 周/月参数，不读取日线聚合或填补缺口。</li>
+        <li>分钟接口未注册、无分钟表、无分钟任务、无相关环境变量。</li>
+        <li>provider timeout、限流、schema drift、空响应、重复数据、S3/DB 失败均有自动测试。</li>
+        <li>worker 中断后可从 publication checkpoint 恢复；raw 成功 DB 失败时无需重新访问上游。</li>
+        <li>membership partial 不推进完整 release；消费者仍能读取上一完整版本并看到 stale 状态。</li>
+        <li>资金流同名异口径、窗口、分桶、单位和最终态不会静默混算或 fallback。</li>
+        <li>来源、许可、频率、保存和再分发审批完成前，production source policy 无法开启。</li>
+        <li>Alembic upgrade/downgrade、raw replay、publication rollback 和备份恢复经过演练。</li>
+      </ul>
+
+      <h3>实现阶段必须执行</h3>
+      <pre><code># 测试镜像
+docker build --target test --tag quant-v2/service-data-sync:test service-data-sync
+
+# 格式、静态检查、单测、架构测试
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff format --check .
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff check .
+docker run --rm quant-v2/service-data-sync:test pyright
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test pytest -m "not integration"
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test pytest tests/architecture --no-cov
+
+# 集成、迁移与 adapter smoke
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra up -d
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra --profile data-sync-test run --rm data-sync-test
+
+# runtime 镜像与诊断
+docker build --tag quant-v2/service-data-sync:local service-data-sync
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra --profile data-sync-worker run --rm --no-deps \
+  data-sync-worker data-sync-diagnostics --format json</code></pre>
+      <p class="small">
+        当前已执行三周期实现的格式、静态检查、单测、架构测试、集成测试、Alembic upgrade/downgrade
+        与运行时镜像构建。scheduler、全量历史 backfill、真实生产来源和资金流不在本次实现范围。
+      </p>
+    </section>
+
+    <section id="open">
+      <h2>13. 待决问题、方案取舍与依据</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>待决问题</th><th>负责人</th><th>决定触发条件</th><th>未决定前行为</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>AKShare/上游商业使用、保存和再分发许可</td>
+              <td>项目维护者/合规</td>
+              <td>P0 production source policy 评审</td>
+              <td>仅 local/research，生产开关 false。</td>
+            </tr>
+            <tr>
+              <td>板块成交量原始单位与标准单位</td>
+              <td>数据工程</td>
+              <td>固定样本与上游页面/独立基准对账</td>
+              <td>以 <code>provider_native</code> 单位单独保存；禁止跨体系换算、加总或比较，待对账后再引入标准单位。</td>
+            </tr>
+            <tr>
+              <td>资金流分桶、占比分母和最终态</td>
+              <td>数据产品/数据工程</td>
+              <td>来源说明或可审计实验证据完成</td>
+              <td>P2 research only。</td>
+            </tr>
+            <tr>
+              <td>首次历史回填起点</td>
+              <td>数据产品</td>
+              <td>接口历史深度 probe + 消费者需求确认</td>
+              <td>不写死日期；按有界人工 backfill。</td>
+            </tr>
+            <tr>
+              <td>生产 cadence、限速和 raw retention</td>
+              <td>运维/数据工程</td>
+              <td>5 日连续探针、payload/耗时/调用量与许可结果</td>
+              <td>使用 shadow 默认值，不声明 SLA。</td>
+            </tr>
+            <tr>
+              <td>行业/板块内部 API 契约</td>
+              <td>service-data-sync / service-api</td>
+              <td>canonical 模型完成且消费页面立项</td>
+              <td>其他服务不得直连数据库。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>主要取舍</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>选择</th><th>采用</th><th>不采用</th><th>原因</th></tr></thead>
+          <tbody>
+            <tr><td>分类身份</td><td>scheme + source code</td><td>按中文名称合并</td><td>保留分类所有者、层级和调整差异。</td></tr>
+            <tr><td>周期行情</td><td>供应商日/周/月三套事实分别存储</td><td>用日线内部聚合周/月</td><td>完整保留上游周期口径，周期间不互相覆盖。</td></tr>
+            <tr><td>当前行情</td><td>批量清单 EOD snapshot</td><td>逐板块 spot 定时抓取</td><td>避免 N+1、重复字段和盘中序列膨胀。</td></tr>
+            <tr><td>成份历史</td><td>完整观测快照</td><td>推断精确调入调出日期</td><td>上游没有生效时间，不能制造事实。</td></tr>
+            <tr><td>资金流</td><td>来源/方法论独立序列</td><td>跨源 fallback 或拼接</td><td>同名指标不具备默认可比性。</td></tr>
+            <tr><td>任务状态</td><td>PostgreSQL 权威，Redis 投递</td><td>Redis 保存唯一 checkpoint</td><td>支持 broker 丢失、恢复和审计。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>仓库依据</h3>
+      <ul>
+        <li><a href="../../decisions/0010-sector-taxonomy-and-derived-data-boundary.md">ADR-0010：行业、概念板块分类与派生数据边界</a></li>
+        <li><a href="../../decisions/0004-market-data-provider-adapters.md">ADR-0004：多数据源适配与路由</a></li>
+        <li><a href="../../decisions/0003-data-sync-runtime-stack.md">ADR-0003：数据同步运行时与存储技术栈</a></li>
+        <li><a href="../../decisions/0002-data-sync-ownership-and-access.md">ADR-0002：同步数据归属与跨服务访问</a></li>
+        <li><a href="../0008-akshare-b06-initial-research/index.html">0008：资金流与特殊交易调研</a></li>
+        <li><a href="../0011-equity-data-sync-and-api/index.html">0011：个股数据同步、存储与查询 API 方案</a></li>
+      </ul>
+
+      <h3>外部研究入口</h3>
+      <ul>
+        <li><a href="https://akshare.akfamily.xyz/data/stock/stock.html">AKShare 股票与板块数据文档</a></li>
+        <li><a href="https://akshare.akfamily.xyz/data/index/index.html">AKShare 指数与申万行业文档</a></li>
+        <li><a href="https://akshare.akfamily.xyz/changelog.html">AKShare 版本变更记录</a></li>
+      </ul>
+      <p class="small">
+        研究日期：2026-07-26。外部接口可用性会变化；文档样例和一次探针只能用于提出候选与失败模式，
+        不能替代许可、连续稳定性、单位和完整性验收。
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      行业与板块数据同步技术方案 · 变更摘要：新增分类体系、来源路由、任务、数据模型、口径、质量、
+      恢复、迁移与验收完整设计；日/周/月分别获取和存储；明确排除所有分时数据。
+    </div>
+  </footer>
+</body>
+</html>

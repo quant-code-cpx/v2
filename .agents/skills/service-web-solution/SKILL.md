@@ -1,6 +1,6 @@
 ---
 name: service-web-solution
-description: Create, review, or revise service-web business flows, page architecture, React technical方案, routing, remote-state and API integration designs, responsive behavior, accessibility, and rollout. Use for new or materially changed pages under service-web or docs/service-web/. For every new page, require a visual prototype based on repository UI assets and the quant-v2-ui-design skill before production implementation.
+description: Create, review, or revise PC-desktop-only service-web business flows, page architecture, React technical方案, routing, remote-state and API integration designs, accessibility, and rollout. Use for new or materially changed pages under service-web or docs/service-web/. For every new page, require one desktop visual prototype based on repository UI assets and the quant-v2-ui-design skill before production implementation.
 ---
 
 # Service Web Solution
@@ -15,6 +15,7 @@ Turn understood business needs into reviewable page architecture, visual prototy
 4. Place the canonical proposal under `docs/service-web/<NNNN>-<topic>/`.
 5. Use available `mui` and `vercel-react-best-practices` skills when MUI implementation or React performance is in scope.
 6. When the design changes an API or data-sync boundary, also load that service's solution skill and keep one named owning proposal plus linked impact/contract changes.
+7. Treat service-web as PC-desktop-only, with `1440×900` as the default prototype and visual-review viewport. Do not design, prototype, implement, render, or test mobile, tablet, touch, or narrow-screen behavior. This overrides mobile/narrow-screen validation in the base solution skill for service-web work.
 
 ## Workflow
 
@@ -24,7 +25,7 @@ Turn understood business needs into reviewable page architecture, visual prototy
    - primary business question and decision;
    - primary task, secondary tasks, success, and failure;
    - required data, authoritative source, freshness, permissions, and sensitivity;
-   - share/bookmark needs, device context, and accessibility constraints.
+   - share/bookmark needs, desktop viewport/input context, and accessibility constraints.
 3. Mark unknowns as assumptions or ask one focused question when an answer would materially change information architecture.
 4. Classify the work:
    - **new page**: new route, new primary task, or materially new information architecture;
@@ -32,13 +33,13 @@ Turn understood business needs into reviewable page architecture, visual prototy
 5. For a new page, complete the prototype gate in `references/prototype-standard.md` before writing production page code:
    - reuse repository tokens and established page patterns;
    - create editable `prototype.html`;
-   - render desktop and mobile prototype images;
+   - render one desktop prototype image at the default viewport;
    - visually inspect hierarchy, overflow, states, semantics, and accessibility;
    - embed or link the prototype images from the technical proposal.
 6. Design page architecture:
    - route, shell, information order, page sections, component boundaries, and interactions;
    - loading, empty, stale, partial, error/retry, forbidden, disabled, submitting, and success states;
-   - desktop, tablet, mobile, keyboard, focus, reduced-motion, and table/chart behavior.
+   - desktop mouse, keyboard, focus, reduced-motion, and table/chart behavior.
 7. Design state ownership:
    - remote server state in TanStack Query;
    - shareable filters and navigation state in URL;
@@ -47,13 +48,14 @@ Turn understood business needs into reviewable page architecture, visual prototy
 8. Design API integration only from frozen contracts. For unfrozen APIs, use clearly labeled fixture or MSW and propose the contract separately; never invent a live endpoint.
 9. Design performance: route lazy loading, query caching, payload bounds, render isolation, chart lifecycle, bundle impact, and perceived-loading behavior. Give measurable budgets or mark them unresolved with an owner.
 10. Read `references/design-checklist.md` and `references/prototype-standard.md` completely before finalizing.
-11. Validate proposal HTML, prototype source/images, desktop/mobile rendering, and local links. Execute document/prototype checks; list `vp check`, tests, build, and E2E as planned/not run when no production implementation exists. Do not implement unless the user also requests implementation.
+11. Validate proposal HTML, prototype source/images, desktop rendering, and local links. Execute document/prototype checks; list `vp check`, tests, build, and E2E as planned/not run when no production implementation exists. Do not implement unless the user also requests implementation.
 
 ## Prototype gate
 
 - Treat prototype production and visual inspection as mandatory for new pages.
 - Do not use generic AI dashboard imagery or ImageGen for product UI.
 - Do not substitute a text wireframe for the required visual prototype.
+- Do not generate mobile, tablet, touch, responsive, or narrow-screen prototype variants.
 - Do not write production page code before the prototype exists and has been reviewed.
 - If implementation is requested in the same task and no material decision remains open, continue after documenting the prototype review; otherwise request the missing decision.
 
@@ -66,7 +68,7 @@ Include, when applicable:
 - prototype images for every new page, with source and review notes;
 - route/component/query/state ownership map;
 - API/fixture strategy and contract dependencies;
-- state, responsive, accessibility, performance, rollout, rollback, and acceptance design.
+- state, PC desktop layout, accessibility, performance, rollout, rollback, and acceptance design.
 
 ## Repository guardrails
 
@@ -76,3 +78,4 @@ Include, when applicable:
 - Keep service-web behind service-api; never access databases or providers directly.
 - Do not guess unfrozen endpoints, real-time protocols, permissions, or financial semantics.
 - Do not replace the product homepage market overview with personal portfolio content.
+- Do not spend design, implementation, screenshot, or test effort on mobile, tablet, touch, responsive, or narrow-screen scenarios.

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta
     name="description"
-    content="基于 Minimal UI 的结构语言与中国市场语义，定义 quant-v2 紫晶电蓝主题、间距、圆角、阴影、MUI 组件尺寸和页面模式。"
+    content="基于 Minimal UI 的结构语言与中国市场语义，定义 Apex数据智能分析平台紫晶电蓝主题、间距、圆角、阴影、MUI 组件尺寸和页面模式。"
   >
   <title>Minimal 风格设计系统与 MUI 落地方案｜技术方案</title>
   <style>
@@ -38,6 +38,7 @@
     }
 
     body {
+      min-width: 1200px;
       margin: 0;
       color: var(--ink);
       background: #fff;
@@ -503,43 +504,6 @@
       font-size: 0.88rem;
     }
 
-    @media (max-width: 800px) {
-      header {
-        padding-top: 34px;
-      }
-
-      .snapshot,
-      .meta,
-      .grid,
-      .grid.two,
-      .specimen {
-        grid-template-columns: 1fr;
-      }
-
-      .swatches {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      section {
-        padding: 40px 0;
-      }
-    }
-
-    @media (max-width: 480px) {
-      .shell {
-        width: min(100% - 28px, 1120px);
-      }
-
-      .card,
-      .specimen {
-        padding: 17px;
-      }
-
-      .swatches {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
-
     @media print {
       nav {
         display: none;
@@ -600,7 +564,7 @@
       <h1>Minimal 风格设计系统与 MUI 落地方案</h1>
       <p class="lede">
         基于 <a href="https://minimals.cc/dashboard">Minimal UI</a> 三个代表页面、
-        两类浮层、深浅主题和移动端布局的浏览器实测，建立 quant-v2 可执行的 UI 规范。
+        两类浮层和深浅主题的 PC 桌面浏览器实测，建立 Apex数据智能分析平台可执行的 UI 规范。
         保留字体、8px 网格、16px 卡片、轻阴影、组件尺寸与交互结构，品牌色改为紫晶电蓝；
         中国市场继续红涨绿跌，并始终配合正负号、箭头或文字。
       </p>
@@ -650,7 +614,7 @@
         <li><a href="#geometry">尺寸与布局</a></li>
         <li><a href="#patterns">组件规范</a></li>
         <li><a href="#mockups">验证稿</a></li>
-        <li><a href="#responsive">响应式与可用性</a></li>
+        <li><a href="#desktop">PC 桌面与可用性</a></li>
         <li><a href="#implementation">实施</a></li>
         <li><a href="#acceptance">验收</a></li>
       </ul>
@@ -662,8 +626,8 @@
       <h2>研究范围与证据强度</h2>
       <p>
         达到模式饱和后提前结束，共检查 <strong>3 个页面</strong>，未触及 10 页上限。
-        数值来自 2560×1156 Chrome 视口下的可见界面与 computed styles；
-        移动端在 390×844 视口复核。2026-07-26 的站点版本可能后续变化。
+        数值来自 2560×1156 Chrome 视口下的可见界面与 computed styles，并在
+        1440×900 产品默认视口复核。2026-07-26 的站点版本可能后续变化。
       </p>
 
       <div class="table-wrap">
@@ -692,7 +656,7 @@
             <tr>
               <td><code>/dashboard/user/new</code></td>
               <td>上传、开关、两列表单、主操作</td>
-              <td>字段高度、表单栅格、卡片宽度、移动折叠</td>
+              <td>字段高度、桌面表单栅格、卡片宽度</td>
               <td><span class="tag fact">实测</span> 建立编辑模式</td>
             </tr>
             <tr>
@@ -707,12 +671,6 @@
               <td>360px 宽、68px Header、半透明 Paper、阴影</td>
               <td><span class="tag fact">实测</span> 覆盖抽屉</td>
             </tr>
-            <tr>
-              <td>深色 + 390px 移动端</td>
-              <td>主题语义、导航收缩、卡片堆叠</td>
-              <td>深色 surface、16px 页边距、64px AppBar</td>
-              <td><span class="tag fact">实测</span> 覆盖响应式</td>
-            </tr>
           </tbody>
         </table>
       </div>
@@ -720,7 +678,7 @@
       <aside class="callout">
         <strong>结论可信度</strong>
         颜色、字体、圆角、阴影和组件尺寸为实测事实；中文字体回退、
-        金融红涨绿跌、触控尺寸和落地顺序属于本方案决策；未检查的复杂空态不写成事实。
+        金融红涨绿跌、桌面交互尺寸和落地顺序属于本方案决策；未检查的复杂空态不写成事实。
       </aside>
     </section>
 
@@ -768,10 +726,10 @@
         </article>
         <article class="card">
           <span class="label">06 · Progressive density</span>
-          <h3>桌面高效，移动可触</h3>
+          <h3>桌面高效，密度稳定</h3>
           <p>
-            桌面允许 36px 操作按钮和 76px 信息行；移动端主要动作至少 44px，
-            多列表单和卡片栅格单列化，表格横向滚动或切换列表视图。
+            1440×900 下使用 36px 操作按钮、76px 信息行和固定多列表单；
+            表格保留完整核心列，超宽内容仅在表格容器内部滚动。
           </p>
         </article>
       </div>
@@ -865,7 +823,7 @@
             <tr>
               <th>层级</th>
               <th>Minimal 实测</th>
-              <th>quant-v2 规范</th>
+              <th>Apex 平台规范</th>
               <th>使用场景</th>
             </tr>
           </thead>
@@ -966,7 +924,7 @@
           <ul>
             <li>图标与文字：8px</li>
             <li>紧密字段/标签：12px</li>
-            <li>移动页边距：16px</li>
+            <li>PC 桌面页面左右内距：40px</li>
             <li>卡片与 Dialog 内容：24px</li>
             <li>卡片栅格：24px</li>
             <li>页面底部：64px</li>
@@ -1003,7 +961,7 @@
             <tr>
               <th>区域</th>
               <th>实测值</th>
-              <th>quant-v2 规范</th>
+              <th>Apex 平台规范</th>
               <th>说明</th>
             </tr>
           </thead>
@@ -1021,12 +979,6 @@
               <td>透明/模糊背景，工具按钮 36px</td>
             </tr>
             <tr>
-              <td>移动 AppBar</td>
-              <td>64px</td>
-              <td>64px</td>
-              <td>侧栏变临时 Drawer；保留主任务与账号入口</td>
-            </tr>
-            <tr>
               <td>内容最大宽度</td>
               <td>1200px</td>
               <td>1200px</td>
@@ -1035,14 +987,8 @@
             <tr>
               <td>桌面内容内距</td>
               <td>左右 40px，底 64px</td>
-              <td>≥1200px 使用 40px；中屏 24px</td>
+              <td>固定使用 40px</td>
               <td>页面标题与主卡片共享左边线</td>
-            </tr>
-            <tr>
-              <td>移动内容内距</td>
-              <td>左右 16px，底 64px</td>
-              <td>16px</td>
-              <td>390px 下卡片实测宽约 343px</td>
             </tr>
             <tr>
               <td>栅格间距</td>
@@ -1070,15 +1016,15 @@
           <tbody>
             <tr>
               <td><code>Button</code></td>
-              <td>small 28 / medium 36 / large 44px</td>
+              <td>small 32 / medium 36 / large 48px</td>
               <td>8px；medium 6×12</td>
-              <td>桌面默认 medium；移动主操作 large；disableElevation</td>
+              <td>桌面默认 medium；高强调主操作使用 large；disableElevation</td>
             </tr>
             <tr>
               <td><code>IconButton</code></td>
-              <td>36×36px</td>
+              <td>40×40px</td>
               <td>8px，圆形 hit area</td>
-              <td>无文字必须有 aria-label 与 Tooltip；触控外层保证 44px</td>
+              <td>无文字必须有 aria-label 与 Tooltip；鼠标 hover 和键盘 focus 清晰</td>
             </tr>
             <tr>
               <td><code>OutlinedInput</code></td>
@@ -1120,11 +1066,11 @@
               <td><code>Dialog</code></td>
               <td>medium 720px</td>
               <td>Title/Content/Actions 24px；16px</td>
-              <td>屏幕边距 16px；Actions 右对齐、间隔 12px</td>
+              <td>固定桌面宽度；Actions 右对齐、间隔 12px</td>
             </tr>
             <tr>
               <td><code>Drawer</code></td>
-              <td>360px，移动 100vw</td>
+              <td>固定 360px</td>
               <td>Header 68px；内容左右 20px</td>
               <td>右侧详情/设置；内容独立滚动；Header 固定</td>
             </tr>
@@ -1160,7 +1106,7 @@
           <h3>表单控件</h3>
           <p>
             56px 字段建立稳定扫描线；36px 桌面按钮保持紧凑。
-            页面在触控断点下将主要按钮提升到 44px。
+            高强调主操作使用 48px large 尺寸。
           </p>
         </div>
         <div class="control-demo" aria-label="控件示例">
@@ -1236,7 +1182,7 @@
           <h3>任务分组，而非字段平铺</h3>
           <ul>
             <li>桌面主表单两列，列间 16px、行间 24px。</li>
-            <li>关联设置可放窄侧卡；移动端全部单列。</li>
+            <li>关联设置可放 360px 侧栏；主表单保持桌面双列。</li>
             <li>卡片内距 24px，字段高度 56px。</li>
             <li>主操作右对齐；多步流程使用稳定底栏。</li>
           </ul>
@@ -1273,7 +1219,7 @@
             <li>Header 68px，标题 18/28，IconButton 36px。</li>
             <li>Paper 90% 不透明 + 20px blur；内容独立滚动。</li>
             <li>纯设置可使用 invisible backdrop；会改业务数据的 Drawer 必须显示 backdrop。</li>
-            <li>移动端宽 100vw，并保留关闭按钮与返回手势。</li>
+            <li>固定宽度 360px，保留关闭按钮与键盘焦点恢复。</li>
           </ul>
         </article>
         <article class="card">
@@ -1282,7 +1228,7 @@
           <ul>
             <li>用于必须先处理的确认、短表单、错误恢复。</li>
             <li>外边距 16px、圆角 16px、Title/Content/Actions 各 24px。</li>
-            <li>中型表单 720px；普通确认由 quant-v2 收敛到 480px。</li>
+            <li>中型表单 720px；普通确认由 Apex 数据智能分析平台收敛到 480px。</li>
             <li>默认操作顺序：取消 → 主操作；危险动作使用 error 色并重复对象名称。</li>
             <li>必须 focus trap、Esc 关闭策略、恢复触发点焦点。</li>
           </ul>
@@ -1300,7 +1246,7 @@
 
       <div class="mockup-grid">
         <figure class="mockup">
-          <img src="assets/homepage-amethyst-electric-blue.png" alt="QUANT V2 紫晶电蓝主题市场首页：侧栏、指标卡、市场走势、智能体、重点标的与资讯摘要">
+          <img src="assets/homepage-amethyst-electric-blue.png" alt="Apex数据智能分析平台紫晶电蓝主题市场首页：侧栏、指标卡、市场走势、智能体、重点标的与资讯摘要">
           <figcaption>
             <strong>紫晶电蓝首页：</strong>
             紫晶承担主要动作、选中、焦点和第一图表序列；电蓝与青蓝承担次级分类。
@@ -1310,13 +1256,13 @@
       </div>
     </section>
 
-    <section id="responsive">
-      <h2>响应式、交互与无障碍</h2>
+    <section id="desktop">
+      <h2>PC 桌面、交互与无障碍</h2>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>断点</th>
+              <th>桌面视口</th>
               <th>页面骨架</th>
               <th>卡片与表单</th>
               <th>表格与操作</th>
@@ -1324,31 +1270,13 @@
           </thead>
           <tbody>
             <tr>
-              <td><strong>xs · 0–599</strong></td>
-              <td>64px AppBar；16px 页边距；无常驻侧栏</td>
-              <td>单列、全宽；主要按钮 44px</td>
-              <td>横滚或卡片列表；冻结第一关键列需专项验证</td>
-            </tr>
-            <tr>
-              <td><strong>sm · 600–899</strong></td>
-              <td>24px 页边距；临时侧栏</td>
-              <td>统计卡可两列；表单视字段长度决定 1–2 列</td>
-              <td>隐藏次要列，保留行 Menu</td>
-            </tr>
-            <tr>
-              <td><strong>md · 900–1199</strong></td>
-              <td>可启用紧凑侧栏；内容 24px</td>
-              <td>表单两列；图表主次布局</td>
-              <td>标准表格；筛选可换行</td>
-            </tr>
-            <tr>
-              <td><strong>lg · 1200–1535</strong></td>
-              <td>300px 侧栏；内容最大 1200px</td>
+              <td><strong>1440×900 默认</strong></td>
+              <td>300px 侧栏、72px AppBar、内容最大 1200px</td>
               <td>完整栅格，24px gap</td>
-              <td>标准密度，完整列</td>
+              <td>标准密度、完整核心列、固定操作区</td>
             </tr>
             <tr>
-              <td><strong>xl · ≥1536</strong></td>
+              <td><strong>≥1536 宽屏</strong></td>
               <td>内容仍限制 1200px，分析大屏可显式扩展</td>
               <td>不因屏幕宽而无限增加列数</td>
               <td>优先提高图表宽度，不拉长文本行</td>
@@ -1415,7 +1343,7 @@
         </li>
         <li>
           <strong>阶段 3｜代表页面：</strong>
-          先迁移市场概览、标的分析两条现有路由；统一卡片、图表 Header、状态和响应式，
+          先迁移市场概览、标的分析两条现有路由；统一卡片、图表 Header、状态和 PC 桌面布局，
           同步更新 KLineChart/ECharts 的共享视觉令牌。
         </li>
         <li>
@@ -1424,7 +1352,7 @@
         </li>
         <li>
           <strong>阶段 5｜视觉回归：</strong>
-          固定 light/dark × 390/768/1200/1440 四组视口，覆盖默认、loading、empty、error、
+          固定 light/dark × 1440×900 PC 桌面视口，覆盖默认、loading、empty、error、
           Drawer、Dialog 和键盘焦点。
         </li>
       </ol>
@@ -1493,9 +1421,9 @@
         </article>
         <article class="card">
           <span class="label">Experience contract</span>
-          <h3>四类视口可用</h3>
+          <h3>PC 桌面视口可用</h3>
           <ul>
-            <li>390–1440px 无页面级横向溢出。</li>
+            <li>1440×900 无页面级横向溢出。</li>
             <li>键盘可完成导航、筛选、弹窗和抽屉任务。</li>
             <li>light/dark、reduced motion、200% zoom 可读。</li>
           </ul>
@@ -1507,7 +1435,7 @@
         <li><code>vp check</code>：格式化、lint、TypeScript。</li>
         <li><code>vp test</code>：theme mapper、状态颜色、组件默认值。</li>
         <li><code>vp build</code>：生产构建与无意外字体/资产依赖。</li>
-        <li><code>vp run e2e</code>：主题、响应式、Dialog/Drawer、键盘焦点。</li>
+        <li><code>vp run e2e</code>：1440×900 PC 桌面、主题、Dialog/Drawer、键盘焦点。</li>
         <li>人工检查：中文/数字基线、图表 tooltip、表格密度、200% zoom、打印/导出视图。</li>
       </ul>
 
@@ -1532,11 +1460,6 @@
               <td>信息架构冻结时</td>
             </tr>
             <tr>
-              <td>列表移动端用横滚还是卡片？</td>
-              <td>行情矩阵横滚；管理列表卡片化</td>
-              <td>首个真实列表字段与主任务确定时</td>
-            </tr>
-            <tr>
               <td>是否采购或直接使用 Minimal 资产？</td>
               <td><strong>否</strong>；复现视觉与交互规范，不使用模板代码或资产</td>
               <td>若未来需要模板代码，先完成许可评估</td>
@@ -1551,7 +1474,8 @@
     <div class="shell">
       Minimal 风格设计系统与 MUI 落地方案 · 变更摘要（2026-07-26）：
       将品牌色从绿色调整为紫晶 <code>#6D5CE7</code> 与电蓝 <code>#2F6BFF</code>，
-      同步 CSS variables、MUI theme、图表序列、示例与视觉验证稿；绿色仅保留明确下跌和成功语义。
+      同步 CSS variables、MUI theme、图表序列、示例与视觉验证稿；产品布局和验证统一为
+      1440×900 PC 桌面基线。
     </div>
   </footer>
 </body>

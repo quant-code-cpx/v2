@@ -1,0 +1,424 @@
+openapi: 3.1.1
+info:
+  title: service-data-sync sector internal API
+  version: 1.0.0
+  description: |
+    Implemented service-to-service read contract owned by service-data-sync.
+    It exposes published EastMoney industry and concept sector catalogs and direct
+    upstream daily, weekly, and monthly bars. It never exposes raw objects,
+    provider fields, database rows, or unpublished PENDING sectors.
+  x-contract-status: Implemented
+servers:
+  - url: http://service-data-sync:8000
+    description: Compose service network
+tags:
+  - name: sectors
+security:
+  - serviceBearer: []
+paths:
+  /internal/v1/sectors:
+    get:
+      tags: [sectors]
+      operationId: listInternalSectors
+      summary: List published sectors in one explicit classification scheme
+      parameters:
+        - $ref: '#/components/parameters/Scheme'
+        - $ref: '#/components/parameters/Query'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize100'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Cursor page ordered by sector code and stable sector identifier.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SectorPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /internal/v1/sectors/{scheme}/{sectorCode}:
+    get:
+      tags: [sectors]
+      operationId: getInternalSector
+      summary: Get one published sector by its scheme and stable code
+      parameters:
+        - $ref: '#/components/parameters/SchemePath'
+        - $ref: '#/components/parameters/SectorCode'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Published sector identity and catalog state.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sector'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /internal/v1/sectors/{scheme}/{sectorCode}/bars:
+    get:
+      tags: [sectors]
+      operationId: listInternalSectorBars
+      summary: Read one direct upstream sector period within an inclusive bounded date range
+      description: |
+        period selects one independently published dataset: 1d, 1w, or 1mo.
+        Weekly and monthly values are direct upstream observations, never daily aggregations.
+        A cursor is bound to sector, period, filter range, and dataVersion; it expires when
+        that published snapshot is superseded.
+      parameters:
+        - $ref: '#/components/parameters/SchemePath'
+        - $ref: '#/components/parameters/SectorCode'
+        - $ref: '#/components/parameters/Period'
+        - $ref: '#/components/parameters/StartDate'
+        - $ref: '#/components/parameters/EndDate'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize1000'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Ascending period-end page from one published data version.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SectorBarPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/SnapshotExpired'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+components:
+  securitySchemes:
+    serviceBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: service-credential
+      description: |
+        Static service credential supplied only by runtime configuration. It is compared in
+        constant time and is never returned by this API; production issuance and rotation are
+        deployment responsibilities.
+  parameters:
+    Scheme:
+      name: scheme
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/SectorScheme'
+    SchemePath:
+      name: scheme
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/SectorScheme'
+    SectorCode:
+      name: sectorCode
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+      description: Stable code within scheme; never a display name.
+    Query:
+      name: query
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+      description: Prefix search over published code or name; no full-text guarantee in v1.
+    Period:
+      name: period
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/BarPeriod'
+    StartDate:
+      name: start
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+    EndDate:
+      name: end
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+      description: Inclusive end date; must not precede start.
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
+    PageSize100:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    PageSize1000:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 500
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 256
+  headers:
+    ETag:
+      schema:
+        type: string
+      description: Strong representation tag derived from request projection and dataVersion.
+    PrivateRevalidate:
+      schema:
+        type: string
+        example: private, max-age=0, must-revalidate
+  responses:
+    ValidationProblem:
+      description: Request path, query, cursor, or bounded date range is invalid.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing or invalid service credential.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Published active sector or selected period is absent.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    SnapshotExpired:
+      description: Cursor points to a superseded publication; restart from first page.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    RateLimited:
+      description: Service caller exceeded its approved query budget.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    DependencyUnavailable:
+      description: Published read store or required internal dependency is unavailable.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    SectorScheme:
+      type: string
+      enum: [eastmoney.industry, eastmoney.concept]
+    BarPeriod:
+      type: string
+      enum: [1d, 1w, 1mo]
+    DecimalString:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+      description: Exact decimal serialized as a JSON string to avoid binary precision loss.
+    NonNegativeDecimalString:
+      type: string
+      pattern: '^[0-9]+(\.[0-9]+)?$'
+    Sector:
+      type: object
+      required: [sectorId, scheme, code, name, dataVersion, publishedAt]
+      additionalProperties: false
+      properties:
+        sectorId:
+          type: string
+          format: uuid
+        scheme:
+          $ref: '#/components/schemas/SectorScheme'
+        code:
+          type: string
+          maxLength: 64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+    SectorPage:
+      type: object
+      required: [items, nextCursor, dataVersion, publishedAt]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/Sector'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 1024
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+    SectorBar:
+      type: object
+      required:
+        - periodEnd
+        - open
+        - high
+        - low
+        - close
+        - volumeValue
+        - volumeUnit
+        - amountCny
+        - isFinal
+      additionalProperties: false
+      properties:
+        periodEnd:
+          type: string
+          format: date
+          description: Upstream period-end label; not a locally inferred period boundary.
+        open:
+          $ref: '#/components/schemas/NonNegativeDecimalString'
+        high:
+          $ref: '#/components/schemas/NonNegativeDecimalString'
+        low:
+          $ref: '#/components/schemas/NonNegativeDecimalString'
+        close:
+          $ref: '#/components/schemas/NonNegativeDecimalString'
+        volumeValue:
+          $ref: '#/components/schemas/NonNegativeDecimalString'
+        volumeUnit:
+          type: string
+          const: provider_native
+          description: Not validated as comparable across schemes; clients must not aggregate it.
+        amountCny:
+          $ref: '#/components/schemas/NonNegativeDecimalString'
+        amplitudePercent:
+          oneOf:
+            - $ref: '#/components/schemas/NonNegativeDecimalString'
+            - type: 'null'
+        changePercent:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        changeAmount:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        turnoverPercent:
+          oneOf:
+            - $ref: '#/components/schemas/NonNegativeDecimalString'
+            - type: 'null'
+        isFinal:
+          type: boolean
+    SectorBarPage:
+      type: object
+      required: [sector, period, dataVersion, publishedAt, items, nextCursor]
+      additionalProperties: false
+      properties:
+        sector:
+          $ref: '#/components/schemas/Sector'
+        period:
+          $ref: '#/components/schemas/BarPeriod'
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        items:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/SectorBar'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 1024
+    Problem:
+      type: object
+      required: [type, title, status, code, requestId]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        detail:
+          type: string
+        requestId:
+          type: string

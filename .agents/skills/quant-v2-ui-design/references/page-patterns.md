@@ -50,8 +50,7 @@ Rules:
 - Use faint dashed horizontal dividers and no vertical rules.
 - Align numbers right; keep names and symbols left.
 - Keep sticky identity columns only when they materially help.
-- Keep table minimum width around 800px on mobile and allow horizontal scroll.
-- Stack filters at narrow widths; do not squeeze fields below usable size.
+- Keep desktop columns and filters legible at the default `1440×900` viewport.
 - Preserve filter state in URL when users may share or revisit results.
 
 ## Form page
@@ -64,7 +63,7 @@ Rules:
 - Use labels for field meaning and helper text for examples.
 - Keep validation near the field.
 - Put destructive actions away from primary submit.
-- On mobile, stack all fields and keep the submit action reachable.
+- Keep the desktop form grid and submit action visible without narrow-screen reflow.
 
 Required states:
 
@@ -97,7 +96,7 @@ Use for contextual side tasks that should preserve page state:
 
 Geometry:
 
-- width 360px or full viewport on small screens;
+- width 360px;
 - white at 90% opacity with 20px blur;
 - subtle left shadow;
 - 24px content padding;
@@ -123,14 +122,13 @@ Geometry:
 
 Keep cancel before confirm. Make destructive confirm explicit and use error color only for destructive meaning.
 
-## Responsive behavior
+## PC desktop behavior
 
-- Desktop: sidebar + 12-column content.
-- Tablet: collapse secondary columns before shrinking content illegibly.
-- Mobile: 16px page padding, single-column cards, 64px header.
-- Preserve horizontal table scrolling.
-- Move drawers to full width when needed.
-- Keep chart controls wrap-safe; never overlap the plot.
+- Default design and visual-review viewport: `1440×900`.
+- Use the desktop sidebar and 12-column content grid.
+- Preserve desktop information density, columns, drawers, dialogs, and chart controls.
+- Keep table/chart overflow contained at the default viewport.
+- Do not define mobile, tablet, touch, narrow-screen, or responsive reflow behavior.
 
 ## State checklist
 

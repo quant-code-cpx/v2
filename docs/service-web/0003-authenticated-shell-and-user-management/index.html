@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Apex数据智能分析平台登录、默认拒绝路由、受保护应用骨架与分层用户管理 Web 技术方案">
+  <title>登录、受保护应用骨架与用户管理｜技术方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1c252e;
+      --muted: #637381;
+      --line: rgb(145 158 171 / 24%);
+      --surface: #f4f6f8;
+      --subtle: #f9fafb;
+      --accent: #6d5ce7;
+      --accent-dark: #4f46b8;
+      --accent-soft: #f0eeff;
+      --success: #16803d;
+      --warning: #845406;
+      --danger: #b52e13;
+      --info: #006e89;
+      --radius: 16px;
+      --shadow: 0 0 2px rgb(145 158 171 / 20%), 0 12px 24px -4px rgb(145 158 171 / 12%);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      min-width: 1200px;
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 16px;
+      line-height: 1.72;
+    }
+    a { color: var(--accent-dark); text-underline-offset: .2em; }
+    a:focus-visible { outline: 3px solid rgb(109 92 231 / 28%); outline-offset: 3px; border-radius: 4px; }
+    code { padding: .12em .38em; border-radius: 5px; background: var(--subtle); color: #332d7a; font-size: .9em; }
+    .shell { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+    header.hero { padding: 56px 0 40px; border-bottom: 1px solid var(--line); background: var(--subtle); }
+    .eyebrow { margin: 0 0 10px; color: var(--accent-dark); font-size: .78rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    h1, h2, h3, h4 { line-height: 1.3; letter-spacing: -.02em; }
+    h1 { max-width: 880px; margin: 0; font-size: clamp(2rem, 5vw, 3.5rem); }
+    h2 { margin: 0 0 20px; font-size: clamp(1.45rem, 3vw, 2rem); }
+    h3 { margin: 0 0 8px; font-size: 1.08rem; }
+    h4 { margin: 22px 0 8px; font-size: 1rem; }
+    p { max-width: 78ch; }
+    .lede { max-width: 820px; margin: 18px 0 0; color: var(--muted); font-size: 1.08rem; }
+    .snapshot, .meta, .grid { display: grid; gap: 16px; }
+    .snapshot { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 30px; }
+    .snapshot article, .meta div { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    .snapshot strong { color: var(--accent-dark); font-size: .78rem; letter-spacing: .06em; }
+    .snapshot p { margin: 5px 0 0; color: var(--muted); font-size: .91rem; line-height: 1.55; }
+    .meta { grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 18px 0 0; }
+    .meta dt { color: var(--muted); font-size: .78rem; }
+    .meta dd { margin: 3px 0 0; font-weight: 700; }
+    .status { color: var(--success); }
+    nav.toc { position: sticky; top: 0; z-index: 10; overflow-x: auto; border-bottom: 1px solid var(--line); background: rgb(255 255 255 / 94%); backdrop-filter: blur(12px); }
+    nav.toc ul { display: flex; gap: 22px; width: max-content; margin: 0; padding: 13px 0; list-style: none; }
+    nav.toc a { color: var(--muted); font-size: .88rem; font-weight: 700; text-decoration: none; }
+    main { padding: 22px 0 72px; }
+    section { padding: 50px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 58px; }
+    .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .card { padding: 22px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; box-shadow: var(--shadow); }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+    .label, .marker { display: inline-block; margin-bottom: 10px; font-size: .75rem; font-weight: 800; letter-spacing: .06em; }
+    .label { color: var(--accent-dark); }
+    .marker { padding: 2px 7px; border-radius: 6px; }
+    .fact { background: #eef7fa; color: var(--info); }
+    .decision { background: var(--accent-soft); color: var(--accent-dark); }
+    .assumption { background: #fff7e8; color: var(--warning); }
+    .pending { background: #fff0ec; color: var(--danger); }
+    .callout { padding: 18px 20px; border-left: 4px solid var(--accent); border-radius: 0 var(--radius) var(--radius) 0; background: var(--accent-soft); }
+    .callout.warning { border-color: #d99118; background: #fff8e9; }
+    .callout.danger { border-color: #ff5630; background: #fff2ef; }
+    .callout strong { display: block; margin-bottom: 4px; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+    table { width: 100%; min-width: 760px; border-collapse: collapse; }
+    th, td { padding: 13px 15px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--surface); color: var(--muted); font-size: .82rem; }
+    tr:last-child td { border-bottom: 0; }
+    pre.flow { overflow-x: auto; padding: 20px; border-radius: var(--radius); background: #141a21; color: #e9edf2; font: .88rem/1.68 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .steps { padding-left: 1.25rem; }
+    .steps li { padding: 3px 0 13px 8px; }
+    .route-list { display: grid; gap: 10px; }
+    .route { display: grid; grid-template-columns: 180px 1fr; gap: 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; }
+    .route code { align-self: start; font-weight: 800; }
+    .prototype-links { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+    .prototype-links a { padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font-weight: 700; text-decoration: none; }
+    .shots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    figure.shot { margin: 0; padding: 16px; border: 1px dashed var(--line); border-radius: 12px; background: var(--subtle); }
+    figure.shot strong, figure.shot span { display: block; }
+    figure.shot span { margin-top: 4px; color: var(--muted); font-size: .84rem; }
+    .checklist { columns: 2; column-gap: 36px; }
+    .checklist li { break-inside: avoid; margin-bottom: 7px; }
+    footer { padding: 28px 0 48px; color: var(--muted); font-size: .88rem; }
+    @media print {
+      nav.toc { display: none; }
+      header.hero, main, section { padding-top: 20px; }
+      .shell { width: 100%; }
+      .card { box-shadow: none; break-inside: avoid; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="shell">
+      <p class="eyebrow">Apex数据智能分析平台 · Technical solution · service-web · 0003</p>
+      <h1>登录、受保护应用骨架与用户管理</h1>
+      <p class="lede">
+        为“Apex数据智能分析平台”建立无注册入口的自定义账号登录页、默认拒绝的受保护路由、白色应用骨架和分层用户管理工作台。
+        前端已接入 service-api 的已实施 Contract 0002：会话与权限由服务端权威判定，SUPER_ADMIN、ADMIN
+        和 USER 的可见动作与目标边界保持一致。
+      </p>
+
+      <div class="snapshot" aria-label="方案一屏摘要">
+        <article><strong>问题</strong><p>实施前只有公开市场 fixture 路由；无登录、会话、用户信息、权限门或用户 CRUD 页面。</p></article>
+        <article><strong>选择</strong><p>已落地独立 AuthShell + 受保护 AppShell；TanStack Query 管会话/用户，URL 管筛选与用户弹窗入口。</p></article>
+        <article><strong>理由</strong><p>沿用 React Router Data Mode、MUI Theme 和现有 qv tokens；服务器继续是唯一安全边界。</p></article>
+        <article><strong>主要风险</strong><p>API 0002、Contract 0002 和 ADR-0008 已协同实施；后续演进不得弱化默认拒绝、目标级授权或敏感数据边界。</p></article>
+      </div>
+
+      <dl class="meta">
+        <div><dt>状态</dt><dd class="status">Implemented</dd></div>
+        <div><dt>负责人</dt><dd>service-web 团队</dd></div>
+        <div><dt>最后修改</dt><dd>2026-07-26</dd></div>
+        <div><dt>关联决策</dt><dd><a href="../../decisions/0008-default-deny-auth-and-hierarchical-rbac.md">ADR-0008</a></dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#understanding">业务理解</a></li>
+        <li><a href="#facts">现状与边界</a></li>
+        <li><a href="#prototype">原型</a></li>
+        <li><a href="#architecture">页面架构</a></li>
+        <li><a href="#state">状态所有权</a></li>
+        <li><a href="#flows">核心流程</a></li>
+        <li><a href="#contract">契约与权限</a></li>
+        <li><a href="#quality">PC 桌面与质量</a></li>
+        <li><a href="#delivery">交付与验收</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="understanding">
+      <h2>业务理解与页面分类</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="marker decision">Actor / entry</span>
+          <h3>匿名访问者与三类登录用户</h3>
+          <p>匿名访问者只从 <code>/login</code> 输入系统分配账号和密码。登录用户从 <code>/</code>
+            进入工作区；ADMIN、SUPER_ADMIN 从导航进入 <code>/users</code>。</p>
+        </article>
+        <article class="card">
+          <span class="marker decision">Primary task</span>
+          <h3>安全进入与最小权限管理</h3>
+          <p>用户需要确认“我能否进入系统”；管理员需要确认“哪些账号存在、状态如何、我能对谁执行什么动作”。</p>
+        </article>
+        <article class="card">
+          <span class="marker decision">Success / failure</span>
+          <h3>可恢复且不泄露</h3>
+          <p>成功后返回原目标路由；失败保留非敏感输入、提供重试。401 清理敏感缓存，403 不渲染受限数据，
+            登录错误不暴露账号是否存在。</p>
+        </article>
+      </div>
+
+      <div class="table-wrap" style="margin-top:20px">
+        <table>
+          <thead><tr><th>工作项</th><th>分类</th><th>理由</th><th>原型门禁</th></tr></thead>
+          <tbody>
+            <tr><td>登录页</td><td><strong>新页面</strong></td><td>已新增公开入口、认证主任务和 AuthShell。</td><td>1440×900 PC、常驻验证码、错误与提交中。</td></tr>
+            <tr><td>首页占位</td><td><strong>新页面</strong></td><td>已新增登录后默认落点；当前 <code>/</code> 为受保护首页占位，市场功能待后续完整能力交付。</td><td>1440×900 PC、权限可见动作；禁止虚构行情与个人资产 Hero。</td></tr>
+            <tr><td>用户管理</td><td><strong>新页面</strong></td><td>已新增列表、筛选、创建、编辑、删除和目标级授权任务。</td><td>1440×900 PC、创建/编辑弹窗、删除确认和远程状态。</td></tr>
+            <tr><td>AppShell</td><td><strong>既有页面结构的重大修改</strong></td><td>已将横向 AppBar 改为 300px 白色 sidebar + 72px appbar，并加入用户、通知与提示区。</td><td>各新页面已在同一 PC 骨架验证。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="facts">
+      <h2>现状事实、决策与边界</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="marker fact">事实</span>
+          <h3>认证与用户管理已实施</h3>
+          <ul>
+            <li><code>/login</code>、受保护的 <code>/</code> 与 <code>/users</code> 已落地；未登录访问业务路由会安全 replace 回登录页。</li>
+            <li>AppShell 已提供品牌标志、分组 PC sidebar、全局搜索占位、帮助/通知、当前用户、退出和全局反馈。</li>
+            <li>auth client、用户 API、权限模型、路由 guard 与登录/用户浏览器回归测试均已接入。</li>
+            <li>TanStack Query、React Router Data Mode、MUI 7、严格 TypeScript 与路由懒加载持续作为实现基线。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="marker fact">事实</span>
+          <h3>可复用 UI 合同</h3>
+          <ul>
+            <li><a href="../../../service-web/src/styles/design-tokens.ts">design-tokens.ts</a> 已定义 300px sidebar、72px desktop appbar、1200px 管理页和 720px dialog。</li>
+            <li><a href="../../../service-web/src/styles/theme.tsx">theme.tsx</a> 已覆盖 Card、Input、Table、Dialog、MenuItem、Skeleton 与 focus。</li>
+            <li><a href="../0002-minimal-inspired-design-system/index.html">设计系统 0002</a> 已确定紫晶电蓝、白色壳层、4/8px 网格和 WCAG 2.2 AA。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="marker decision">决策</span>
+          <h3>消费已实施的真实 API</h3>
+          <p>生产实现已接入 <a href="../../contracts/0002-user-access-management.openapi.yaml">Contract 0002</a>，
+            通过构建期 <code>VITE_API_BASE_URL</code> 调用真实 Auth/User API，运行时不使用 fixture/MSW。现有
+            <a href="../../contracts/0001-service-api-user-auth.openapi.yaml">Contract 0001</a>
+            只代表已实现基线，不能满足 SUPER_ADMIN、验证码、详情、筛选、软删除和并发控制。</p>
+        </article>
+      </div>
+
+      <aside class="callout warning" style="margin-top:20px">
+        <strong>需求歧义已由 ADR-0008 解释</strong>
+        “未登录不允许访问登录接口和验证码接口”会使登录不可达。本方案采用 ADR-0008 的显式解释：
+        安全例外仅包含登录、常驻图形验证码、Refresh Cookie 刷新与同源幂等退出清理；健康探针是受部署网络
+        限制的运维例外。
+      </aside>
+    </section>
+
+    <section id="prototype">
+      <h2>高保真原型与视觉门禁</h2>
+      <p>
+        <a href="prototype.html?view=login">prototype.html</a> 是单文件、离线可用的可编辑源，
+        复用 qv token 值，不依赖外部字体、CDN 或图片。查询参数切换视图：
+      </p>
+      <div class="prototype-links">
+        <a href="prototype.html?view=login">登录</a>
+        <a href="prototype.html?view=home">首页占位</a>
+        <a href="prototype.html?view=users">用户管理</a>
+        <a href="prototype.html?view=users-create">新建用户弹窗</a>
+        <a href="prototype.html?view=users-edit">编辑用户弹窗</a>
+        <a href="prototype.html?view=states">状态与删除确认</a>
+      </div>
+
+      <div class="shots" aria-label="已审查原型截图">
+        <figure class="shot"><strong><a href="assets/login-desktop.png">login-desktop.png</a></strong><span>1440px · 简化登录、常驻后端 PNG 验证码、无注册入口。</span></figure>
+        <figure class="shot"><strong><a href="assets/home-desktop.png">home-desktop.png</a></strong><span>1440px · 白色 shell + 临时首页。</span></figure>
+        <figure class="shot"><strong><a href="assets/prototype-desktop.png">prototype-desktop.png</a></strong><span>1440px · 主工作台：筛选、表格、cursor 导航与角色状态。</span></figure>
+        <figure class="shot"><strong><a href="assets/users-create-desktop.png">users-create-desktop.png</a></strong><span>1440px · 720px 新建用户弹窗与掩码密码。</span></figure>
+        <figure class="shot"><strong><a href="assets/users-edit-desktop.png">users-edit-desktop.png</a></strong><span>1440px · 编辑用户弹窗、不可改账号与 ETag 冲突提示。</span></figure>
+        <figure class="shot"><strong><a href="assets/prototype-states.png">prototype-states.png</a></strong><span>1440×900 视口全页 · loading/empty/error/403/session/captcha/delete/success。</span></figure>
+      </div>
+
+      <aside class="callout" style="margin-top:20px">
+        <strong>原型 v1.6 视觉自审：通过</strong>
+        2026-07-27 已在 Playwright Chromium 1.61.1、1440×900 PC 视口对实际页面和关键状态完成目检；
+        状态清单使用同视口全页捕获。
+        本轮门禁覆盖“Apex数据智能分析平台”品牌标志、分组菜单、顶部搜索、无侧栏底部冗余、管理员本人只读行、
+        列表刷新、表头升降序、常驻后端 PNG 验证码、720px 创建/编辑 Dialog、cursor 导航，以及删除目标摘要、权限边界与危险确认。
+        默认视口不得出现页面级横向溢出；仅用户表格容器允许内部横滚。
+        ADR-0008、API 0002 与 Contract 0002 已完成实施及协同验收；截图对应当前已交付行为。
+      </aside>
+    </section>
+
+    <section id="architecture">
+      <h2>路由、Shell 与页面架构</h2>
+      <div class="route-list">
+        <div class="route"><code>/login</code><div><strong>Anonymous-only AuthShell。</strong>未认证可访问；
+          已认证访问时重定向到安全的 <code>returnTo</code> 或 <code>/</code>。不显示注册、忘记密码或其他未设计流程。</div></div>
+        <div class="route"><code>/</code><div><strong>Protected AppShell index。</strong>首期显示最小占位，
+          未来在同一路由原位替换为“今日市场”；个人资产与虚构行情不得占据首页首屏。</div></div>
+        <div class="route"><code>/users</code><div><strong>Protected + <code>users:read</code>。</strong>
+          查询、角色、状态、排序、cursor 和 pageSize 写入 URL；结果由 TanStack Query 持有。</div></div>
+        <div class="route"><code>/users?dialog=create</code><div><strong>Protected + <code>users:create</code>。</strong>
+          URL 打开 720px Dialog，使返回键恢复列表；可选角色按服务端 permissions 与 actor role 收敛。</div></div>
+        <div class="route"><code>/users/:id?dialog=edit</code><div><strong>Protected + target policy。</strong>
+          URL 打开 720px Dialog；详情从 Query 获取 ETag，提交 PATCH/DELETE/reset 时带 <code>If-Match</code>。</div></div>
+        <div class="route"><code>403 / route error</code><div><strong>壳层内失败边界。</strong>
+          403 不渲染受限数据；未知路由、可恢复数据错误和全局启动失败分别处理，不让一个子路由替换整个 AppShell。</div></div>
+      </div>
+
+      <div class="grid" style="margin-top:22px">
+        <article class="card">
+          <span class="label">AuthShell</span>
+          <h3>自定义账号登录</h3>
+          <p><strong>输入/输出：</strong>账号、密码、captchaId/captchaAnswer → 当前用户；不提供注册或首次改密门。</p>
+          <p><strong>状态：</strong>表单本地状态、login mutation、页面打开即加载的短期 challenge。</p>
+          <p><strong>失败边界：</strong>失败留在登录页；不加载业务导航或数据。</p>
+        </article>
+        <article class="card">
+          <span class="label">Protected AppShell</span>
+          <h3>导航、用户与反馈骨架</h3>
+          <p><strong>输入/输出：</strong>route matches + me.permissions → 可见菜单、用户菜单和 Outlet。</p>
+          <p><strong>状态：</strong>账号菜单和未开放功能的短期提示；不保存 token 或服务端响应。</p>
+          <p><strong>失败边界：</strong>会话失效清缓存回登录；子页错误保留壳层。</p>
+        </article>
+        <article class="card">
+          <span class="label">User workspace</span>
+          <h3>列表、编辑 Dialog 与危险确认</h3>
+          <p><strong>输入/输出：</strong>URL filters + permissions + User page/ETag → CRUD mutations。</p>
+          <p><strong>状态：</strong>远程数据进 Query，表单与删除确认留组件。</p>
+          <p><strong>失败边界：</strong>每个 mutation 独立处理 400/401/403/404/409/412。</p>
+        </article>
+      </div>
+
+      <h3 style="margin-top:26px">Shell 功能区</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>区域</th><th>首期行为</th><th>无契约时行为</th><th>无障碍</th></tr></thead>
+          <tbody>
+            <tr><td>Sidebar</td><td>按 permissions 过滤稳定导航；选中项使用紫晶软底。</td><td>只显示已有路由，不造空功能。</td><td><code>nav</code>、<code>aria-current</code>、键盘 focus 返回。</td></tr>
+            <tr><td>右上用户</td><td>显示 displayName、角色；菜单含退出。</td><td>会话启动中显示 Skeleton。</td><td>按钮具完整可访问名称；Menu 恢复触发点焦点。</td></tr>
+            <tr><td>通知/提示</td><td>保留通知、帮助区；全局 Snackbar 负责 mutation/session 反馈。</td><td>通知数据契约未冻结时不请求 endpoint；入口禁用或提示“即将开放”。</td><td>Badge 有文本名称；Snackbar 使用 <code>aria-live</code>。</td></tr>
+            <tr><td>全局搜索</td><td>显示设计稿规定的搜索骨架，点击仅提示“即将开放”。</td><td>搜索契约未冻结时不发送请求、不展示虚构结果。</td><td>按钮具完整可访问名称；快捷键只作视觉预留，不劫持输入控件。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="state">
+      <h2>状态所有权与数据策略</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>状态</th><th>唯一所有者</th><th>建议 key / 表达</th><th>禁止</th></tr></thead>
+          <tbody>
+            <tr><td>access token</td><td>Auth client 内存</td><td>reload 后由 Refresh Cookie 重新签发</td><td>localStorage、URL、Zustand、日志</td></tr>
+            <tr><td>当前用户/permissions</td><td>TanStack Query</td><td><code>["auth","me"]</code></td><td>复制到独立全局 store 后手工同步</td></tr>
+            <tr><td>用户列表</td><td>TanStack Query</td><td><code>["users","list",normalizedFilters]</code></td><td>组件 effect 手写缓存</td></tr>
+            <tr><td>用户详情/ETag</td><td>TanStack Query + response metadata</td><td><code>["users","detail",id]</code></td><td>丢失 ETag 后盲写</td></tr>
+            <tr><td>筛选、排序、cursor</td><td>React Router URL</td><td><code>q/role/status/sort/cursor/pageSize</code></td><td>只放组件 state 导致刷新丢失</td></tr>
+            <tr><td>创建/编辑 Dialog 入口</td><td>React Router URL</td><td><code>dialog=create|edit</code></td><td>返回键无法关闭弹窗任务</td></tr>
+            <tr><td>登录/编辑表单</td><td>React Hook Form 或组件</td><td>字段、校验、submitting</td><td>服务端错误长期缓存</td></tr>
+            <tr><td>Dialog、Snackbar、菜单</td><td>局部 UI / Feedback provider</td><td>短生命周期、非敏感</td><td>把密码、token 或完整 Problem 写入提示队列</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted">
+        当前使用显式类型化 API 模块、TanStack Query 与组件本地表单状态；Contract 0002 已实施。
+        浏览器 E2E 的受控请求拦截仅用于回归测试，运行时直接访问真实 API。
+      </p>
+    </section>
+
+    <section id="flows">
+      <h2>核心流程与失败恢复</h2>
+      <div class="grid two">
+        <article class="card">
+          <h3>登录与常驻图形验证码</h3>
+          <pre class="flow" aria-label="登录流程">打开登录页 → POST captcha（空 body）
+  → 原样显示后端 PNG；用户可刷新
+  → 提交 account/password/captchaId/captchaAnswer
+  ├─ 200 → token 仅存内存
+  │        → GET /users/me
+  │        → 校验 returnTo
+  │        → 进入受保护路由
+  ├─ 422 captcha-invalid → 刷新图片并聚焦验证码
+  └─ 400/401/403/429/503 → 通用错误 / 凭据错误 / 跨站拒绝 / 冷却提示 / 可恢复重试
+每次提交后 challenge 作废，再次提交前重新获取。</pre>
+        </article>
+        <article class="card">
+          <h3>刷新、深链与会话失效</h3>
+          <pre class="flow" aria-label="会话启动流程">访问受保护深链
+  → 内存无 token
+  → POST refresh（HttpOnly Cookie）
+  ├─ 200 → GET me → require permission
+  │        ├─ allow → 渲染页面
+  │        └─ deny  → 壳层内 403
+  ├─ 409 refresh-race → 等待跨标签页轮换完成后重试一次
+  └─ 401/403 → 清敏感 Query
+              → /login?returnTo=安全相对路径</pre>
+        </article>
+        <article class="card">
+          <h3>用户创建/修改</h3>
+          <pre class="flow" aria-label="用户写入流程">Actor 打开 720px Dialog
+  → 前端按 permissions 收敛字段
+  → API 再做 actor/target 校验
+  → POST 或 PATCH + If-Match
+  ├─ 2xx → 清空密码、关闭 Dialog、invalidate list/detail、提示成功
+  ├─ 409 → 账号冲突，定位字段
+  ├─ 412 → 保留草稿、重取详情、提示已被修改
+  └─ 403/404 → 关闭受限详情，不泄露目标</pre>
+        </article>
+        <article class="card">
+          <h3>软删除与退出</h3>
+          <pre class="flow" aria-label="删除与退出流程">删除：行操作 → 明确对象 Dialog
+  → DELETE + If-Match
+  → 204（含目标已删除）→ 移除缓存、回列表、toast
+
+退出：POST logout
+  → 精确 Origin；服务端不区分缺失/无效/已撤销 Cookie，始终清 Cookie 并返回 204
+  → Web 清 token 与敏感 Query
+  → replace 到 /login
+  → 禁止返回键恢复受保护内容</pre>
+        </article>
+      </div>
+
+      <aside class="callout" style="margin-top:20px">
+        <strong>路由守卫不是安全边界</strong>
+        React Router 的匹配 loader 可能并行执行。每个受保护数据 loader 必须通过共享
+        <code>requireSession</code>/<code>requirePermission</code> 前置函数，且 service-api 对每个请求独立鉴权；
+        不能只依赖父 loader 或菜单显隐。
+      </aside>
+    </section>
+
+    <section id="contract">
+      <h2>权限矩阵与 API 依赖</h2>
+      <p>
+        权威方案：
+        <a href="../../service-api/0002-user-access-management/index.html">API 0002 用户访问管理与登录安全</a>；
+        机器合同：
+        <a href="../../contracts/0002-user-access-management.openapi.yaml">Contract 0002</a>；
+        决策：
+        <a href="../../decisions/0008-default-deny-auth-and-hierarchical-rbac.md">ADR-0008</a>。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>能力</th><th>USER</th><th>ADMIN</th><th>SUPER_ADMIN</th><th>Web 表达</th></tr></thead>
+          <tbody>
+            <tr><td>登录、本人资料、自愿改密、退出</td><td>允许</td><td>允许</td><td>允许</td><td>会话与用户菜单；管理员设置的密码不触发强制改密。</td></tr>
+            <tr><td>查看用户管理</td><td>拒绝</td><td>允许</td><td>允许</td><td>USER 不显示菜单；直接访问显示 403。</td></tr>
+            <tr><td>管理 USER</td><td>拒绝</td><td>允许</td><td>允许</td><td>创建、编辑、禁用、软删除、重置密码。</td></tr>
+            <tr><td>创建/管理 ADMIN</td><td>拒绝</td><td>拒绝</td><td>允许</td><td>ADMIN 不显示管理员角色选项与目标操作。</td></tr>
+            <tr><td>创建/修改/删除 SUPER_ADMIN</td><td>拒绝</td><td>拒绝</td><td>普通 API 拒绝</td><td>管理列表只显示当前 Actor 本人只读行，不枚举其他超管，不提供管理动作。</td></tr>
+            <tr><td>管理自身角色/状态/删除</td><td>拒绝</td><td>拒绝</td><td>拒绝</td><td>动作禁用并说明原因；API 仍复核。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style="margin-top:26px">Web 消费点</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Contract 0002 能力</th><th>页面用途</th><th>缓存/并发</th><th>关键错误</th></tr></thead>
+          <tbody>
+            <tr><td>login / captcha / refresh / logout</td><td>AuthShell、会话启动与幂等退出</td><td>页面打开加载 captcha；challenge 单次使用且 no-store；跨标签页协调 refresh</td><td>400、401、403、409、422、429、503</td></tr>
+            <tr><td>GET users/me</td><td>AppShell 用户、角色与 permissions</td><td><code>auth/me</code>；安全变化立即失效</td><td>401</td></tr>
+            <tr><td>GET users</td><td>列表、q/role/status/sort/cursor/pageSize</td><td>筛选绑定 query key；保留前页几何</td><td>400、401、403</td></tr>
+            <tr><td>GET/PATCH users/{id}</td><td>详情与编辑 Dialog</td><td>保存 ETag；PATCH 带 If-Match</td><td>403/404、412</td></tr>
+            <tr>
+              <td>POST users</td><td>新建用户 Dialog</td>
+              <td>管理员输入初始密码并站外交付；提交结束即清空；响应/Toast 不回显；随后 invalidates list</td>
+              <td>400、403、409</td>
+            </tr>
+            <tr><td>DELETE users/{id}</td><td>明确对象的危险确认</td><td>If-Match；成功移除 detail/list</td><td>403/404、412</td></tr>
+            <tr>
+              <td>password-reset</td><td>更多操作中的独立确认</td>
+              <td>管理员输入新密码；提交结束即清空且不缓存、不在响应或提示回显；站外交付</td>
+              <td>403/404、412</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="quality">
+      <h2>PC 桌面、无障碍、安全与性能</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">PC desktop</span>
+          <h3>固定桌面信息密度</h3>
+          <ul>
+            <li>产品范围只覆盖 PC 桌面浏览器；默认设计与视觉验收视口为 1440×900。</li>
+            <li>300px sidebar、72px appbar；内容区在 1200/1440/1920+ PC 桌面宽度使用 24/32/40px 内边距，宽表工作区最大 1536px。</li>
+            <li>表格最小宽约 900px；默认视口全部核心列可读，必要时仅表格容器内部横滚。</li>
+            <li>创建与编辑统一使用居中 Dialog，宽 720px；header/footer 可见，超高时仅内容区滚动。</li>
+            <li>所有交互仅定义桌面鼠标、键盘与可见焦点反馈。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">Accessibility</span>
+          <h3>WCAG 2.2 AA</h3>
+          <ul>
+            <li>持久 label、错误文本、自动完成属性、Enter 提交与密码显示可访问名称。</li>
+            <li>验证码提供键盘可达的刷新、过期和错误说明；按产品约束不提供音频功能。</li>
+            <li>导航 <code>aria-current</code>、skip link、可见 focus、40px 最小目标。</li>
+            <li>角色/状态 Chip 含文字；Toast 用 live region；Dialog 管理焦点进入与返回。</li>
+            <li>尊重 reduced-motion；Skeleton 接近最终几何。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">Security</span>
+          <h3>前端最小暴露</h3>
+          <ul>
+            <li>不持久化 access token、密码、captcha 答案、challenge ID、Cookie 或完整 Problem detail。</li>
+            <li>密码输入默认掩码且不预填；显示明文需主动触发，失焦、提交或关闭 Dialog 自动恢复掩码并清空。</li>
+            <li>编辑 Dialog 不展示密码字段；重置密码走独立确认。日志、埋点与错误上报中的账号显示为 <code>ad***01</code>。</li>
+            <li><code>returnTo</code> 仅接受同源相对路径，拒绝协议、host 与双斜线。</li>
+            <li>401 清所有身份相关 Query；403 不清会话，不渲染受限数据。</li>
+            <li>退出使用 history replace；缓存和浏览器返回不能恢复敏感页面。</li>
+            <li>客户端显隐不替代 API actor/target policy。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3 style="margin-top:26px">性能与感知预算</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>项目</th><th>已实施目标</th><th>验证</th></tr></thead>
+          <tbody>
+            <tr><td>路由加载</td><td>login、home、users 独立 lazy chunk；登录/用户页不得加载 KLineChart/ECharts。</td><td><code>vp build</code> chunk 清单。</td></tr>
+            <tr><td>列表 payload</td><td>遵守 Contract 0002，pageSize 最大 100；默认 20。</td><td>真实 API 浏览器联调、Contract 回归与 Network。</td></tr>
+            <tr><td>重渲染</td><td>表格行、Dialog 表单、AppShell 用户区隔离；输入不触发整个壳层重渲染。</td><td>React Profiler；阈值由 service-web 实现 PR 固定。</td></tr>
+            <tr><td>感知加载</td><td>会话启动显示中性启动态；列表 Skeleton 不闪现受保护数据。</td><td>慢网 E2E 与视觉检查。</td></tr>
+            <tr><td>bundle 数字预算</td><td><span class="marker pending">待决</span> 以实施前现有 build 为基线，由 service-web owner 在实现 PR 固定 gzip 增量上限。</td><td>CI build report。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="delivery">
+      <h2>实施、迁移、回滚与验收</h2>
+      <ol class="steps">
+        <li><strong>阶段 0｜门禁：</strong>已实施 ADR-0008、API 0002、Contract 0002；已生成并检查本方案全部截图。</li>
+        <li><strong>阶段 1｜客户端基础：</strong>已建立类型化 API 模块、内存 token、refresh single-flight、Problem 映射与 auth Query。</li>
+        <li><strong>阶段 2｜路由与壳层：</strong>已实现 AuthShell、Protected AppShell、<code>/login</code>、
+          <code>/</code> 占位、401/403/error 边界、用户菜单与反馈区。</li>
+        <li><strong>阶段 3｜用户工作台：</strong>已实现 URL 筛选、cursor 列表、详情/创建/编辑 Dialog、删除/重置确认、ETag/412 恢复。</li>
+        <li><strong>阶段 4｜协同启用：</strong>已启用 SUPER_ADMIN/DELETED；Web/API/OpenAPI 同窗口发布并运行角色矩阵 E2E。</li>
+        <li><strong>阶段 5｜首页替换：</strong>真实今日市场契约冻结并另行完成新页面原型后，在同一 <code>/</code> 路由替换临时占位。</li>
+      </ol>
+
+      <div class="grid">
+        <article class="card">
+          <span class="label">Rollout</span>
+          <h3>协同、已接入</h3>
+          <p>Auth/User 真实调用已通过构建期 <code>VITE_API_BASE_URL</code> 接入；无 MSW-only 运行时或真实 API 构建开关。
+            超级管理员迁移、API 部署与 Web 启用顺序遵守 ADR-0008。</p>
+        </article>
+        <article class="card">
+          <span class="label">Rollback</span>
+          <h3>版本化回滚</h3>
+          <p>Web 回滚使用上一份已验证的兼容构建，不回退服务端安全枚举或软删除数据。
+            若鉴权异常，保持默认拒绝，不临时开放业务路由。</p>
+        </article>
+        <article class="card">
+          <span class="label">Observability</span>
+          <h3>不记录秘密</h3>
+          <p>记录 route、operationId、status、Problem type、requestId、耗时与恢复动作；禁止记录密码、
+            token、captcha 答案、Refresh Cookie 或完整用户对象。</p>
+        </article>
+      </div>
+
+      <h3 style="margin-top:28px">验收清单</h3>
+      <ul class="checklist">
+        <li>匿名用户只能看登录页；已登录访问登录页跳回安全目标。</li>
+        <li>登录账号框仅提示“请输入账号”，不展示创建规则；5–32 位规则只在新建用户弹窗校验。</li>
+        <li>后端 PNG 验证码在登录页常驻；页面打开即加载，每次提交后刷新，无音频入口。</li>
+        <li>管理员设置的密码可直接登录；不存在首次登录强制改密路由或状态。</li>
+        <li>刷新并发 single-flight；401 清身份缓存，403 保留会话。</li>
+        <li>USER 直接访问用户管理得到 403 且无受限数据闪现。</li>
+        <li>ADMIN 只能管理 USER；SUPER_ADMIN 可管理 ADMIN/USER。</li>
+        <li>ADMIN/SUPER_ADMIN 本人出现在列表只读行；编辑、重置密码和删除动作不可用，其他 SUPER_ADMIN 不可枚举。</li>
+        <li>列表筛选、排序、cursor 可通过 URL 重访。</li>
+        <li>CRUD 处理 loading、empty、error、409、412、success。</li>
+        <li>删除明确重复对象；成功后列表、详情缓存一致。</li>
+        <li>1440×900 PC 默认视口无页面级横向溢出，固定区不遮挡核心操作。</li>
+        <li>键盘、焦点、Dialog、live region 与 reduced-motion 通过。</li>
+        <li>登录/用户路由未打入图表引擎 chunk。</li>
+      </ul>
+
+      <div class="table-wrap" style="margin-top:22px">
+        <table>
+          <thead><tr><th>验证命令</th><th>本方案阶段状态</th><th>实现验收要求</th></tr></thead>
+          <tbody>
+            <tr><td><code>vp check</code></td><td>通过：59 文件格式检查，52 文件 lint/typecheck</td><td>后续变更继续保持通过</td></tr>
+            <tr><td><code>vp test</code></td><td>通过：7 个测试文件、21 个测试</td><td>持续覆盖 auth、表单、RBAC、Query/412 回归</td></tr>
+            <tr><td><code>vp build</code></td><td>通过；登录/用户 chunk 未加载图表引擎。既有 AnalysisChart 仍有 &gt;500 kB 警告。</td><td>后续复查 chunk 边界</td></tr>
+            <tr><td><code>vp run e2e</code></td><td>通过：5 个 Chromium 场景，覆盖匿名、401、403、ADMIN、SUPER_ADMIN 与 DELETED。</td><td>保持 1440×900 PC 角色矩阵回归</td></tr>
+            <tr><td><code>docker build --tag quant-v2/service-web:local service-web</code></td><td>通过；容器 <code>GET /healthz</code> 返回 ok</td><td>后续变更继续保持通过</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style="margin-top:28px">待决问题</h3>
+      <div class="grid">
+        <article class="card"><span class="marker fact">完成</span><h3>截图视觉门禁</h3><p>6 张 PC 截图已按 v1.5 原型重新生成并逐张自审，默认视口无横向溢出或资源错误。</p></article>
+        <article class="card"><span class="marker pending">待决</span><h3>通知与全局搜索合同</h3><p>负责人：产品/API。触发：需要真实通知或搜索时。首期只保留骨架与本地提示，不猜 endpoint。</p></article>
+        <article class="card"><span class="marker pending">待决</span><h3>验证码与 bundle 预算</h3><p>负责人：API/Web。验证码已接入后端非活动 PNG、无音频；后续需为既有 AnalysisChart 超过 500 kB 的构建警告确定 gzip 增量阈值。</p></article>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      Apex数据智能分析平台登录、受保护应用骨架与用户管理 · 变更摘要：2026-07-26 已补齐品牌标志、菜单分组、顶部搜索、桌面分档内容宽度、列表刷新与本人只读行；PC 桌面专用。
+    </div>
+  </footer>
+</body>
+</html>

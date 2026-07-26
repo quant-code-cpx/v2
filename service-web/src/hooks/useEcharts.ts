@@ -8,7 +8,7 @@ export function useECharts(option: EChartsOption) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ECharts | null>(null);
 
-  /** Create responsive chart engine once and dispose it with component. */
+  /** Create a container-resizing chart engine once and dispose it with component. */
   useEffect(() => {
     const element = containerRef.current;
 

@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Apex数据智能分析平台登录、受保护应用骨架与用户管理高保真原型">
+  <title>登录｜Apex数据智能分析平台原型</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --qv-neutral-0: #fff;
+      --qv-neutral-100: #f9fafb;
+      --qv-neutral-200: #f4f6f8;
+      --qv-neutral-300: #dfe3e8;
+      --qv-neutral-500: #919eab;
+      --qv-neutral-600: #637381;
+      --qv-neutral-700: #454f5b;
+      --qv-neutral-800: #1c252e;
+      --qv-primary-lighter: #f0eeff;
+      --qv-primary-main: #6d5ce7;
+      --qv-primary-dark: #4f46b8;
+      --qv-secondary-main: #2f6bff;
+      --qv-info-main: #008fb3;
+      --qv-success-main: #22c55e;
+      --qv-warning-main: #d99118;
+      --qv-error-main: #ff5630;
+      --qv-divider: rgb(145 158 171 / 20%);
+      --qv-focus: 0 0 0 3px rgb(109 92 231 / 28%);
+      --qv-shadow-card: 0 0 2px rgb(145 158 171 / 20%), 0 12px 24px -4px rgb(145 158 171 / 12%);
+      --qv-shadow-dialog: 0 24px 72px -12px rgb(20 26 33 / 30%);
+      --qv-font: "Public Sans Variable", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      --qv-display: Barlow, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      --sidebar: 300px;
+      --appbar: 72px;
+      --radius-control: 8px;
+      --radius-card: 16px;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--qv-neutral-0); }
+    body {
+      min-width: 1200px;
+      margin: 0;
+      color: var(--qv-neutral-800);
+      background: var(--qv-neutral-200);
+      font-family: var(--qv-font);
+      font-size: 14px;
+      line-height: 1.55;
+      font-variant-numeric: tabular-nums;
+    }
+    button, input, select { font: inherit; }
+    button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
+      outline: none;
+      box-shadow: var(--qv-focus);
+    }
+    a { color: inherit; }
+    [hidden] { display: none !important; }
+    .skip-link {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      z-index: 100;
+      translate: 0 -160%;
+      padding: 10px 14px;
+      border-radius: 8px;
+      background: var(--qv-neutral-800);
+      color: #fff;
+      text-decoration: none;
+    }
+    .skip-link:focus { translate: 0; }
+    .icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+    .icon-sm { width: 17px; height: 17px; }
+    .icon-lg { width: 30px; height: 30px; }
+    .muted { color: var(--qv-neutral-600); }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+
+    /* Login */
+    .auth-screen {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(340px, 42%) 1fr;
+      background: #fff;
+    }
+    .auth-brand {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 40px 48px;
+      background: var(--qv-neutral-200);
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      width: max-content;
+      color: var(--qv-neutral-800);
+      font: 800 20px/1 var(--qv-display);
+      letter-spacing: .02em;
+      text-decoration: none;
+    }
+    .brand-mark {
+      position: relative;
+      width: 30px;
+      height: 34px;
+    }
+    .brand-mark::before, .brand-mark::after {
+      content: "";
+      position: absolute;
+      inset: 1px 10px;
+      border-radius: 999px;
+      background: var(--qv-primary-main);
+      transform: rotate(-28deg);
+    }
+    .brand-mark::after { inset: 9px 4px; background: var(--qv-secondary-main); transform: rotate(28deg); }
+    .auth-context { max-width: 480px; margin: auto 0; }
+    .auth-context h1 {
+      margin: 0;
+      font: 800 clamp(30px, 4vw, 48px)/1.18 var(--qv-display);
+      letter-spacing: -.025em;
+    }
+    .auth-context p { max-width: 38ch; margin: 18px 0 0; color: var(--qv-neutral-600); font-size: 16px; }
+    .auth-form-side { display: grid; place-items: center; padding: 40px; }
+    .login-card { width: min(100%, 430px); padding: 32px; border-radius: var(--radius-card); background: #fff; box-shadow: var(--qv-shadow-card); }
+    .login-card h2 { margin: 0 0 28px; font: 800 28px/1.35 var(--qv-display); }
+    .field { display: grid; gap: 7px; margin-top: 18px; }
+    .field label, .field-label { color: var(--qv-neutral-700); font-weight: 700; }
+    .input-wrap { position: relative; }
+    .field input, .field select {
+      width: 100%;
+      height: 56px;
+      padding: 0 14px;
+      border: 1px solid var(--qv-divider);
+      border-radius: var(--radius-control);
+      background: #fff;
+      color: var(--qv-neutral-800);
+      outline: none;
+    }
+    .field input:hover, .field select:hover { border-color: rgb(145 158 171 / 38%); }
+    .field input:focus, .field select:focus { border: 2px solid var(--qv-primary-main); }
+    .field input[aria-invalid="true"] { border-color: var(--qv-error-main); }
+    .input-wrap input { padding-right: 48px; }
+    .input-action {
+      position: absolute;
+      top: 8px;
+      right: 6px;
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--qv-neutral-600);
+      cursor: pointer;
+    }
+    .helper { margin: 0; color: var(--qv-neutral-600); font-size: 12px; }
+    .captcha-row { display: grid; grid-template-columns: 1fr 116px 40px; gap: 8px; }
+    .captcha-row input {
+      width: 100%;
+      height: 56px;
+      padding: 0 14px;
+      border: 1px solid var(--qv-divider);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--qv-neutral-800);
+      outline: none;
+    }
+    .captcha-image {
+      display: block;
+      width: 116px;
+      height: 56px;
+      object-fit: cover;
+      border: 1px solid rgb(109 92 231 / 24%);
+      border-radius: 8px;
+      background: var(--qv-primary-lighter);
+    }
+    .captcha-row button { width: 40px; height: 40px; align-self: center; border: 0; border-radius: 50%; background: #fff; color: var(--qv-neutral-600); cursor: pointer; }
+    .btn {
+      min-height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border: 1px solid transparent;
+      border-radius: var(--radius-control);
+      background: transparent;
+      color: var(--qv-neutral-800);
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .btn-primary { background: var(--qv-primary-main); color: #fff; box-shadow: 0 8px 16px rgb(109 92 231 / 24%); }
+    .btn-primary:hover { background: var(--qv-primary-dark); }
+    .btn-outlined { border-color: var(--qv-divider); background: #fff; }
+    .btn-danger { background: var(--qv-error-main); color: #fff; }
+    .btn-lg { min-height: 48px; padding: 10px 16px; }
+    .btn-block { width: 100%; margin-top: 24px; }
+
+    /* Protected shell */
+    .workspace { min-height: 100vh; background: var(--qv-neutral-200); }
+    .sidebar {
+      position: fixed;
+      inset: 0 auto 0 0;
+      z-index: 30;
+      width: var(--sidebar);
+      display: flex;
+      flex-direction: column;
+      padding: 26px 16px 16px;
+      border-right: 1px solid var(--qv-divider);
+      background: #fff;
+    }
+    .sidebar .brand {
+      width: auto;
+      margin: 0 8px 32px;
+      gap: 8px;
+      font-size: 15px;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+    .sidebar .brand-mark { width: 24px; height: 28px; flex: 0 0 24px; }
+    .nav-label { margin: 20px 12px 8px; color: var(--qv-neutral-500); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .side-nav { display: grid; gap: 4px; }
+    .side-nav a {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      color: var(--qv-neutral-600);
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .side-nav a:hover { background: var(--qv-neutral-100); color: var(--qv-neutral-800); }
+    .side-nav a[aria-current="page"] { background: var(--qv-primary-lighter); color: var(--qv-primary-dark); }
+    .side-nav .nav-spacer { margin-top: 12px; }
+    .appbar {
+      position: fixed;
+      inset: 0 0 auto var(--sidebar);
+      z-index: 25;
+      height: var(--appbar);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--qv-divider);
+      background: #fff;
+    }
+    .global-search {
+      position: relative;
+      width: min(100%, 560px);
+      margin: 0 auto;
+    }
+    .global-search input {
+      width: 100%;
+      height: 42px;
+      padding: 0 42px;
+      border: 1px solid var(--qv-divider);
+      border-radius: 8px;
+      background: #fff;
+      outline: none;
+    }
+    .global-search > .icon { position: absolute; top: 11px; left: 14px; color: var(--qv-neutral-500); }
+    .kbd { position: absolute; top: 8px; right: 9px; padding: 3px 7px; border: 1px solid var(--qv-divider); border-radius: 6px; color: var(--qv-neutral-500); background: var(--qv-neutral-100); font-size: 11px; }
+    .top-actions { display: flex; align-items: center; gap: 4px; }
+    .icon-btn {
+      position: relative;
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--qv-neutral-700);
+      cursor: pointer;
+    }
+    .icon-btn:hover { background: var(--qv-neutral-100); }
+    .badge {
+      position: absolute;
+      top: 1px;
+      right: 0;
+      min-width: 18px;
+      height: 18px;
+      display: grid;
+      place-items: center;
+      padding: 0 4px;
+      border: 2px solid #fff;
+      border-radius: 999px;
+      background: var(--qv-error-main);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 800;
+    }
+    .user-menu {
+      min-width: 188px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: 4px;
+      padding: 4px 8px 4px 4px;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--qv-neutral-800);
+      text-align: left;
+      cursor: pointer;
+    }
+    .user-menu:hover { background: var(--qv-neutral-100); }
+    .avatar {
+      width: 40px;
+      height: 40px;
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--qv-primary-main);
+      color: #fff;
+      font-weight: 800;
+    }
+    .user-copy { min-width: 0; flex: 1; }
+    .user-copy strong, .user-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .user-copy span { color: var(--qv-neutral-600); font-size: 11px; }
+    .workspace-main {
+      min-height: 100vh;
+      margin-left: var(--sidebar);
+      padding: calc(var(--appbar) + 32px) 40px 48px;
+    }
+    .page { width: min(100%, 1200px); margin: 0 auto; }
+    .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+    .page-header h1 { margin: 0; font: 800 28px/1.35 var(--qv-display); letter-spacing: -.02em; }
+    .page-header p { margin: 5px 0 0; color: var(--qv-neutral-600); }
+    .breadcrumb { display: flex; gap: 7px; margin-bottom: 8px; color: var(--qv-neutral-600); font-size: 12px; }
+    .card { border-radius: var(--radius-card); background: #fff; box-shadow: var(--qv-shadow-card); }
+
+    /* Placeholder home */
+    .placeholder {
+      min-height: 520px;
+      display: grid;
+      place-items: center;
+      padding: 40px;
+      text-align: center;
+    }
+    .placeholder-inner { max-width: 520px; }
+    .placeholder-icon {
+      width: 72px;
+      height: 72px;
+      display: grid;
+      place-items: center;
+      margin: 0 auto 20px;
+      border-radius: 20px;
+      background: var(--qv-primary-lighter);
+      color: var(--qv-primary-main);
+    }
+    .placeholder h2 { margin: 0; font: 800 24px/1.4 var(--qv-display); }
+    .placeholder p { margin: 12px auto 24px; color: var(--qv-neutral-600); }
+    .route-note {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 18px;
+      padding: 7px 10px;
+      border-radius: 6px;
+      background: var(--qv-neutral-100);
+      color: var(--qv-neutral-600);
+      font-size: 12px;
+    }
+
+    /* Users */
+    .filter-card { padding: 20px; }
+    .filters { display: grid; grid-template-columns: minmax(240px, 1fr) 160px 160px auto auto; gap: 12px; }
+    .compact-field { position: relative; }
+    .compact-field input, .compact-field select {
+      width: 100%;
+      height: 44px;
+      padding: 0 12px;
+      border: 1px solid var(--qv-divider);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--qv-neutral-800);
+      outline: none;
+    }
+    .compact-field.search input { padding-left: 40px; }
+    .compact-field.search .icon { position: absolute; top: 12px; left: 12px; color: var(--qv-neutral-500); }
+    .result-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 20px 2px 12px; }
+    .result-bar strong { font-size: 16px; }
+    .result-bar span { color: var(--qv-neutral-600); }
+    .table-card { overflow: hidden; }
+    .table-scroll { overflow-x: auto; }
+    .user-table { width: 100%; min-width: 900px; border-collapse: collapse; }
+    .user-table th, .user-table td { height: 68px; padding: 12px 16px; border-bottom: 1px dashed var(--qv-divider); text-align: left; vertical-align: middle; }
+    .user-table th { height: 56px; background: var(--qv-neutral-200); color: var(--qv-neutral-600); font-size: 12px; font-weight: 700; }
+    .user-table tbody tr:hover { background: rgb(145 158 171 / 6%); }
+    .identity { display: flex; align-items: center; gap: 11px; }
+    .identity .avatar { width: 36px; height: 36px; background: var(--qv-primary-lighter); color: var(--qv-primary-dark); }
+    .identity strong, .identity span { display: block; }
+    .identity span { color: var(--qv-neutral-600); font-size: 12px; }
+    .chip {
+      min-height: 24px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .chip-admin { background: var(--qv-primary-lighter); color: var(--qv-primary-dark); }
+    .chip-super { border: 1px solid rgb(109 92 231 / 28%); background: #fff; color: var(--qv-primary-dark); }
+    .chip-user { background: rgb(47 107 255 / 9%); color: #1d4ed8; }
+    .chip-active { background: rgb(34 197 94 / 10%); color: #16803d; }
+    .chip-disabled { background: rgb(145 158 171 / 12%); color: var(--qv-neutral-600); }
+    .chip-super { background: rgb(217 145 24 / 12%); color: #935c00; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .row-actions { display: flex; align-items: center; gap: 2px; }
+    .row-actions .icon-btn { width: 36px; height: 36px; }
+    .table-footer { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; color: var(--qv-neutral-600); }
+    .pager { display: flex; align-items: center; gap: 6px; }
+    .page-btn { min-width: 36px; height: 36px; border: 1px solid var(--qv-divider); border-radius: 8px; background: #fff; color: var(--qv-neutral-600); cursor: pointer; }
+    .page-btn[aria-current="page"] { border-color: var(--qv-primary-main); background: var(--qv-primary-lighter); color: var(--qv-primary-dark); font-weight: 800; }
+
+    /* Create/edit dialog */
+    .user-dialog-layer {
+      position: fixed;
+      inset: 0;
+      z-index: 70;
+      display: grid;
+      place-items: center;
+      padding: 40px;
+      background: rgb(20 26 33 / 36%);
+    }
+    .user-dialog {
+      width: min(720px, calc(100vw - 80px));
+      max-height: calc(100vh - 80px);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      overflow: hidden;
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: var(--qv-shadow-dialog);
+    }
+    .user-dialog-head, .user-dialog-foot { padding: 20px 24px; background: #fff; }
+    .user-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 1px solid var(--qv-divider); }
+    .user-dialog-head h2 { margin: 0; font: 800 20px/1.4 var(--qv-display); }
+    .user-dialog-head p { margin: 4px 0 0; color: var(--qv-neutral-600); font-size: 12px; }
+    .user-dialog-body { overflow-y: auto; padding: 20px 24px 24px; }
+    .user-dialog-foot { display: flex; justify-content: flex-end; gap: 12px; border-top: 1px solid var(--qv-divider); }
+    .user-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+    .user-form-grid .field { min-width: 0; }
+    .user-form-grid .full-row { grid-column: 1 / -1; }
+    .inline-alert {
+      display: flex;
+      gap: 10px;
+      padding: 12px 14px;
+      border: 1px solid rgb(0 143 179 / 20%);
+      border-radius: 8px;
+      background: rgb(0 143 179 / 7%);
+      color: #006e89;
+      font-size: 12px;
+    }
+    .role-help { display: grid; gap: 6px; margin-top: 12px; padding: 12px; border-radius: 8px; background: var(--qv-neutral-100); color: var(--qv-neutral-600); font-size: 12px; }
+
+    /* State gallery */
+    .state-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+    .state-card { min-height: 206px; padding: 22px; }
+    .state-card h2 { margin: 0 0 4px; font: 800 17px/1.4 var(--qv-display); }
+    .state-card > p { margin: 0 0 18px; color: var(--qv-neutral-600); }
+    .skeleton { overflow: hidden; position: relative; height: 14px; margin-top: 12px; border-radius: 7px; background: var(--qv-neutral-200); }
+    .skeleton::after { content: ""; position: absolute; inset: 0; background: rgb(255 255 255 / 45%); transform: translateX(-100%); animation: shimmer 1.4s infinite; }
+    .empty { display: grid; place-items: center; padding: 12px; text-align: center; }
+    .empty .placeholder-icon { width: 48px; height: 48px; margin-bottom: 8px; border-radius: 14px; }
+    .alert {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 12px 14px;
+      border: 1px solid;
+      border-radius: 8px;
+    }
+    .alert-error { border-color: rgb(255 86 48 / 22%); background: rgb(255 86 48 / 8%); color: #b52e13; }
+    .alert-warning { border-color: rgb(217 145 24 / 24%); background: rgb(217 145 24 / 8%); color: #845406; }
+    .alert-success { border-color: rgb(34 197 94 / 24%); background: rgb(34 197 94 / 8%); color: #16803d; }
+    .dialog-stage {
+      position: relative;
+      min-height: 360px;
+      grid-column: 1 / -1;
+      overflow: hidden;
+      padding: 22px;
+    }
+    .dialog-backdrop { position: absolute; inset: 0; display: grid; place-items: center; padding: 18px; background: rgb(20 26 33 / 34%); }
+    .dialog {
+      width: min(100%, 480px);
+      padding: 24px;
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: 0 22px 56px rgb(20 26 33 / 26%);
+    }
+    .dialog h2 { margin: 0; font: 800 20px/1.4 var(--qv-display); }
+    .dialog p { margin: 10px 0 18px; color: var(--qv-neutral-600); }
+    .dialog .danger-object { padding: 12px; border-radius: 8px; background: rgb(255 86 48 / 8%); color: #b52e13; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 22px; }
+    .toast {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      z-index: 90;
+      min-width: 300px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 14px 16px;
+      border-radius: 10px;
+      background: var(--qv-neutral-800);
+      color: #fff;
+      box-shadow: 0 16px 40px rgb(20 26 33 / 24%);
+    }
+    .toast .icon { color: #5fe08a; }
+    .prototype-switcher {
+      position: fixed;
+      z-index: 110;
+      right: 12px;
+      bottom: 12px;
+      display: flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--qv-divider);
+      border-radius: 10px;
+      background: rgb(255 255 255 / 94%);
+      box-shadow: var(--qv-shadow-card);
+    }
+    .prototype-switcher a { padding: 5px 8px; border-radius: 6px; color: var(--qv-neutral-600); font-size: 10px; font-weight: 700; text-decoration: none; }
+    .prototype-switcher a[aria-current="page"] { background: var(--qv-primary-lighter); color: var(--qv-primary-dark); }
+    .capture .prototype-switcher { display: none; }
+    .capture .toast { position: static; min-width: 0; margin: 20px 0 0; }
+
+    @keyframes shimmer { to { transform: translateX(100%); } }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" focusable="false">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.5 2.5 0 1 1 3.2 2.4c-.9.35-.9 1.1-.9 1.6M12 17h.01"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M6.1 9a7 7 0 0 1 11.6-2.6L20 11M4 13l2.3 4.6A7 7 0 0 0 18 15"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+  </svg>
+
+  <a class="skip-link" id="skip-link" href="#auth-main">跳到主要内容</a>
+
+  <section class="auth-screen" id="auth-screen" aria-labelledby="login-title">
+    <aside class="auth-brand">
+      <a class="brand" href="?view=login" aria-label="Apex数据智能分析平台登录页">
+        <span class="brand-mark" aria-hidden="true"></span><span>Apex数据智能分析平台</span>
+      </a>
+      <div class="auth-context">
+        <h1>股票与市场<br>数据分析</h1>
+        <p>支持行情、指标、策略研究，后续接入 AI 研究助手。</p>
+      </div>
+    </aside>
+    <main class="auth-form-side" id="auth-main">
+      <form class="login-card" data-auth-view="login">
+        <h2 id="login-title">登录</h2>
+        <div class="field">
+          <label for="login-account">账号</label>
+          <input id="login-account" name="account" autocomplete="username" placeholder="请输入账号">
+        </div>
+        <div class="field">
+          <label for="login-password">密码</label>
+          <div class="input-wrap">
+            <input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码">
+            <button class="input-action" type="button" aria-label="显示密码" title="显示密码"><svg class="icon"><use href="#i-eye"/></svg></button>
+          </div>
+        </div>
+        <div class="field" id="captcha-slot">
+          <label for="login-captcha">验证码</label>
+          <div class="captcha-row">
+            <input id="login-captcha" name="captchaAnswer" autocomplete="off" maxlength="6" placeholder="请输入验证码">
+            <img class="captcha-image" src="assets/captcha-fixture.png" alt="后端返回的图形验证码示例">
+            <button type="button" aria-label="刷新验证码" title="刷新验证码"><svg class="icon"><use href="#i-refresh"/></svg></button>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-lg btn-block" type="submit">登录</button>
+      </form>
+    </main>
+  </section>
+
+  <div class="workspace" id="workspace" hidden>
+    <aside class="sidebar" aria-label="主导航">
+      <a class="brand" href="?view=home"><span class="brand-mark" aria-hidden="true"></span><span>Apex数据智能分析平台</span></a>
+      <span class="nav-label">工作区</span>
+      <nav class="side-nav">
+        <a href="?view=home" data-nav="home"><svg class="icon"><use href="#i-home"/></svg>首页</a>
+        <span class="nav-label nav-spacer">系统管理</span>
+        <a href="?view=users" data-nav="users"><svg class="icon"><use href="#i-users"/></svg>用户管理</a>
+      </nav>
+    </aside>
+
+    <header class="appbar">
+      <label class="global-search">
+        <span class="sr-only">全局搜索</span>
+        <svg class="icon"><use href="#i-search"/></svg>
+        <input type="search" placeholder="搜索股票、页面或功能">
+        <span class="kbd">⌘ K</span>
+      </label>
+      <div class="top-actions" aria-label="全局功能">
+        <button class="icon-btn" type="button" aria-label="通知功能即将开放" title="通知功能即将开放"><svg class="icon"><use href="#i-bell"/></svg></button>
+        <button class="icon-btn help-action" type="button" aria-label="帮助与系统提示" title="帮助与系统提示"><svg class="icon"><use href="#i-help"/></svg></button>
+        <button class="user-menu" type="button" aria-label="打开用户菜单：系统管理员">
+          <span class="avatar" aria-hidden="true">系</span>
+          <span class="user-copy"><strong>系统管理员</strong><span>超级管理员</span></span>
+          <svg class="icon icon-sm"><use href="#i-chevron"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="workspace-main" id="workspace-main">
+      <section class="page" data-page="home">
+        <header class="page-header">
+          <div><div class="breadcrumb"><span>工作区</span><span>/</span><span>首页</span></div><h1>首页</h1><p>登录后的默认落点。</p></div>
+        </header>
+        <article class="card placeholder">
+          <div class="placeholder-inner">
+            <div class="placeholder-icon"><svg class="icon icon-lg"><use href="#i-home"/></svg></div>
+            <h2>首页能力建设中</h2>
+            <p>当前仅提供受保护路由与应用骨架。功能齐全后，此处将在同一 <strong>/</strong> 路由替换为“今日市场”，不会使用个人资产 Hero 或虚构行情占位。</p>
+            <a class="btn btn-primary" href="?view=users"><svg class="icon icon-sm"><use href="#i-users"/></svg>进入用户管理</a>
+            <div class="route-note"><svg class="icon icon-sm"><use href="#i-info"/></svg>临时页面 · 后续原位替换</div>
+          </div>
+        </article>
+      </section>
+
+      <section class="page" data-page="users" hidden>
+        <header class="page-header">
+          <div><div class="breadcrumb"><span>系统管理</span><span>/</span><span>用户管理</span></div><h1>用户管理</h1><p>查询、创建和维护平台账号；操作范围由服务端权限决定。</p></div>
+          <a class="btn btn-primary btn-lg" href="?view=users-create"><svg class="icon icon-sm"><use href="#i-plus"/></svg>新建用户</a>
+        </header>
+        <section class="card filter-card" aria-label="用户筛选">
+          <div class="filters">
+            <label class="compact-field search"><span class="sr-only">搜索用户</span><svg class="icon"><use href="#i-search"/></svg><input type="search" placeholder="搜索账号或显示名称"></label>
+            <label class="compact-field"><span class="sr-only">角色</span><select><option>全部角色</option><option>管理员</option><option>普通用户</option></select></label>
+            <label class="compact-field"><span class="sr-only">状态</span><select><option>全部状态</option><option>启用</option><option>已禁用</option><option>已删除（仅超级管理员）</option></select></label>
+            <button class="btn btn-outlined" type="button"><svg class="icon icon-sm"><use href="#i-refresh"/></svg>刷新</button>
+            <button class="btn btn-outlined" type="button">重置筛选</button>
+          </div>
+        </section>
+        <div class="result-bar"><div><strong>全部用户</strong> <span>本页 4 个账号</span></div><span>更新于 10:32</span></div>
+        <section class="card table-card" aria-label="用户列表">
+          <div class="table-scroll" tabindex="0" aria-label="用户表格，可横向滚动">
+            <table class="user-table">
+              <thead><tr><th scope="col">用户</th><th scope="col">角色</th><th scope="col">状态</th><th scope="col">最近登录</th><th scope="col">更新时间</th><th scope="col">操作</th></tr></thead>
+              <tbody>
+                <tr><td><div class="identity"><span class="avatar">系</span><span><strong>系统管理员</strong><span>apex.root · 当前账号</span></span></div></td><td><span class="chip chip-super">超级管理员</span></td><td><span class="chip chip-active"><span class="dot"></span>启用</span></td><td>今天 10:32</td><td>2026-07-26</td><td><span class="muted">本人账号</span></td></tr>
+                <tr><td><div class="identity"><span class="avatar">林</span><span><strong>林岚</strong><span>admin.lin</span></span></div></td><td><span class="chip chip-admin">管理员</span></td><td><span class="chip chip-active"><span class="dot"></span>启用</span></td><td>昨天 18:42</td><td>2026-07-25</td><td><div class="row-actions"><a class="icon-btn" href="?view=users-edit" aria-label="编辑林岚" title="编辑"><svg class="icon"><use href="#i-edit"/></svg></a><button class="icon-btn" type="button" aria-label="林岚更多操作" title="更多操作"><svg class="icon"><use href="#i-more"/></svg></button></div></td></tr>
+                <tr><td><div class="identity"><span class="avatar">陈</span><span><strong>陈晨</strong><span>chenchen</span></span></div></td><td><span class="chip chip-user">普通用户</span></td><td><span class="chip chip-active"><span class="dot"></span>启用</span></td><td>2026-07-24 09:16</td><td>2026-07-24</td><td><div class="row-actions"><a class="icon-btn" href="?view=users-edit" aria-label="编辑陈晨" title="编辑"><svg class="icon"><use href="#i-edit"/></svg></a><button class="icon-btn" type="button" aria-label="陈晨更多操作" title="更多操作"><svg class="icon"><use href="#i-more"/></svg></button></div></td></tr>
+                <tr><td><div class="identity"><span class="avatar">周</span><span><strong>周屿</strong><span>zhouyu</span></span></div></td><td><span class="chip chip-user">普通用户</span></td><td><span class="chip chip-disabled"><span class="dot"></span>已禁用</span></td><td>2026-07-19 14:22</td><td>2026-07-23</td><td><div class="row-actions"><a class="icon-btn" href="?view=users-edit" aria-label="编辑周屿" title="编辑"><svg class="icon"><use href="#i-edit"/></svg></a><button class="icon-btn" type="button" aria-label="周屿更多操作" title="更多操作"><svg class="icon"><use href="#i-more"/></svg></button></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <footer class="table-footer"><span>每页 20 条 · 本页 4 条</span><nav class="pager" aria-label="用户列表分页"><button class="page-btn" type="button" disabled aria-label="上一页">‹</button><button class="page-btn" type="button" aria-label="下一页">›</button></nav></footer>
+        </section>
+      </section>
+
+      <section class="page" data-page="states" hidden>
+        <header class="page-header"><div><div class="breadcrumb"><span>原型审查</span><span>/</span><span>状态</span></div><h1>关键状态与反馈</h1><p>覆盖远程数据、会话、权限、验证码、删除和成功反馈。</p></div></header>
+        <div class="state-grid">
+          <article class="card state-card"><h2>加载中</h2><p>Skeleton 匹配最终表格几何。</p><div class="skeleton" style="width: 42%"></div><div class="skeleton"></div><div class="skeleton" style="width: 84%"></div><div class="skeleton" style="width: 92%"></div></article>
+          <article class="card state-card"><h2>空结果</h2><p>筛选无结果，给出恢复动作。</p><div class="empty"><div class="placeholder-icon"><svg class="icon"><use href="#i-search"/></svg></div><strong>没有匹配用户</strong><span class="muted">调整筛选条件后重试</span></div></article>
+          <article class="card state-card"><h2>可恢复错误</h2><p>不清空已有上下文。</p><div class="alert alert-error"><svg class="icon"><use href="#i-info"/></svg><span><strong>用户列表加载失败</strong><br>请检查网络后重试。 <button class="btn btn-outlined" type="button" style="margin-top:10px">重新加载</button></span></div></article>
+          <article class="card state-card"><h2>权限不足</h2><p>403 不泄露受限内容。</p><div class="alert alert-warning"><svg class="icon"><use href="#i-lock"/></svg><span><strong>无权访问用户管理</strong><br>当前账号缺少 users:read 权限。</span></div></article>
+          <article class="card state-card"><h2>会话失效</h2><p>清理敏感缓存并返回登录。</p><div class="alert alert-warning"><svg class="icon"><use href="#i-info"/></svg><span><strong>登录状态已失效</strong><br>请重新登录。返回后可继续原页面。</span></div></article>
+          <article class="card state-card"><h2>图形验证码</h2><p>登录页常驻；图片由后端返回，无音频。</p><div class="captcha-row"><input aria-label="示例验证码输入" placeholder="请输入验证码"><img class="captcha-image" src="assets/captcha-fixture.png" alt="后端返回的图形验证码示例"><button type="button" aria-label="刷新示例验证码"><svg class="icon"><use href="#i-refresh"/></svg></button></div></article>
+          <article class="card dialog-stage">
+            <span class="sr-only">删除确认状态</span>
+            <div class="dialog-backdrop">
+              <section class="dialog" role="dialog" aria-modal="false" aria-labelledby="delete-title">
+                <h2 id="delete-title">删除用户“陈晨”？</h2>
+                <p>管理员可删除普通用户；超级管理员可删除管理员与普通用户。删除策略与审计保留以 Contract 0002 为准。</p>
+                <div class="danger-object"><strong>chenchen</strong><br>普通用户 · 当前启用</div>
+                <div class="dialog-actions"><button class="btn btn-outlined" type="button">取消</button><button class="btn btn-danger" type="button">确认删除</button></div>
+              </section>
+            </div>
+          </article>
+        </div>
+        <div class="toast" role="status" aria-live="polite"><svg class="icon"><use href="#i-check"/></svg><span><strong>用户已创建</strong><br><small>林岚现在可以使用分配账号登录。</small></span></div>
+      </section>
+    </main>
+
+    <div class="user-dialog-layer" id="user-dialog" hidden>
+      <section class="user-dialog" role="dialog" aria-modal="true" aria-labelledby="user-dialog-title">
+        <header class="user-dialog-head">
+          <div>
+            <h2 id="user-dialog-title"><span data-create-only>新建用户</span><span data-edit-only hidden>编辑用户“赵宁”</span></h2>
+            <p><span data-create-only>设置账号和初始密码，用户可直接登录。</span><span data-edit-only hidden>修改资料、角色或账号状态。</span></p>
+          </div>
+          <a class="icon-btn" href="?view=users" aria-label="关闭用户弹窗"><svg class="icon"><use href="#i-close"/></svg></a>
+        </header>
+        <form class="user-dialog-body user-form-grid" id="user-dialog-form">
+          <div class="inline-alert full-row" data-create-only><svg class="icon"><use href="#i-info"/></svg><span>管理员只能创建普通用户；超级管理员可创建管理员。服务端始终重新校验权限。</span></div>
+          <div class="inline-alert full-row" data-edit-only hidden><svg class="icon"><use href="#i-info"/></svg><span>保存时携带当前 ETag；若用户已被他人修改，将保留草稿并提示重新加载。</span></div>
+          <div class="field"><label for="new-account">账号</label><input id="new-account" name="account" autocomplete="off" minlength="5" maxlength="32" pattern="[a-z0-9][a-z0-9._-]{4,31}" placeholder="例如：market.user"><p class="helper"><span data-create-only>5–32 位且必须唯一；创建后不可修改。</span><span data-edit-only hidden>账号是登录标识，创建后不可修改。</span></p></div>
+          <div class="field"><label for="new-name">显示名称</label><input id="new-name" autocomplete="off" placeholder="例如：林岚"></div>
+          <div class="field full-row" data-create-only><label for="new-password">初始密码</label><div class="input-wrap"><input id="new-password" type="password" autocomplete="new-password" placeholder="至少 12 位，包含数字"><button class="input-action" type="button" aria-label="显示初始密码"><svg class="icon"><use href="#i-eye"/></svg></button></div><p class="helper">默认掩码且不预填；提交结束立即清空。请站外交付，响应、Toast、列表、日志和埋点均不回显。</p></div>
+          <div class="field"><label for="new-role">角色</label><select id="new-role"><option>普通用户</option><option>管理员</option></select></div>
+          <div class="field"><label for="new-status">账号状态</label><select id="new-status"><option>启用</option><option>已禁用</option></select></div>
+          <div class="role-help full-row"><strong>角色边界</strong><span>管理员：管理普通用户。</span><span>超级管理员：管理管理员与普通用户；系统初始化账号受保护。</span></div>
+        </form>
+        <footer class="user-dialog-foot"><a class="btn btn-outlined" href="?view=users">取消</a><button class="btn btn-primary" type="submit" form="user-dialog-form"><span data-create-only>创建用户</span><span data-edit-only hidden>保存修改</span></button></footer>
+      </section>
+    </div>
+  </div>
+
+  <nav class="prototype-switcher" aria-label="原型视图">
+    <a href="?view=login" data-switch="login">登录</a>
+    <a href="?view=home" data-switch="home">首页</a>
+    <a href="?view=users" data-switch="users">用户</a>
+    <a href="?view=users-create" data-switch="users-create">新建</a>
+    <a href="?view=users-edit" data-switch="users-edit">编辑</a>
+    <a href="?view=states" data-switch="states">状态</a>
+  </nav>
+
+  <script>
+    /** Project URL-controlled prototype state into one static, non-production document. */
+    (() => {
+      const allowed = new Set(["login", "home", "users", "users-create", "users-edit", "states"]);
+      const params = new URLSearchParams(window.location.search);
+      const requested = params.get("view") || "login";
+      const view = allowed.has(requested) ? requested : "login";
+      const dialogMode = view === "users-create" ? "create" : view === "users-edit" ? "edit" : null;
+      const pageName = dialogMode ? "users" : view;
+      const switchName = view;
+      document.body.dataset.view = view;
+      document.body.classList.toggle("capture", params.get("capture") === "1");
+
+      const auth = document.getElementById("auth-screen");
+      const workspace = document.getElementById("workspace");
+      const skipLink = document.getElementById("skip-link");
+      const authVisible = view === "login";
+      auth.hidden = !authVisible;
+      workspace.hidden = authVisible;
+      skipLink.href = view === "login" ? "#auth-main" : "#workspace-main";
+      auth.setAttribute("aria-labelledby", "login-title");
+      for (const form of document.querySelectorAll("[data-auth-view]")) {
+        form.hidden = form.dataset.authView !== view;
+      }
+
+      for (const page of document.querySelectorAll("[data-page]")) {
+        page.hidden = page.dataset.page !== pageName;
+      }
+      for (const link of document.querySelectorAll("[data-nav]")) {
+        if (link.dataset.nav === pageName) link.setAttribute("aria-current", "page");
+        else link.removeAttribute("aria-current");
+      }
+      for (const link of document.querySelectorAll("[data-switch]")) {
+        if (link.dataset.switch === switchName) link.setAttribute("aria-current", "page");
+        else link.removeAttribute("aria-current");
+      }
+
+      const dialog = document.getElementById("user-dialog");
+      dialog.hidden = dialogMode === null;
+      for (const element of document.querySelectorAll("[data-create-only]")) {
+        element.hidden = dialogMode !== "create";
+      }
+      for (const element of document.querySelectorAll("[data-edit-only]")) {
+        element.hidden = dialogMode !== "edit";
+      }
+      const accountInput = document.getElementById("new-account");
+      const nameInput = document.getElementById("new-name");
+      const roleInput = document.getElementById("new-role");
+      const statusInput = document.getElementById("new-status");
+      accountInput.readOnly = dialogMode === "edit";
+      accountInput.value = dialogMode === "edit" ? "zhaoning" : "";
+      nameInput.value = dialogMode === "edit" ? "赵宁" : "";
+      roleInput.selectedIndex = 0;
+      statusInput.selectedIndex = 0;
+
+      /** Preserve native form submit semantics without navigating away from the static prototype. */
+      function preventPrototypeSubmit(event) {
+        event.preventDefault();
+      }
+      for (const form of document.querySelectorAll("form")) {
+        form.addEventListener("submit", preventPrototypeSubmit);
+      }
+      for (const button of document.querySelectorAll(".input-action")) {
+        const input = button.closest(".input-wrap")?.querySelector("input");
+        if (!input) continue;
+        const mask = () => {
+          input.type = "password";
+          button.setAttribute("aria-label", "显示密码");
+        };
+        button.addEventListener("click", () => {
+          input.type = input.type === "password" ? "text" : "password";
+          button.setAttribute("aria-label", input.type === "password" ? "显示密码" : "隐藏密码");
+        });
+        input.addEventListener("blur", mask);
+        input.form?.addEventListener("submit", () => {
+          mask();
+          input.value = "";
+        });
+      }
+
+      const titles = {
+        login: "登录",
+        home: "首页占位",
+        users: "用户管理",
+        "users-create": "新建用户",
+        "users-edit": "编辑用户",
+        states: "状态与反馈"
+      };
+      document.title = `${titles[switchName]}｜Apex数据智能分析平台原型`;
+    })();
+  </script>
+</body>
+</html>

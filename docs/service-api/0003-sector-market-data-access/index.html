@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="行业与概念板块日、周、月行情的跨服务读取和 service-api 对外查询技术方案。">
+  <title>板块行情 API 访问｜技术方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #dfe4ec;
+      --surface: #f6f8fb;
+      --accent: #3157d5;
+      --accent-soft: #eef2ff;
+      --success: #176b4d;
+      --success-soft: #eaf7f1;
+      --warning: #8a4b08;
+      --warning-soft: #fff5e8;
+      --danger: #a33131;
+      --radius: 14px;
+      --shadow: 0 10px 24px rgb(23 32 51 / 7%);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+    }
+    a { color: var(--accent); text-underline-offset: .2em; }
+    a:focus-visible { outline: 3px solid rgb(49 87 213 / 28%); outline-offset: 3px; border-radius: 3px; }
+    code { padding: .08em .3em; border-radius: 4px; background: #eef1f5; font: .9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    .shell { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+    header { padding: 52px 0 38px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .eyebrow { margin: 0 0 10px; color: var(--accent); font-size: .78rem; font-weight: 760; letter-spacing: .12em; text-transform: uppercase; }
+    h1, h2, h3 { line-height: 1.28; letter-spacing: -.02em; }
+    h1 { max-width: 880px; margin: 0; font-size: clamp(2rem, 5.4vw, 3.6rem); }
+    h2 { margin: 0 0 20px; font-size: clamp(1.45rem, 3vw, 2rem); }
+    h3 { margin: 0 0 8px; font-size: 1.08rem; }
+    p { max-width: 82ch; }
+    .lede { max-width: 850px; margin: 18px 0 0; color: var(--muted); font-size: 1.08rem; }
+    .meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 28px 0 0; }
+    .meta div { padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+    .meta dt { color: var(--muted); font-size: .78rem; }
+    .meta dd { margin: 3px 0 0; font-weight: 680; }
+    .status { color: var(--warning); }
+    nav { position: sticky; top: 0; z-index: 10; overflow-x: auto; border-bottom: 1px solid var(--line); background: rgb(255 255 255 / 96%); backdrop-filter: blur(8px); }
+    nav ul { display: flex; gap: 20px; width: max-content; margin: 0; padding: 12px 0; list-style: none; }
+    nav a { color: var(--muted); font-size: .88rem; font-weight: 680; text-decoration: none; }
+    nav a:hover { color: var(--accent); }
+    main { padding: 18px 0 72px; }
+    section { padding: 50px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 56px; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .card { min-width: 0; padding: 21px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; box-shadow: var(--shadow); overflow-wrap: anywhere; }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+    .label, .tag { display: inline-block; color: var(--accent); font-size: .76rem; font-weight: 780; letter-spacing: .055em; }
+    .label { margin-bottom: 9px; text-transform: uppercase; }
+    .tag { margin: 0 5px 4px 0; padding: 2px 8px; border: 1px solid #c9d8f6; border-radius: 999px; background: var(--accent-soft); letter-spacing: 0; }
+    .tag.fact { color: var(--success); border-color: #b9dfd0; background: var(--success-soft); }
+    .tag.pending { color: var(--warning); border-color: #efd09f; background: var(--warning-soft); }
+    .callout { margin-top: 18px; padding: 18px 21px; border-left: 4px solid var(--accent); border-radius: 0 var(--radius) var(--radius) 0; background: var(--accent-soft); }
+    .callout.warning { border-left-color: var(--warning); background: var(--warning-soft); }
+    .callout.danger { border-left-color: var(--danger); background: #fff0f0; }
+    .callout strong { display: block; margin-bottom: 3px; }
+    .flow, pre { overflow-x: auto; padding: 20px; border: 1px solid #273249; border-radius: var(--radius); background: #111827; color: #e5e7eb; font: .86rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+    table { width: 100%; min-width: 760px; border-collapse: collapse; }
+    th, td { padding: 13px 15px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--surface); font-size: .83rem; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .steps { padding-left: 1.25rem; }
+    .steps li { padding: 3px 0 13px 8px; }
+    .checklist { padding-left: 1.1rem; list-style: "✓  "; }
+    .checklist li { padding: 3px 0 7px 6px; }
+    .risk { color: var(--warning); font-weight: 720; }
+    .decision { color: var(--success); font-weight: 720; }
+    .small { color: var(--muted); font-size: .88rem; }
+    footer { padding: 26px 0 46px; color: var(--muted); font-size: .88rem; }
+    @media (max-width: 800px) {
+      .shell { width: min(100% - 28px, 1120px); }
+      .meta, .grid, .grid.two { grid-template-columns: 1fr; }
+      section { padding: 38px 0; }
+    }
+    @media print {
+      nav { display: none; }
+      header, main, section { padding-top: 18px; }
+      .shell { width: 100%; }
+      .card { box-shadow: none; break-inside: avoid; }
+      .flow, pre { white-space: pre-wrap; color: #111; background: #fff; border-color: #999; }
+      a { color: inherit; text-decoration: none; }
+      .table-wrap, .callout { break-inside: avoid; }
+      h2, h3 { break-after: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Technical solution · service-api · 0003</p>
+      <h1>板块行情 API 访问技术方案</h1>
+      <p class="lede">
+        为已发布的行业、概念板块目录和日/周/月原生行情建立受版本保护的读取链路：
+        <code>service-api</code> 只经 <code>service-data-sync</code> 的内部 HTTP 契约读取，
+        对外提供认证后的稳定查询接口，不共享数据库、不暴露 raw 证据、不派生日周月数据。
+      </p>
+      <dl class="meta">
+        <div><dt>状态</dt><dd class="status">Implemented</dd></div>
+        <div><dt>负责人</dt><dd>service-api / service-data-sync</dd></div>
+        <div><dt>最后修改</dt><dd>2026-07-26</dd></div>
+        <div><dt>关联决策</dt><dd><a href="../../decisions/0011-sector-market-data-api-boundary.md">ADR-0011</a></dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">摘要</a></li>
+        <li><a href="#scope">范围</a></li>
+        <li><a href="#ownership">边界</a></li>
+        <li><a href="#flow">流程</a></li>
+        <li><a href="#contract">契约</a></li>
+        <li><a href="#reliability">可靠性</a></li>
+        <li><a href="#delivery">实施</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>1. 摘要</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">问题</span>
+          <h3>同步结果尚无服务接口</h3>
+          <p>板块三周期数据已进入同步服务，但 <code>service-api</code> 没有业务模块、下游 client 或公开路由。</p>
+        </article>
+        <article class="card">
+          <span class="label">决策</span>
+          <h3>内部 HTTP + API 投影</h3>
+          <p>同步服务拥有 canonical 数据和版本；API 通过版本化 internal contract 读取，再投影为 <code>/api/v1</code>。</p>
+        </article>
+        <article class="card">
+          <span class="label">主要风险</span>
+          <h3 class="risk">鉴权和生产准入未冻结</h3>
+          <p>静态服务凭据、认证读取和关键回归已实现；凭据轮换、来源许可和稳定性仍须在生产治理中完成。</p>
+        </article>
+      </div>
+      <aside class="callout">
+        <strong>结论</strong>
+        首期提供目录和 K 线只读查询；请求必须明确 <code>scheme</code>、<code>code</code>、<code>period</code> 与日期窗。
+        不提供分钟数据、板块成份、EOD quote、申万、资金流、跨 scheme 合并、成交量排名或导出任务。
+      </aside>
+    </section>
+
+    <section id="scope">
+      <h2>2. 目标、非目标与事实</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>目标</h3>
+          <ul>
+            <li>认证调用方可分页查询 ACTIVE 行业/概念板块。</li>
+            <li>按 <code>1d</code>、<code>1w</code>、<code>1mo</code> 读取单板块、单版本行情。</li>
+            <li>返回 ETag、dataVersion、publishedAt 和终态标记。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>非目标</h3>
+          <ul>
+            <li>不让 API 查询同步数据库、S3 或供应商。</li>
+            <li>不从日线计算周/月，不填补周期缺口。</li>
+            <li>不建立 API 自有行情读模型或 Redis 业务缓存。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>已知事实</h3>
+          <ul>
+            <li><span class="tag fact">事实</span> P0 已有三个独立 canonical 周期表与发布版本。</li>
+            <li><span class="tag fact">事实</span> 当前 API 只有 User/Auth 模块，没有下游行情 client。</li>
+            <li><span class="tag pending">待决</span> 服务凭据、最终权限和生产 SLO 未定。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="ownership">
+      <h2>3. 功能边界与所有权</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">service-data-sync</span>
+          <h3>Canonical owner</h3>
+          <p><strong>职责：</strong>验证、版本化并发布 sector 数据；提供内部只读投影。</p>
+          <p><strong>输入 / 输出：</strong>canonical publication → internal JSON + ETag。</p>
+          <p><strong>状态：</strong>板块身份、三周期 revision、dataVersion、raw evidence。</p>
+          <p><strong>失败边界：</strong>数据未发布、读库或服务凭据失败时拒绝，不返回 raw 或猜测值。</p>
+        </article>
+        <article class="card">
+          <span class="label">service-api</span>
+          <h3>Public projection owner</h3>
+          <p><strong>职责：</strong>用户认证、授权、输入边界、下游调用、Problem Details 和防滥用。</p>
+          <p><strong>输入 / 输出：</strong>浏览器/API 调用 → internal client → 公共 JSON + ETag。</p>
+          <p><strong>状态：</strong>无行情权威状态；只保留已有用户/会话与短期安全限流。</p>
+          <p><strong>失败边界：</strong>下游错误映射为受控 503，不泄漏 URL、凭据、SQL 或 provider 字段。</p>
+        </article>
+        <article class="card">
+          <span class="label">service-web / consumer</span>
+          <h3>调用方</h3>
+          <p><strong>职责：</strong>显式传入分类体系和周期，按 ETag/dataVersion 处理刷新。</p>
+          <p><strong>输入 / 输出：</strong>仅调用 <code>/api/v1/market/*</code>，不访问 internal 路由。</p>
+          <p><strong>状态：</strong>可持有展示缓存，但不能把 <code>provider_native</code> 成交量跨体系相加。</p>
+          <p><strong>失败边界：</strong>503 显示数据暂不可用；不把缺失渲染为零或休市。</p>
+        </article>
+      </div>
+
+      <pre class="flow" aria-label="模块依赖图">service-web / partner
+        │ authenticated public HTTP
+        ▼
+service-api: SectorMarketDataModule
+  ├─ Auth / final market-read policy
+  ├─ DTO validation / rate limit / Problem Details
+  └─ DataSyncSectorClient  ── service credential ──▶ service-data-sync internal v1
+                                                        │
+                                                        ▼
+                                              published canonical sector data
+
+禁止：service-api ── SQL / S3 / AKShare ──▶ service-data-sync owned storage</pre>
+    </section>
+
+    <section id="flow">
+      <h2>4. 核心流程</h2>
+      <pre class="flow" aria-label="正常读取流程">1. 用户请求 GET /api/v1/market/sectors/{scheme}/{code}/bars
+2. service-api 全局 Guard 验证 Session；最终 market-read policy 通过
+3. DTO 校验 scheme、code、period、包含端 start/end、limit/cursor、If-None-Match
+4. DataSyncSectorClient 转发 requestId、ETag 与专用服务凭据
+5. service-data-sync 校验服务身份，选择对应已发布 1d / 1w / 1mo dataVersion
+6. internal 返回一页；service-api 验证 JSON 结构、过滤内部字段、返回同一语义响应
+7. 响应附 ETag 与 private, max-age=0, must-revalidate</pre>
+      <div class="grid two">
+        <article class="card">
+          <h3>发布切换与分页</h3>
+          <p>cursor 绑定 <code>scheme</code>、<code>code</code>、<code>period</code>、日期窗和 dataVersion。发布被替换后，继续使用旧 cursor 返回 409；客户端从第一页重新读取，避免一页内混入两个版本。</p>
+        </article>
+        <article class="card">
+          <h3>下游失败</h3>
+          <p>连接前超时、可重试连接中断可安全重试一次；下游 5xx、超时、schema 不符、断路器打开均返回 503 Problem Details。没有未标记 stale fallback。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="contract">
+      <h2>5. 契约、数据语义与安全</h2>
+      <p>完整、可机器解析的契约分别归属同步服务和 API 服务：</p>
+      <ul>
+        <li><a href="../../contracts/0005-data-sync-sector-internal.openapi.yaml">0005：service-data-sync 板块内部 OpenAPI</a></li>
+        <li><a href="../../contracts/0006-service-api-sector.openapi.yaml">0006：service-api 板块公开 OpenAPI</a></li>
+      </ul>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>接口</th><th>身份 / 输入</th><th>成功结果</th><th>错误与缓存</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>GET /api/v1/market/sectors</code></td>
+              <td>认证用户；必填 <code>scheme</code>，可选前缀 <code>query</code>、cursor、limit≤100。</td>
+              <td>ACTIVE 板块目录页、dataVersion、publishedAt。</td>
+              <td>400/401/403/429/503；支持 ETag/304。</td>
+            </tr>
+            <tr>
+              <td><code>GET /api/v1/market/sectors/{scheme}/{sectorCode}/bars</code></td>
+              <td>认证用户；必填 <code>period</code>、<code>start</code>、<code>end</code>；limit≤1000。</td>
+              <td>一个周期、一个 sector、一个 dataVersion 的 periodEnd 升序页。</td>
+              <td>400/401/403/404/409/429/503；支持 ETag/304。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>公开 K 线响应示例</h3>
+      <pre><code>{
+  "sector": {
+    "scheme": "eastmoney.industry",
+    "code": "BK0475",
+    "name": "证券",
+    "dataVersion": "&lt;uuid&gt;",
+    "publishedAt": "2026-07-26T08:00:00Z"
+  },
+  "period": "1w",
+  "dataVersion": "&lt;uuid&gt;",
+  "items": [{
+    "periodEnd": "2026-07-24",
+    "open": "1000.12", "high": "1018.20",
+    "low": "998.30", "close": "1012.40",
+    "volumeValue": "123456", "volumeUnit": "provider_native",
+    "amountCny": "1234567890", "isFinal": true
+  }],
+  "nextCursor": null
+}</code></pre>
+
+      <div class="grid two">
+        <article class="card">
+          <h3>不可混用语义</h3>
+          <p><code>scheme + code</code> 才是身份；名称不是主键。<code>1w</code>/<code>1mo</code> 是上游直接结果。<code>periodEnd</code> 是上游标签，不是 API 推算的周期起点。</p>
+        </article>
+        <article class="card">
+          <h3>精度与单位</h3>
+          <p>价格、金额、百分比和成交量均以 decimal string 返回，避免 JavaScript 浮点漂移。成交量必须携带 <code>provider_native</code>；禁止跨 scheme 比较、求和或排名。</p>
+        </article>
+      </div>
+      <aside class="callout warning">
+        <strong>授权待决</strong>
+        方案提出“现有 ACTIVE 登录用户可读”作为首期候选，最终角色/permission 必须在 ADR-0011 评审后冻结。
+        任何实现不得通过 <code>@Public()</code> 绕开全局默认认证，也不引入 <code>forwardRef()</code>。
+      </aside>
+    </section>
+
+    <section id="reliability">
+      <h2>6. 可靠性、运行与兼容</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">下游 client</span>
+          <h3>小超时、一次安全重试</h3>
+          <p>新增环境配置承载 internal base URL、超时、服务凭据和 retry budget。GET 仅在未写入响应时重试一次；timeout、5xx 和 schema drift 不做 cross-source fallback。</p>
+        </article>
+        <article class="card">
+          <span class="label">可观测性</span>
+          <h3>双服务关联</h3>
+          <p>透传 <code>X-Request-Id</code>；记录 route、scheme、period、status、dataVersion presence、duration 与 retry，不记录 token、raw URI、payload 或高基数 sector code 指标。</p>
+        </article>
+        <article class="card">
+          <span class="label">健康</span>
+          <h3>业务失败不重启 API</h3>
+          <p><code>/health</code> 仍只表示进程，<code>/ready</code> 仍只检查 API 自有 PostgreSQL/Redis。数据同步不可用由 route 503、client 指标和告警表达。</p>
+        </article>
+      </div>
+      <h3>兼容与回滚</h3>
+      <ul>
+        <li><strong>v1 兼容：</strong>仅可新增 optional 字段；改变 scheme、period、decimal 字符串、单位或 cursor 语义必须发布 v2。</li>
+        <li><strong>部署顺序：</strong>先发布 data-sync internal v1 与 contract test，再发布 API client/module；最后按受控流量开放 public route。</li>
+        <li><strong>回滚：</strong>关闭 API 路由或回滚 API client，不删除同步数据、raw 或 publication。已公开 v1 的 internal endpoint 保持兼容窗口，故障优先 roll forward。</li>
+        <li><strong>不新增数据迁移：</strong>API 不增加 Prisma 行情模型；同步服务的 internal 读层使用现有 canonical 数据及后续独立 schema 演进。</li>
+      </ul>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>7. 方案取舍</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>候选</th><th>优点</th><th>代价</th><th>结论</th></tr></thead>
+          <tbody>
+            <tr><td>同步服务 internal HTTP</td><td>版本、质量、迁移和所有权清晰。</td><td>增加网络调用与 503。</td><td class="decision">采用</td></tr>
+            <tr><td>API 直连同步 PostgreSQL</td><td>低延迟、短期代码少。</td><td>共享 schema 和凭据，绕过 publication。</td><td>禁止</td></tr>
+            <tr><td>API 自有完整读模型</td><td>运行时隔离、读性能高。</td><td>事件、回放、一致性和第二份数据治理。</td><td>延后；规模证明后另立 ADR</td></tr>
+            <tr><td>Redis 行情缓存</td><td>可减少下游读取。</td><td>容易成为无版本权威副本；当前无需。</td><td>首期不采用</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="delivery">
+      <h2>8. 实施、验收与待决</h2>
+      <ol class="steps">
+        <li><strong>阶段 0 — 合同评审：</strong>评审 ADR-0011，冻结用户权限、服务凭据、网络边界、timeout/rate limit 和 p95/SLO；未通过不建公开路由。</li>
+        <li><strong>阶段 1 — 同步服务读层：</strong>实现 internal FastAPI 路由、ACTIVE catalog read port、scheme+code 查找、版本绑定 cursor、ETag、服务鉴权与 contract test。</li>
+        <li><strong>阶段 2 — API 投影：</strong>实现 SectorMarketDataModule、DTO、client、Problem Details、授权策略、OpenAPI contract test、日志/指标；不改 Prisma 业务表。</li>
+        <li><strong>阶段 3 — 受控发布：</strong>先内部调用和 shadow metrics，再开放 public route；验证 401/403、cursor 409、下游 503 和 dataVersion 一致性。</li>
+      </ol>
+      <div class="grid two">
+        <article class="card">
+          <h3>验收标准</h3>
+          <ul class="checklist">
+            <li>API 不导入同步数据库 schema、SDK 或 adapter。</li>
+            <li>同一 response/page 只含一个 period/dataVersion；周/月不读日线。</li>
+            <li>unknown scheme、超界日期、篡改 cursor、PENDING sector 均不泄漏数据。</li>
+            <li>401/403/404/409/429/503 和 ETag/304 有自动测试。</li>
+            <li>internal/public OpenAPI 可解析，双向 contract test 与 Docker health 通过。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>待决问题</h3>
+          <ul>
+            <li>服务凭据采用短期 token、mTLS 或受网络限制的静态 secret — 平台/安全评审。</li>
+            <li>所有 ACTIVE 用户是否可读，或新增 market-data permission — 产品/安全评审。</li>
+            <li>超时、限流、SLO、历史最大窗与 cursor TTL — 探针和消费流量测量后确定。</li>
+            <li>来源许可、生产 source policy、volume 标准单位 — data-sync 准入评审。</li>
+          </ul>
+        </article>
+      </div>
+      <h3>已执行的验证命令</h3>
+      <pre><code>cd service-api
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+docker build --target test --tag quant-v2/service-api:test .
+
+# 实现后：OpenAPI 解析、internal/public contract test、503 故障注入、health/ready
+docker compose -f ../compose.yaml -f ../compose.dev.yaml --env-file ../.env.example --profile api up --build</code></pre>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">板块行情 API 访问 · Implemented：跨服务读取边界、internal/public OpenAPI 和 API 实施路径。</div>
+  </footer>
+</body>
+</html>

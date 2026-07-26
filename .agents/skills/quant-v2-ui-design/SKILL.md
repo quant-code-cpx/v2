@@ -1,6 +1,6 @@
 ---
 name: quant-v2-ui-design
-description: Design, implement, review, or revise QUANT V2 product UI using the repository's Minimal-inspired design system and China-market semantics. Use for service-web pages, dashboards, MUI components, CSS or theme work, charts, cards, tables, filters, forms, drawers, dialogs, responsive behavior, accessibility, or visual QA.
+description: Design, implement, review, or revise PC-desktop-only QUANT V2 product UI using the repository's Minimal-inspired design system and China-market semantics. Use for service-web pages, dashboards, MUI components, CSS or theme work, charts, cards, tables, filters, forms, drawers, dialogs, accessibility, or visual QA.
 ---
 
 # QUANT V2 UI Design
@@ -28,7 +28,7 @@ Read `docs/service-web/0002-minimal-inspired-design-system/index.html` only when
 4. Keep white canvas and low-contrast gray hierarchy. Use dark or image-heavy surfaces only as bounded content, never as the app shell.
 5. Apply China-market semantics: up is red, down is green. Always pair color with sign, arrow, or text.
 6. Use non-directional chart colors for categories and comparisons. Do not reuse market red/green as arbitrary decoration.
-7. Implement mobile and keyboard behavior with desktop layout. Preserve touch targets, horizontal table access, focus states, loading, empty, error, and disabled states.
+7. Implement only PC desktop mouse and keyboard behavior. Preserve hover, focus, loading, empty, error, and disabled states; do not design or test mobile, tablet, touch, responsive, or narrow-screen behavior.
 8. Run `pnpm check`, affected tests, and `pnpm build` in `service-web`.
 
 ## Implementation rules
@@ -52,6 +52,7 @@ Read `docs/service-web/0002-minimal-inspired-design-system/index.html` only when
 - No giant welcome hero on information-critical quant pages.
 - No personal portfolio summary replacing the market overview on the homepage.
 - No new visual constant outside canonical token files unless the value is inherently local.
+- No mobile, tablet, touch, responsive, or narrow-screen design, prototype, implementation, screenshot, or test work.
 
 ## Completion check
 
@@ -62,5 +63,5 @@ Confirm:
 - components match tokenized dimensions;
 - red-up/green-down semantics are correct;
 - empty/loading/error states exist where data is remote;
-- desktop, tablet, and mobile layouts remain usable;
+- the `1440×900` default PC desktop layout is usable and has no page-level overflow;
 - no unrelated visual constants were introduced.

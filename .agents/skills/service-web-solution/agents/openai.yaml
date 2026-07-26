@@ -1,4 +1,4 @@
 interface:
   display_name: "Web 技术方案与原型"
-  short_description: "理解业务并设计 React 页面技术方案，新页面强制输出桌面与移动原型图"
-  default_prompt: "使用 $service-web-solution 理解页面业务并产出技术方案；新页面先生成可视原型。"
+  short_description: "理解业务并设计 PC 桌面 React 页面，新页面只输出桌面原型图"
+  default_prompt: "使用 $service-web-solution 理解页面业务并产出 PC 桌面技术方案；新页面先生成一份 1440×900 可视原型。"

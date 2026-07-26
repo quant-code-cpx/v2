@@ -52,10 +52,22 @@ export class RedisService implements OnModuleDestroy, OnModuleInit {
   /** Increment counter and set expiry only on first observation to preserve fixed window. */
   public async incrementWithTtl(key: string, ttlSeconds: number): Promise<number> {
     const namespacedKey = this.withPrefix(key);
-    const value = await this.client.incr(namespacedKey);
-    // NX prevents each request from sliding rate-limit window forward.
-    await this.client.expire(namespacedKey, ttlSeconds, 'NX');
-    return value;
+    const result = await this.client.eval(
+      // Execute INCR and first-write expiry together so a crash cannot leave an unbounded key.
+      'local value = redis.call("INCR", KEYS[1]); if value == 1 then redis.call("EXPIRE", KEYS[1], ARGV[1]); end; return value;',
+      { keys: [namespacedKey], arguments: [String(ttlSeconds)] },
+    );
+    return Number(result);
+  }
+
+  /** Atomically consume one short-lived value only when its server-derived digest matches. */
+  public async consumeMatchingValue(key: string, expectedValue: string): Promise<boolean> {
+    const result = await this.client.eval(
+      // Delete on every observed challenge, including a wrong answer, to prevent answer guessing.
+      'local value = redis.call("GET", KEYS[1]); if not value then return 0 end; redis.call("DEL", KEYS[1]); if value == ARGV[1] then return 1 end; return 0;',
+      { keys: [this.withPrefix(key)], arguments: [expectedValue] },
+    );
+    return Number(result) === 1;
   }
 
   /** Prefix local key to isolate this service from other Redis consumers. */

@@ -31,7 +31,7 @@ export function InstrumentAnalysisView() {
   return (
     <Stack spacing={3}>
       <Box>
-        <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1}>
+        <Stack direction="row" justifyContent="space-between" spacing={1}>
           <Box>
             <Typography variant="h4">贵州茅台</Typography>
             <Typography color="text.secondary" sx={{ mt: 0.5 }}>

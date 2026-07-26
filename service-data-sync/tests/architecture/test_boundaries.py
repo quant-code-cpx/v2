@@ -1,3 +1,5 @@
+"""验证数据同步服务分层与数据源隔离边界。"""
+
 from __future__ import annotations
 
 import ast
@@ -9,7 +11,7 @@ FORBIDDEN_PROVIDER_SYMBOLS = {"akshare", "tushare", "ts_code", "dataframe"}
 
 
 def _imports(path: Path) -> set[str]:
-    """Return imported module names from one source file without executing it."""
+    """不执行源码，返回一个文件导入的模块名集合。"""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     imports: set[str] = set()
     for node in ast.walk(tree):
@@ -21,12 +23,12 @@ def _imports(path: Path) -> set[str]:
 
 
 def _source_files() -> list[Path]:
-    """Return all package Python files subject to architecture constraints."""
+    """返回受架构约束检查的全部包内 Python 文件。"""
     return sorted(PACKAGE_ROOT.rglob("*.py"))
 
 
 def test_application_does_not_depend_on_infrastructure() -> None:
-    """Keep application layer independent from infrastructure implementations."""
+    """保证应用层不依赖基础设施实现。"""
     violations = [
         path
         for path in (PACKAGE_ROOT / "application").rglob("*.py")
@@ -37,7 +39,7 @@ def test_application_does_not_depend_on_infrastructure() -> None:
 
 
 def test_provider_sdk_imports_are_scoped_to_provider_adapters() -> None:
-    """Allow provider SDK imports only inside dedicated provider-adapter boundary."""
+    """仅允许专用数据源适配器边界导入供应商 SDK。"""
     violations: list[Path] = []
     provider_root = PACKAGE_ROOT / "infrastructure" / "providers"
     for path in _source_files():
@@ -49,7 +51,7 @@ def test_provider_sdk_imports_are_scoped_to_provider_adapters() -> None:
 
 
 def test_provider_adapters_cannot_depend_on_persistence_or_messaging() -> None:
-    """Prevent adapters from bypassing canonical persistence and messaging ports."""
+    """阻止适配器绕过标准持久化与消息端口。"""
     provider_root = PACKAGE_ROOT / "infrastructure" / "providers"
     violations = [
         path
@@ -65,7 +67,7 @@ def test_provider_adapters_cannot_depend_on_persistence_or_messaging() -> None:
 
 
 def test_provider_specific_symbols_are_absent_from_port_contract() -> None:
-    """Keep provider-neutral port free of vendor-specific vocabulary."""
+    """保证数据源无关端口不出现供应商专有词汇。"""
     port_source = (
         (PACKAGE_ROOT / "application" / "ports" / "data_source.py")
         .read_text(encoding="utf-8")

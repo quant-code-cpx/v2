@@ -6,6 +6,11 @@
 TypeScript 7、TanStack Query、KLineChart 10 和 ECharts 6。页面暂用受控 fixture，未直连 API、
 数据库或供应商。
 
+## 支持范围
+
+产品仅支持 PC 桌面浏览器，最低宽度为 `1200px`，默认设计与视觉验收视口为 `1440×900`。
+页面使用固定桌面信息架构；验证覆盖鼠标、键盘、语义化、焦点、对比度和 reduced-motion。
+
 源码按经典前端职责分层：<code>api</code>、<code>components</code>、<code>config</code>、<code>hooks</code>、<code>libs</code>、<code>mocks</code>、<code>router</code>、<code>styles</code>、<code>types</code>、<code>utils</code> 和 <code>views</code>。未冻结契约只能放入 <code>mocks</code>，不能伪造真实接口。
 
 ## 命令

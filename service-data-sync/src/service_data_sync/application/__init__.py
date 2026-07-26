@@ -1,1 +1,1 @@
-"""Application-level ports and provider-neutral coordination."""
+"""应用层端口与数据源无关的编排逻辑。"""

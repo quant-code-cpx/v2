@@ -1,3 +1,5 @@
+"""服务配置加载与校验的单元测试。"""
+
 from __future__ import annotations
 
 import pytest
@@ -7,7 +9,7 @@ from service_data_sync.bootstrap.settings import Environment, LogFormat, load_se
 
 
 def test_settings_loads_typed_environment(configured_environment: None) -> None:
-    """Load test environment into typed settings and secret wrappers."""
+    """将测试环境加载为带类型的配置和密钥包装对象。"""
     settings = load_settings()
 
     assert settings.environment is Environment.TEST
@@ -16,7 +18,7 @@ def test_settings_loads_typed_environment(configured_environment: None) -> None:
 
 
 def test_settings_hides_validation_details(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replace raw Pydantic error with safe configuration-domain message."""
+    """将原始 Pydantic 错误替换为安全的配置领域错误。"""
     monkeypatch.delenv("DATA_SYNC_DATABASE_URL", raising=False)
 
     with pytest.raises(ConfigurationError, match="invalid service-data-sync configuration"):
@@ -37,7 +39,7 @@ def test_settings_rejects_invalid_values(
     variable: str,
     value: str,
 ) -> None:
-    """Reject invalid level, endpoint scheme, and blank bucket configuration."""
+    """拒绝无效日志级别、端点协议和空桶名称配置。"""
     monkeypatch.setenv(variable, value)
 
     with pytest.raises(ConfigurationError):

@@ -1,1 +1,1 @@
-"""Process entry points. HTTP routes are intentionally absent."""
+"""进程入口；当前刻意不提供 HTTP 路由。"""

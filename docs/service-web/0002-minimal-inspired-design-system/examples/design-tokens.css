@@ -128,10 +128,10 @@
   --qv-table-row-height-dense: 3.25rem;
   --qv-drawer-width: 22.5rem;
   --qv-dialog-width-md: 45rem;
+  --qv-desktop-min-width: 75rem;
   --qv-sidebar-width: 18.75rem;
   --qv-content-max-width: 75rem;
   --qv-appbar-height-desktop: 4.5rem;
-  --qv-appbar-height-mobile: 4rem;
 
   /* Interaction */
   --qv-focus-ring: 0 0 0 3px rgb(109 92 231 / 28%);

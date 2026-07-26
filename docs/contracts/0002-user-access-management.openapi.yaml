@@ -1,0 +1,1030 @@
+openapi: 3.1.1
+info:
+  title: Apex数据智能分析平台 user access management API
+  version: 1.3.0
+  description: |
+    Implemented contract for default-deny authentication, always-on login CAPTCHA,
+    hierarchical USER/ADMIN/SUPER_ADMIN authorization, and user lifecycle management.
+    Product-facing name is Apex数据智能分析平台; quant-v2 remains a repository codename only.
+    Login identities are custom accounts, never email addresses.
+
+    This contract supersedes 0001-service-api-user-auth.openapi.yaml for the User/Auth
+    runtime surface. 0001 remains a historical schema-and-migration reference only; it
+    provides neither email-login support nor a runtime API compatibility boundary.
+  x-contract-status: Implemented
+  x-supersedes: 0001-service-api-user-auth.openapi.yaml
+servers:
+  - url: http://127.0.0.1:13000
+    description: Local development
+tags:
+  - name: auth
+    description: Login, always-on CAPTCHA, refresh, and logout.
+  - name: users
+    description: Self-service and target-scoped user administration.
+  - name: operations
+    description: Minimal orchestrator probes; not anonymous business capabilities.
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      tags: [operations]
+      operationId: getLiveness
+      summary: Process liveness
+      description: Operational exception. Deployment network controls its exposure.
+      security: []
+      responses:
+        '200':
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /ready:
+    get:
+      tags: [operations]
+      operationId: getReadiness
+      summary: Required dependency readiness
+      description: Operational exception. Returns no dependency credentials or topology.
+      security: []
+      responses:
+        '200':
+          description: PostgreSQL and Redis are ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /api/v1/auth/captcha:
+    post:
+      tags: [auth]
+      operationId: createLoginCaptcha
+      summary: Create a short-lived login CAPTCHA challenge
+      description: |
+        Anonymous allowlist endpoint called when the login page opens and whenever the
+        user refreshes the image. The challenge is bound to client risk context and TTL,
+        is single-use, and is rate-limited. It is not bound to an account and requires no
+        risk ticket or request body.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/BrowserOrigin'
+      responses:
+        '201':
+          description: Challenge created.
+          headers:
+            Cache-Control:
+              description: Always no-store.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaptchaChallenge'
+              example:
+                challengeId: 67bd4b5c-1255-49bb-b65f-abf847608cb3
+                imageDataUrl: data:image/png;base64,iVBORw0KGgo=
+                expiresAt: '2026-07-26T10:02:00Z'
+        '403':
+          $ref: '#/components/responses/CrossSiteRequestRejected'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Login with custom account and password
+      description: |
+        Anonymous allowlist endpoint. Every request supplies account, password,
+        captchaId, and captchaAnswer. Invalid, disabled, deleted, and unknown accounts do
+        not receive distinguishable credential errors. Account format rules are enforced
+        when an administrator creates the user, not repeated as login-field validation.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/BrowserOrigin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              credentialsAndCaptcha:
+                value:
+                  account: market.user
+                  password: correct-horse-123
+                  captchaId: 67bd4b5c-1255-49bb-b65f-abf847608cb3
+                  captchaAnswer: '3472'
+      responses:
+        '200':
+          description: Session created; HttpOnly refresh cookie set.
+          headers:
+            Set-Cookie:
+              description: Secure, HttpOnly, host-only refresh_token cookie.
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessTokenResponse'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/InvalidCredentials'
+        '403':
+          $ref: '#/components/responses/CrossSiteRequestRejected'
+        '422':
+          $ref: '#/components/responses/CaptchaInvalid'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [auth]
+      operationId: refresh
+      summary: Rotate refresh session
+      description: |
+        Anonymous Bearer allowlist but authenticated by refresh cookie. Browser requests
+        require an exact allowed Origin. Rotation is single-winner under concurrency.
+      security:
+        - refreshCookie: []
+      parameters:
+        - $ref: '#/components/parameters/BrowserOrigin'
+      responses:
+        '200':
+          description: Refresh session rotated.
+          headers:
+            Set-Cookie:
+              description: Rotated Secure, HttpOnly, host-only refresh_token cookie.
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessTokenResponse'
+        '401':
+          $ref: '#/components/responses/InvalidRefreshToken'
+        '403':
+          $ref: '#/components/responses/CrossSiteRequestRejected'
+        '409':
+          $ref: '#/components/responses/RefreshRace'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Idempotently clear the browser session
+      description: |
+        Exact-Origin cleanup endpoint. If a structurally valid refresh cookie identifies
+        a session, that session is revoked. Missing, expired, already-revoked, or invalid
+        cookies are not distinguishable: every accepted same-origin request clears the
+        cookie and returns 204.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/BrowserOrigin'
+      responses:
+        '204':
+          description: Current session revoked and refresh cookie cleared.
+          headers:
+            Set-Cookie:
+              description: Expired refresh_token cookie.
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+        '403':
+          $ref: '#/components/responses/CrossSiteRequestRejected'
+
+  /api/v1/users/me:
+    get:
+      tags: [users]
+      operationId: getCurrentUser
+      summary: Get current user and effective permissions
+      responses:
+        '200':
+          description: Current user.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUser'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags: [users]
+      operationId: updateCurrentUser
+      summary: Update current user profile
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Profile updated.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUser'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+
+  /api/v1/users/me/password:
+    post:
+      tags: [users]
+      operationId: changeCurrentUserPassword
+      summary: Change current user password
+      description: |
+        Optional self-service action. Verifies the current password and increments
+        securityVersion. Every access token and refresh session issued with the previous
+        securityVersion becomes invalid; no first-login password change is enforced.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '204':
+          description: Password changed; existing sessions are invalid.
+          headers:
+            Set-Cookie:
+              description: Expired refresh_token cookie.
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/v1/users:
+    get:
+      tags: [users]
+      operationId: listUsers
+      summary: List users within actor management scope
+      description: |
+        ADMIN results contain USER targets plus the current ADMIN actor when it matches
+        the active filters. SUPER_ADMIN results contain USER and ADMIN targets plus only
+        the current SUPER_ADMIN actor when it matches the active filters. The actor row is
+        read-only in this management collection; peer SUPER_ADMIN records are never
+        returned, and detail or mutation endpoints continue to reject self-management.
+      x-required-permissions: ['users:read']
+      parameters:
+        - name: q
+          in: query
+          description: Trimmed nonblank case-normalized account or display-name search.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 120
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [USER, ADMIN]
+        - name: status
+          in: query
+          description: |
+            When omitted, only ACTIVE and DISABLED targets are returned. DELETED may be
+            requested explicitly by SUPER_ADMIN only; ADMIN receives 403 for that filter.
+          schema:
+            $ref: '#/components/schemas/UserStatus'
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [createdAt, updatedAt, account, displayName]
+            default: createdAt
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: cursor
+          in: query
+          description: Opaque cursor bound to current filters and sort.
+          schema:
+            type: string
+            maxLength: 512
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Target-scoped cursor page containing manageable users and the matching actor identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPage'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [users]
+      operationId: createUser
+      summary: Create a managed user
+      description: |
+        ADMIN may request role USER only. SUPER_ADMIN may request USER or ADMIN.
+        SUPER_ADMIN cannot be created by this API. No public registration endpoint exists.
+        The actor supplies the initial password through the request. The API hashes it,
+        never generates or returns its plaintext, and does not force a first-login change.
+        The normalized account is the natural uniqueness boundary; this phase does not
+        support Idempotency-Key.
+      x-required-permissions: ['users:create']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: User created and immediately eligible to log in.
+          headers:
+            Location:
+              description: URI of created user.
+              schema:
+                type: string
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/users/{id}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [users]
+      operationId: getUser
+      summary: Get a user within actor management scope
+      description: |
+        Inaccessible targets, including SUPER_ADMIN and DELETED records, are returned as
+        not found. Deleted records are visible only in SUPER_ADMIN's explicitly filtered
+        management collection.
+      x-required-permissions: ['users:read']
+      responses:
+        '200':
+          description: User detail.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [users]
+      operationId: updateUser
+      summary: Update a user within actor management scope
+      description: |
+        ADMIN may update USER only. SUPER_ADMIN may update USER or ADMIN. Neither may
+        target itself through this endpoint or grant SUPER_ADMIN.
+      x-required-permissions: ['users:update']
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: User updated.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+    delete:
+      tags: [users]
+      operationId: deleteUser
+      summary: Soft-delete a user within actor management scope
+      description: |
+        Sets status DELETED and deletedAt, increments version and securityVersion, and
+        retains the normalized account and audit chain. For an already-DELETED target still
+        within actor scope, terminal state takes precedence over the stale If-Match value
+        and the server returns 204. Unknown or inaccessible targets return 404.
+      x-required-permissions: ['users:delete']
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '204':
+          description: User is soft-deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+
+  /api/v1/users/{id}/password-reset:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [users]
+      operationId: resetUserPassword
+      summary: Set a new password for a managed user
+      description: |
+        ADMIN may reset USER only. SUPER_ADMIN may reset USER or ADMIN. The operation
+        increments version and securityVersion and invalidates existing sessions.
+        The actor supplies the new password; no response echoes
+        plaintext.
+      x-required-permissions: ['users:reset-password']
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+      responses:
+        '204':
+          description: Password reset; existing sessions are invalid.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Short-lived access token; server also validates Session and User state.
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+      description: Rotating opaque refresh token in a Secure HttpOnly cookie.
+
+  parameters:
+    BrowserOrigin:
+      name: Origin
+      in: header
+      required: true
+      description: |
+        Exact configured Web origin. Browser authentication endpoints reject a missing
+        or mismatched Origin and validate Fetch Metadata. Endpoints carrying a request
+        body additionally require application/json; empty-body refresh/logout do not.
+      schema:
+        type: string
+        format: uri
+        maxLength: 2048
+    UserId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Strong ETag returned for this exact user resource.
+      schema:
+        type: string
+        minLength: 3
+        maxLength: 160
+
+  headers:
+    ETag:
+      description: Strong resource version identifier for conditional mutation.
+      schema:
+        type: string
+        example: '"user-77e0f18a-v7"'
+    CacheControlNoStore:
+      description: Sensitive authentication response must not be stored.
+      schema:
+        type: string
+        const: no-store
+
+  responses:
+    ValidationProblem:
+      description: Request validation failed.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://apex.local/problems/validation-error
+            title: Bad Request
+            status: 400
+            detail: Request validation failed
+            instance: /api/v1/users
+            requestId: 48a025dd-67d0-4ee0-8841-85d9be28cad7
+            code: validation-error
+    InvalidCredentials:
+      description: Account or password is invalid; account existence is not disclosed.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://apex.local/problems/invalid-credentials
+            title: Unauthorized
+            status: 401
+            detail: Invalid credentials
+            instance: /api/v1/auth/login
+            requestId: 48a025dd-67d0-4ee0-8841-85d9be28cad7
+            code: invalid-credentials
+    InvalidRefreshToken:
+      description: Refresh credential is missing, invalid, expired, revoked, or replayed.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    CaptchaInvalid:
+      description: CAPTCHA challenge is missing, invalid, expired, consumed, or answered incorrectly.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://apex.local/problems/captcha-invalid
+            title: Unprocessable Content
+            status: 422
+            detail: Refresh the CAPTCHA image and try again
+            instance: /api/v1/auth/login
+            requestId: 48a025dd-67d0-4ee0-8841-85d9be28cad7
+            code: captcha-invalid
+    CrossSiteRequestRejected:
+      description: Origin or Fetch Metadata failed the browser request boundary.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: A valid authenticated session is required.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: Authenticated actor lacks permission for this action or target.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Resource does not exist or is outside actor management scope.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: Unique business constraint conflicts with existing state.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    PreconditionFailed:
+      description: If-Match does not match current resource version.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://apex.local/problems/precondition-failed
+            title: Precondition Failed
+            status: 412
+            detail: User changed since it was loaded
+            instance: /api/v1/users/77e0f18a-9f4d-4b3a-ae69-d0ff1707df91
+            requestId: 48a025dd-67d0-4ee0-8841-85d9be28cad7
+            code: precondition-failed
+    PreconditionRequired:
+      description: If-Match is required.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    RefreshRace:
+      description: |
+        Another refresh using the same previous token won within the short concurrency
+        grace window. The client waits briefly, then retries with the rotated cookie;
+        this condition does not revoke the session family.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+        Retry-After:
+          description: Seconds before retrying with the current cookie.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    RateLimited:
+      description: Security rate limit exceeded.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+        Retry-After:
+          description: Seconds until retry is allowed.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    DependencyUnavailable:
+      description: Required security or persistence dependency is unavailable.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlNoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          const: ok
+
+    Role:
+      type: string
+      enum: [USER, ADMIN, SUPER_ADMIN]
+
+    UserStatus:
+      type: string
+      enum: [ACTIVE, DISABLED, DELETED]
+
+    Permission:
+      type: string
+      enum:
+        - profile:read
+        - profile:update
+        - password:change
+        - users:read
+        - users:create
+        - users:update
+        - users:delete
+        - users:reset-password
+        - admins:create
+        - admins:manage
+
+    CaptchaChallenge:
+      type: object
+      required: [challengeId, imageDataUrl, expiresAt]
+      additionalProperties: false
+      properties:
+        challengeId:
+          type: string
+          format: uuid
+        imageDataUrl:
+          type: string
+          maxLength: 131072
+          pattern: '^data:image/png;base64,'
+          description: Backend-rendered non-active PNG; clients must not synthesize a challenge.
+        expiresAt:
+          type: string
+          format: date-time
+
+    LoginRequest:
+      type: object
+      required: [account, password, captchaId, captchaAnswer]
+      additionalProperties: false
+      properties:
+        account:
+          type: string
+          minLength: 1
+          maxLength: 32
+          description: Trimmed and lowercased before lookup; creation rules are not exposed here.
+        password:
+          type: string
+          minLength: 1
+          maxLength: 512
+          writeOnly: true
+        captchaId:
+          type: string
+          format: uuid
+        captchaAnswer:
+          type: string
+          minLength: 1
+          maxLength: 16
+          writeOnly: true
+
+    AccessTokenResponse:
+      type: object
+      required: [accessToken, accessTokenExpiresIn, user]
+      additionalProperties: false
+      properties:
+        accessToken:
+          type: string
+          minLength: 1
+        accessTokenExpiresIn:
+          type: integer
+          minimum: 60
+          maximum: 3600
+          description: Seconds until access token expiration.
+        user:
+          $ref: '#/components/schemas/CurrentUser'
+
+    User:
+      type: object
+      required:
+        - id
+        - account
+        - displayName
+        - role
+        - status
+        - version
+        - lastLoginAt
+        - deletedAt
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        account:
+          type: string
+          minLength: 5
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{4,31}$'
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        role:
+          $ref: '#/components/schemas/Role'
+        status:
+          $ref: '#/components/schemas/UserStatus'
+        version:
+          type: integer
+          minimum: 1
+        lastLoginAt:
+          type: [string, 'null']
+          format: date-time
+        deletedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CurrentUser:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          required: [permissions]
+          properties:
+            permissions:
+              type: array
+              uniqueItems: true
+              items:
+                $ref: '#/components/schemas/Permission'
+      unevaluatedProperties: false
+
+    UserPage:
+      type: object
+      required: [items, page]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/User'
+        page:
+          type: object
+          required: [nextCursor]
+          additionalProperties: false
+          properties:
+            nextCursor:
+              type: [string, 'null']
+              maxLength: 512
+
+    UpdateProfileRequest:
+      type: object
+      required: [displayName]
+      additionalProperties: false
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Trimmed before validation; blank values are invalid.
+
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      additionalProperties: false
+      properties:
+        currentPassword:
+          type: string
+          minLength: 1
+          maxLength: 512
+          writeOnly: true
+        newPassword:
+          type: string
+          minLength: 12
+          maxLength: 512
+          pattern: '(?=.*\d).{12,}'
+          writeOnly: true
+
+    CreateUserRequest:
+      type: object
+      required: [account, displayName, password]
+      additionalProperties: false
+      properties:
+        account:
+          type: string
+          minLength: 5
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{4,31}$'
+          description: Trimmed and lowercased by the server; immutable after creation.
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Trimmed before validation; blank values are invalid.
+        password:
+          type: string
+          minLength: 12
+          maxLength: 512
+          pattern: '(?=.*\d).{12,}'
+          writeOnly: true
+        role:
+          type: string
+          enum: [USER, ADMIN]
+          default: USER
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+          default: ACTIVE
+
+    UpdateUserRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      description: Omitted fields are unchanged; fields present with null are invalid.
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Trimmed before validation; blank values are invalid.
+        role:
+          type: string
+          enum: [USER, ADMIN]
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+
+    ResetPasswordRequest:
+      type: object
+      required: [password]
+      additionalProperties: false
+      properties:
+        password:
+          type: string
+          minLength: 12
+          maxLength: 512
+          pattern: '(?=.*\d).{12,}'
+          writeOnly: true
+
+    Problem:
+      type: object
+      required: [type, title, status, detail, instance, requestId, code]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+        requestId:
+          type: string
+          maxLength: 128
+        code:
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'

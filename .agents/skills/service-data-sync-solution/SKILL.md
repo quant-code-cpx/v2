@@ -25,12 +25,14 @@ Design synchronization capabilities that remain provider-neutral, repeatable, re
    - market, timezone, calendar, granularity, date range, and freshness;
    - expected volume, historical depth, correction behavior, and source entitlement.
    - when market data is involved, adjustment basis, corporate-action effects, suspension/no-trade semantics, units, and revision policy.
+   - when a metric is vendor-derived, its semantic family, methodology owner/version, universe, bucket definition, denominator, window, cutoff, and finalization state.
 3. Separate facts, assumptions, decisions, and unresolved questions. Do not promote provider research into production approval.
 4. Design provider isolation:
    - keep SDKs, URLs, and vendor fields inside one adapter;
    - emit provider-neutral batches through existing ports;
    - prevent tasks, application, quality, and persistence code from importing concrete providers;
    - keep adapters unable to write the canonical database directly.
+   - preserve upstream source and methodology as canonical provenance; provider-neutral does not mean methodology-neutral.
 5. Design execution semantics:
    - trigger, schedule, partitions, full/incremental mode, checkpoints, backfill;
    - idempotency key, concurrency lock, retry budget, timeout, cancellation, resume, and rerun;
@@ -43,8 +45,9 @@ Design synchronization capabilities that remain provider-neutral, repeatable, re
    - rate limits, credentials, egress, resource limits, health/readiness;
    - run/batch correlation, structured logs, metrics, traces, alerts, diagnostics, and operator recovery.
 8. Design consumer access through versioned API or event contracts. Never grant service-api or service-web direct database/provider access.
-9. Read `references/design-checklist.md` completely and close every applicable item before finalizing.
-10. Validate the HTML proposal, links, and Compose impact. Execute document-level checks; list implementation acceptance commands as planned/not run when no implementation exists. Do not implement unless the user also requests implementation.
+9. For vendor-derived or semantically ambiguous market data such as fund flow, main-force flow, order-size buckets, sentiment, or estimated positions, read `references/derived-market-data.md` completely and apply its comparability gate.
+10. Read `references/design-checklist.md` completely and close every applicable item before finalizing.
+11. Validate the HTML proposal, links, and Compose impact. Execute document-level checks; list implementation acceptance commands as planned/not run when no implementation exists. Do not implement unless the user also requests implementation.
 
 ## Required proposal content
 
@@ -63,6 +66,8 @@ Include, when applicable:
 - Do not invent an undecided source, scheduler, transport, SLA, or schema.
 - Do not call vendor SDKs outside adapters.
 - Do not let adapters write canonical storage.
+- Do not canonicalize a vendor label as a universal market fact or silently substitute a differently defined source.
+- Do not mix reported values, vendor estimates, intraday snapshots, daily facts, or rolling-window snapshots in one arithmetic series without an explicit, versioned transformation.
 - Do not define missing dates as market closure without authoritative evidence.
 - Do not omit timezone, trading-calendar, idempotency, recovery, migration, or rollback design.
 - Do not treat Redis as authoritative dataset storage.

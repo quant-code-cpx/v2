@@ -4,11 +4,10 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from '../app.module.js';
-import { Role } from '../generated/prisma/client.js';
 import { UserService } from '../modules/user/user.service.js';
 import { AppConfigService } from '../platform/config/app-config.service.js';
 
-/** Create initial administrator only when validated bootstrap credentials and empty user store exist. */
+/** 在迁移完成后确认唯一 `SUPER_ADMIN` 存在，同时绝不输出账号或密码。 */
 async function bootstrapAdmin(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule, { bufferLogs: true });
   const logger = new Logger('BootstrapAdmin');
@@ -16,27 +15,22 @@ async function bootstrapAdmin(): Promise<void> {
   try {
     const config = app.get(AppConfigService);
     const users = app.get(UserService);
-    const email = config.bootstrapAdminEmail;
+    const account = config.bootstrapAdminAccount;
     const password = config.bootstrapAdminPassword;
-    if (!email || !password) {
-      throw new Error('BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD are required');
-    }
-    if (await users.hasUsers()) {
-      throw new Error('Refusing bootstrap: users already exist');
-    }
-    const user = await users.createUser(
-      {
-        email,
-        displayName: 'Administrator',
-        password,
-        role: Role.ADMIN,
-      },
-      { actorId: null },
+    const result = await users.ensureBootstrapSuperAdmin(account, password);
+    logger.log(
+      result.created
+        ? 'Bootstrap super administrator created'
+        : 'Active super administrator already exists; bootstrap skipped',
     );
-    logger.log(`Bootstrap administrator created: ${user.id}`);
   } finally {
     await app.close();
   }
 }
 
-void bootstrapAdmin();
+// 仅输出确定的失败状态，不记录初始化凭证。
+void bootstrapAdmin().catch((error: unknown) => {
+  const logger = new Logger('BootstrapAdmin');
+  logger.error(error instanceof Error ? error.message : 'Bootstrap failed');
+  process.exitCode = 1;
+});

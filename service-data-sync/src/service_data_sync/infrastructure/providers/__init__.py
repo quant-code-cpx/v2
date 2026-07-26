@@ -1,1 +1,1 @@
-"""Reserved for future provider-specific adapters only."""
+"""预留给未来数据源专有适配器的边界包。"""

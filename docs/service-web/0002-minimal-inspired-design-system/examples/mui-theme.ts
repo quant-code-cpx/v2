@@ -100,7 +100,7 @@ export function createMinimalInspiredTheme(mode: PaletteMode): Theme {
       MuiCssBaseline: {
         styleOverrides: {
           body: {
-            minWidth: 320,
+            minWidth: 1200,
             fontVariantNumeric: "tabular-nums",
           },
           "*:focus-visible": {
@@ -208,9 +208,9 @@ export function createMinimalInspiredTheme(mode: PaletteMode): Theme {
       MuiDialog: {
         styleOverrides: {
           paper: {
-            width: "min(720px, calc(100% - 32px))",
+            width: 720,
             maxWidth: "none",
-            margin: 16,
+            margin: 24,
             borderRadius: 16,
             boxShadow: "-40px 40px 80px -8px rgb(0 0 0 / 24%)",
           },
@@ -228,7 +228,7 @@ export function createMinimalInspiredTheme(mode: PaletteMode): Theme {
       MuiDrawer: {
         styleOverrides: {
           paper: {
-            width: "min(360px, 100vw)",
+            width: 360,
             backgroundColor: dark ? "rgb(28 37 46 / 90%)" : "rgb(255 255 255 / 90%)",
             backdropFilter: "blur(20px)",
             boxShadow: dark

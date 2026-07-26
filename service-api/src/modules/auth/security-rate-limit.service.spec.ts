@@ -38,6 +38,8 @@ const configuration = {
   loginFailureWindowSeconds: 60,
   loginLockSeconds: 60,
   loginMaxFailures: 2,
+  captchaRateLimitWindowSeconds: 60,
+  captchaRateLimitMax: 2,
   refreshRateLimitWindowSeconds: 60,
   refreshRateLimitMax: 2,
   refreshTokenTtlSeconds: 3_600,
@@ -52,14 +54,27 @@ describe('SecurityRateLimitService', () => {
       configuration,
     );
 
-    await service.recordFailedLogin('user@example.com', '127.0.0.1');
-    await service.recordFailedLogin('user@example.com', '127.0.0.1');
+    await service.recordFailedLogin('market.user', '127.0.0.1');
+    await service.recordFailedLogin('market.user', '127.0.0.1');
 
-    await expect(service.assertLoginAllowed('user@example.com', '127.0.0.1')).rejects.toMatchObject(
-      {
-        status: 429,
-      },
+    await expect(service.assertLoginAllowed('market.user', '127.0.0.1')).rejects.toMatchObject({
+      status: 429,
+    });
+  });
+
+  // Verify CAPTCHA issue traffic is independently rate limited even before any login attempt exists.
+  it('limits CAPTCHA issue requests by client address', async () => {
+    const service = new SecurityRateLimitService(
+      new FakeRedis() as unknown as RedisService,
+      configuration,
     );
+
+    await service.assertCaptchaIssueAllowed('127.0.0.1');
+    await service.assertCaptchaIssueAllowed('127.0.0.1');
+
+    await expect(service.assertCaptchaIssueAllowed('127.0.0.1')).rejects.toMatchObject({
+      status: 429,
+    });
   });
 
   // Verify refresh counter scopes repeated attempts to session and client address.

@@ -59,7 +59,7 @@ function buildPerformanceOption(
   };
 }
 
-/** Render responsive ECharts comparison of close price against benchmark. */
+/** Render container-resizing ECharts comparison of close price against benchmark. */
 export function AnalysisChart({ data }: { data: readonly AnalysisPoint[] }) {
   const tokens = useChartVisualTokens();
   // Rebuild option only when visual tokens or immutable series changes.

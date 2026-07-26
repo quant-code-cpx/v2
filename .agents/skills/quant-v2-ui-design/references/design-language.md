@@ -6,7 +6,7 @@
 2. Make data primary and explanation secondary.
 3. Use regular density, not arbitrary whitespace.
 4. Give each card one coherent task.
-5. Keep desktop efficient and mobile touchable.
+5. Optimize only for PC desktop efficiency; do not spend effort on mobile, tablet, touch, responsive, or narrow-screen behavior.
 6. Treat this as the initial product baseline.
 
 ## Color
@@ -83,10 +83,8 @@ Prefer shadow or subtle divider; rarely use both.
 
 - Desktop sidebar: 300px.
 - Desktop app bar: 72px.
-- Mobile app bar: 64px.
 - Regular content max width: 1200px including 40px side padding.
 - Analytics content max width: 1536px including 40px side padding.
-- Mobile page padding: 16px.
 - Main grids: 12 columns, 24px gap.
 
 Use the 1536px analytics grid for market dashboards and chart-heavy analysis. Use the 1200px grid for forms and standard management pages.
@@ -127,7 +125,7 @@ Use the 1536px analytics grid for market dashboards and chart-heavy analysis. Us
 
 - Every clickable element needs hover, active, focus, disabled, and loading behavior where relevant.
 - Focus ring: `0 0 0 3px rgb(109 92 231 / 28%)`.
-- Minimum touch target: 40px; use 44–48px for mobile primary controls.
 - Target WCAG 2.2 AA.
 - Never rely on color alone.
 - Honor reduced motion.
+- Use mouse and keyboard interaction only as product input requirements; do not add touch targets, gestures, virtual-keyboard handling, or mobile-specific controls.

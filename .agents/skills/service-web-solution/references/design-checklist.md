@@ -1,5 +1,11 @@
 # Web 方案检查表
 
+## 产品范围
+
+- 仅面向 PC 桌面浏览器，默认原型与视觉验收视口为 `1440×900`。
+- 未设计、实现、生成或测试移动端、平板、触控设备、窄屏响应式布局及其专属交互。
+- 未把 mobile、tablet、touch 或 responsive 作为兼容目标、验收项或待决问题。
+
 ## 业务理解
 
 - Actor、入口、主业务问题、决策和首要任务明确。
@@ -13,7 +19,7 @@
 - Route、shell、section、component 和 action 边界明确。
 - Loading、empty、stale、partial、error/retry、forbidden、disabled、submitting、success 完整。
 - URL、TanStack Query、本地状态和图表引擎状态所有权明确。
-- 桌面、平板、移动、键盘、焦点、触控目标和 reduced motion 完整。
+- 桌面鼠标、键盘、焦点、语义化、ARIA 和 reduced motion 完整。
 
 ## 数据与契约
 
@@ -28,7 +34,7 @@
 - 使用现有 tokens、theme、组件和页面模式，无随机视觉常量。
 - 中国市场红涨绿跌正确，颜色不是唯一信号。
 - KLineChart 与 ECharts 职责不混用。
-- 表格数字右对齐、移动端可横向滚动；图表控制不遮挡内容。
+- 表格数字右对齐；默认桌面视口下表格与图表控制无溢出、遮挡。
 - 原型和最终方案无巨大 Hero、装饰渐变、霓虹、玻璃或暗色壳层。
 
 ## 性能与交付

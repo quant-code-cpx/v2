@@ -1,3 +1,5 @@
+"""兼容 S3 对象存储客户端的创建、探测与关闭。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,12 +15,14 @@ from service_data_sync.bootstrap.settings import Settings
 
 @dataclass
 class ObjectStorageClient:
+    """封装服务拥有的对象存储客户端及其目标桶。"""
+
     client: Any
     bucket: str
 
     @classmethod
     def from_settings(cls, settings: Settings) -> ObjectStorageClient:
-        """Create S3-compatible client with bounded timeouts and one retry attempt."""
+        """创建兼容 S3 的客户端，限制超时且最多重试一次。"""
         client = boto3.client(
             "s3",
             endpoint_url=settings.s3_endpoint_url,
@@ -34,12 +38,12 @@ class ObjectStorageClient:
         return cls(client=client, bucket=settings.s3_bucket)
 
     def ping(self) -> None:
-        """Verify configured bucket access without reading or writing business data."""
+        """校验目标桶访问权限，不读取或写入业务数据。"""
         try:
             self.client.head_bucket(Bucket=self.bucket)
         except (BotoCoreError, ClientError) as error:
             raise DependencyUnavailable("s3", "head_bucket") from error
 
     def close(self) -> None:
-        """Close object-storage client during container shutdown."""
+        """在容器关闭时关闭对象存储客户端。"""
         self.client.close()

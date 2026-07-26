@@ -17,8 +17,9 @@ NNNN-short-title.md
 1. 复制 `0000-template.md`。
 2. 填写背景、约束、候选方案和取舍。
 3. 状态先设为 `Proposed`。
-4. 评审后改为 `Accepted`、`Rejected`、`Deprecated` 或 `Superseded`。
-5. 实现与文档链接对应 ADR。
+4. 评审后改为 `Accepted` 或 `Rejected`。
+5. 实现并验证后改为 `Implemented`；被替代时改为 `Deprecated` 或 `Superseded`。
+6. 实现与文档链接对应 ADR。
 
 ## 决策索引
 
@@ -29,3 +30,7 @@ NNNN-short-title.md
 - [0005：API 服务最小运行时与 User/Auth 架构](0005-service-api-runtime-and-architecture.md) — Implemented
 - [0006：Web 前端运行时与工程技术栈](0006-service-web-frontend-stack.md) — Accepted
 - [0007：Docker Compose 开发与生产环境分层](0007-compose-environment-strategy.md) — Accepted
+- [0008：默认鉴权与分层用户权限](0008-default-deny-auth-and-hierarchical-rbac.md) — Implemented
+- [0009：A 股个股数据来源、复权语义与服务边界](0009-equity-data-source-and-serving-boundary.md) — Proposed
+- [0010：行业、概念板块分类与派生数据边界](0010-sector-taxonomy-and-derived-data-boundary.md) — Proposed
+- [0011：板块行情跨服务读取与公开 API 边界](0011-sector-market-data-api-boundary.md) — Implemented

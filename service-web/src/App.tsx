@@ -3,30 +3,26 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "react-router-dom";
 
 import { queryClient } from "./api/query-client";
+import { AuthProvider } from "./components/AuthProvider";
+import { FeedbackProvider } from "./components/FeedbackProvider";
 import { createAppRouter } from "./router";
-import { ColorModeProvider, useAppTheme } from "./styles/theme";
+import { createAppTheme } from "./styles/theme";
 
-const router = createAppRouter(queryClient);
+const router = createAppRouter();
+const theme = createAppTheme();
 
-/** Render router under MUI theme derived from current color-mode context. */
-function RoutedApplication() {
-  const theme = useAppTheme();
-
-  return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline enableColorScheme />
-      <RouterProvider router={router} />
-    </ThemeProvider>
-  );
-}
-
-/** Compose global query, color-mode, theme, and router providers. */
+/** 组合固定浅色桌面主题、查询、鉴权、反馈与路由运行时。 */
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ColorModeProvider>
-        <RoutedApplication />
-      </ColorModeProvider>
+      <ThemeProvider theme={theme}>
+        <CssBaseline enableColorScheme />
+        <AuthProvider>
+          <FeedbackProvider>
+            <RouterProvider router={router} />
+          </FeedbackProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

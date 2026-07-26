@@ -22,7 +22,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "bootstrap:admin": "prisma generate && nest build && node dist/scripts/bootstrap-admin.js"
+    "bootstrap:admin": "prisma generate && nest build && node dist/scripts/bootstrap-admin.js",
+    "prepare:legacy-accounts": "prisma generate && nest build && node dist/scripts/prepare-legacy-accounts.js",
+    "promote:super-admin": "prisma generate && nest build && node dist/scripts/promote-existing-admin.js"
   },
   "dependencies": {
     "@nestjs/common": "11.1.28",

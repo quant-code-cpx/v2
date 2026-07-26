@@ -79,6 +79,54 @@ services:
     init: true
     restart: "no"
 
+  service-api-bootstrap:
+    image: quant-v2/service-api:migrate
+    profiles: ["api"]
+    command: ["node", "dist/scripts/bootstrap-admin.js"]
+    depends_on:
+      service-api-postgres:
+        condition: service_healthy
+      service-api-redis:
+        condition: service_healthy
+      service-api-migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      API_PREFIX: ${SERVICE_API_PREFIX:-api/v1}
+      DATABASE_URL: postgresql://${SERVICE_API_POSTGRES_USER}:${SERVICE_API_POSTGRES_PASSWORD}@service-api-postgres:5432/${SERVICE_API_POSTGRES_DATABASE}
+      REDIS_URL: redis://:${SERVICE_API_REDIS_PASSWORD}@service-api-redis:6379/0
+      REDIS_KEY_PREFIX: ${SERVICE_API_REDIS_KEY_PREFIX:-quant-v2:api}
+      JWT_ISSUER: ${SERVICE_API_JWT_ISSUER:-quant-v2}
+      JWT_AUDIENCE: ${SERVICE_API_JWT_AUDIENCE:-quant-v2-web}
+      JWT_ACCESS_SECRET: ${SERVICE_API_JWT_ACCESS_SECRET:?set SERVICE_API_JWT_ACCESS_SECRET}
+      JWT_ACCESS_TTL_SECONDS: ${SERVICE_API_JWT_ACCESS_TTL_SECONDS:-900}
+      REFRESH_TOKEN_TTL_SECONDS: ${SERVICE_API_REFRESH_TOKEN_TTL_SECONDS:-2592000}
+      COOKIE_SAME_SITE: ${SERVICE_API_COOKIE_SAME_SITE:-lax}
+      COOKIE_SECURE: "false"
+      CORS_ORIGIN: ${SERVICE_API_DEV_CORS_ORIGIN:-http://127.0.0.1:15173}
+      TRUST_PROXY: "false"
+      LOGIN_FAILURE_WINDOW_SECONDS: ${SERVICE_API_LOGIN_FAILURE_WINDOW_SECONDS:-900}
+      LOGIN_LOCK_SECONDS: ${SERVICE_API_LOGIN_LOCK_SECONDS:-900}
+      LOGIN_MAX_FAILURES: ${SERVICE_API_LOGIN_MAX_FAILURES:-5}
+      CAPTCHA_TTL_SECONDS: ${SERVICE_API_CAPTCHA_TTL_SECONDS:-120}
+      CAPTCHA_RATE_LIMIT_WINDOW_SECONDS: ${SERVICE_API_CAPTCHA_RATE_LIMIT_WINDOW_SECONDS:-60}
+      CAPTCHA_RATE_LIMIT_MAX: ${SERVICE_API_CAPTCHA_RATE_LIMIT_MAX:-20}
+      CAPTCHA_HMAC_SECRET: ${SERVICE_API_CAPTCHA_HMAC_SECRET:?set SERVICE_API_CAPTCHA_HMAC_SECRET}
+      REFRESH_RATE_LIMIT_WINDOW_SECONDS: ${SERVICE_API_REFRESH_RATE_LIMIT_WINDOW_SECONDS:-60}
+      REFRESH_RATE_LIMIT_MAX: ${SERVICE_API_REFRESH_RATE_LIMIT_MAX:-30}
+      REFRESH_RACE_GRACE_SECONDS: ${SERVICE_API_REFRESH_RACE_GRACE_SECONDS:-5}
+      BOOTSTRAP_ADMIN_ACCOUNT: ${BOOTSTRAP_ADMIN_ACCOUNT:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      HOME: /tmp
+    networks:
+      - service-api-internal
+    read_only: true
+    tmpfs:
+      - /tmp
+    init: true
+    restart: "no"
+
   service-api:
     image: quant-v2/service-api:local
     profiles: ["api"]
@@ -89,6 +137,10 @@ services:
         condition: service_healthy
       service-api-migrate:
         condition: service_completed_successfully
+      service-api-bootstrap:
+        condition: service_completed_successfully
+      data-sync-api:
+        condition: service_healthy
     environment:
       PORT: 3000
       API_PREFIX: ${SERVICE_API_PREFIX:-api/v1}
@@ -104,8 +156,15 @@ services:
       LOGIN_FAILURE_WINDOW_SECONDS: ${SERVICE_API_LOGIN_FAILURE_WINDOW_SECONDS:-900}
       LOGIN_LOCK_SECONDS: ${SERVICE_API_LOGIN_LOCK_SECONDS:-900}
       LOGIN_MAX_FAILURES: ${SERVICE_API_LOGIN_MAX_FAILURES:-5}
+      CAPTCHA_TTL_SECONDS: ${SERVICE_API_CAPTCHA_TTL_SECONDS:-120}
+      CAPTCHA_RATE_LIMIT_WINDOW_SECONDS: ${SERVICE_API_CAPTCHA_RATE_LIMIT_WINDOW_SECONDS:-60}
+      CAPTCHA_RATE_LIMIT_MAX: ${SERVICE_API_CAPTCHA_RATE_LIMIT_MAX:-20}
+      CAPTCHA_HMAC_SECRET: ${SERVICE_API_CAPTCHA_HMAC_SECRET:?set SERVICE_API_CAPTCHA_HMAC_SECRET}
       REFRESH_RATE_LIMIT_WINDOW_SECONDS: ${SERVICE_API_REFRESH_RATE_LIMIT_WINDOW_SECONDS:-60}
       REFRESH_RATE_LIMIT_MAX: ${SERVICE_API_REFRESH_RATE_LIMIT_MAX:-30}
+      REFRESH_RACE_GRACE_SECONDS: ${SERVICE_API_REFRESH_RACE_GRACE_SECONDS:-5}
+      DATA_SYNC_INTERNAL_BASE_URL: http://data-sync-api:8000
+      DATA_SYNC_INTERNAL_BEARER_TOKEN: ${DATA_SYNC_INTERNAL_API_BEARER_TOKEN:?set DATA_SYNC_INTERNAL_API_BEARER_TOKEN}
     healthcheck:
       test:
         [
@@ -215,6 +274,65 @@ services:
       - data-sync-internal
     restart: "no"
 
+  data-sync-migrate:
+    image: quant-v2/service-data-sync:local
+    profiles: ["api", "data-sync-api"]
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      data-sync-postgres:
+        condition: service_healthy
+    environment:
+      DATA_SYNC_ENV: local
+      DATA_SYNC_DATABASE_URL: postgresql+psycopg://${DATA_SYNC_POSTGRES_USER}:${DATA_SYNC_POSTGRES_PASSWORD}@data-sync-postgres:5432/${DATA_SYNC_POSTGRES_DATABASE}
+      DATA_SYNC_BROKER_URL: redis://:${DATA_SYNC_REDIS_PASSWORD}@data-sync-redis:6379/0
+      DATA_SYNC_S3_ENDPOINT_URL: http://data-sync-minio:9000
+      DATA_SYNC_S3_ACCESS_KEY: ${DATA_SYNC_S3_ACCESS_KEY:?set DATA_SYNC_S3_ACCESS_KEY}
+      DATA_SYNC_S3_SECRET_KEY: ${DATA_SYNC_S3_SECRET_KEY:?set DATA_SYNC_S3_SECRET_KEY}
+      DATA_SYNC_S3_BUCKET: ${DATA_SYNC_S3_BUCKET:?set DATA_SYNC_S3_BUCKET}
+      DATA_SYNC_INTERNAL_API_BEARER_TOKEN: ${DATA_SYNC_INTERNAL_API_BEARER_TOKEN:?set DATA_SYNC_INTERNAL_API_BEARER_TOKEN}
+    networks:
+      - data-sync-internal
+    read_only: true
+    tmpfs:
+      - /tmp
+    init: true
+    restart: "no"
+
+  data-sync-api:
+    image: quant-v2/service-data-sync:local
+    profiles: ["api", "data-sync-api"]
+    command: ["data-sync-internal-api"]
+    depends_on:
+      data-sync-postgres:
+        condition: service_healthy
+      data-sync-migrate:
+        condition: service_completed_successfully
+    environment:
+      DATA_SYNC_ENV: local
+      DATA_SYNC_LOG_LEVEL: ${DATA_SYNC_LOG_LEVEL:-INFO}
+      DATA_SYNC_DATABASE_URL: postgresql+psycopg://${DATA_SYNC_POSTGRES_USER}:${DATA_SYNC_POSTGRES_PASSWORD}@data-sync-postgres:5432/${DATA_SYNC_POSTGRES_DATABASE}
+      DATA_SYNC_BROKER_URL: redis://:${DATA_SYNC_REDIS_PASSWORD}@data-sync-redis:6379/0
+      DATA_SYNC_S3_ENDPOINT_URL: http://data-sync-minio:9000
+      DATA_SYNC_S3_ACCESS_KEY: ${DATA_SYNC_S3_ACCESS_KEY:?set DATA_SYNC_S3_ACCESS_KEY}
+      DATA_SYNC_S3_SECRET_KEY: ${DATA_SYNC_S3_SECRET_KEY:?set DATA_SYNC_S3_SECRET_KEY}
+      DATA_SYNC_S3_BUCKET: ${DATA_SYNC_S3_BUCKET:?set DATA_SYNC_S3_BUCKET}
+      DATA_SYNC_S3_REGION: ${DATA_SYNC_S3_REGION:-us-east-1}
+      DATA_SYNC_INTERNAL_API_BEARER_TOKEN: ${DATA_SYNC_INTERNAL_API_BEARER_TOKEN:?set DATA_SYNC_INTERNAL_API_BEARER_TOKEN}
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health').close()"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    networks:
+      - data-sync-internal
+      - service-api-internal
+    read_only: true
+    tmpfs:
+      - /tmp
+    init: true
+    restart: unless-stopped
+
   data-sync-worker:
     image: quant-v2/service-data-sync:local
     profiles: ["data-sync-worker"]
@@ -236,6 +354,10 @@ services:
       DATA_SYNC_S3_BUCKET: ${DATA_SYNC_S3_BUCKET:?set DATA_SYNC_S3_BUCKET}
       DATA_SYNC_S3_REGION: ${DATA_SYNC_S3_REGION:-us-east-1}
       DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS: ${DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS:-10}
+      DATA_SYNC_AKSHARE_ENABLED: ${DATA_SYNC_AKSHARE_ENABLED:-false}
+      DATA_SYNC_SECTOR_ENABLED: ${DATA_SYNC_SECTOR_ENABLED:-false}
+      DATA_SYNC_INTERNAL_API_BEARER_TOKEN: ${DATA_SYNC_INTERNAL_API_BEARER_TOKEN:?set DATA_SYNC_INTERNAL_API_BEARER_TOKEN}
+      DATA_SYNC_AKSHARE_REQUEST_TIMEOUT_SECONDS: ${DATA_SYNC_AKSHARE_REQUEST_TIMEOUT_SECONDS:-30}
     healthcheck:
       test: ["CMD", "data-sync-diagnostics", "--format", "json"]
       interval: 10s

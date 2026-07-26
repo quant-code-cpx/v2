@@ -1,13 +1,14 @@
-import { HttpException, HttpStatus, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 
 import { AppConfigService } from '../../platform/config/app-config.service.js';
+import { PublicProblemException } from '../../platform/http/problem.exception.js';
 import { RedisService } from '../../platform/redis/redis.service.js';
 
-class RateLimitedException extends HttpException {
+class RateLimitedException extends PublicProblemException {
   /** Create service-specific HTTP 429 response without exposing internal rate-limit state. */
-  public constructor(message: string) {
-    super(message, HttpStatus.TOO_MANY_REQUESTS);
+  public constructor(message: string, retryAfter: number) {
+    super(HttpStatus.TOO_MANY_REQUESTS, 'rate-limited', message, retryAfter);
   }
 }
 
@@ -20,11 +21,12 @@ export class SecurityRateLimitService {
   ) {}
 
   /** Reject a login identity currently locked after repeated failed attempts. */
-  public async assertLoginAllowed(email: string, ip: string): Promise<void> {
-    const lockKey = this.loginLockKey(email, ip);
+  public async assertLoginAllowed(account: string, ip: string): Promise<void> {
     try {
-      if (await this.redis.get(lockKey)) {
-        throw new RateLimitedException('Too many login attempts');
+      for (const identifier of this.loginIdentifiers(account, ip)) {
+        if (await this.redis.get(`auth:login:locked:${identifier}`)) {
+          throw new RateLimitedException('Too many login attempts', this.config.loginLockSeconds);
+        }
       }
     } catch (error: unknown) {
       this.rethrowSecurityError(error);
@@ -32,17 +34,22 @@ export class SecurityRateLimitService {
   }
 
   /** Count failed login, then atomically convert threshold breach into temporary lock. */
-  public async recordFailedLogin(email: string, ip: string): Promise<void> {
-    const identifier = this.identifier(email, ip);
+  public async recordFailedLogin(account: string, ip: string): Promise<void> {
     try {
-      const attempts = await this.redis.incrementWithTtl(
-        `auth:login:failed:${identifier}`,
-        this.config.loginFailureWindowSeconds,
-      );
-      // Delete counter once locked so another request cannot extend failure window unexpectedly.
-      if (attempts >= this.config.loginMaxFailures) {
-        await this.redis.set(`auth:login:locked:${identifier}`, '1', this.config.loginLockSeconds);
-        await this.redis.delete(`auth:login:failed:${identifier}`);
+      for (const identifier of this.loginIdentifiers(account, ip)) {
+        const attempts = await this.redis.incrementWithTtl(
+          `auth:login:failed:${identifier}`,
+          this.config.loginFailureWindowSeconds,
+        );
+        // Delete counter once locked so another request cannot extend failure window unexpectedly.
+        if (attempts >= this.config.loginMaxFailures) {
+          await this.redis.set(
+            `auth:login:locked:${identifier}`,
+            '1',
+            this.config.loginLockSeconds,
+          );
+          await this.redis.delete(`auth:login:failed:${identifier}`);
+        }
       }
     } catch (error: unknown) {
       this.rethrowSecurityError(error);
@@ -50,9 +57,29 @@ export class SecurityRateLimitService {
   }
 
   /** Remove prior login-failure counter after verified successful authentication. */
-  public async resetLoginFailures(email: string, ip: string): Promise<void> {
+  public async resetLoginFailures(account: string, ip: string): Promise<void> {
     try {
-      await this.redis.delete(`auth:login:failed:${this.identifier(email, ip)}`);
+      for (const identifier of this.loginIdentifiers(account, ip)) {
+        await this.redis.delete(`auth:login:failed:${identifier}`);
+      }
+    } catch (error: unknown) {
+      this.rethrowSecurityError(error);
+    }
+  }
+
+  /** Bound CAPTCHA issuance by client network identity before expensive image generation. */
+  public async assertCaptchaIssueAllowed(ip: string): Promise<void> {
+    try {
+      const requests = await this.redis.incrementWithTtl(
+        `auth:captcha:issued:${this.identifier(ip)}`,
+        this.config.captchaRateLimitWindowSeconds,
+      );
+      if (requests > this.config.captchaRateLimitMax) {
+        throw new RateLimitedException(
+          'Too many CAPTCHA requests',
+          this.config.captchaRateLimitWindowSeconds,
+        );
+      }
     } catch (error: unknown) {
       this.rethrowSecurityError(error);
     }
@@ -66,7 +93,10 @@ export class SecurityRateLimitService {
         this.config.refreshRateLimitWindowSeconds,
       );
       if (requests > this.config.refreshRateLimitMax) {
-        throw new RateLimitedException('Too many refresh attempts');
+        throw new RateLimitedException(
+          'Too many refresh attempts',
+          this.config.refreshRateLimitWindowSeconds,
+        );
       }
     } catch (error: unknown) {
       this.rethrowSecurityError(error);
@@ -95,9 +125,13 @@ export class SecurityRateLimitService {
     }
   }
 
-  /** Construct lock key from opaque hashed login identity. */
-  private loginLockKey(email: string, ip: string): string {
-    return `auth:login:locked:${this.identifier(email, ip)}`;
+  /** Derive independent account, IP, and account-plus-IP buckets for distributed credential attacks. */
+  private loginIdentifiers(account: string, ip: string): string[] {
+    return [
+      this.identifier('account', account),
+      this.identifier('ip', ip),
+      this.identifier('account-ip', account, ip),
+    ];
   }
 
   /** Hash security identifiers before placing them in Redis key space. */
@@ -107,9 +141,13 @@ export class SecurityRateLimitService {
 
   /** Preserve deliberate throttling errors; fail closed when Redis safeguard is unavailable. */
   private rethrowSecurityError(error: unknown): never {
-    if (error instanceof RateLimitedException) {
+    if (error instanceof PublicProblemException) {
       throw error;
     }
-    throw new ServiceUnavailableException('Authentication security controls unavailable');
+    throw new PublicProblemException(
+      HttpStatus.SERVICE_UNAVAILABLE,
+      'dependency-unavailable',
+      'Authentication security controls unavailable',
+    );
   }
 }

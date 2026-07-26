@@ -2,9 +2,11 @@ import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 
 import { DatabaseService } from '../database/database.service.js';
+import { Public } from '../http/public.decorator.js';
 import { RedisService } from '../redis/redis.service.js';
 
 @ApiExcludeController()
+@Public()
 @Controller()
 export class HealthController {
   /** Inject dependencies required by readiness probe. */

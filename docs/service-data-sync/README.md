@@ -16,3 +16,5 @@
 - [0008：AKShare B06 资金流与特殊交易首轮调研](0008-akshare-b06-initial-research/index.html) — Draft（第二轮短探针完成；R3 待验收）
 - [0009：AKShare B07 基金、宏观与机构调研首轮调研](0009-akshare-b07-initial-research/index.html) — Draft（第二轮短探针完成；R3 待验收）
 - [0010：AKShare 第二轮独立验证汇总](0010-akshare-round2-verification/index.html) — Draft（R2 完成；无能力获 FULL 准入）
+- [0011：个股数据同步、存储与查询 API 技术方案](0011-equity-data-sync-and-api/index.html) — Proposed
+- [0012：行业与板块数据同步技术方案](0012-industry-and-sector-data-sync/index.html) — Proposed（明确排除分时数据）

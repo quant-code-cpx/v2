@@ -10,15 +10,15 @@ export function RouteErrorView() {
     : "页面暂时不可用，请稍后重试。";
 
   return (
-    <Box sx={{ minHeight: "100dvh", display: "grid", placeItems: "center", p: 3 }}>
-      <Stack spacing={2} alignItems="flex-start" sx={{ width: "min(100%, 480px)" }}>
+    <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", p: 3 }}>
+      <Stack spacing={2} alignItems="flex-start" sx={{ width: 480 }}>
         <ErrorOutlineIcon color="error" sx={{ fontSize: 42 }} />
         <Typography variant="h4">无法加载此页面</Typography>
         <Alert severity="error" sx={{ width: "100%" }}>
           {message}
         </Alert>
         <Button component={RouterLink} to="/" variant="contained">
-          返回市场概览
+          返回首页
         </Button>
       </Stack>
     </Box>

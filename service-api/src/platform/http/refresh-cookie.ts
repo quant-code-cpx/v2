@@ -1,10 +1,10 @@
 import type { CookieOptions, Request, Response } from 'express';
 
-import type { AppConfigService } from '../../platform/config/app-config.service.js';
+import type { AppConfigService } from '../config/app-config.service.js';
 
 export const REFRESH_COOKIE_NAME = 'refresh_token';
 
-/** Store refresh token using common security options and its absolute expiry. */
+/** Store refresh token with common security options and its absolute expiry. */
 export function setRefreshCookie(
   response: Response,
   refreshToken: string,
@@ -28,13 +28,18 @@ export function readRefreshCookie(request: Request): string | null {
   for (const segment of header.split(';')) {
     const [name, ...value] = segment.trim().split('=');
     if (name === REFRESH_COOKIE_NAME && value.length > 0) {
-      return decodeURIComponent(value.join('='));
+      try {
+        return decodeURIComponent(value.join('='));
+      } catch {
+        // Treat malformed client cookie encoding as an absent token so auth endpoints keep their stable failures.
+        return null;
+      }
     }
   }
   return null;
 }
 
-/** Build the shared cookie scope required for setting and reliably clearing token. */
+/** Build shared cookie scope required for setting and reliably clearing refresh tokens. */
 function cookieOptions(config: AppConfigService, expires?: Date): CookieOptions {
   return {
     httpOnly: true,

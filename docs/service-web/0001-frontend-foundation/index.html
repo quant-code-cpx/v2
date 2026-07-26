@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta
     name="description"
-    content="定义 quant-v2 Web 服务的 Vite+、React、TypeScript、MUI、状态、请求，以及 KLineChart 与 ECharts 双图表实现方案。"
+    content="定义 Apex数据智能分析平台 Web 服务的 Vite+、React、TypeScript、MUI、状态、请求，以及 KLineChart 与 ECharts 双图表实现方案。"
   >
   <title>Web 前端工程基础与双图表实现方案｜技术方案</title>
   <style>
@@ -33,6 +33,7 @@
     }
 
     body {
+      min-width: 1200px;
       margin: 0;
       color: var(--ink);
       background: #fff;
@@ -368,33 +369,6 @@
       padding: 28px 0 48px;
       color: var(--muted);
       font-size: 0.88rem;
-    }
-
-    @media (max-width: 800px) {
-      header {
-        padding-top: 34px;
-      }
-
-      .snapshot,
-      .meta,
-      .grid,
-      .grid.two {
-        grid-template-columns: 1fr;
-      }
-
-      section {
-        padding: 40px 0;
-      }
-    }
-
-    @media (max-width: 480px) {
-      .shell {
-        width: min(100% - 28px, 1120px);
-      }
-
-      .card {
-        padding: 17px;
-      }
     }
 
     @media print {
@@ -1064,7 +1038,8 @@ useEffect(() => {
       <aside class="callout warning">
         <strong>KLineChart 10 风险门</strong>
         10.0.0 于 2026-07-11 发布，属于刚升级的数据加载与实例 API。阶段 2 必须用真实规模 fixture
-        验证 DataLoader、指标、overlay、深浅主题、移动端手势和销毁重建；未通过时停止扩大业务页面，
+        验证 DataLoader、指标、overlay、深浅主题、鼠标缩放/拖拽、键盘焦点和销毁重建；
+        未通过时停止扩大业务页面，
         修复或另开 ADR，不静默改回 ECharts K 线。
       </aside>
 
@@ -1191,7 +1166,7 @@ useEffect(() => {
             <li>DataLoader 的 init/forward/backward、取消、旧响应和错误状态：Vitest + MSW。</li>
             <li>订阅 acquire/release、乱序、重复、断流、重连和补洞：可控 fake stream。</li>
             <li>KLineChart init/dispose/指标协调、ECharts init/resize/dispose：引擎边界 mock。</li>
-            <li>标的/周期切换、加载历史、主题、移动端和恢复流程：Playwright。</li>
+            <li>标的/周期切换、加载历史、主题、1440×900 桌面交互和恢复流程：Playwright。</li>
             <li>Canvas 不做大面积脆弱像素断言；验证数据、交互和少量稳定截图。</li>
           </ul>
         </article>
@@ -1275,7 +1250,7 @@ useEffect(() => {
         <li>
           <strong>阶段 4｜K 线实时与专业能力：</strong>
           实现共享 Stream Client、订阅释放、乱序/重复/缺口处理、补洞；
-          加入 MA/VOL/MACD、指标选择和首批 overlay，完成移动端手势专项回归。
+          加入 MA/VOL/MACD、指标选择和首批 overlay，完成桌面鼠标、键盘交互专项回归。
         </li>
         <li>
           <strong>阶段 5｜ECharts 分析纵向切片：</strong>
@@ -1285,7 +1260,7 @@ useEffect(() => {
         <li>
           <strong>阶段 6｜发布门禁：</strong>
           运行全量 check/test/build/e2e、bundle report、5,000 Candle 基准、断网恢复、深浅主题、
-          桌面/移动与可访问性检查；灰度开启实时和画线能力。
+          1440×900 PC 桌面与可访问性检查；灰度开启实时和画线能力。
         </li>
       </ol>
 
@@ -1304,7 +1279,7 @@ useEffect(() => {
         <article class="card">
           <h3>产品质量验收</h3>
           <ul>
-            <li>桌面与移动布局无页面横向溢出。</li>
+            <li>1440×900 PC 桌面布局无页面横向溢出。</li>
             <li>路由懒加载、loading、empty、error、offline 状态完整。</li>
             <li>K 线分页、实时 upsert、周期切换、断流补洞和指标/画线达到验收。</li>
             <li>ECharts 三类首发分析图数据、tooltip、legend、缩放和数据表一致。</li>
@@ -1418,7 +1393,7 @@ useEffect(() => {
 
   <footer>
     <div class="shell">
-      Web 前端工程基础与双图表实现方案 · 变更摘要（2026-07-26）：完成 Vite+ React 基线、双图表 fixture、单元/E2E 配置、容器与 CI；源码调整为经典职责分层目录；真实 API/实时能力待契约。
+      Web 前端工程基础与双图表实现方案 · 变更摘要（2026-07-26）：完成 Vite+ React 基线、双图表 fixture、单元/E2E 配置、容器与 CI；统一为 1440×900 PC 桌面布局与交互验收；真实 API/实时能力待契约。
     </div>
   </footer>
 </body>

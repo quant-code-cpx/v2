@@ -42,6 +42,13 @@ services:
       dockerfile: Dockerfile
       target: migrate
 
+  service-api-bootstrap:
+    image: quant-v2/service-api:migrate-dev
+    build:
+      context: ./service-api
+      dockerfile: Dockerfile
+      target: migrate
+
   service-api:
     image: quant-v2/service-api:dev
     build:
@@ -100,6 +107,27 @@ services:
       - ./service-data-sync/migrations:/app/migrations:ro
       - ./service-data-sync/alembic.ini:/app/alembic.ini:ro
 
+  data-sync-migrate:
+    image: quant-v2/service-data-sync:dev
+    build:
+      context: ./service-data-sync
+      dockerfile: Dockerfile
+      target: development
+
+  data-sync-api:
+    image: quant-v2/service-data-sync:dev
+    build:
+      context: ./service-data-sync
+      dockerfile: Dockerfile
+      target: development
+    environment:
+      DATA_SYNC_ENV: local
+      DATA_SYNC_LOG_FORMAT: console
+    volumes:
+      - ./service-data-sync/src:/app/src:ro
+      - ./service-data-sync/migrations:/app/migrations:ro
+      - ./service-data-sync/alembic.ini:/app/alembic.ini:ro
+
   data-sync-test:
     image: quant-v2/service-data-sync:test
     profiles: ["data-sync-test"]
@@ -107,7 +135,7 @@ services:
       context: ./service-data-sync
       dockerfile: Dockerfile
       target: test
-    command: ["pytest", "-m", "integration", "--no-cov"]
+    command: ["/bin/sh", "-ec", "alembic upgrade head && pytest -m integration --no-cov"]
     depends_on:
       data-sync-postgres:
         condition: service_healthy
@@ -128,6 +156,10 @@ services:
       DATA_SYNC_S3_BUCKET: ${DATA_SYNC_S3_BUCKET:?set DATA_SYNC_S3_BUCKET}
       DATA_SYNC_S3_REGION: ${DATA_SYNC_S3_REGION:-us-east-1}
       DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS: ${DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS:-10}
+      DATA_SYNC_AKSHARE_ENABLED: ${DATA_SYNC_AKSHARE_ENABLED:-false}
+      DATA_SYNC_SECTOR_ENABLED: ${DATA_SYNC_SECTOR_ENABLED:-false}
+      DATA_SYNC_INTERNAL_API_BEARER_TOKEN: ${DATA_SYNC_INTERNAL_API_BEARER_TOKEN:?set DATA_SYNC_INTERNAL_API_BEARER_TOKEN}
+      DATA_SYNC_AKSHARE_REQUEST_TIMEOUT_SECONDS: ${DATA_SYNC_AKSHARE_REQUEST_TIMEOUT_SECONDS:-30}
     networks:
       - data-sync-internal
     read_only: true

@@ -85,13 +85,12 @@ export const componentGeometry = {
 } as const;
 
 export const appLayout = {
+  desktopMinWidth: 1200,
   sidebarWidth: 300,
   appBarDesktopHeight: 72,
-  appBarMobileHeight: 64,
   contentMaxWidth: 1200,
   analyticsMaxWidth: 1536,
   contentPaddingDesktop: 40,
-  contentPaddingMobile: 16,
   gridGap: 24,
 } as const;
 

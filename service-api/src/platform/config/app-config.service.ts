@@ -98,6 +98,26 @@ export class AppConfigService {
     return this.config.getOrThrow('LOGIN_MAX_FAILURES', { infer: true });
   }
 
+  /** Return one CAPTCHA challenge's short security lifetime. */
+  public get captchaTtlSeconds(): number {
+    return this.config.getOrThrow('CAPTCHA_TTL_SECONDS', { infer: true });
+  }
+
+  /** Return fixed window used to limit CAPTCHA issue requests by network identity. */
+  public get captchaRateLimitWindowSeconds(): number {
+    return this.config.getOrThrow('CAPTCHA_RATE_LIMIT_WINDOW_SECONDS', { infer: true });
+  }
+
+  /** Return maximum CAPTCHA issue requests in one network window. */
+  public get captchaRateLimitMax(): number {
+    return this.config.getOrThrow('CAPTCHA_RATE_LIMIT_MAX', { infer: true });
+  }
+
+  /** Return HMAC secret used to store CAPTCHA answers without retaining plaintext. */
+  public get captchaHmacSecret(): string {
+    return this.config.getOrThrow('CAPTCHA_HMAC_SECRET', { infer: true });
+  }
+
   /** Return fixed window used to count refresh attempts. */
   public get refreshRateLimitWindowSeconds(): number {
     return this.config.getOrThrow('REFRESH_RATE_LIMIT_WINDOW_SECONDS', { infer: true });
@@ -108,9 +128,29 @@ export class AppConfigService {
     return this.config.getOrThrow('REFRESH_RATE_LIMIT_MAX', { infer: true });
   }
 
-  /** Return optional one-time administrator email from deployment configuration. */
-  public get bootstrapAdminEmail(): string | undefined {
-    return this.config.get('BOOTSTRAP_ADMIN_EMAIL', { infer: true });
+  /** Return bounded retry grace period for simultaneous browser refresh requests. */
+  public get refreshRaceGraceSeconds(): number {
+    return this.config.getOrThrow('REFRESH_RACE_GRACE_SECONDS', { infer: true });
+  }
+
+  /** 返回同步服务内部只读 API 的受校验基地址。 */
+  public get dataSyncInternalBaseUrl(): string {
+    return this.config.getOrThrow('DATA_SYNC_INTERNAL_BASE_URL', { infer: true });
+  }
+
+  /** 返回仅用于 API 服务到同步服务的独立 Bearer 凭据。 */
+  public get dataSyncInternalBearerToken(): string {
+    return this.config.getOrThrow('DATA_SYNC_INTERNAL_BEARER_TOKEN', { infer: true });
+  }
+
+  /** 返回下游内部读取请求的有界超时毫秒数。 */
+  public get dataSyncInternalRequestTimeoutMs(): number {
+    return this.config.getOrThrow('DATA_SYNC_INTERNAL_REQUEST_TIMEOUT_MS', { infer: true });
+  }
+
+  /** Return optional one-time super-administrator account from deployment configuration. */
+  public get bootstrapAdminAccount(): string | undefined {
+    return this.config.get('BOOTSTRAP_ADMIN_ACCOUNT', { infer: true });
   }
 
   /** Return optional one-time administrator password from deployment configuration. */

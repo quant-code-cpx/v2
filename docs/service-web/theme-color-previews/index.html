@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>QUANT V2 主题配色预览</title>
+    <title>Apex数据智能分析平台主题配色预览</title>
     <style>
       :root {
         color-scheme: light;
@@ -86,7 +86,7 @@
 
       .shell {
         display: grid;
-        grid-template-columns: 252px minmax(0, 1fr);
+        grid-template-columns: 220px minmax(0, 1fr);
         min-height: 100vh;
         background: var(--canvas);
       }
@@ -96,7 +96,7 @@
         display: flex;
         flex-direction: column;
         min-height: 100vh;
-        padding: 24px 16px 18px;
+        padding: 24px 12px 18px;
         background: var(--paper);
         border-right: 1px solid var(--divider);
       }
@@ -348,7 +348,7 @@
         gap: 20px;
         max-width: 1536px;
         margin: 0 auto;
-        padding: 20px 24px 26px;
+        padding: 20px 18px 26px;
       }
 
       .metric-grid {
@@ -365,10 +365,10 @@
 
       .metric {
         display: grid;
-        grid-template-columns: 52px minmax(0, 1fr) 72px;
+        grid-template-columns: 46px minmax(0, 1fr) 58px;
         align-items: center;
         min-height: 122px;
-        padding: 18px;
+        padding: 18px 14px;
       }
 
       .metric-icon {
@@ -426,7 +426,7 @@
 
       .mini-chart {
         align-self: end;
-        width: 72px;
+        width: 58px;
         height: 42px;
         overflow: visible;
       }
@@ -827,28 +827,6 @@
         background: var(--warning);
       }
 
-      @media (max-width: 1480px) {
-        .shell {
-          grid-template-columns: 220px minmax(0, 1fr);
-        }
-
-        .sidebar {
-          padding-inline: 12px;
-        }
-
-        .content {
-          padding-inline: 18px;
-        }
-
-        .metric {
-          grid-template-columns: 46px minmax(0, 1fr) 58px;
-          padding-inline: 14px;
-        }
-
-        .mini-chart {
-          width: 58px;
-        }
-      }
     </style>
   </head>
   <body>
@@ -857,7 +835,7 @@
         <div class="brand">
           <div class="brand-mark"><span></span></div>
           <div>
-            <div class="brand-name">QUANT V2</div>
+            <div class="brand-name">Apex数据智能分析平台</div>
             <div class="brand-subtitle">智能投研与市场分析平台</div>
           </div>
         </div>
@@ -1268,7 +1246,7 @@
       };
       document.documentElement.dataset.theme = theme;
       document.getElementById("scheme-name").textContent = names[theme] || names.a;
-      document.title = `${names[theme] || names.a}｜QUANT V2`;
+      document.title = `${names[theme] || names.a}｜Apex数据智能分析平台`;
     </script>
   </body>
 </html>

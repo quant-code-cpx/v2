@@ -1,1 +1,1 @@
-"""Process configuration, logging, and dependency composition."""
+"""进程配置、日志与依赖组合。"""

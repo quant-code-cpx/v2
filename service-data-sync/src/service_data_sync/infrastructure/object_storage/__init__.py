@@ -1,1 +1,1 @@
-"""S3-compatible connectivity only; no domain object naming in foundation 0001."""
+"""仅提供兼容 S3 的连通性；基础阶段不在此定义领域对象命名。"""

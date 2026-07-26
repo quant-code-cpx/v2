@@ -130,13 +130,12 @@
   --qv-dialog-width-md: 45rem;
 
   /* App shell and content grids */
+  --qv-desktop-min-width: 75rem;
   --qv-sidebar-width: 18.75rem;
   --qv-appbar-height-desktop: 4.5rem;
-  --qv-appbar-height-mobile: 4rem;
   --qv-content-max-width: 75rem;
   --qv-analytics-max-width: 96rem;
   --qv-content-padding-desktop: 2.5rem;
-  --qv-content-padding-mobile: 1rem;
   --qv-grid-gap: 1.5rem;
 
   /* Interaction */

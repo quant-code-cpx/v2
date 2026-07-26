@@ -1,1 +1,1 @@
-"""Messaging infrastructure; no business task definitions in foundation 0001."""
+"""消息基础设施；基础阶段不在此定义业务任务。"""

@@ -1,0 +1,1284 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta
+    name="description"
+    content="Apex数据智能分析平台登录、默认拒绝鉴权、分层角色与用户全生命周期管理目标方案"
+  >
+  <title>用户访问管理与登录安全｜技术方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #dfe4ec;
+      --surface: #f6f8fb;
+      --accent: #3157d5;
+      --accent-soft: #eef2ff;
+      --success: #176b4d;
+      --warning: #8a4b08;
+      --danger: #a02b2b;
+      --radius: 14px;
+      --shadow: 0 12px 30px rgb(23 32 51 / 7%);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      min-width: 1200px;
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    a {
+      color: var(--accent);
+      text-underline-offset: 0.2em;
+    }
+
+    a:focus-visible {
+      outline: 3px solid rgb(49 87 213 / 28%);
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
+
+    code {
+      padding: 0.08em 0.28em;
+      border-radius: 4px;
+      background: var(--surface);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    .shell {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    header {
+      padding: 56px 0 38px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 750;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+    }
+
+    h1 {
+      max-width: 820px;
+      margin: 0;
+      font-size: clamp(2rem, 6vw, 3.6rem);
+    }
+
+    h2 {
+      margin: 0 0 20px;
+      font-size: clamp(1.45rem, 3vw, 2rem);
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 1.05rem;
+    }
+
+    p {
+      max-width: 78ch;
+    }
+
+    .lede {
+      max-width: 800px;
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 1.08rem;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 30px 0 0;
+    }
+
+    .meta div {
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+    }
+
+    .meta dt {
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .meta dd {
+      margin: 3px 0 0;
+      font-weight: 650;
+    }
+
+    .status {
+      color: var(--warning);
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 94%);
+      backdrop-filter: blur(12px);
+    }
+
+    nav ul {
+      display: flex;
+      gap: 22px;
+      width: max-content;
+      margin: 0;
+      padding: 13px 0;
+      list-style: none;
+    }
+
+    nav a {
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 650;
+      text-decoration: none;
+    }
+
+    nav a:hover {
+      color: var(--accent);
+    }
+
+    main {
+      padding: 22px 0 72px;
+    }
+
+    section {
+      padding: 48px 0;
+      border-bottom: 1px solid var(--line);
+      scroll-margin-top: 58px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .card p:last-child,
+    .card ul:last-child {
+      margin-bottom: 0;
+    }
+
+    .label {
+      display: inline-block;
+      margin-bottom: 10px;
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 750;
+      letter-spacing: 0.06em;
+    }
+
+    .fact {
+      color: var(--success);
+    }
+
+    .risk {
+      color: var(--warning);
+      font-weight: 700;
+    }
+
+    .danger {
+      color: var(--danger);
+      font-weight: 700;
+    }
+
+    .callout {
+      margin-top: 20px;
+      padding: 20px 22px;
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      background: var(--accent-soft);
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .flow,
+    pre {
+      overflow-x: auto;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #111827;
+      color: #e5e7eb;
+      font: 0.88rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--surface);
+      font-size: 0.84rem;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .steps {
+      padding-left: 1.25rem;
+    }
+
+    .steps li {
+      padding: 4px 0 12px 8px;
+    }
+
+    .mt {
+      margin-top: 28px;
+    }
+
+    footer {
+      padding: 28px 0 48px;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    @media print {
+      nav {
+        display: none;
+      }
+
+      header,
+      main,
+      section {
+        padding-top: 18px;
+      }
+
+      .shell {
+        width: 100%;
+      }
+
+      .card {
+        box-shadow: none;
+        break-inside: avoid;
+      }
+
+      .table-wrap,
+      pre {
+        break-inside: avoid;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Apex数据智能分析平台 · Service API · Technical solution</p>
+      <h1>用户访问管理与登录安全</h1>
+      <p class="lede">
+        为“Apex数据智能分析平台”在现有 User/Auth 基线上加入自定义账号登录、全局默认鉴权、常驻图形验证码、三级固定角色和完整用户管理。
+        采用 PostgreSQL 权威状态、Redis 短期安全状态、目标级授权与软删除；最大风险是新枚举与旧客户端不兼容，
+        必须在受控未发布窗口协同升级。
+      </p>
+
+      <dl class="meta">
+        <div>
+          <dt>状态</dt>
+          <dd class="status">Implemented</dd>
+        </div>
+        <div>
+          <dt>负责人</dt>
+          <dd>项目维护者</dd>
+        </div>
+        <div>
+          <dt>最后修改</dt>
+          <dd>2026-07-26</dd>
+        </div>
+        <div>
+          <dt>关联决策</dt>
+          <dd><a href="../../decisions/0008-default-deny-auth-and-hierarchical-rbac.md">ADR-0008</a></dd>
+        </div>
+      </dl>
+
+      <aside class="callout">
+        <strong>2026-07-26 实施摘要</strong>
+        0002 已落地为自定义账号、常驻 PNG 验证码、默认拒绝、三级角色和用户管理运行时合同；已移除运行时
+        Swagger 匿名面。独立 bootstrap job 仅在空用户库且没有 ACTIVE <code>SUPER_ADMIN</code> 时自动创建唯一超级管理员；
+        已有 ACTIVE <code>SUPER_ADMIN</code> 则安全 no-op，非空库或禁用/删除超级管理员则安全失败。已有库使用显式
+        <code>userId → account</code> 映射准备后迁移；受控提升 ACTIVE ADMIN 仅保留为恢复路径。0001 仅保留历史
+        schema/migration 参考。
+      </aside>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">摘要</a></li>
+        <li><a href="#facts">现状</a></li>
+        <li><a href="#scope">范围</a></li>
+        <li><a href="#architecture">架构</a></li>
+        <li><a href="#authorization">权限</a></li>
+        <li><a href="#flows">流程</a></li>
+        <li><a href="#contracts">接口</a></li>
+        <li><a href="#data">数据</a></li>
+        <li><a href="#security">安全</a></li>
+        <li><a href="#delivery">迁移与验收</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>摘要</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label fact">事实</span>
+          <h3>已有可复用 User/Auth 垂直切片</h3>
+          <p>
+            现有 API 已有 Argon2id、JWT、Refresh Session、Redis 限流、Prisma 用户/凭证/会话/审计表、
+            <code>securityVersion</code> 与独立 bootstrap job 自动超级管理员引导。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">决策</span>
+          <h3>默认拒绝 + 固定三级角色</h3>
+          <p>
+            全局 Guard 保护所有业务路由；登录、常驻图形验证码、刷新与幂等退出清理使用显式安全例外。
+            <code>ADMIN</code> 只管理普通用户，<code>SUPER_ADMIN</code> 管理管理员。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">主要风险</span>
+          <h3 class="risk">角色枚举会破坏旧客户端穷举</h3>
+          <p>
+            只有确认无外部消费者时才沿用 <code>/api/v1</code> 协同升级；若发现独立消费者，必须改用
+            <code>/api/v2</code>，不能让旧 Prisma Client 读取新枚举值。
+          </p>
+        </article>
+      </div>
+
+      <aside class="callout">
+        <strong>需求解释假设</strong>
+        原始表述中“未登录不允许访问登录接口和验证码接口”与登录流程矛盾。本方案按“除登录、验证码、
+        Refresh Cookie 刷新与同源幂等退出清理外，未登录不得访问业务接口”设计。<code>/health</code>、
+        <code>/ready</code> 是受网络边界保护的运维例外。
+      </aside>
+    </section>
+
+    <section id="facts">
+      <h2>现状事实与可复用资产</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">主题</th>
+              <th scope="col">已验证事实</th>
+              <th scope="col">本方案处理</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>角色</td>
+              <td>
+                0002 已将 Role 扩展为 <code>USER</code>/<code>ADMIN</code>/<code>SUPER_ADMIN</code>，并以条件唯一索引
+                保证最多一个超级管理员。
+              </td>
+              <td>Actor/Target 约束已移入事务用例；独立 bootstrap job 只在空用户库创建超级管理员。</td>
+            </tr>
+            <tr>
+              <td>认证</td>
+              <td>
+                登录和刷新匿名，用户 Controller 局部挂载 JWT/Role Guard；不存在全局默认拒绝和
+                <code>@Public()</code> allowlist。
+              </td>
+              <td>全局认证、显式匿名、架构测试枚举匿名路由。</td>
+            </tr>
+            <tr>
+              <td>用户管理</td>
+              <td>
+                已有列表、创建、修改和本人资料/改密；缺少详情、删除、筛选排序、管理员重置密码和并发前置条件。
+              </td>
+              <td>补齐完整目标契约；删除采用软删除。</td>
+            </tr>
+            <tr>
+              <td>会话</td>
+              <td>
+                Refresh token 摘要存 PostgreSQL，支持轮换和重放检测；每个受保护请求读取 Session/User，
+                安全版本不一致立即拒绝。
+              </td>
+              <td>保留；补会话族、绝对期限、轮换审计和严格 Origin。</td>
+            </tr>
+            <tr>
+              <td>Redis</td>
+              <td>已有 namespace、TTL API、登录失败锁和刷新限流，故障时登录/刷新 fail closed。</td>
+              <td>复用短期状态边界；增加常驻图形验证码，验证与消费保持原子。</td>
+            </tr>
+            <tr>
+              <td>契约与测试</td>
+              <td>
+                <a href="../../contracts/0001-service-api-user-auth.openapi.yaml">0001 OpenAPI</a> 已 Superseded；
+                它仅保留为历史 schema/migration 参考，既不支持邮箱登录，也不构成运行时 API 兼容边界。
+              </td>
+              <td>
+                <a href="../../contracts/0002-user-access-management.openapi.yaml">0002 Implemented 契约</a>
+                已覆盖自定义账号、常驻验证码、默认拒绝、三级角色和用户生命周期；已补 DTO、Auth、RBAC 与迁移准备回归。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        现有基础方案仍有效：
+        <a href="../0001-service-api-foundation/index.html">0001 API 服务基础架构</a> 与
+        <a href="../../decisions/0005-service-api-runtime-and-architecture.md">ADR-0005</a> 继续约束单进程、
+        User/Auth 边界、PostgreSQL 权威状态和 Redis 限权。
+      </p>
+    </section>
+
+    <section id="scope">
+      <h2>目标、非目标与能力卡</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>目标</h3>
+          <ul>
+            <li>账号密码登录，无注册入口；登录页始终展示并校验图形验证码。</li>
+            <li>新增路由默认认证，前后端按统一权限控制路由、菜单和操作。</li>
+            <li>超级管理员创建管理员，管理员只能管理普通用户。</li>
+            <li>用户列表、详情、创建、修改、软删除、重置密码可审计、可并发控制。</li>
+            <li>所有安全变更通过 <code>securityVersion</code> 立即使旧会话失效。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>非目标</h3>
+          <ul>
+            <li>公共注册、邀请注册、自助找回密码、短信或邮件通道。</li>
+            <li>OAuth、MFA、SSO、多租户和自定义角色/权限编辑器。</li>
+            <li>硬删除用户、账号复用、审计匿名化和用户恢复 API。</li>
+            <li>行情或 data-sync 接口；本能力无跨服务依赖。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>约束与待定预算</h3>
+          <ul>
+            <li>创建用户时校验账号：trim 后转小写，5–32 位，字符集为 <code>[a-z0-9._-]</code>。</li>
+            <li>登录只校验账号非空且不超过 32 位，格式错误与未知账号统一按凭据错误处理。</li>
+            <li>账号创建后不可编辑；软删除后仍保留占用，数据库以 <code>normalizedAccount</code> 保证唯一。</li>
+            <li>单租户；Web/API 默认同站部署。</li>
+            <li>用户 JSON body 目标上限 16 KiB，列表最多 100 条。</li>
+            <li>p95 延迟、峰值登录量、审计保留期在状态转 Accepted 前定稿。</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="table-wrap mt">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Actor / 权限</th>
+              <th scope="col">用例与成功结果</th>
+              <th scope="col">Owner / Consumer</th>
+              <th scope="col">一致性、SLO、兼容</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>匿名：login/captcha、同源幂等 logout；Refresh Cookie：refresh</td>
+              <td>完成风险校验后签发会话；失败不泄露账号存在性</td>
+              <td>AuthModule / service-web</td>
+              <td>安全状态强一致；Redis/DB 失败拒绝；延迟预算待定</td>
+            </tr>
+            <tr>
+              <td>USER：本人能力</td>
+              <td>读取/改资料、改密、退出；改密后旧会话失效</td>
+              <td>UserModule / service-web</td>
+              <td>事务写；受控窗口协同升级 <code>/api/v1</code></td>
+            </tr>
+            <tr>
+              <td>ADMIN：管理 USER</td>
+              <td>CRUD、筛选、重置普通用户；列表附带本人只读身份，同级目标仍拒绝</td>
+              <td>UserModule / 管理页面</td>
+              <td>ETag 防覆盖；权限变更 100% 审计</td>
+            </tr>
+            <tr>
+              <td>SUPER_ADMIN：管理 ADMIN/USER</td>
+              <td>创建和管理管理员；列表显示本人只读身份，详情与写接口仍拒绝自身</td>
+              <td>UserModule / 超级管理页面</td>
+              <td>独立 bootstrap job 保证唯一性；0 次未授权成功为硬性目标</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <h2>功能划分与依赖方向</h2>
+      <pre class="flow" role="img" aria-label="模块依赖图">service-web
+    │ HTTPS · /api/v1
+    ▼
+HTTP Foundation
+    ├── RequestId / Validation / Problem Details / CORS / Security Headers
+    ├── Global Authentication Guard ── @Public allowlist
+    └── Permission metadata ────────── coarse capability check
+             │
+      ┌──────┴────────┐
+      ▼               ▼
+AuthModule ───────▶ UserModule
+  │ Session/JWT       │ User/Credential/RolePolicy
+  │                   │ target/self/version checks
+  ├──────────┐        │
+  ▼          ▼        ▼
+Redis      service-api PostgreSQL
+短期安全    用户/凭证/会话/审计权威状态
+
+禁止 UserModule → AuthModule；禁止 forwardRef；无 data-sync 存储访问。</pre>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">组件</th>
+              <th scope="col">职责与输入/输出</th>
+              <th scope="col">状态与依赖</th>
+              <th scope="col">失败边界</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>HTTP Access Control</td>
+              <td>全局认证、匿名元数据、权限元数据、当前 Actor 上下文；输出认证或拒绝结果</td>
+              <td>无权威状态；依赖 Auth token validator</td>
+              <td>无法验证即 401；缺权限元数据不扩大匿名面</td>
+            </tr>
+            <tr>
+              <td>AuthModule</td>
+              <td>验证码签发/校验、登录、JWT、刷新、退出、会话重放；输出 AuthContext/token</td>
+              <td>拥有 Session 与 Auth audit；依赖 User 认证 port、DB、Redis</td>
+              <td>签名、DB、关键 Redis 或审计失败时不交付 token</td>
+            </tr>
+            <tr>
+              <td>UserModule</td>
+              <td>资料、凭证、角色、状态、软删除、目标级授权；输出 UserResource/page</td>
+              <td>拥有 User/Credential/User audit；只依赖 DB 和平台上下文</td>
+              <td>授权、并发或审计失败时事务回滚</td>
+            </tr>
+            <tr>
+              <td>RolePolicy</td>
+              <td>根据 actor role、action、target role/self 计算允许/拒绝</td>
+              <td>固定代码策略，无 DB 权限表</td>
+              <td>未知角色、动作或目标默认拒绝</td>
+            </tr>
+            <tr>
+              <td>Redis 安全状态</td>
+              <td>账号/IP 风险计数、验证码摘要/次数、Refresh 限流与重放标记</td>
+              <td>全部 key 有 TTL；无用户/session 权威记录</td>
+              <td>验证码签发、所有登录、刷新 fail closed；已认证访问仍由 DB 判定</td>
+            </tr>
+            <tr>
+              <td>PostgreSQL</td>
+              <td>Prisma 事务、唯一约束、版本与追加审计</td>
+              <td>全部 User/Auth 权威状态</td>
+              <td>不可用时业务请求失败且 readiness 失败；应用不自动迁移</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="authorization">
+      <h2>角色、能力与目标级约束</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">动作</th>
+              <th scope="col">USER</th>
+              <th scope="col">ADMIN</th>
+              <th scope="col">SUPER_ADMIN</th>
+              <th scope="col">服务端约束</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>本人资料、本人改密、退出</td>
+              <td>允许</td>
+              <td>允许</td>
+              <td>允许</td>
+              <td>只能使用 <code>/users/me</code>；改密递增安全版本</td>
+            </tr>
+            <tr>
+              <td>用户列表/详情</td>
+              <td>拒绝</td>
+              <td>见 USER + 本人只读行</td>
+              <td>见 USER/ADMIN + 本人只读行；不返回其他 SUPER_ADMIN</td>
+              <td>查询按 actor ID 与 target scope 限制；本人不获得详情或管理动作</td>
+            </tr>
+            <tr>
+              <td>创建 USER</td>
+              <td>拒绝</td>
+              <td>允许</td>
+              <td>允许</td>
+              <td>无注册端点；账号唯一；初始密码可直接登录，不强制首次修改</td>
+            </tr>
+            <tr>
+              <td>创建 ADMIN</td>
+              <td>拒绝</td>
+              <td>拒绝</td>
+              <td>允许</td>
+              <td>写 actor role 与目标 role 审计</td>
+            </tr>
+            <tr>
+              <td>创建/授予 SUPER_ADMIN</td>
+              <td>拒绝</td>
+              <td>拒绝</td>
+              <td>普通 API 拒绝</td>
+              <td>仅独立 bootstrap job 或受控恢复流程</td>
+            </tr>
+            <tr>
+              <td>修改/禁用/删除/重置 USER</td>
+              <td>拒绝</td>
+              <td>允许</td>
+              <td>允许</td>
+              <td>要求 ETag；安全变更递增 <code>securityVersion</code></td>
+            </tr>
+            <tr>
+              <td>修改/禁用/删除/重置 ADMIN</td>
+              <td>拒绝</td>
+              <td>拒绝</td>
+              <td>允许</td>
+              <td>不能以管理员接口操作自己；不能改为 SUPER_ADMIN</td>
+            </tr>
+            <tr>
+              <td>管理 SUPER_ADMIN</td>
+              <td>拒绝</td>
+              <td>拒绝</td>
+              <td>拒绝</td>
+              <td>防止误删唯一根账号；只走受控运维恢复</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout">
+        <strong>两层授权</strong>
+        全局 Guard 与权限元数据只能证明“Actor 可能执行这类动作”。UserModule 必须在事务中读取目标，
+        再检查目标角色、自操作、状态、<code>If-Match</code> 和允许字段。非 HTTP 调用同样不能绕过此策略。
+      </aside>
+    </section>
+
+    <section id="flows">
+      <h2>核心正常与失败流程</h2>
+
+      <h3>登录与常驻图形验证码</h3>
+      <ol class="steps">
+        <li>
+          登录页打开即调用无请求体的 <code>POST /auth/captcha</code>，取得短期 challenge ID、
+          后端 PNG 与过期时间；用户刷新图片时重新调用。接口按 IP 限流并返回 no-store。
+        </li>
+        <li>
+          匿名客户端提交 account、password、captchaId 与 captchaAnswer。验证码 HMAC 校验和单次消费在
+          Redis 原子完成；错误、过期或已消费返回 <code>422 captcha-invalid</code>。
+        </li>
+        <li>
+          验证码通过后，Auth 检查账号/IP 风险桶并验证密码；账号格式不符、不存在、禁用、已删除和密码错误
+          对外保持同一 <code>401 invalid-credentials</code>，未知账号仍执行固定 dummy hash。
+          每次提交后 challenge 均不可复用，Web 在再次提交前取得新 challenge。
+        </li>
+        <li>
+          服务预生成 Session ID、Refresh secret 与 access token；关键 Redis 操作完成后，在 PostgreSQL
+          事务中创建 Session、更新 <code>lastLoginAt</code> 并写登录审计。事务失败时 token 从不交付。
+        </li>
+        <li>
+          返回 access token，并设置 host-only、Secure、HttpOnly、SameSite、最小 Path 的 Refresh Cookie。
+          Web 只把 access token 放内存。
+        </li>
+      </ol>
+
+      <h3 class="mt">全局受保护请求</h3>
+      <pre class="flow" role="img" aria-label="全局鉴权流程">Request
+  │
+  ├─ route 有 @Public() ─────────────▶ 仅 allowlist 流程
+  │
+  └─ 默认路径
+       1. JWT signature / alg / iss / aud / exp
+       2. PostgreSQL Session 未撤销、未过期
+       3. User ACTIVE 且 token/session/user securityVersion 一致
+       4. 构造 AuthContext { userId, sessionId, role, permissions }
+       5. 粗权限 Guard
+       6. UserModule 目标级策略
+                ├─ 允许 ───────────▶ 用例
+                └─ 拒绝 ───────────▶ 403 或隐藏目标的 404</pre>
+      <p>
+        管理员创建或重置的密码可立即用于正常登录，不存在首次登录强制改密状态。用户可随时调用
+        <code>POST /users/me/password</code> 主动修改；成功后递增安全版本、清除 Refresh Cookie，
+        并要求用新密码重新登录。
+      </p>
+
+      <h3 class="mt">刷新、并发与重放</h3>
+      <ol class="steps">
+        <li>
+          登录、验证码、Refresh 与退出的浏览器请求必须携带精确允许的 Origin，缺失或不匹配均拒绝，
+          并校验 Fetch Metadata；带 body 的登录要求 JSON Content-Type，空 body 的验证码、Refresh
+          与退出不要求。<code>SameSite=None</code> 必须另加 CSRF token。
+        </li>
+        <li>解析并限制 token 长度、验证 Session UUID、执行 Redis 的 session+IP 限流。</li>
+        <li>
+          预生成新 Session/token，在事务中用“旧 Session 未撤销 + 摘要匹配”条件更新，创建同一
+          <code>familyId</code> 的新 Session 并写轮换审计；并发只有一个请求成功。
+        </li>
+        <li>
+          记录前序摘要与轮换时间。短并发宽限窗内的失败者返回 <code>409</code> +
+          <code>Retry-After</code>，不清 Cookie、不撤销 family；Web 等待后用浏览器中胜者设置的新 Cookie
+          重试。超出宽限窗再使用旧 token 才判为重放。
+        </li>
+        <li>确认重放时只撤销对应 Session family，写重放审计与短期 Redis 标记；不误伤其他设备会话。</li>
+      </ol>
+
+      <h3 class="mt">管理员修改、重置与软删除</h3>
+      <ol class="steps">
+        <li>全局认证与粗权限通过；UserModule 在 actor scope 内读取目标。</li>
+        <li>校验 Actor/Target 矩阵、自操作规则和 <code>If-Match</code>。版本冲突返回 412。</li>
+        <li>
+          事务开始后重新读取并锁定 Actor 的 role/status/securityVersion 与目标当前状态，再次校验矩阵；
+          条件更新同时约束 Actor 仍 ACTIVE 且未变更。随后写用户/凭证、递增资源版本；角色、状态、重置密码或删除同时递增
+          <code>securityVersion</code>；写脱敏 before/after 审计。
+        </li>
+        <li>
+          删除写 <code>status=DELETED</code> 与 <code>deletedAt</code>，不物理删除。目标已是 DELETED
+          且仍在 Actor scope 时，终态优先于旧 ETag，重复 DELETE 返回 204；未知或不在 scope 内返回 404。
+        </li>
+      </ol>
+
+      <h3 class="mt">唯一超级管理员自动初始化</h3>
+      <ol class="steps">
+        <li>独立 bootstrap job 在 Prisma schema migration 后、API 启动前读取 bootstrap secret；应用启动和公开 API 都不执行创建。</li>
+        <li>
+          使用数据库条件唯一索引保证最多一个 <code>SUPER_ADMIN</code>；advisory lock/串行化事务先检查
+          ACTIVE <code>SUPER_ADMIN</code>。已有 ACTIVE 超级管理员时安全 no-op，不改密、不覆盖，也不因缺失 bootstrap secret 失败。
+        </li>
+        <li>
+          用户库为空且没有 ACTIVE 超级管理员时，两个 bootstrap 变量必须同时存在，才创建配置账号、凭证和脱敏审计。
+          若存在任意 USER/ADMIN、禁用或已删除的超级管理员、配置账号冲突，或任一变量缺失，job 失败且绝不提升、覆盖或修改既有账号。
+        </li>
+        <li>
+          显式提升 ACTIVE ADMIN 仅用于受控恢复；首次初始化不依赖它。生产 secret 由部署环境注入，禁止写入版本库、日志或审计明文。
+        </li>
+      </ol>
+    </section>
+
+    <section id="contracts">
+      <h2>API 合同与错误语义</h2>
+      <p>
+        机器可读定义：
+        <a href="../../contracts/0002-user-access-management.openapi.yaml">0002-user-access-management.openapi.yaml</a>。
+        它是已实施运行时合同，并取代
+        <a href="../../contracts/0001-service-api-user-auth.openapi.yaml">0001</a> 的 User/Auth 基线；0001 仅保留为
+        legacy schema/migration 参考，不提供邮箱登录或运行时兼容承诺。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">方法与路径</th>
+              <th scope="col">权限</th>
+              <th scope="col">关键输入/结果</th>
+              <th scope="col">失败与幂等</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>POST /api/v1/auth/captcha</code></td>
+              <td>Public + IP 限流</td>
+              <td>空 body → 201 challenge、后端生成的非活动 PNG、过期时间；no-store；无音频字段</td>
+              <td>403/429/503；页面打开和手动刷新均调用</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/auth/login</code></td>
+              <td>Public + 验证码 + 风险控制</td>
+              <td>account/password/captchaId/captchaAnswer 必填；200 token + cookie</td>
+              <td>400/401/403/422/429/503；失败不创建 Session</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/auth/refresh</code></td>
+              <td>Refresh Cookie</td>
+              <td>轮换 token/cookie</td>
+              <td>401/403/409/429/503；并发仅一胜，宽限窗失败者不撤销 family</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/auth/logout</code></td>
+              <td>Public 同源清理 + 可选 Refresh Cookie</td>
+              <td>有效 Cookie 撤销对应 Session；始终过期 Cookie 并返回 204</td>
+              <td>缺失/无效/已撤销 Cookie 不区分；Origin/Fetch Metadata 失败为 403</td>
+            </tr>
+            <tr>
+              <td><code>GET/PATCH /api/v1/users/me</code></td>
+              <td>Authenticated</td>
+              <td>本人、permissions；修改要求 If-Match</td>
+              <td>401/412</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/users/me/password</code></td>
+              <td>Authenticated</td>
+              <td>用户自愿改密；校验旧密码、清除 Refresh Cookie、204/no-store</td>
+              <td>401；成功使旧 access/refresh 失效，Web 返回登录页</td>
+            </tr>
+            <tr>
+              <td><code>GET /api/v1/users</code></td>
+              <td>ADMIN / SUPER_ADMIN</td>
+              <td>q、role、status、sort、opaque cursor，最多 100 条；匹配筛选时附带本人只读行</td>
+              <td>默认排除 DELETED；仅 SUPER_ADMIN 可显式筛选；不枚举其他超级管理员；cursor 与筛选绑定</td>
+            </tr>
+            <tr>
+              <td><code>GET /api/v1/users/{id}</code></td>
+              <td>ADMIN / SUPER_ADMIN + target</td>
+              <td>200 User + ETag</td>
+              <td>越出 actor scope、SUPER_ADMIN 或 DELETED 详情返回 404</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/users</code></td>
+              <td>ADMIN / SUPER_ADMIN + requested role</td>
+              <td>201 User + ETag；管理员设置初始密码，不回显明文</td>
+              <td>账号重复 409；首期无 Idempotency-Key，重试后 refetch</td>
+            </tr>
+            <tr>
+              <td><code>PATCH /api/v1/users/{id}</code></td>
+              <td>ADMIN / SUPER_ADMIN + target</td>
+              <td>If-Match；资料/角色/状态；200 + 新 ETag</td>
+              <td>412 并发冲突；无字段 400</td>
+            </tr>
+            <tr>
+              <td><code>DELETE /api/v1/users/{id}</code></td>
+              <td>ADMIN / SUPER_ADMIN + target</td>
+              <td>If-Match；软删除；204</td>
+              <td>已删终态优先于旧 ETag 并返回 204；未知/越权目标 404</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/users/{id}/password-reset</code></td>
+              <td>ADMIN / SUPER_ADMIN + target</td>
+              <td>If-Match；管理员设置新密码；204</td>
+              <td>412；成功使旧会话失效</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid two mt">
+        <article class="card">
+          <h3>Problem Details</h3>
+          <p>
+            统一 <code>application/problem+json</code>，包含稳定 <code>type</code>、title、status、detail、
+            instance、requestId。新增稳定类型：<code>captcha-invalid</code>、
+            <code>precondition-failed</code>。不返回 stack、SQL、凭证、Cookie 或账号存在性。
+          </p>
+        </article>
+        <article class="card">
+          <h3>校验边界</h3>
+          <p>
+            拒绝未知字段；account trim/lowercase 后匹配
+            <code>^[a-z0-9][a-z0-9._-]{4,31}$</code>，密码 12–512，displayName trim 后 1–120；
+            角色/状态使用枚举。
+            密码 OpenAPI 使用 <code>minLength</code> 与 YAML 单引号 pattern，避免现有 0001 的反斜杠转义歧义。
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section id="data">
+      <h2>数据模型、事务与查询</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">模型</th>
+              <th scope="col">已实施变化</th>
+              <th scope="col">约束/索引</th>
+              <th scope="col">事务与删除</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>User</code></td>
+              <td>
+                Role 增 <code>SUPER_ADMIN</code>；Status 增 <code>DELETED</code>；增 nullable
+                <code>deletedAt</code>；新增 <code>account</code>/<code>normalizedAccount</code>；
+                复用 <code>version</code>/<code>securityVersion</code>
+              </td>
+              <td>
+                normalizedAccount 全局唯一且账号软删除后不复用；增加“常量键 + role=SUPER_ADMIN”条件唯一索引，
+                数据库保证最多一个；
+                <code>status=DELETED ⇔ deletedAt IS NOT NULL</code> CHECK；新增
+                <code>(status, role, createdAt, id)</code> 查询索引
+              </td>
+              <td><code>DELETED</code> 是终态且只能由 DELETE 写入；更新、版本、安全版本与审计同事务</td>
+            </tr>
+            <tr>
+              <td><code>Credential</code></td>
+              <td>保留 Argon2id 和 passwordChangedAt；不增加首次登录强制改密字段</td>
+              <td>一对一；任何密码字段不进入 User DTO/audit/log/trace/APM</td>
+              <td>本人改密/管理员重置与 User 安全版本、审计同事务</td>
+            </tr>
+            <tr>
+              <td><code>Session</code></td>
+              <td>
+                增最终 NOT NULL 的 <code>familyId</code>/<code>absoluteExpiresAt</code>、nullable 前序 token 摘要与轮换时间；
+                保留 rotatedFromId
+              </td>
+              <td>既有记录回填 familyId=id、absoluteExpiresAt=expiresAt；增加 family 活动索引</td>
+              <td>轮换 CAS、建新 Session、审计同事务；宽限窗内 409，确认重放只撤销 family</td>
+            </tr>
+            <tr>
+              <td><code>AuditLog</code></td>
+              <td>复用 metadata，定义大小上限与 before/after 脱敏 schema</td>
+              <td>保留 actor/target 时间索引；审计保留期待定</td>
+              <td>追加写；关键写失败回滚业务变更</td>
+            </tr>
+            <tr>
+              <td>Redis</td>
+              <td>新增 captcha answer HMAC/单次消费；保留 account、IP、组合风险桶</td>
+              <td>key 只含摘要；全部 TTL；验证与消费、INCR+EXPIRE 使用 Lua/MULTI 原子执行</td>
+              <td>可丢失，无 backfill；不保存用户/凭证/Session 权威状态</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="mt">并发与排序</h3>
+      <ul>
+        <li>资源响应返回整数 <code>version</code> 与强 ETag；PATCH/DELETE/password-reset 要求相同资源 ETag。</li>
+        <li>
+          事务内重读 Actor 与目标；更新条件包含 <code>id + version + actorId + actor securityVersion +
+          actor ACTIVE + actor 可管理目标</code>。零行区分 404、412 与权限失效，但不泄露越权目标。
+        </li>
+        <li>列表默认 <code>createdAt desc, id desc</code>；opaque cursor 包含最后键、排序与筛选指纹，篡改返回 400。</li>
+        <li>搜索只匹配规范化 account/displayName，输入最长 120；排序字段白名单，不接受任意 SQL 字段。</li>
+        <li>创建依赖 normalizedAccount 唯一约束，重复返回 409；软删除后账号仍不复用。</li>
+      </ul>
+    </section>
+
+    <section id="security">
+      <h2>威胁、失败与可观测性</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">威胁/故障</th>
+              <th scope="col">控制</th>
+              <th scope="col">验证/信号</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>漏挂 Guard 导致匿名访问</td>
+              <td>全局默认认证；显式 <code>@Public</code>；匿名路由 allowlist 架构测试</td>
+              <td>新增 Controller 未标 Public 时 e2e 必须 401</td>
+            </tr>
+            <tr>
+              <td>管理员横向提权或自锁</td>
+              <td>固定权限映射 + UserModule 目标策略；本人只进入列表只读 scope，不进入详情或写 scope</td>
+              <td>完整 Actor×Action×Target 表驱动测试；本人行无操作；拒绝审计指标</td>
+            </tr>
+            <tr>
+              <td>账号枚举、撞库、分布式爆破</td>
+              <td>固定 dummy hash 验证、统一错误、独立账号/IP/组合桶、边缘限流、常驻验证码</td>
+              <td>响应语义/时序回归；401/422/429 指标</td>
+            </tr>
+            <tr>
+              <td>登录/刷新 CSRF</td>
+              <td>所有认证浏览器端点强制可信 Origin 与 Fetch Metadata；仅带 body 端点要求 JSON；
+                SameSite/Secure/HttpOnly/host-only；SameSite=None 另加 CSRF token；Cookie 响应 no-store</td>
+              <td>缺失、伪造、跨站 Origin/Fetch Metadata e2e；Cookie 与 Cache-Control 断言</td>
+            </tr>
+            <tr>
+              <td>Refresh 并发与重放</td>
+              <td>条件更新、familyId、前序摘要与短宽限窗；窗内 409 不撤销，确认重放只撤销单 family</td>
+              <td>双并发只一胜且失败者可恢复；窗口外重放撤销本 family；其他设备 Session 保持有效</td>
+            </tr>
+            <tr>
+              <td>管理员接触初始/重置密码</td>
+              <td>经 TLS 提交；API 只持久化 Argon2id hash，不生成/记录/回显明文；站外交付；Web 提交后清空</td>
+              <td>响应/日志/缓存/trace/APM 扫描；重置后递增安全版本并撤销旧会话</td>
+            </tr>
+            <tr>
+              <td>并发覆盖或重复危险操作</td>
+              <td>ETag/If-Match、版本条件更新；DELETE 重复结果稳定</td>
+              <td>并发 PATCH/DELETE/password-reset 集成测试</td>
+            </tr>
+            <tr>
+              <td>Redis 故障或无 TTL key</td>
+              <td>安全入口 fail closed；原子 TTL；Redis 仅短期状态</td>
+              <td>故障注入；扫描 namespace 确认 TTL；readiness 变红</td>
+            </tr>
+            <tr>
+              <td>审计失败或敏感数据泄漏</td>
+              <td>审计与业务同事务；metadata 白名单/大小上限；结构化日志集中脱敏</td>
+              <td>审计写失败回滚；日志无 password/token/cookie/body</td>
+            </tr>
+            <tr>
+              <td>旧客户端读取新 enum</td>
+              <td>schema/code/data 三阶段；旧实例排空后才激活新值；外部消费者触发 v2</td>
+              <td>部署门禁记录消费者检查与实例版本</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid mt">
+        <article class="card">
+          <h3>HTTP 边界</h3>
+          <p>
+            CORS 精确 origin，methods 包含 DELETE，allowed headers 包含 Authorization/Content-Type/If-Match，
+            exposed headers 包含 ETag/Location/Retry-After；JSON body 设上限；启用安全头与 shutdown hooks。
+            <code>TRUST_PROXY</code> 只在可信反向代理网络启用，不能无条件相信客户端转发头。
+          </p>
+        </article>
+        <article class="card">
+          <h3>日志与指标</h3>
+          <p>
+            日志关联 requestId、actorId、sessionId、action、result，不记录凭据。指标至少覆盖登录结果、
+            captcha invalid、限流、鉴权 401、授权 403、版本 412、审计失败和 Refresh replay。
+          </p>
+        </article>
+        <article class="card">
+          <h3>健康与运维</h3>
+          <p>
+            <code>/health</code> 只表示进程；<code>/ready</code> 检查 PostgreSQL/Redis。生产探针走内部网络，
+            不注册运行时 Swagger/OpenAPI 路由。过期 Session 与审计保留由上线 runbook 定义，不预建业务 Scheduler。
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section id="delivery">
+      <h2>实施、迁移、回滚与验收</h2>
+      <ol class="steps">
+        <li>
+          <strong>阶段 0 — 合同冻结（已完成）：</strong>
+          ADR-0008、权限矩阵、登录标识、验证码 TTL/限流和消费者边界已冻结。当前无外部消费者；未来若出现独立消费者，
+          只能从 <code>/api/v2</code> 新建兼容窗口，不能回写旧邮箱契约。
+        </li>
+        <li>
+          <strong>阶段 1 — Expand schema（已实施）：</strong>
+          migration A 添加 <code>SUPER_ADMIN</code>/<code>DELETED</code> 枚举值。已有用户库先由
+          <code>prepare-legacy-accounts</code> 在串行化事务中锁表，按显式 <code>userId → account</code> 映射填充
+          nullable account/normalizedAccount；禁止从邮箱推导。migration B 复验完整性、格式和唯一性，再收紧 NOT NULL，
+          并回填 Session family/absolute expiry。无法可靠回填的遗留 Session 统一撤销。
+        </li>
+        <li>
+          <strong>阶段 2 — 安全代码（已实施）：</strong>
+          全局 Guard、显式 Public allowlist、目标级策略、自定义账号、常驻验证码、Session family 与 DTO 回归已落地；
+          service-web 按 0002 Implemented 合同协同发布。运行时不注册 Swagger/OpenAPI 路由，避免匿名绕过。
+        </li>
+        <li>
+          <strong>阶段 3 — 激活路径（已实施）：</strong>
+          独立 bootstrap job 仅在空用户库且无 ACTIVE <code>SUPER_ADMIN</code> 时自动创建配置账号为唯一超级管理员；
+          已有 ACTIVE 超级管理员安全 no-op，任意其他既有用户、禁用/删除超级管理员、变量缺失或账号冲突均 fail closed。
+          既有 ACTIVE ADMIN 的显式提升仅是受控恢复路径，需传入精确账号和 <code>PROMOTE_ACTIVE_ADMIN</code> 确认值；
+          成功后撤销既有 Session、递增安全版本并写审计。普通 API 不提供 SUPER_ADMIN 变更。
+        </li>
+        <li>
+          <strong>阶段 4 — Contract 状态（已完成）：</strong>
+          0002 已设为 Implemented，0001 已设为 Superseded；0001 只保留为历史和 legacy 数据迁移参考。
+        </li>
+      </ol>
+
+      <h3>回滚</h3>
+      <div class="grid">
+        <article class="card">
+          <span class="label">激活前</span>
+          <h3>回滚镜像，保留扩展</h3>
+          <p>回滚应用与 Web；保留 nullable 列和未使用 enum 值。PostgreSQL enum 不执行破坏性删除。</p>
+        </article>
+        <article class="card">
+          <span class="label">激活后</span>
+          <h3>激活后禁止回滚旧鉴权镜像</h3>
+          <p>
+            阶段 3 首次写入 SUPER_ADMIN/DELETED，或签发依赖 family/absolute expiry 的 Session 后即越过
+            point of no return。旧 Guard/会话逻辑会丢失角色层级或绝对期限，并可能重新启用软删除账号；
+            故障只能 roll forward，或部署兼容修复镜像。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">数据恢复</span>
+          <h3>软删除不自动反转</h3>
+          <p>应用回滚不恢复已删用户或旧密码。需要恢复时走受审计运维命令；保留数据库备份，不执行 down -v。</p>
+        </article>
+      </div>
+
+      <h3 class="mt">验收矩阵</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">类别</th>
+              <th scope="col">必须验证</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>架构</td>
+              <td>
+                Auth→User/Redis 单向，无 <code>forwardRef</code>；全局默认认证；Public 集合精确；
+                UserModule 不 import Auth 具体 Guard。
+              </td>
+            </tr>
+            <tr>
+              <td>RBAC</td>
+              <td>
+                全部 Actor×Action×Target 组合；ADMIN 不能创建/管理管理员；任何 API 不能管理 SUPER_ADMIN；
+                前端隐藏不影响后端判定。
+              </td>
+            </tr>
+            <tr>
+              <td>Auth</td>
+              <td>
+                正确/错误/禁用/删除账号、dummy hash、常驻验证码、账号/IP/组合限流、Redis fail closed、
+                challenge 必填/单次消费/刷新/过期、Refresh 并发/重放、幂等 logout、改密清 Cookie、
+                缺失/伪造 Origin、Fetch Metadata、SameSite/CSRF、Cookie 与 no-store。
+              </td>
+            </tr>
+            <tr>
+              <td>User</td>
+              <td>
+                list/detail/create/update/delete/password-reset；筛选/排序/cursor；账号 5–32 位校验与唯一性；
+                软删除账号保留；列表只附带 Actor 本人且不泄露其他 SUPER_ADMIN；
+                DELETED 默认/显式查询边界、重复删除终态优先；If-Match 412；securityVersion 各触发条件。
+              </td>
+            </tr>
+            <tr>
+              <td>数据</td>
+              <td>
+                fresh/existing migration、并发自动 bootstrap 只创建一次、已有 ACTIVE SUPER_ADMIN no-op、非空库或禁用/删除
+                超级管理员、变量缺失或账号冲突失败、指定管理员提升恢复路径、旧实例排空门禁、
+                Credential/Session 回填与 NOT NULL 收紧、激活后禁止旧授权镜像、兼容修复镜像与 backup restore。
+              </td>
+            </tr>
+            <tr>
+              <td>合同</td>
+              <td>
+                OpenAPI 3.1 可解析；运行时路由/DTO/status/security 与 0002 一致；密码 pattern 对
+                12+ 且含数字的样例通过，对缺数字样例失败；未知字段拒绝。
+              </td>
+            </tr>
+            <tr>
+              <td>运维</td>
+              <td>
+                PostgreSQL/Redis 中断恢复、health/ready、日志脱敏、审计失败回滚、优雅停机、
+                Docker 镜像与容器健康检查。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="mt">计划命令（方案阶段未运行实现验证）</h3>
+      <pre>cd service-api
+corepack pnpm@11.17.0 install
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm prisma:deploy
+
+cd ..
+docker build --target test --tag quant-v2/service-api:test service-api
+docker build --tag quant-v2/service-api:local service-api
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example --profile api up --build
+curl -fsS http://127.0.0.1:13000/health
+curl -fsS http://127.0.0.1:13000/ready</pre>
+
+      <div class="grid two mt">
+        <article class="card">
+          <h3>本方案验证</h3>
+          <ul>
+            <li>HTML 语义、PC 桌面/打印布局和本地链接。</li>
+            <li>OpenAPI YAML 解析、引用解析和密码 pattern 样例。</li>
+            <li>已更新运行代码、0002 合同和 0001 Superseded 标记；Docker Node 24 格式、lint、类型和单测通过。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>待决问题</h3>
+          <ul>
+            <li>“Apex数据智能分析平台”商标、域名与应用商店名称需在正式上线前完成法务检索。</li>
+            <li>常驻验证码 TTL、IP 限流阈值；首期合同明确仅返回 PNG、不提供音频。</li>
+            <li>超级管理员灾难恢复和凭证轮换流程。</li>
+            <li>p95/吞吐/连接池预算、审计与 Session 保留期。</li>
+            <li>生产 Web/API 是否始终同站；若跨站需独立 CSRF 方案。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      用户访问管理与登录安全 · Implemented：默认拒绝、常驻验证码、三级角色、目标级授权、软删除和可审计迁移。
+    </div>
+  </footer>
+</body>
+</html>

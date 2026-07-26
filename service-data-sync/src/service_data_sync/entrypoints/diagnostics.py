@@ -1,3 +1,5 @@
+"""本地依赖诊断 CLI，输出稳定且不含密钥的健康状态。"""
+
 from __future__ import annotations
 
 import argparse
@@ -16,6 +18,8 @@ from service_data_sync.bootstrap.settings import Settings, load_settings
 
 
 class DiagnosticsExitCode(IntEnum):
+    """诊断 CLI 对外承诺的稳定退出码。"""
+
     OK = 0
     INTERNAL_ERROR = 1
     CONFIGURATION_ERROR = 2
@@ -27,6 +31,8 @@ class DiagnosticsExitCode(IntEnum):
 
 @dataclass(frozen=True)
 class CheckResult:
+    """一项基础设施探测的成功状态、耗时与安全错误类型。"""
+
     dependency: str
     ok: bool
     duration_ms: int
@@ -35,17 +41,19 @@ class CheckResult:
 
 @dataclass(frozen=True)
 class DiagnosticsReport:
+    """汇总全部依赖探测结果，并负责转换为 CLI 输出。"""
+
     results: tuple[CheckResult, ...]
 
     @property
     def exit_code(self) -> DiagnosticsExitCode:
-        """Collapse check outcomes into stable CLI exit code."""
+        """将各项探测结果归并为稳定的 CLI 退出码。"""
         failed = {result.dependency for result in self.results if not result.ok}
         if not failed:
             return DiagnosticsExitCode.OK
         if failed == {"configuration"}:
             return DiagnosticsExitCode.CONFIGURATION_ERROR
-        # A mixed failure must not masquerade as any single dependency outage.
+        # 多项依赖同时失败不能伪装成任意一种单依赖故障。
         if len(failed) > 1:
             return DiagnosticsExitCode.MULTIPLE_DEPENDENCIES_UNAVAILABLE
         return {
@@ -55,7 +63,7 @@ class DiagnosticsReport:
         }.get(next(iter(failed)), DiagnosticsExitCode.INTERNAL_ERROR)
 
     def as_dict(self) -> dict[str, Any]:
-        """Serialize report into deterministic machine-readable diagnostics payload."""
+        """将报告序列化为字段顺序稳定、可机器读取的诊断载荷。"""
         return {
             "ok": self.exit_code is DiagnosticsExitCode.OK,
             "exit_code": int(self.exit_code),
@@ -68,7 +76,7 @@ def run_diagnostics(
     *,
     timeout_seconds: int,
 ) -> DiagnosticsReport:
-    """Run independent dependency checks concurrently and classify failures or timeout."""
+    """并发执行相互独立的依赖探测，并归类失败或超时。"""
     started_at = {name: time.monotonic() for name in checks}
     executor = ThreadPoolExecutor(max_workers=len(checks), thread_name_prefix="dependency-check")
     futures: dict[Future[None], str] = {
@@ -79,7 +87,7 @@ def run_diagnostics(
 
     for future, dependency in futures.items():
         duration_ms = int((time.monotonic() - started_at[dependency]) * 1000)
-        # Executor cancellation cannot stop running I/O, but report timeout without waiting for it.
+        # 取消线程池任务无法中止已运行 I/O；仍应立即报告超时，不能继续等待。
         if future in pending:
             future.cancel()
             results.append(
@@ -110,7 +118,7 @@ def run_diagnostics(
 
 
 def _checks(container: ServiceContainer) -> dict[str, Callable[[], None]]:
-    """Expose dependency probes under stable externally documented names."""
+    """以对外文档约定的稳定名称暴露依赖探测函数。"""
     return {
         "postgres": container.database.ping,
         "redis": container.broker.ping,
@@ -119,7 +127,7 @@ def _checks(container: ServiceContainer) -> dict[str, Callable[[], None]]:
 
 
 def diagnose(settings: Settings) -> DiagnosticsReport:
-    """Build temporary container, run all probes, and always release its clients."""
+    """创建临时容器、执行全部探测，并始终释放客户端。"""
     container = build_container(settings)
     try:
         return run_diagnostics(
@@ -131,7 +139,7 @@ def diagnose(settings: Settings) -> DiagnosticsReport:
 
 
 def _render(report: DiagnosticsReport, output_format: str) -> str:
-    """Render diagnostics as stable JSON or concise human-readable lines."""
+    """将诊断结果渲染为稳定 JSON 或简洁的人工可读行。"""
     if output_format == "json":
         return json.dumps(report.as_dict(), ensure_ascii=False, sort_keys=True)
     lines = [
@@ -142,7 +150,7 @@ def _render(report: DiagnosticsReport, output_format: str) -> str:
 
 
 def _configuration_report() -> DiagnosticsReport:
-    """Create safe failure report when settings could not be loaded."""
+    """配置无法加载时创建不泄漏细节的失败报告。"""
     return DiagnosticsReport(
         results=(
             CheckResult(
@@ -156,16 +164,14 @@ def _configuration_report() -> DiagnosticsReport:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    """Parse CLI output-format option without binding process arguments in tests."""
-    parser = argparse.ArgumentParser(
-        description="Check service-data-sync infrastructure dependencies."
-    )
+    """解析 CLI 输出格式，测试时不绑定进程参数。"""
+    parser = argparse.ArgumentParser(description="检查 service-data-sync 基础设施依赖。")
     parser.add_argument("--format", choices=("console", "json"), default="console")
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run diagnostics CLI and return documented status code without exposing secrets."""
+    """运行诊断 CLI，返回文档约定退出码且不暴露密钥。"""
     args = parse_args(argv)
     try:
         settings = load_settings()

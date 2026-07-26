@@ -1,14 +1,7 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type PropsWithChildren,
-} from "react";
-import { createTheme, type PaletteMode, type Theme } from "@mui/material/styles";
+import { createTheme, type Theme } from "@mui/material/styles";
 
 import {
+  appLayout,
   brandColors,
   componentGeometry,
   feedbackColors,
@@ -18,35 +11,13 @@ import {
   typographyFamilies,
 } from "./design-tokens";
 
-const COLOR_MODE_STORAGE_KEY = "quant-v2:color-mode:v1";
-
-interface ColorModeContextValue {
-  mode: PaletteMode;
-  toggleColorMode: () => void;
-}
-
-const ColorModeContext = createContext<ColorModeContextValue | null>(null);
-
-/** Prefer persisted color mode, otherwise follow browser preference. */
-function getInitialColorMode(): PaletteMode {
-  const storedMode = window.localStorage.getItem(COLOR_MODE_STORAGE_KEY);
-
-  if (storedMode === "light" || storedMode === "dark") {
-    return storedMode;
-  }
-
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
-/** Build complete MUI theme from shared design tokens for requested palette mode. */
-export function createAppTheme(mode: PaletteMode): Theme {
-  const dark = mode === "dark";
-
+/** 构建平台固定浅色桌面主题，避免系统偏好或本地存储改变业务界面。 */
+export function createAppTheme(): Theme {
   return createTheme({
     spacing: 8,
     shape: { borderRadius: componentGeometry.baseRadius },
     palette: {
-      mode,
+      mode: "light",
       primary: {
         light: brandColors.primaryLight,
         main: brandColors.primary,
@@ -64,20 +35,12 @@ export function createAppTheme(mode: PaletteMode): Theme {
       warning: { main: feedbackColors.warning },
       error: { main: feedbackColors.error },
       grey: neutralColors,
-      background: dark
-        ? { default: neutralColors[900], paper: neutralColors[800] }
-        : { default: "#FFFFFF", paper: "#FFFFFF" },
-      text: dark
-        ? {
-            primary: "#FFFFFF",
-            secondary: neutralColors[500],
-            disabled: neutralColors[600],
-          }
-        : {
-            primary: neutralColors[800],
-            secondary: neutralColors[600],
-            disabled: neutralColors[500],
-          },
+      background: { default: "#FFFFFF", paper: "#FFFFFF" },
+      text: {
+        primary: neutralColors[800],
+        secondary: neutralColors[600],
+        disabled: neutralColors[500],
+      },
       divider: "rgb(145 158 171 / 20%)",
       action: {
         hover: "rgb(145 158 171 / 8%)",
@@ -125,7 +88,7 @@ export function createAppTheme(mode: PaletteMode): Theme {
       MuiCssBaseline: {
         styleOverrides: {
           body: {
-            minWidth: 320,
+            minWidth: appLayout.desktopMinWidth,
             fontVariantNumeric: "tabular-nums",
           },
           "*:focus-visible": {
@@ -145,7 +108,7 @@ export function createAppTheme(mode: PaletteMode): Theme {
           root: {
             border: 0,
             borderRadius: componentGeometry.cardRadius,
-            boxShadow: dark ? shadows.cardDark : shadows.card,
+            boxShadow: shadows.card,
           },
         },
       },
@@ -193,7 +156,13 @@ export function createAppTheme(mode: PaletteMode): Theme {
             "&:hover fieldset": { borderColor: "rgb(145 158 171 / 32%)" },
             "&.Mui-focused fieldset": { borderWidth: 2 },
           },
-          input: { padding: "16px 14px", fontSize: 15, lineHeight: "24px" },
+          input: {
+            padding: "16px 14px",
+            fontSize: 15,
+            lineHeight: "24px",
+            // MUI's focused fieldset is the sole visible focus cue for text inputs.
+            "&:focus-visible": { boxShadow: "none" },
+          },
         },
       },
       MuiFormHelperText: {
@@ -234,8 +203,8 @@ export function createAppTheme(mode: PaletteMode): Theme {
           },
           head: {
             height: componentGeometry.tableHeadHeight,
-            color: dark ? neutralColors[500] : neutralColors[600],
-            backgroundColor: dark ? "#28323D" : neutralColors[200],
+            color: neutralColors[600],
+            backgroundColor: neutralColors[200],
             fontWeight: 600,
           },
         },
@@ -253,9 +222,9 @@ export function createAppTheme(mode: PaletteMode): Theme {
       MuiDialog: {
         styleOverrides: {
           paper: {
-            width: `min(${componentGeometry.dialogWidth}px, calc(100% - 32px))`,
+            width: componentGeometry.dialogWidth,
             maxWidth: "none",
-            margin: 16,
+            margin: 24,
             borderRadius: componentGeometry.cardRadius,
             boxShadow: shadows.dialog,
           },
@@ -273,10 +242,10 @@ export function createAppTheme(mode: PaletteMode): Theme {
       MuiDrawer: {
         styleOverrides: {
           paper: {
-            width: `min(${componentGeometry.drawerWidth}px, 100vw)`,
-            backgroundColor: dark ? "rgb(28 37 46 / 90%)" : "rgb(255 255 255 / 90%)",
+            width: componentGeometry.drawerWidth,
+            backgroundColor: "rgb(255 255 255 / 90%)",
             backdropFilter: "blur(20px)",
-            boxShadow: dark ? shadows.drawerDark : shadows.drawer,
+            boxShadow: shadows.drawer,
           },
         },
       },
@@ -295,48 +264,4 @@ export function createAppTheme(mode: PaletteMode): Theme {
       },
     },
   });
-}
-
-/** Persist color-mode state and expose toggle action to descendant UI. */
-export function ColorModeProvider({ children }: PropsWithChildren) {
-  const [mode, setMode] = useState<PaletteMode>(getInitialColorMode);
-
-  /** Synchronize React color choice with browser storage and document color-scheme hint. */
-  useEffect(() => {
-    window.localStorage.setItem(COLOR_MODE_STORAGE_KEY, mode);
-    document.documentElement.dataset.colorScheme = mode;
-  }, [mode]);
-
-  /** Keep provider value stable until mode changes, avoiding unnecessary context updates. */
-  const value = useMemo<ColorModeContextValue>(
-    () => ({
-      mode,
-      /** Switch only between supported palette modes. */
-      toggleColorMode: () => {
-        // Functional update avoids stale closure when toggles occur before React commits.
-        setMode((currentMode) => (currentMode === "dark" ? "light" : "dark"));
-      },
-    }),
-    [mode],
-  );
-
-  return <ColorModeContext.Provider value={value}>{children}</ColorModeContext.Provider>;
-}
-
-/** Read color-mode context, enforcing provider placement for consumers. */
-export function useColorMode() {
-  const context = useContext(ColorModeContext);
-
-  if (context === null) {
-    throw new Error("useColorMode must be used within ColorModeProvider");
-  }
-
-  return context;
-}
-
-/** Memoize active MUI theme from contextual color mode. */
-export function useAppTheme() {
-  const { mode } = useColorMode();
-
-  return useMemo(() => createAppTheme(mode), [mode]);
 }

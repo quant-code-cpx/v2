@@ -10,8 +10,10 @@ import {
 import type { Request, Response } from 'express';
 
 type ProblemResponse = {
+  code?: string;
   error?: string;
   message?: string | string[];
+  retryAfter?: number;
 };
 
 @Catch()
@@ -27,6 +29,8 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
     const payload = exception instanceof HttpException ? exception.getResponse() : undefined;
     const detail = this.detailFrom(payload, status);
+    const code = this.codeFrom(payload, status);
+    const retryAfter = this.retryAfterFrom(payload);
 
     if (status >= 500) {
       this.logger.error({
@@ -36,16 +40,22 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       });
     }
 
+    if (retryAfter !== undefined) {
+      response.setHeader('Retry-After', String(retryAfter));
+    }
+
     response
       .status(status)
+      .setHeader('Cache-Control', 'no-store')
       .type('application/problem+json')
       .json({
-        type: `https://quant-v2.local/problems/${this.problemType(status)}`,
+        type: `https://apex.local/problems/${code}`,
         title: this.titleFor(status),
         status,
         detail,
         instance: request.originalUrl,
         requestId: request.requestId,
+        code,
       });
   }
 
@@ -68,18 +78,39 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     return this.titleFor(status);
   }
 
-  /** Map common status codes to stable problem-type path segments. */
-  private problemType(status: number): string {
+  /** Read a safe explicit public code or derive a stable code from HTTP status. */
+  private codeFrom(payload: string | object | undefined, status: number): string {
+    if (payload && typeof payload === 'object') {
+      const code = (payload as ProblemResponse).code;
+      if (typeof code === 'string' && /^[a-z][a-z0-9-]*$/.test(code)) {
+        return code;
+      }
+    }
+
     const types: Record<number, string> = {
       400: 'validation-error',
       401: 'unauthorized',
       403: 'forbidden',
       404: 'not-found',
       409: 'conflict',
+      412: 'precondition-failed',
+      422: 'unprocessable-content',
+      428: 'precondition-required',
       429: 'rate-limited',
       503: 'dependency-unavailable',
     };
     return types[status] ?? 'internal-error';
+  }
+
+  /** Read optional bounded retry instruction emitted by a deliberate public problem. */
+  private retryAfterFrom(payload: string | object | undefined): number | undefined {
+    if (!payload || typeof payload !== 'object') {
+      return undefined;
+    }
+    const retryAfter = (payload as ProblemResponse).retryAfter;
+    return typeof retryAfter === 'number' && Number.isSafeInteger(retryAfter) && retryAfter > 0
+      ? retryAfter
+      : undefined;
   }
 
   /** Return standard HTTP status title with safe fallback for unknown status. */

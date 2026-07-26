@@ -1,1 +1,1 @@
-"""PostgreSQL connection infrastructure; no models or tables in foundation 0001."""
+"""PostgreSQL 连接基础设施；基础阶段不在此定义模型或表。"""

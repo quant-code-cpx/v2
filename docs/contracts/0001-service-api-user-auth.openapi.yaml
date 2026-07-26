@@ -2,7 +2,13 @@ openapi: 3.1.1
 info:
   title: quant-v2 service-api
   version: 1.0.0
-  description: Versioned User and authentication API. All business routes use /api/v1.
+  description: |
+    Historical User and authentication API contract. Superseded by
+    0002-user-access-management.openapi.yaml for the runtime User/Auth surface.
+    Retained only as a legacy schema-and-migration reference; it does not provide an
+    email-login or runtime compatibility guarantee.
+  x-contract-status: Superseded
+  x-superseded-by: 0002-user-access-management.openapi.yaml
 servers:
   - url: http://127.0.0.1:13000
 paths:

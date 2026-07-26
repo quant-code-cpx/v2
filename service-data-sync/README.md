@@ -1,17 +1,77 @@
 # service-data-sync
 
-财经与股票基础数据同步服务。当前实现仅包含工程基础设施：配置、日志、PostgreSQL/Redis/S3 连通性诊断、
-空载 Celery worker、provider-neutral port 和架构测试。
+财经与股票基础数据同步服务。当前包含工程基础设施、P0 个股未复权日线，以及行业/概念板块三周期行情的受控同步闭环：
+provider-neutral port、AKShare adapter、S3 raw evidence、PostgreSQL canonical revision 和人工 CLI。
 
 技术方案见 [0001：同步服务工程基础设施](../docs/service-data-sync/0001-data-sync-foundation/index.html)。
+板块跨服务读取与 API 路径见
+[0003：板块行情 API 访问技术方案](../docs/service-api/0003-sector-market-data-access/index.html)（已实现内部与公开读取路由）。
 
 ## 当前边界
 
-- 没有 FastAPI、HTTP route、OpenAPI、service-api 集成。
-- 没有业务表、业务模型、Alembic revision、定时任务或真实同步任务。
-- 未安装、未调用 AKShare、Tushare 或其他供应商 SDK。
+- 已实现 FastAPI 内部只读路由 `GET /internal/v1/sectors`、`GET /internal/v1/sectors/{scheme}/{sectorCode}`
+  和 `GET /internal/v1/sectors/{scheme}/{sectorCode}/bars`；仅接受 `DATA_SYNC_INTERNAL_API_BEARER_TOKEN`，不暴露 raw、供应商字段或 `PENDING` 身份。
+- 已有 P0 Alembic revision：证券占位身份、source batch、按年分区的日线修订和 publication 元数据。
+- 已实现 AKShare 腾讯未复权日线 adapter；默认关闭，只有设置 `DATA_SYNC_AKSHARE_ENABLED=true` 才会注册。
+- 已实现东财行业/概念板块的日线、周线、月线 adapter；三个周期分别调用上游参数、分别存入
+  `sector_daily_bar`、`sector_weekly_bar`、`sector_monthly_bar`，绝不由日线计算。除 `DATA_SYNC_AKSHARE_ENABLED=true`
+  外，还必须显式设置 `DATA_SYNC_SECTOR_ENABLED=true`。
+- 已实现行业/概念目录 CLI；目录快照写入 raw evidence 后会激活带名称的 `ACTIVE` 身份。行情先创建的 `PENDING` 身份会保留 UUID 后升级；成份、申万体系、EOD 快照、资金流和调度仍未实现。
+- 默认 CLI 只拉最近 31 个自然日；首次回填、交易所主数据、复权、财务和定时调度尚未实现。
 - 所有未来外部数据只能通过 provider-neutral port 与独立 adapter 获取。
 - application、task、质量、持久化代码禁止直接调用数据源 SDK、HTTP 或具体 adapter。
+
+## P0 最近一个月同步
+
+先启动本地数据同步基础设施并完成迁移，再显式开启研究来源：
+
+~~~sh
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra up -d
+docker build --target test --tag quant-v2/service-data-sync:test service-data-sync
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra --profile data-sync-test run --rm data-sync-test \
+  /bin/sh -ec 'alembic upgrade head && DATA_SYNC_AKSHARE_ENABLED=true \
+  data-sync-equity-bars --instrument SSE.600519'
+~~~
+
+未传 `--start` 与 `--end` 时，CLI 从当日向前取 31 个自然日。`--start`、`--end` 均为包含端 ISO 日期；
+重复同一窗口只记录新的 raw 观测，不会创建重复 canonical revision 或新的 publication version。
+
+## P0 板块三周期同步
+
+板块 CLI 不提供默认日期，必须显式给出有界窗口。`--period` 为 `1d`、`1w` 或 `1mo`，它们映射到三个
+独立 upstream 请求和 canonical 表；不能传入分钟周期，也不会读取日线来计算周/月线。
+
+~~~sh
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra up -d
+docker build --target test --tag quant-v2/service-data-sync:test service-data-sync
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra --profile data-sync-test run --rm data-sync-test \
+  /bin/sh -ec 'alembic upgrade head && DATA_SYNC_AKSHARE_ENABLED=true \
+  DATA_SYNC_SECTOR_ENABLED=true data-sync-sector-bars \
+  --scheme eastmoney.industry --sector BK0475 --period 1w \
+  --start 2026-06-01 --end 2026-06-30'
+~~~
+
+上例只适用于获准的 local/research 来源。生产开关继续保持关闭，直到许可、频率、留存和连续稳定性完成评审。
+
+## P0 板块目录与内部读取
+
+先同步分类目录，才会有可由内部 API 读取的 `ACTIVE` 板块；目录同步不包含成份关系：
+
+~~~sh
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra up -d
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra --profile data-sync-test run --rm data-sync-test \
+  /bin/sh -ec 'alembic upgrade head && DATA_SYNC_AKSHARE_ENABLED=true \
+  DATA_SYNC_SECTOR_ENABLED=true data-sync-sector-catalog --scheme eastmoney.industry'
+~~~
+
+内部 HTTP 服务只在 Compose 内网监听 `8000`。`service-api` 通过 `data-sync-api` 服务名访问它；两侧必须使用同一
+`DATA_SYNC_INTERNAL_API_BEARER_TOKEN`，生产环境由 secret 注入并进行轮换。
 
 ## 前置条件
 

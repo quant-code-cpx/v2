@@ -1,6 +1,7 @@
-import type { Request } from 'express';
-
 import type { Role } from '../../generated/prisma/client.js';
+import type { CurrentUserResource } from '../user/user.types.js';
+
+export type { AuthContext, AuthenticatedRequest } from '../../platform/http/auth-context.js';
 
 export type JwtPayload = {
   sub: string;
@@ -9,18 +10,9 @@ export type JwtPayload = {
   sv: number;
 };
 
-export type AuthContext = {
-  userId: string;
-  sessionId: string;
-  role: Role;
-};
-
-export type AuthenticatedRequest = Request & {
-  user: AuthContext;
-};
-
 export type TokenPair = {
   accessToken: string;
   refreshToken: string;
   refreshExpiresAt: Date;
+  user: CurrentUserResource;
 };

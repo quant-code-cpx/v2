@@ -12,8 +12,9 @@ export function configureHttp(app: NestExpressApplication, config: AppConfigServ
   app.enableCors({
     origin: config.corsOrigin,
     credentials: true,
-    methods: ['GET', 'POST', 'PATCH'],
-    allowedHeaders: ['Authorization', 'Content-Type', 'X-Request-Id'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'If-Match', 'X-Request-Id'],
+    exposedHeaders: ['ETag', 'Location', 'Retry-After', 'X-Request-Id'],
   });
   app.use(requestIdMiddleware);
   app.useGlobalPipes(

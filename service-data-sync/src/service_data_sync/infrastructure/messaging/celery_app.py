@@ -1,3 +1,5 @@
+"""Celery worker 的受限 broker 配置。"""
+
 from __future__ import annotations
 
 from celery import Celery
@@ -6,7 +8,7 @@ from service_data_sync.bootstrap.settings import Settings
 
 
 def create_worker_app(settings: Settings) -> Celery:
-    """Create broker-only worker with bounded startup retries and no result backend."""
+    """创建仅使用 broker、限制启动重试且不启用结果后端的 worker。"""
     app = Celery("service_data_sync", broker=settings.broker_url.get_secret_value())
     app.conf.update(
         broker_connection_timeout=5,

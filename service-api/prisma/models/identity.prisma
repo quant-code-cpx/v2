@@ -1,28 +1,36 @@
 enum Role {
   USER
   ADMIN
+  SUPER_ADMIN
 }
 
 enum UserStatus {
   ACTIVE
   DISABLED
+  DELETED
 }
 
 model User {
-  id              String      @id @default(uuid()) @db.Uuid
-  normalizedEmail String      @unique @map("normalized_email")
-  email           String
-  displayName     String      @map("display_name")
-  role            Role        @default(USER)
-  status          UserStatus  @default(ACTIVE)
-  securityVersion Int         @default(1) @map("security_version")
-  version         Int         @default(1)
-  lastLoginAt     DateTime?   @map("last_login_at")
-  createdAt       DateTime    @default(now()) @map("created_at")
-  updatedAt       DateTime    @updatedAt @map("updated_at")
-  credential      Credential?
-  sessions        Session[]
-  auditLogs       AuditLog[]  @relation("actor_audit_logs")
+  id                String      @id @default(uuid()) @db.Uuid
+  normalizedAccount String      @unique @map("normalized_account")
+  account           String
+  // Retained only for pre-Apex data compatibility. It is never an authentication identifier or API field.
+  normalizedEmail   String?     @unique @map("normalized_email")
+  email             String?
+  displayName       String      @map("display_name")
+  role              Role        @default(USER)
+  status            UserStatus  @default(ACTIVE)
+  securityVersion   Int         @default(1) @map("security_version")
+  version           Int         @default(1)
+  lastLoginAt       DateTime?   @map("last_login_at")
+  deletedAt         DateTime?   @map("deleted_at")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+  credential        Credential?
+  sessions          Session[]
+  auditLogs         AuditLog[]  @relation("actor_audit_logs")
+
+  @@index([status, role, createdAt, id])
 
   @@map("users")
 }

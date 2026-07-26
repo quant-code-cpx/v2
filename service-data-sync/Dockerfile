@@ -13,6 +13,8 @@ COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY src ./src
+COPY migrations ./migrations
+COPY alembic.ini ./
 RUN uv sync --frozen --no-dev
 
 FROM builder AS test
@@ -26,6 +28,8 @@ ENV COVERAGE_FILE=/tmp/.coverage \
     XDG_CACHE_HOME=/tmp/cache
 
 COPY tests ./tests
+COPY migrations ./migrations
+COPY alembic.ini ./
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes libatomic1 \
     && rm -rf /var/lib/apt/lists/* \
@@ -54,6 +58,8 @@ WORKDIR /app
 
 COPY --from=builder --chown=app:app /app/.venv .venv
 COPY --from=builder --chown=app:app /app/src ./src
+COPY --from=builder --chown=app:app /app/migrations ./migrations
+COPY --from=builder --chown=app:app /app/alembic.ini ./alembic.ini
 
 USER app
 

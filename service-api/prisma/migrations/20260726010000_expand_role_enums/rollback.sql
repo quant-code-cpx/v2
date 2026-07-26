@@ -1,0 +1,2 @@
+-- PostgreSQL enum values are intentionally not removed. Roll back only application code before
+-- 20260726010100_apex_user_access writes the new enum values.
