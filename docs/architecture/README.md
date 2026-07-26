@@ -6,16 +6,26 @@
 外部财经数据源
        |
        v
-service-data-sync  --->  数据存储  <---  service-api  <---  service-web
+service-data-sync  --->  同步服务专属存储
+       |
+       | 版本化内部 API
+       v
+service-api  <---  service-web
 ```
 
-这是目标边界，不代表数据库或通信技术已经确定。
+同步服务独占其数据库和原始数据对象存储，API 服务不得直连。跨服务访问决策见
+[ADR-0002](../decisions/0002-data-sync-ownership-and-access.md)。
+
+该图表示目标边界，不代表当前已实现接口或数据模型。`0001-data-sync-foundation`
+仅搭工程骨架与基础设施接线；接口、表、迁移、调度和真实同步均由后续编号方案实现。
 
 ## 服务职责
 
 ### service-data-sync
 
 - 获取、校验、标准化和持久化财经与股票基础数据。
+- 所有外部数据只能通过 provider-neutral port 和独立 adapter 获取；同步核心不认识具体供应商。
+- 数据源优先级由能力、成本、权益和健康策略配置，不硬编码在任务或领域模型中。
 - 保存数据来源、同步时间、版本和质量状态。
 - 支持幂等重试、增量同步、断点恢复与失败审计。
 
@@ -41,4 +51,12 @@ service-data-sync  --->  数据存储  <---  service-api  <---  service-web
 
 ## 尚未决定
 
-技术栈、存储、通信、认证、部署和监控方案均待 ADR 确认。
+生产部署平台、统一入口、TLS、secret manager 和监控平台仍待 ADR 确认。同步服务基础选型见
+[技术方案](../service-data-sync/0001-data-sync-foundation/index.html)。
+
+## 部署与容器环境
+
+- [0001：Docker 开发与生产环境方案](0001-docker-environments/index.html)
+- [ADR-0007：Docker Compose 开发与生产环境分层](../decisions/0007-compose-environment-strategy.md)
+
+当前生产 Compose 是单节点部署基线，不代表高可用或最终云平台拓扑。

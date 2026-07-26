@@ -1,0 +1,70 @@
+# Production override: immutable release images, no infrastructure host ports, hardened apps.
+services:
+  service-web:
+    image: ${SERVICE_WEB_IMAGE_REF:?set SERVICE_WEB_IMAGE_REF to an immutable digest}
+    ports:
+      - "${SERVICE_WEB_BIND_ADDRESS:-0.0.0.0}:${SERVICE_WEB_PORT:-15173}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  service-api-postgres:
+    image: ${POSTGRES_IMAGE_REF:?set POSTGRES_IMAGE_REF to an immutable digest}
+
+  service-api-redis:
+    image: ${REDIS_IMAGE_REF:?set REDIS_IMAGE_REF to an immutable digest}
+
+  service-api-migrate:
+    image: ${SERVICE_API_MIGRATION_IMAGE_REF:?set SERVICE_API_MIGRATION_IMAGE_REF to an immutable digest}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  service-api:
+    image: ${SERVICE_API_IMAGE_REF:?set SERVICE_API_IMAGE_REF to an immutable digest}
+    environment:
+      NODE_ENV: production
+      COOKIE_SECURE: "true"
+      CORS_ORIGIN: ${SERVICE_API_PROD_CORS_ORIGIN:?set SERVICE_API_PROD_CORS_ORIGIN}
+      TRUST_PROXY: ${SERVICE_API_PROD_TRUST_PROXY:-false}
+    ports:
+      - "${SERVICE_API_BIND_ADDRESS:-0.0.0.0}:${SERVICE_API_PORT:-13000}:3000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  data-sync-postgres:
+    image: ${POSTGRES_IMAGE_REF:?set POSTGRES_IMAGE_REF to an immutable digest}
+
+  data-sync-redis:
+    image: ${REDIS_IMAGE_REF:?set REDIS_IMAGE_REF to an immutable digest}
+
+  data-sync-minio:
+    image: ${MINIO_IMAGE_REF:?set MINIO_IMAGE_REF to an immutable digest}
+
+  data-sync-minio-init:
+    image: ${MINIO_MC_IMAGE_REF:?set MINIO_MC_IMAGE_REF to an immutable digest}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  data-sync-worker:
+    image: ${DATA_SYNC_IMAGE_REF:?set DATA_SYNC_IMAGE_REF to an immutable digest}
+    environment:
+      DATA_SYNC_ENV: production
+      DATA_SYNC_LOG_FORMAT: json
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+networks:
+  service-api-internal:
+    internal: true
+  data-sync-internal:
+    internal: true

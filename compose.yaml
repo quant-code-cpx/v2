@@ -1,0 +1,266 @@
+name: ${COMPOSE_PROJECT_NAME:-quant-v2}
+
+# Shared topology. Always combine this file with compose.dev.yaml or compose.prod.yaml.
+services:
+  service-web:
+    image: quant-v2/service-web:local
+    profiles: ["web"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+    networks:
+      - public
+    restart: unless-stopped
+
+  service-api-postgres:
+    image: postgres:17.4-bookworm
+    profiles: ["api", "api-infra"]
+    environment:
+      POSTGRES_DB: ${SERVICE_API_POSTGRES_DATABASE:?set SERVICE_API_POSTGRES_DATABASE}
+      POSTGRES_PASSWORD: ${SERVICE_API_POSTGRES_PASSWORD:?set SERVICE_API_POSTGRES_PASSWORD}
+      POSTGRES_USER: ${SERVICE_API_POSTGRES_USER:?set SERVICE_API_POSTGRES_USER}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    volumes:
+      - service_api_postgres:/var/lib/postgresql/data
+    networks:
+      - service-api-internal
+    restart: unless-stopped
+
+  service-api-redis:
+    image: redis:7.4.2-alpine
+    profiles: ["api", "api-infra"]
+    command:
+      [
+        "/bin/sh",
+        "-ec",
+        "exec redis-server --appendonly yes --requirepass \"$$SERVICE_API_REDIS_PASSWORD\"",
+      ]
+    environment:
+      SERVICE_API_REDIS_PASSWORD: ${SERVICE_API_REDIS_PASSWORD:?set SERVICE_API_REDIS_PASSWORD}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli --no-auth-warning -a $$SERVICE_API_REDIS_PASSWORD ping | grep -q PONG",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    volumes:
+      - service_api_redis:/data
+    networks:
+      - service-api-internal
+    restart: unless-stopped
+
+  service-api-migrate:
+    image: quant-v2/service-api:migrate
+    profiles: ["api"]
+    command: ["./node_modules/.bin/prisma", "migrate", "deploy"]
+    depends_on:
+      service-api-postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${SERVICE_API_POSTGRES_USER}:${SERVICE_API_POSTGRES_PASSWORD}@service-api-postgres:5432/${SERVICE_API_POSTGRES_DATABASE}
+      HOME: /tmp
+    networks:
+      - service-api-internal
+    read_only: true
+    tmpfs:
+      - /tmp
+    init: true
+    restart: "no"
+
+  service-api:
+    image: quant-v2/service-api:local
+    profiles: ["api"]
+    depends_on:
+      service-api-postgres:
+        condition: service_healthy
+      service-api-redis:
+        condition: service_healthy
+      service-api-migrate:
+        condition: service_completed_successfully
+    environment:
+      PORT: 3000
+      API_PREFIX: ${SERVICE_API_PREFIX:-api/v1}
+      DATABASE_URL: postgresql://${SERVICE_API_POSTGRES_USER}:${SERVICE_API_POSTGRES_PASSWORD}@service-api-postgres:5432/${SERVICE_API_POSTGRES_DATABASE}
+      REDIS_URL: redis://:${SERVICE_API_REDIS_PASSWORD}@service-api-redis:6379/0
+      REDIS_KEY_PREFIX: ${SERVICE_API_REDIS_KEY_PREFIX:-quant-v2:api}
+      JWT_ISSUER: ${SERVICE_API_JWT_ISSUER:-quant-v2}
+      JWT_AUDIENCE: ${SERVICE_API_JWT_AUDIENCE:-quant-v2-web}
+      JWT_ACCESS_SECRET: ${SERVICE_API_JWT_ACCESS_SECRET:?set SERVICE_API_JWT_ACCESS_SECRET}
+      JWT_ACCESS_TTL_SECONDS: ${SERVICE_API_JWT_ACCESS_TTL_SECONDS:-900}
+      REFRESH_TOKEN_TTL_SECONDS: ${SERVICE_API_REFRESH_TOKEN_TTL_SECONDS:-2592000}
+      COOKIE_SAME_SITE: ${SERVICE_API_COOKIE_SAME_SITE:-lax}
+      LOGIN_FAILURE_WINDOW_SECONDS: ${SERVICE_API_LOGIN_FAILURE_WINDOW_SECONDS:-900}
+      LOGIN_LOCK_SECONDS: ${SERVICE_API_LOGIN_LOCK_SECONDS:-900}
+      LOGIN_MAX_FAILURES: ${SERVICE_API_LOGIN_MAX_FAILURES:-5}
+      REFRESH_RATE_LIMIT_WINDOW_SECONDS: ${SERVICE_API_REFRESH_RATE_LIMIT_WINDOW_SECONDS:-60}
+      REFRESH_RATE_LIMIT_MAX: ${SERVICE_API_REFRESH_RATE_LIMIT_MAX:-30}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:3000/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\"",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    networks:
+      - service-api-internal
+      - public
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  data-sync-postgres:
+    image: postgres:17.4-bookworm
+    profiles: ["data-sync-infra"]
+    environment:
+      POSTGRES_DB: ${DATA_SYNC_POSTGRES_DATABASE:?set DATA_SYNC_POSTGRES_DATABASE}
+      POSTGRES_PASSWORD: ${DATA_SYNC_POSTGRES_PASSWORD:?set DATA_SYNC_POSTGRES_PASSWORD}
+      POSTGRES_USER: ${DATA_SYNC_POSTGRES_USER:?set DATA_SYNC_POSTGRES_USER}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    volumes:
+      - data_sync_postgres:/var/lib/postgresql/data
+    networks:
+      - data-sync-internal
+    restart: unless-stopped
+
+  data-sync-redis:
+    image: redis:7.4.2-alpine
+    profiles: ["data-sync-infra"]
+    command:
+      [
+        "/bin/sh",
+        "-ec",
+        "exec redis-server --appendonly yes --requirepass \"$$DATA_SYNC_REDIS_PASSWORD\"",
+      ]
+    environment:
+      DATA_SYNC_REDIS_PASSWORD: ${DATA_SYNC_REDIS_PASSWORD:?set DATA_SYNC_REDIS_PASSWORD}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli --no-auth-warning -a $$DATA_SYNC_REDIS_PASSWORD ping | grep -q PONG",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    volumes:
+      - data_sync_redis:/data
+    networks:
+      - data-sync-internal
+    restart: unless-stopped
+
+  data-sync-minio:
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+    profiles: ["data-sync-infra"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    volumes:
+      - data_sync_minio:/data
+    networks:
+      - data-sync-internal
+    restart: unless-stopped
+
+  data-sync-minio-init:
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    profiles: ["data-sync-infra"]
+    depends_on:
+      data-sync-minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        until mc alias set local http://data-sync-minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do
+          sleep 1
+        done
+        mc mb --ignore-existing "local/$$DATA_SYNC_S3_BUCKET"
+        if ! mc admin user info local "$$DATA_SYNC_S3_ACCESS_KEY" >/dev/null 2>&1; then
+          mc admin user add local "$$DATA_SYNC_S3_ACCESS_KEY" "$$DATA_SYNC_S3_SECRET_KEY"
+        fi
+        mc admin policy attach local readwrite --user "$$DATA_SYNC_S3_ACCESS_KEY"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      DATA_SYNC_S3_ACCESS_KEY: ${DATA_SYNC_S3_ACCESS_KEY:?set DATA_SYNC_S3_ACCESS_KEY}
+      DATA_SYNC_S3_SECRET_KEY: ${DATA_SYNC_S3_SECRET_KEY:?set DATA_SYNC_S3_SECRET_KEY}
+      DATA_SYNC_S3_BUCKET: ${DATA_SYNC_S3_BUCKET:?set DATA_SYNC_S3_BUCKET}
+    networks:
+      - data-sync-internal
+    restart: "no"
+
+  data-sync-worker:
+    image: quant-v2/service-data-sync:local
+    profiles: ["data-sync-worker"]
+    command: ["data-sync-worker"]
+    depends_on:
+      data-sync-postgres:
+        condition: service_healthy
+      data-sync-redis:
+        condition: service_healthy
+      data-sync-minio-init:
+        condition: service_completed_successfully
+    environment:
+      DATA_SYNC_LOG_LEVEL: ${DATA_SYNC_LOG_LEVEL:-INFO}
+      DATA_SYNC_DATABASE_URL: postgresql+psycopg://${DATA_SYNC_POSTGRES_USER}:${DATA_SYNC_POSTGRES_PASSWORD}@data-sync-postgres:5432/${DATA_SYNC_POSTGRES_DATABASE}
+      DATA_SYNC_BROKER_URL: redis://:${DATA_SYNC_REDIS_PASSWORD}@data-sync-redis:6379/0
+      DATA_SYNC_S3_ENDPOINT_URL: http://data-sync-minio:9000
+      DATA_SYNC_S3_ACCESS_KEY: ${DATA_SYNC_S3_ACCESS_KEY:?set DATA_SYNC_S3_ACCESS_KEY}
+      DATA_SYNC_S3_SECRET_KEY: ${DATA_SYNC_S3_SECRET_KEY:?set DATA_SYNC_S3_SECRET_KEY}
+      DATA_SYNC_S3_BUCKET: ${DATA_SYNC_S3_BUCKET:?set DATA_SYNC_S3_BUCKET}
+      DATA_SYNC_S3_REGION: ${DATA_SYNC_S3_REGION:-us-east-1}
+      DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS: ${DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS:-10}
+    healthcheck:
+      test: ["CMD", "data-sync-diagnostics", "--format", "json"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 20s
+    networks:
+      - data-sync-internal
+      - data-sync-egress
+    read_only: true
+    tmpfs:
+      - /tmp
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+networks:
+  service-api-internal:
+  data-sync-internal:
+  public:
+  data-sync-egress:
+
+volumes:
+  service_api_postgres:
+  service_api_redis:
+  data_sync_postgres:
+  data_sync_redis:
+  data_sync_minio:

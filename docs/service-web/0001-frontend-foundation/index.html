@@ -1,0 +1,1425 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta
+    name="description"
+    content="定义 quant-v2 Web 服务的 Vite+、React、TypeScript、MUI、状态、请求，以及 KLineChart 与 ECharts 双图表实现方案。"
+  >
+  <title>Web 前端工程基础与双图表实现方案｜技术方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #dfe4ec;
+      --surface: #f6f8fb;
+      --accent: #3157d5;
+      --accent-soft: #eef2ff;
+      --success: #176b4d;
+      --warning: #8a4b08;
+      --danger: #9f2d2d;
+      --radius: 14px;
+      --shadow: 0 12px 30px rgb(23 32 51 / 7%);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    a {
+      color: var(--accent);
+      text-underline-offset: 0.2em;
+    }
+
+    a:focus-visible {
+      outline: 3px solid rgb(49 87 213 / 28%);
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
+
+    code {
+      padding: 0.1em 0.35em;
+      border-radius: 5px;
+      background: var(--surface);
+      font: 0.9em/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .shell {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    header {
+      padding: 44px 0 34px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, var(--surface), #fff);
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font-size: 0.76rem;
+      font-weight: 750;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+    }
+
+    h1 {
+      max-width: 900px;
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 3.45rem);
+    }
+
+    h2 {
+      margin: 0 0 20px;
+      font-size: clamp(1.45rem, 3vw, 2rem);
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 1.05rem;
+    }
+
+    p {
+      max-width: 78ch;
+    }
+
+    ul {
+      padding-left: 1.25rem;
+    }
+
+    li + li {
+      margin-top: 0.35rem;
+    }
+
+    .lede {
+      max-width: 860px;
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 1.04rem;
+    }
+
+    .snapshot {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .snapshot article {
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgb(255 255 255 / 82%);
+    }
+
+    .snapshot strong {
+      display: block;
+      margin-bottom: 2px;
+      color: var(--accent);
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+    }
+
+    .snapshot p {
+      margin: 0;
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 14px 0 0;
+    }
+
+    .meta div {
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgb(255 255 255 / 70%);
+    }
+
+    .meta dt {
+      color: var(--muted);
+      font-size: 0.75rem;
+    }
+
+    .meta dd {
+      margin: 1px 0 0;
+      font-size: 0.9rem;
+      font-weight: 650;
+    }
+
+    .status {
+      color: var(--success);
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 94%);
+      backdrop-filter: blur(12px);
+    }
+
+    nav ul {
+      display: flex;
+      gap: 22px;
+      width: max-content;
+      margin: 0;
+      padding: 13px 0;
+      list-style: none;
+    }
+
+    nav li + li {
+      margin: 0;
+    }
+
+    nav a {
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 650;
+      text-decoration: none;
+    }
+
+    nav a:hover {
+      color: var(--accent);
+    }
+
+    main {
+      padding: 22px 0 72px;
+    }
+
+    section {
+      padding: 50px 0;
+      border-bottom: 1px solid var(--line);
+      scroll-margin-top: 58px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .card p:last-child,
+    .card ul:last-child {
+      margin-bottom: 0;
+    }
+
+    .label {
+      display: inline-block;
+      margin-bottom: 9px;
+      color: var(--accent);
+      font-size: 0.76rem;
+      font-weight: 750;
+      letter-spacing: 0.06em;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 0.12rem 0.48rem;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.76rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .tag.pending {
+      background: #fff4e5;
+      color: var(--warning);
+    }
+
+    .tag.optional {
+      background: #f2f4f7;
+      color: var(--muted);
+    }
+
+    .callout {
+      margin-top: 18px;
+      padding: 18px 20px;
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      background: var(--accent-soft);
+    }
+
+    .callout.warning {
+      border-left-color: var(--warning);
+      background: #fff8ed;
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .flow,
+    pre {
+      overflow-x: auto;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #111827;
+      color: #e5e7eb;
+      font: 0.88rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--surface);
+      font-size: 0.82rem;
+    }
+
+    td {
+      font-size: 0.93rem;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .steps {
+      padding-left: 1.25rem;
+    }
+
+    .steps li {
+      padding: 4px 0 12px 8px;
+    }
+
+    .risk {
+      color: var(--warning);
+      font-weight: 700;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .decision {
+      color: var(--success);
+      font-weight: 700;
+    }
+
+    .rejected {
+      color: var(--danger);
+    }
+
+    footer {
+      padding: 28px 0 48px;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    @media (max-width: 800px) {
+      header {
+        padding-top: 34px;
+      }
+
+      .snapshot,
+      .meta,
+      .grid,
+      .grid.two {
+        grid-template-columns: 1fr;
+      }
+
+      section {
+        padding: 40px 0;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .shell {
+        width: min(100% - 28px, 1120px);
+      }
+
+      .card {
+        padding: 17px;
+      }
+    }
+
+    @media print {
+      nav {
+        display: none;
+      }
+
+      header,
+      main,
+      section {
+        padding-top: 18px;
+      }
+
+      .shell {
+        width: 100%;
+      }
+
+      .card,
+      .snapshot article {
+        box-shadow: none;
+        break-inside: avoid;
+      }
+
+      .card,
+      .snapshot article,
+      pre,
+      tr {
+        break-inside: avoid;
+      }
+
+      h2,
+      h3 {
+        break-after: avoid;
+      }
+
+      .table-wrap {
+        overflow: visible;
+      }
+
+      table {
+        min-width: 0;
+      }
+
+      thead {
+        display: table-header-group;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Technical solution · service-web · 0001</p>
+      <h1>Web 前端工程基础与双图表实现方案</h1>
+      <p class="lede">
+        为 <code>service-web</code> 建立可独立构建、测试和部署的 React SPA 基线。
+        采用 Vite+、pnpm、React、React Router Data Mode、MUI v7 与 TypeScript 7；
+        KLineChart 10 专职 K 线、指标和画线，Apache ECharts 6.1 专职其他分析数据。
+      </p>
+
+      <div class="snapshot" aria-label="方案一屏摘要">
+        <article>
+          <strong>问题</strong>
+          <p>前端基础已落地；真实 OpenAPI、实时行情、认证和领域业务仍未接入。</p>
+        </article>
+        <article>
+          <strong>推荐</strong>
+          <p>Vite+ 0.2.6 + pnpm 11.17 + React 19 + TS 7 + MUI 7；图表按能力边界采用 KLineChart + ECharts。</p>
+        </article>
+        <article>
+          <strong>主要风险</strong>
+          <p>Vite+ 尚未到 1.0；双引擎增加包体、生命周期、主题和数据一致性治理成本。</p>
+        </article>
+      </div>
+
+      <dl class="meta">
+        <div>
+          <dt>状态</dt>
+          <dd class="status">Implemented</dd>
+        </div>
+        <div>
+          <dt>负责人</dt>
+          <dd>项目维护者</dd>
+        </div>
+        <div>
+          <dt>最后修改</dt>
+          <dd>2026-07-26</dd>
+        </div>
+        <div>
+          <dt>关联决策</dt>
+          <dd><a href="../../decisions/0006-service-web-frontend-stack.md">ADR-0006</a></dd>
+        </div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#scope">目标与边界</a></li>
+        <li><a href="#baseline">技术基线</a></li>
+        <li><a href="#architecture">架构与状态</a></li>
+        <li><a href="#flow">数据流程</a></li>
+        <li><a href="#charts">双图表实现</a></li>
+        <li><a href="#quality">质量与安全</a></li>
+        <li><a href="#delivery">实施与验收</a></li>
+        <li><a href="#questions">待决问题</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="scope">
+      <h2>目标与边界</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">目标</span>
+          <h3>可持续演进的工程骨架</h3>
+          <ul>
+            <li>固定运行时、包管理、构建、检查、测试和目录边界。</li>
+            <li>定义路由、服务端状态、客户端状态、表单和 URL 状态的所有权。</li>
+            <li>建立行情历史数据、实时增量和图表渲染的清晰边界。</li>
+            <li>固定 KLineChart 与 ECharts 的职责、适配层、生命周期和测试方法。</li>
+            <li>让本地与 CI 使用同一套 <code>vp</code> 命令。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">非目标</span>
+          <h3>本阶段不实现真实业务集成</h3>
+          <ul>
+            <li>不确定具体页面信息架构、视觉稿和品牌规范。</li>
+            <li>不定义登录、交易、策略或投资组合业务。</li>
+            <li>不替代 <code>service-api</code>，也不允许浏览器直连数据库或数据供应商。</li>
+            <li>不在本阶段猜测或接入未冻结的 <code>service-api</code> 契约。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">约束与假设</span>
+          <h3>现代浏览器、API 驱动</h3>
+          <ul>
+            <li><strong>事实：</strong>React SPA、容器镜像、基础 CI 和 fixture 纵向切片已实现。</li>
+            <li><strong>决策：</strong>三项服务继续独立构建、测试、运行和部署。</li>
+            <li><strong>假设：</strong>首期为需登录或数据密集的 SPA，无强 SEO 需求。</li>
+            <li><strong>待决：</strong>认证方式、API 协议与实时行情协议。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="baseline">
+      <h2>技术基线</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>能力</th>
+              <th>选择</th>
+              <th>采用方式</th>
+              <th>理由 / 边界</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>运行时与包管理</td>
+              <td><strong>Node.js 24 + pnpm 11</strong></td>
+              <td><span class="tag">采用</span></td>
+              <td>已固定 Node 24.18.0、pnpm 11.17.0 并提交 <code>pnpm-lock.yaml</code>；Vite+ 负责解析和安装。</td>
+            </tr>
+            <tr>
+              <td>统一工具链</td>
+              <td><strong>Vite+ Beta</strong></td>
+              <td><span class="tag">采用并设逃生口</span></td>
+              <td>
+                已使用 <code>vp create vite:application</code> 初始化并固定 0.2.6；统一 Vite、Vitest、Oxlint、Oxfmt 与任务缓存。
+                保留回退到标准 Vite 配置的迁移步骤。
+              </td>
+            </tr>
+            <tr>
+              <td>语言</td>
+              <td><strong>TypeScript 7.0.2</strong></td>
+              <td><span class="tag">采用</span></td>
+              <td>
+                2026-07 已正式发布的 Go 原生实现；与 Vite+ 的 tsgolint/Oxlint 路线一致。
+                开启严格模式、<code>noUncheckedIndexedAccess</code>，不使用已移除的 <code>baseUrl</code>。
+              </td>
+            </tr>
+            <tr>
+              <td>UI 与渲染</td>
+              <td><strong>React 19 + MUI v7</strong></td>
+              <td><span class="tag">采用</span></td>
+              <td>已固定 React 19.2.8、React Router 7.18.1、MUI 7.3.11；主题、组件和可访问性走统一设计系统。</td>
+            </tr>
+            <tr>
+              <td>路由</td>
+              <td><strong>React Router Data Mode</strong></td>
+              <td><span class="tag">采用</span></td>
+              <td>
+                需要 loader、action、错误边界和懒加载，但当前不需要 Framework Mode 的 SSR/SSG
+                与服务端运行时。
+              </td>
+            </tr>
+            <tr>
+              <td>服务端状态</td>
+              <td><strong>TanStack Query</strong></td>
+              <td><span class="tag">采用</span></td>
+              <td>负责缓存、去重、失效、重试和分页；路由 loader 只预取关键 query，不复制缓存。</td>
+            </tr>
+            <tr>
+              <td>客户端状态</td>
+              <td><strong>Zustand</strong></td>
+              <td><span class="tag optional">按需启用</span></td>
+              <td>最适合少量跨路由 UI 状态；禁止存服务端响应、行情流和认证 token。</td>
+            </tr>
+            <tr>
+              <td>请求与契约</td>
+              <td><strong>TanStack Query + OpenAPI client（待契约）</strong></td>
+              <td><span class="tag optional">待接入</span></td>
+              <td>基础 Query 与 Zod 边界校验已实现；OpenAPI 落地后再加入生成 client，不引入 Axios。</td>
+            </tr>
+            <tr>
+              <td>表单与运行时校验</td>
+              <td><strong>Zod；React Hook Form 待真实表单</strong></td>
+              <td><span class="tag optional">按需加入</span></td>
+              <td>已用 Zod 验证环境变量与 Candle fixture；真实表单出现时再加入 React Hook Form。</td>
+            </tr>
+            <tr>
+              <td>CSS</td>
+              <td><strong>MUI Theme + Emotion + 全局 CSS</strong></td>
+              <td><span class="tag">采用</span></td>
+              <td>
+                <code>CssBaseline</code>、theme token 和 <code>sx</code> 管组件；
+                仅保留 <code>global.css</code> 处理全局规则，不叠加 Tailwind 或 CSS Modules。
+              </td>
+            </tr>
+            <tr>
+              <td>K 线图表</td>
+              <td><strong>KLineChart 10.0.x</strong></td>
+              <td><span class="tag">采用</span></td>
+              <td>
+                独占 K 线、成交量、技术指标、十字光标、缩放、画线和实时 Candle 更新。
+                初始化时固定精确版本，不使用 React 包装库。
+              </td>
+            </tr>
+            <tr>
+              <td>分析图表</td>
+              <td><strong>Apache ECharts 6.1.x</strong></td>
+              <td><span class="tag">采用</span></td>
+              <td>
+                独占非 K 线分析图：行情宽度、资金流、因子、相关性、收益分布和回测结果。
+                使用 <code>echarts/core</code> 按需注册，不实现 candlestick series。
+              </td>
+            </tr>
+            <tr>
+              <td>工具与 hooks</td>
+              <td><strong>date-fns + @date-fns/tz</strong></td>
+              <td><span class="tag optional">按功能加入</span></td>
+              <td>
+                格式化优先原生 <code>Intl</code>；不预装 Lodash 或 hooks 大礼包。
+                领域 hooks 由 feature 自己持有，出现三处重复再提取。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout warning">
+        <strong>TypeScript 7 评价</strong>
+        适合直接采用，不需要回退。它已是稳定版，Vite+ 的类型检查本身建立在 TypeScript Go
+        工具链上。唯一主要缺口是 7.0 尚未提供稳定编程 API；若某个开发工具仍需
+        <code>typescript</code> API，可按官方方案仅为该工具并装
+        <code>@typescript/typescript6</code>，应用类型检查继续用 TypeScript 7。
+      </aside>
+
+      <aside class="callout">
+        <strong>Vite+ Beta 风险控制</strong>
+        固定 Vite+ 及上游工具版本；升级走单独 PR；CI 必跑 <code>vp check</code>、
+        <code>vp test</code> 和 <code>vp build</code>。源码保持标准 React/Vite 结构。
+        若 Beta 回归阻塞发布，移除 Vite+ 扩展配置并恢复独立 Vite/Vitest/Oxlint/Oxfmt 命令，
+        不改业务代码。
+      </aside>
+    </section>
+
+    <section id="architecture">
+      <h2>架构、目录与状态所有权</h2>
+      <aside class="callout">
+        <strong>2026-07-26 实施状态</strong>
+        阶段 1 已完成：Vite+、严格 TypeScript、Data Router、MUI Theme、TanStack Query、Vitest、Playwright、Docker 与 CI 均已进入代码库。
+        阶段 2 已完成基础设施：<code>ChartVisualTokens</code>、KLineChart DataLoader fixture、ECharts 按需注册和两个独立异步 chunk 已验证构建。
+        源码目录已改为经典职责分层：<code>api</code>、<code>components</code>、<code>router</code>、<code>views</code>、<code>types</code> 等保持一层边界。
+        阶段 3 仅完成受控 fixture；真实历史分页与实时协议仍等待跨服务契约。
+      </aside>
+      <pre aria-label="已实现目录结构">service-web/
+├── src/
+│   ├── api/                            # Query Client、请求函数与 query options
+│   ├── components/                     # App Shell、KLineChart、ECharts 组合组件
+│   ├── config/                         # 环境变量运行时校验
+│   ├── hooks/                          # React 可复用 hooks
+│   ├── libs/                           # 第三方图表引擎注册与适配
+│   ├── mocks/                          # 未冻结契约期间的受控 fixture
+│   ├── router/                         # Data Router、预取与页面懒加载
+│   ├── styles/                         # MUI Theme、图表 token、全局 CSS
+│   ├── types/                          # 跨模块 DTO 与领域类型
+│   ├── utils/                          # 无状态数据转换与 DataLoader 辅助
+│   ├── views/                          # 路由页面组件与路由错误页
+│   ├── App.tsx
+│   └── main.tsx
+├── e2e/
+├── public/
+├── vite.config.ts
+└── package.json</pre>
+
+      <aside class="callout">
+        <strong>关键边界</strong>
+        不设计同时覆盖 KLineChart 与 ECharts 的 <code>ChartAdapter</code> 万能接口。
+        两者只共享 canonical 数据模型、涨跌色/字体/网格等视觉令牌和错误语义；
+        生命周期、option、指标、overlay 和事件保持引擎原生类型。
+      </aside>
+
+      <div class="grid">
+        <article class="card">
+          <span class="label">导航与工作区</span>
+          <h3>App Shell / Routes</h3>
+          <p><strong>职责：</strong>主题、导航、权限门、路由错误边界和页面级懒加载。</p>
+          <p><strong>输入 / 输出：</strong>URL 与 session → 可渲染的 feature 页面。</p>
+          <p><strong>状态：</strong>路由参数、search params；不持有行情数据。</p>
+          <p><strong>依赖：</strong>React Router、MUI、Query Client。</p>
+          <p><strong>失败边界：</strong>单路由失败局部展示，外壳和其他路由继续使用。</p>
+        </article>
+        <article class="card">
+          <span class="label">K 线能力</span>
+          <h3>Kline Feature</h3>
+          <p><strong>职责：</strong>历史加载、实时 Candle、指标、overlay、周期和主题。</p>
+          <p><strong>输入 / 输出：</strong>Symbol、Period、Candle page/event → KLineChart 实例。</p>
+          <p><strong>状态：</strong>历史权威缓存进 Query；十字光标、缩放和可见区留图表实例。</p>
+          <p><strong>依赖：</strong>KLineChart、Market Data Gateway、Market Stream Client。</p>
+          <p><strong>失败边界：</strong>单图表降级；保留历史，显示延迟并允许重试。</p>
+        </article>
+        <article class="card">
+          <span class="label">分析可视化</span>
+          <h3>Analytics Feature</h3>
+          <p><strong>职责：</strong>将分析 DTO 映射为显式、可测试的 ECharts option。</p>
+          <p><strong>输入 / 输出：</strong>规范化 dataset + 视觉令牌 → 非 K 线分析图。</p>
+          <p><strong>状态：</strong>筛选进 URL，响应进 Query，hover/legend 留实例。</p>
+          <p><strong>依赖：</strong>ECharts 按需模块和本 feature 的纯 option builder。</p>
+          <p><strong>失败边界：</strong>每个分析卡片独立 loading/empty/error，不拖垮整页。</p>
+        </article>
+      </div>
+
+      <h3 style="margin-top: 28px;">状态放置规则</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>状态类型</th>
+              <th>唯一所有者</th>
+              <th>例子</th>
+              <th>禁止做法</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>可分享 / 可回退状态</td>
+              <td>React Router URL</td>
+              <td><code>symbol</code>、周期、日期范围、指标集合、筛选</td>
+              <td>只放全局 store，导致刷新和分享丢失</td>
+            </tr>
+            <tr>
+              <td>服务端权威状态</td>
+              <td>TanStack Query</td>
+              <td>历史 Candle、分析数据、自选、用户资料</td>
+              <td>复制进 Zustand；由 effect 手工同步两份缓存</td>
+            </tr>
+            <tr>
+              <td>行情实时连接</td>
+              <td>Market Stream Client</td>
+              <td>连接、重连、订阅引用计数、序号和延迟</td>
+              <td>每个图表各建 WebSocket；逐 tick 写 React state</td>
+            </tr>
+            <tr>
+              <td>跨路由客户端 UI</td>
+              <td>Zustand</td>
+              <td>工作区布局、面板折叠、非敏感偏好、画线草稿</td>
+              <td>存 token、服务端响应或无限行情序列</td>
+            </tr>
+            <tr>
+              <td>图表瞬时交互</td>
+              <td>各图表实例</td>
+              <td>tooltip、十字光标、缩放、legend、可见范围</td>
+              <td>高频同步到 React 或全局 store</td>
+            </tr>
+            <tr>
+              <td>表单草稿</td>
+              <td>React Hook Form / 组件</td>
+              <td>策略参数、告警设置、搜索输入</td>
+              <td>每次按键写全局 store</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="flow">
+      <h2>数据契约与核心流程</h2>
+      <pre class="flow" aria-label="双图表数据流程">URL: /instruments/:symbol?interval=1d
+  │
+  ├─ Router loader ──▶ Query Client 预取标的信息和首屏分析数据
+  │
+  ├─ Kline Feature ──▶ KLineChart.setDataLoader(...)
+  │      │
+  │      ├─ getBars(init/forward/backward)
+  │      │      └─ Market Data Gateway ──▶ Query Client ── HTTP ──▶ service-api
+  │      │
+  │      └─ subscribeBar / unsubscribeBar
+  │             └─ Market Stream Client ── WebSocket ──▶ service-api
+  │
+  └─ Analytics Feature ──▶ Query Client ── HTTP ──▶ service-api
+         └─ pure option builder ──▶ ECharts.setOption(...)
+
+DTO decimal string ── validate / normalize once ──▶ chart number
+stream gap ── mark stale ── REST backfill ── resume live</pre>
+
+      <div class="grid two">
+        <article class="card">
+          <h3>HTTP 历史分页语义</h3>
+          <ul>
+            <li><code>init</code>：取目标时间附近或最新一页，按开盘时间升序返回。</li>
+            <li><code>forward</code>：按 KLineChart 语义加载更早数据；请求 <code>before</code>。</li>
+            <li><code>backward</code>：加载更新数据；请求 <code>after</code>。</li>
+            <li>服务端显式返回两侧 <code>hasMore</code>，不能用“返回数量不足”猜测结束。</li>
+            <li>Query key 包含 market、symbol、period、边界、方向和 limit，禁止跨周期复用。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>实时增量语义</h3>
+          <ul>
+            <li>服务端推送已聚合到周期的 Candle，不向图表灌入逐笔成交。</li>
+            <li>相同 <code>openTime</code> 原位更新，更大时间追加，更旧或重复序号丢弃。</li>
+            <li>Stream Client 按 symbol + period 复用连接并做订阅引用计数。</li>
+            <li>切换标的、周期、重置或销毁会释放旧订阅；组件不自行创建 WebSocket。</li>
+            <li>重连检测序号缺口：先标记 stale，再 REST 补洞，成功后恢复 live。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3 style="margin-top: 28px;">Canonical Candle 与跨服务契约</h3>
+      <pre aria-label="Candle 数据契约草案">interface CandleDto {
+  symbol: string
+  interval: string
+  openTime: string       // RFC 3339，含时区或 Z
+  open: string
+  high: string
+  low: string
+  close: string
+  volume: string
+  turnover?: string
+  sequence: string       // 超出 JS 安全整数范围也保持 string
+  isClosed: boolean
+}
+
+interface Candle {
+  timestamp: number      // 仅前端规范化后使用的 Unix 毫秒
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+  turnover?: number
+}</pre>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>契约项</th>
+              <th>建议语义</th>
+              <th>前端处理</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>历史接口</td>
+              <td>
+                <code>GET /api/v1/market/candles</code>；参数含 symbol、interval、
+                before/after、limit；返回 items 与双向 paging。
+              </td>
+              <td>由生成 client 调用，经 Query Client 去重和缓存。</td>
+            </tr>
+            <tr>
+              <td>实时事件</td>
+              <td>
+                <code>market.candle.upsert</code>；含 eventId、sequence、occurredAt、
+                symbol、interval 与 CandleDto。
+              </td>
+              <td>验证 envelope 后按 key 分发；图表只收到已规范化 Candle。</td>
+            </tr>
+            <tr>
+              <td>Symbol</td>
+              <td>ticker、exchange、timezone、pricePrecision、volumePrecision。</td>
+              <td>传入 <code>setSymbol</code>，价格精度不可由历史数据临时猜测。</td>
+            </tr>
+            <tr>
+              <td>Period</td>
+              <td>前端统一 <code>1m/5m/15m/1h/1d/1w</code> 等枚举。</td>
+              <td>用穷尽映射转为 KLineChart span/type；不支持值立即拒绝。</td>
+            </tr>
+            <tr>
+              <td>数值与时间</td>
+              <td>decimal 与 unsafe integer 使用 string；时间使用 RFC 3339。</td>
+              <td>
+                图表边界校验 finite、OHLC 关系、升序和重复值，再转 number；
+                展示采用交易所时区。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout warning">
+        <strong>契约状态</strong>
+        上表是 <code>service-api</code> 的实现要求，不是已存在接口。
+        开发纵向切片前，应把最终 HTTP 与实时 schema 分别落到
+        <code>docs/contracts/</code> 和 OpenAPI；字段未确认时仅使用 MSW fixture。
+      </aside>
+
+      <h3 style="margin-top: 28px;">KLineChart DataLoader 适配</h3>
+      <pre aria-label="KLineChart DataLoader 伪代码">const dataLoader = {
+  async getBars({ type, timestamp, symbol, period, callback }) {
+    const request = toCandlePageRequest(type, timestamp, symbol, period)
+    const generation = currentGeneration
+    const contextKey = toContextKey(symbol, period)
+
+    try {
+      const page = await marketDataGateway.getCandles(request, abortSignal)
+      if (!isCurrentContext(contextKey, generation)) return
+      callback(page.items.map(toKLineData), {
+        forward: page.hasMoreBefore,
+        backward: page.hasMoreAfter,
+      })
+      publishStatus({ state: 'ready', updatedAt: Date.now() })
+    } catch (error) {
+      if (!isCurrentContext(contextKey, generation) || isAbort(error)) return
+      callback([], { forward: false, backward: false })
+      publishStatus({ state: 'error', error })
+    }
+  },
+  subscribeBar({ symbol, period, callback }) {
+    marketStream.acquire(symbol, period, candle => callback(toKLineData(candle)))
+  },
+  unsubscribeBar({ symbol, period }) {
+    marketStream.release(symbol, period)
+  },
+}</pre>
+      <ul>
+        <li>
+          <code>marketDataGateway</code> 内部调用 <code>queryClient.fetchQuery</code>；
+          Query Cache 是历史响应的权威缓存，KLineChart 只持有渲染数据。
+        </li>
+        <li>
+          每次 symbol/period 变化递增 generation 并中止旧 HTTP 请求；
+          即使底层请求不能取消，旧 callback 也不能写入新图。
+        </li>
+        <li>
+          DataLoader 没有错误 callback；适配器通过旁路 status 通知 React 显示重试条。
+          用户重试调用 <code>chart.resetData()</code>，不静默无限重试。
+        </li>
+        <li>
+          实时事件直接调用引擎 callback，不逐条写 React state；Query Cache 仅在 Candle
+          收盘或节流后更新，供其他组件读取。
+        </li>
+      </ul>
+
+      <h3 style="margin-top: 28px;">React 生命周期</h3>
+      <pre aria-label="KLineChart React 生命周期伪代码">useEffect(() => {
+  const chart = init(containerRef.current, createInitOptions(chartTokens))
+  chartRef.current = chart
+  installDefaultIndicators(chart)
+
+  return () => {
+    dataLoader.dispose()
+    dataLoaderAttachedRef.current = false
+    chartRef.current = null
+    dispose(chart)
+  }
+}, [])
+
+useEffect(() => {
+  dataLoader.setContext(symbol, period) // 先 abort 旧请求并更新 context key
+  chartRef.current?.setSymbol(toKlineSymbol(symbol))
+  chartRef.current?.setPeriod(toKlinePeriod(period))
+  if (!dataLoaderAttachedRef.current) {
+    chartRef.current?.setDataLoader(dataLoader) // 首次保持 symbol → period → loader 顺序
+    dataLoaderAttachedRef.current = true
+  }
+}, [symbol, period])
+
+useEffect(() => {
+  chartRef.current?.setStyles(toKlineStyles(chartTokens))
+}, [chartTokens])</pre>
+      <ul>
+        <li>实例只在挂载时创建一次；symbol、period、theme 变化不重建画布。</li>
+        <li>使用元素 ref，不使用全局 DOM id；卸载必须 <code>dispose(chart)</code>。</li>
+        <li>KLineChart 已监听容器尺寸，默认不额外高频调用 <code>resize()</code>。</li>
+        <li>指标和 overlay 按 id 增删；切换主题只增量调用 <code>setStyles</code>。</li>
+      </ul>
+
+      <aside class="callout warning">
+        <strong>故障策略</strong>
+        历史加载失败保留最后成功数据；实时断流显示“数据可能延迟”和最后更新时间；
+        恢复时按 sequence 补洞。异常、乱序或不满足 OHLC 不变量的数据进入观测日志，
+        不传给任一图表引擎。
+      </aside>
+    </section>
+
+    <section id="charts">
+      <h2>KLineChart + ECharts 双引擎实现</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>数据 / 交互</th>
+              <th>唯一引擎</th>
+              <th>首期图形</th>
+              <th>明确禁止</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>行情 K 线</strong></td>
+              <td><strong>KLineChart 10</strong></td>
+              <td>
+                Candle、VOL、MA/EMA/BOLL、MACD/KDJ/RSI、缩放、十字光标、画线、磁吸、
+                可见范围和实时更新。
+              </td>
+              <td>ECharts 不创建 candlestick series；不维护第二套 K 线 tooltip 和指标逻辑。</td>
+            </tr>
+            <tr>
+              <td><strong>市场概览</strong></td>
+              <td><strong>ECharts 6.1</strong></td>
+              <td>
+                涨跌家数、行业表现、成交额排行、市场宽度、资金净流入。
+              </td>
+              <td>KLineChart 不承载柱、饼、排行或仪表盘分析卡片。</td>
+            </tr>
+            <tr>
+              <td><strong>研究与回测</strong></td>
+              <td><strong>ECharts 6.1</strong></td>
+              <td>
+                因子散点、相关性热力、收益分布、净值/基准/回撤、风险贡献。
+              </td>
+              <td>服务端不得下发可执行 ECharts option 或 formatter。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout">
+        <strong>版本策略</strong>
+        初始化当天验证并在 <code>package.json</code> 固定 KLineChart 10.0.x 与 ECharts 6.1.x
+        精确版本，由 <code>pnpm-lock.yaml</code> 锁定传递依赖。升级单独提交并运行图表专项回归；
+        不引入 <code>react-klinecharts</code>、<code>echarts-for-react</code> 等包装库。
+      </aside>
+      <aside class="callout warning">
+        <strong>KLineChart 10 风险门</strong>
+        10.0.0 于 2026-07-11 发布，属于刚升级的数据加载与实例 API。阶段 2 必须用真实规模 fixture
+        验证 DataLoader、指标、overlay、深浅主题、移动端手势和销毁重建；未通过时停止扩大业务页面，
+        修复或另开 ADR，不静默改回 ECharts K 线。
+      </aside>
+
+      <h3 style="margin-top: 28px;">KLineChart 首期能力清单</h3>
+      <div class="grid">
+        <article class="card">
+          <span class="label">基础行情</span>
+          <h3>必须完成</h3>
+          <ul>
+            <li>标的、1m/5m/15m/1h/1d/1w 周期切换。</li>
+            <li>初始加载、向前历史分页、空态、失败重试和 stale 状态。</li>
+            <li>同 Candle 更新、收盘追加、乱序丢弃、断线重连与补洞。</li>
+            <li>价格/成交量精度、交易所时区、复权状态和最后更新时间可见。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">指标</span>
+          <h3>白名单与资源上限</h3>
+          <ul>
+            <li>默认主图 MA，副图 VOL + MACD。</li>
+            <li>首期可选 EMA、BOLL、KDJ、RSI；通过 <code>createIndicator</code> 管理。</li>
+            <li>最多 2 个主图叠加指标、3 个副图，避免无界 pane 和计算开销。</li>
+            <li>自定义指标必须用纯 <code>calc</code>，先单元测试，再 <code>registerIndicator</code>。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">画线与交互</span>
+          <h3>第二纵向切片</h3>
+          <ul>
+            <li>首批 overlay：水平线、趋势线、价格线；支持 normal/weak/strong magnet。</li>
+            <li>持久化只保存 name、points、styles、lock、symbol/period 和 schemaVersion。</li>
+            <li>回调函数与实例 id 不持久化；加载时通过白名单重建。</li>
+            <li>跨设备同步需要独立 API 契约；接口落地前仅保存非敏感本地偏好。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3 style="margin-top: 28px;">ECharts 按需注册与 React hook</h3>
+      <pre aria-label="ECharts 注册和 hook 伪代码">import * as echarts from 'echarts/core'
+import { BarChart, LineChart, PieChart, ScatterChart, HeatmapChart } from 'echarts/charts'
+import {
+  AriaComponent, DatasetComponent, DataZoomComponent, GridComponent,
+  LegendComponent, TooltipComponent, TransformComponent, VisualMapComponent,
+} from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+echarts.use([
+  BarChart, LineChart, PieChart, ScatterChart, HeatmapChart,
+  AriaComponent, DatasetComponent, DataZoomComponent, GridComponent,
+  LegendComponent, TooltipComponent, TransformComponent, VisualMapComponent,
+  CanvasRenderer,
+])
+
+useEffect(() => {
+  const chart = echarts.init(containerRef.current)
+  const observer = new ResizeObserver(() => chart.resize())
+  observer.observe(containerRef.current)
+  chartRef.current = chart
+
+  return () => {
+    observer.disconnect()
+    chartRef.current = null
+    chart.dispose()
+  }
+}, [])
+
+useEffect(() => {
+  chartRef.current?.setOption(option, { notMerge: true, lazyUpdate: true })
+}, [option])</pre>
+      <ul>
+        <li>
+          图形类型集中在 <code>shared/charts/echarts/register.ts</code> 注册；
+          新类型随真实用例加入，禁止从完整 <code>echarts</code> 入口导入。
+        </li>
+        <li>
+          每种业务图由纯 option builder 生成 <code>ComposeOption</code> 类型结果；
+          组件只管理 init、setOption、事件、ResizeObserver 与 dispose。
+        </li>
+        <li>
+          多 series 共享数据时优先用 <code>dataset</code>；
+          formatter、颜色和交互函数只来自本地代码，不接受服务端脚本。
+        </li>
+        <li>
+          对大量点先在 worker 或 API 聚合/抽样；不把重计算放在 React render，
+          不因实时更新重建实例。
+        </li>
+      </ul>
+
+      <h3 style="margin-top: 28px;">主题、涨跌语义与布局</h3>
+      <div class="grid two">
+        <article class="card">
+          <h3>共享 ChartVisualTokens</h3>
+          <p>
+            由 MUI theme 派生 background、surface、textPrimary、textSecondary、gridLine、
+            positive、negative、neutral、seriesPalette、fontFamily 与 fontSize。
+          </p>
+          <p>
+            首期面向中国市场，默认“涨红跌绿”；模型内部使用 positive/negative 语义，
+            未来切换国际配色只改映射。图标、正负号和文本同时表达涨跌，不能只靠颜色。
+          </p>
+        </article>
+        <article class="card">
+          <h3>实例更新</h3>
+          <p>
+            KLineChart 主题变化调用 <code>setStyles</code>；ECharts option builder 注入新 tokens
+            后调用 <code>setOption</code>。MUI toolbar 与画布分离，画布有确定最小高度。
+          </p>
+          <p>
+            K 线页和分析面板各自 route-level lazy import；同页需要两种图时，再按面板可见性加载，
+            避免应用外壳提前下载双引擎。
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section id="quality">
+      <h2>质量、可靠性与安全</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">测试</span>
+          <h3>Vitest + Testing Library + MSW + Playwright</h3>
+          <ul>
+            <li>Candle 校验、Period 映射、排序/去重、option builder：Vitest。</li>
+            <li>DataLoader 的 init/forward/backward、取消、旧响应和错误状态：Vitest + MSW。</li>
+            <li>订阅 acquire/release、乱序、重复、断流、重连和补洞：可控 fake stream。</li>
+            <li>KLineChart init/dispose/指标协调、ECharts init/resize/dispose：引擎边界 mock。</li>
+            <li>标的/周期切换、加载历史、主题、移动端和恢复流程：Playwright。</li>
+            <li>Canvas 不做大面积脆弱像素断言；验证数据、交互和少量稳定截图。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">性能</span>
+          <h3>按路由切包，图表隔离</h3>
+          <ul>
+            <li>应用外壳不得静态导入任一图表；KLineChart 与 ECharts 生成独立异步 chunk。</li>
+            <li>ECharts 使用 <code>echarts/core</code> 按需注册；构建报告验证无 candlestick 模块。</li>
+            <li>同页双引擎按面板可见性加载；不通过 shared barrel 造成意外预加载。</li>
+            <li>列表达到规模阈值再引入 MUI X Data Grid/虚拟化。</li>
+            <li>基准：5,000 根 Candle 首次可交互 ≤ 1.5s；单根增量更新 ≤ 100ms。</li>
+            <li>基准环境、数据 fixture 和结果进 CI artifact；升级后体积或耗时退化超过 10% 阻断。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">安全与隐私</span>
+          <h3>浏览器不是可信边界</h3>
+          <ul>
+            <li><code>VITE_*</code> 只允许公开配置，绝不放密钥。</li>
+            <li>优先 HttpOnly + Secure + SameSite cookie；CSRF 策略与 API 一起设计。</li>
+            <li>不把 token、账户敏感数据或完整响应持久化到 localStorage。</li>
+            <li>ECharts HTML tooltip 与服务端文案按不可信输入处理，禁止执行远端 chart option。</li>
+            <li>KLineChart 指标、overlay 和样式只能从本地白名单重建，拒绝远端函数配置。</li>
+            <li>生产 source map 私有上传；日志过滤 token、cookie、账户和持仓明细。</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="grid two" style="margin-top: 18px;">
+        <article class="card">
+          <h3>故障与恢复</h3>
+          <ul>
+            <li>路由级 Error Boundary 区分 401/403/404/429/5xx/离线。</li>
+            <li>查询只对幂等请求有限重试；429 尊重 <code>Retry-After</code>。</li>
+            <li>行情断流时保留最后数据，明显显示更新时间和 stale 状态。</li>
+            <li>mutation 默认不自动重试；避免重复创建告警或订单类操作。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>可观测性与可访问性</h3>
+          <ul>
+            <li>API 错误附 request/correlation id，前后端日志可串联。</li>
+            <li>记录图表 init、首批数据到首次渲染、流延迟、重连、补洞和丢弃事件计数。</li>
+            <li>错误采集供应商经轻量 adapter 接入；不上传原始持仓、策略参数或全量行情。</li>
+            <li>目标 WCAG 2.2 AA；键盘焦点、对比度、reduced motion 纳入验收。</li>
+            <li>ECharts 注册 AriaComponent；两引擎都提供文本摘要、数据表入口和键盘工具栏。</li>
+            <li>颜色不是涨跌唯一表达；tooltip 与状态同时显示正负号和文字。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="delivery">
+      <h2>实施、发布与验收</h2>
+      <ol class="steps">
+        <li>
+          <strong>阶段 0｜契约冻结：</strong>
+          确认 market/symbol/period、复权、交易所时区、历史双向分页、实时 sequence 和错误模型；
+          更新 OpenAPI 与实时 schema，产出固定 MSW fixture。
+        </li>
+        <li>
+          <strong>阶段 1｜工程骨架：</strong>
+          用 <code>vp create</code> 在临时目录生成 React + TypeScript 模板，再安全合并到已有
+          <code>service-web/</code>；固定 Node/pnpm/Vite+/TS 版本，补 README、环境示例、CI、
+          Data Router、MUI theme、Query Client、MSW 和 Playwright。
+          <span class="decision">已完成（2026-07-26）。</span>
+        </li>
+        <li>
+          <strong>阶段 2｜图表基础设施：</strong>
+          加入 ChartVisualTokens、KLineChart 动态加载、ECharts 按需注册、<code>useECharts</code>、
+          图表错误边界和统一 loading/empty/error/stale 外壳；构建确认双引擎独立 chunk。
+          <span class="decision">基础设施已完成；真实数据状态待 API 契约。</span>
+        </li>
+        <li>
+          <strong>阶段 3｜K 线历史纵向切片：</strong>
+          实现 DTO 校验、Period 映射、Market Data Gateway、DataLoader 和 KlinePanel；
+          打通标的 → 初始页 → 向前分页 → 周期切换 → 失败重试。
+          <span class="risk">目前仅 fixture DataLoader；不将其标记为完成。</span>
+        </li>
+        <li>
+          <strong>阶段 4｜K 线实时与专业能力：</strong>
+          实现共享 Stream Client、订阅释放、乱序/重复/缺口处理、补洞；
+          加入 MA/VOL/MACD、指标选择和首批 overlay，完成移动端手势专项回归。
+        </li>
+        <li>
+          <strong>阶段 5｜ECharts 分析纵向切片：</strong>
+          先交付市场宽度、资金流和回测净值/回撤三类图；
+          每类具备独立 DTO mapper、dataset、option builder、空态、错误和数据表入口。
+        </li>
+        <li>
+          <strong>阶段 6｜发布门禁：</strong>
+          运行全量 check/test/build/e2e、bundle report、5,000 Candle 基准、断网恢复、深浅主题、
+          桌面/移动与可访问性检查；灰度开启实时和画线能力。
+        </li>
+      </ol>
+
+      <div class="grid">
+        <article class="card">
+          <h3>工程验收</h3>
+          <ul>
+            <li><code>vp install --frozen-lockfile</code> 可复现安装。</li>
+            <li><code>vp check</code> 格式化、lint、TS 7 类型检查全通过。</li>
+            <li><code>vp test</code> 与 <code>vp build</code> 全通过。</li>
+            <li>Playwright 覆盖历史、实时、分析图、错误恢复和主题切换关键流。</li>
+            <li>构建报告证明应用外壳不含图表引擎，双引擎为独立异步 chunk。</li>
+            <li>README 记录启动、检查、测试、构建和预览命令。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>产品质量验收</h3>
+          <ul>
+            <li>桌面与移动布局无页面横向溢出。</li>
+            <li>路由懒加载、loading、empty、error、offline 状态完整。</li>
+            <li>K 线分页、实时 upsert、周期切换、断流补洞和指标/画线达到验收。</li>
+            <li>ECharts 三类首发分析图数据、tooltip、legend、缩放和数据表一致。</li>
+            <li>5,000 Candle 和连续增量达到性能目标，无明显主线程长任务。</li>
+            <li>键盘、对比度和图表替代信息通过检查。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>回滚</h3>
+          <ul>
+            <li>依赖升级按 lockfile 和独立提交回退。</li>
+            <li>Vite+ 阻塞时切换独立工具命令，保持 Vite 应用代码不变。</li>
+            <li>实时、指标和画线分别受 feature flag 控制，可退回只读历史 K 线。</li>
+            <li>图表版本回退不改变 API canonical Candle 与分析 DTO。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="questions">
+      <h2>待决问题与推荐默认值</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>问题</th>
+              <th>推荐默认</th>
+              <th>何时必须决定</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>首发市场、涨跌色与复权口径？</td>
+              <td><strong>中国市场、涨红跌绿</strong>；前复权/不复权必须由 API 显式标记。</td>
+              <td>阶段 0，Candle contract 和主题 token 落地前。</td>
+            </tr>
+            <tr>
+              <td>是否需要 SSR / SEO？</td>
+              <td><strong>首期 SPA</strong>，React Router Data Mode；公开营销页未来独立评估。</td>
+              <td>部署方案和公开页面开发前。</td>
+            </tr>
+            <tr>
+              <td>认证与 API 是否同源？</td>
+              <td><strong>同站点反向代理 + HttpOnly cookie</strong>。</td>
+              <td>真实登录和部署配置前。</td>
+            </tr>
+            <tr>
+              <td>实时行情用 WebSocket 还是 SSE？</td>
+              <td><strong>WebSocket</strong>，支持多标的订阅控制；保留 transport interface 便于测试。</td>
+              <td>实时契约设计前。</td>
+            </tr>
+            <tr>
+              <td>画线是否需要跨设备持久化？</td>
+              <td><strong>首期本地、版本化存储</strong>；确认跨设备后新增用户 overlay API。</td>
+              <td>阶段 4 前；影响账号数据与冲突策略。</td>
+            </tr>
+            <tr>
+              <td>分析图首发清单和数据粒度？</td>
+              <td><strong>市场宽度、资金流、净值/回撤</strong>；API 先聚合到展示粒度。</td>
+              <td>阶段 5 前；决定 ECharts 注册模块和 DTO。</td>
+            </tr>
+            <tr>
+              <td>错误监控、产品分析和 i18n？</td>
+              <td>先留 adapter 和 message key；供应商、隐私规则与语言范围后定。</td>
+              <td>生产发布前。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style="margin-top: 30px;">已核实的一手资料</h3>
+      <ul>
+        <li>
+          <a href="https://voidzero.dev/posts/announcing-vite-plus-beta">Vite+ Beta 公告</a>、
+          <a href="https://viteplus.dev/guide/">Vite+ Getting Started</a>、
+          <a href="https://viteplus.dev/guide/check">Vite+ Check</a>。
+        </li>
+        <li>
+          <a href="https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/">
+            TypeScript 7.0 正式发布
+          </a>、
+          <a href="https://devblogs.microsoft.com/typescript/announcing-typescript-6-0/">
+            TypeScript 6.0 兼容过渡说明
+          </a>。
+        </li>
+        <li>
+          <a href="https://reactrouter.com/start/modes">React Router 模式选择</a>、
+          <a href="https://mui.com/material-ui/getting-started/installation/">MUI 安装与样式引擎</a>。
+        </li>
+        <li>
+          <a href="https://tanstack.com/query/latest/docs/framework/react/overview">TanStack Query</a>、
+          <a href="https://openapi-ts.dev/openapi-react-query/">openapi-react-query</a>、
+          <a href="https://zustand.docs.pmnd.rs/">Zustand</a>。
+        </li>
+        <li>
+          <a href="https://klinecharts.com/en-US/guide/data-integration">KLineChart 数据接入</a>、
+          <a href="https://klinecharts.com/en-US/api/chart/init">初始化 API</a>、
+          <a href="https://klinecharts.com/en-US/api/chart/dispose">销毁 API</a>、
+          <a href="https://klinecharts.com/en-US/guide/indicator.html">指标指南</a>、
+          <a href="https://klinecharts.com/en-US/api/instance/createOverlay">Overlay API</a>。
+        </li>
+        <li>
+          <a href="https://echarts.apache.org/handbook/en/basics/import/">ECharts 按需导入</a>、
+          <a href="https://echarts.apache.org/handbook/en/concepts/chart-size/">尺寸与销毁</a>、
+          <a href="https://echarts.apache.org/handbook/en/concepts/dataset/">Dataset</a>、
+          <a href="https://echarts.apache.org/en/changelog.html">ECharts 版本记录</a>。
+        </li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      Web 前端工程基础与双图表实现方案 · 变更摘要（2026-07-26）：完成 Vite+ React 基线、双图表 fixture、单元/E2E 配置、容器与 CI；源码调整为经典职责分层目录；真实 API/实时能力待契约。
+    </div>
+  </footer>
+</body>
+</html>

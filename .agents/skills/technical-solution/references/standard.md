@@ -11,7 +11,13 @@
 
 ## 输出与归属
 
-- 每个方案拥有独立目录，名称使用短且明确的 kebab-case。
+- 每个方案拥有独立目录，格式为 `<NNNN>-<kebab-case-topic>`，例如
+  `0001-data-sync-foundation`。
+- `NNNN` 是四位、从 `0001` 开始的创建顺序号。编号作用域是方案所在的直接父目录：
+  每个 `docs/service-*/`、`docs/architecture/` 和 `docs/contracts/` 分别递增。
+- 创建方案前扫描同一父目录已有编号，使用最大编号加一。缺号不回填、删除后不复用；编辑现有方案不改编号。
+- 迁移旧的无编号方案时，优先按可靠的 Git 创建时间排序并依次分配；无法确定时按目录名稳定排序，
+  从当前最大编号之后追加。迁移必须同步更新所有本地链接。
 - `index.html` 是唯一主文档；不维护内容重复的 Markdown 版本。
 - 方案专属图片或 SVG 放 `assets/`，示例放 `examples/`。
 - 跨服务的机器可读契约统一归档到 `docs/contracts/`，并由方案链接。
@@ -103,6 +109,7 @@ Draft → Proposed → Accepted → Implemented → Superseded
 
 ### 工程
 
+- [ ] 方案目录使用 `<NNNN>-<kebab-case-topic>`，编号在父目录内唯一且未复用。
 - [ ] 主文档是目录内的 `index.html`。
 - [ ] 页面不依赖网络即可打开。
 - [ ] 本地链接有效，无秘密或真实生产数据。

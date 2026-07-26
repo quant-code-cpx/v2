@@ -11,10 +11,10 @@ Create reviewable technical proposals that make scope, responsibilities, flows, 
 
 1. Read `references/standard.md` completely before drafting or editing a proposal.
 2. Read repository guidance, relevant existing documents, and affected implementation context. Use CodeGraph first when the repository is indexed and code understanding is needed.
-3. Classify proposal scope and choose its canonical directory:
-   - Service-specific: `docs/service-<name>/<kebab-case-topic>/`
-   - Cross-service architecture: `docs/architecture/<kebab-case-topic>/`
-   - API, event, or data contract: `docs/contracts/<kebab-case-topic>/`
+3. Classify proposal scope, allocate the next four-digit sequence within its canonical parent as defined in `references/standard.md`, and choose its directory:
+   - Service-specific: `docs/service-<name>/<NNNN>-<kebab-case-topic>/`
+   - Cross-service architecture: `docs/architecture/<NNNN>-<kebab-case-topic>/`
+   - API, event, or data contract: `docs/contracts/<NNNN>-<kebab-case-topic>/`
 4. For cross-service, deployment, contract, or hard-to-reverse decisions, create or update an ADR before finalizing the proposal.
 5. Use `assets/index.template.html` as structural and visual starting point. Produce `index.html` as canonical document. Remove irrelevant template sections instead of filling them with noise.
 6. Keep machine-readable contracts such as OpenAPI, AsyncAPI, JSON Schema, SQL, or Proto in separate files and link them from `index.html`.
@@ -24,6 +24,7 @@ Create reviewable technical proposals that make scope, responsibilities, flows, 
 ## Editing Existing Proposals
 
 - Update existing canonical directory; do not create `v2`, `final`, `new`, or date-suffixed copies.
+- Preserve its assigned sequence number. When migrating an unnumbered legacy proposal, follow the migration rule in `references/standard.md`.
 - Preserve valid decisions and working links.
 - Update status, last-modified date, and change summary.
 - Move superseded reasoning to ADR history instead of duplicating it throughout proposal.

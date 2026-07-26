@@ -1,0 +1,14 @@
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @map("actor_id") @db.Uuid
+  action     String
+  targetId   String?  @map("target_id") @db.Uuid
+  requestId  String?  @map("request_id")
+  metadata   Json?
+  occurredAt DateTime @default(now()) @map("occurred_at")
+  actor      User?    @relation("actor_audit_logs", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, occurredAt])
+  @@index([targetId, occurredAt])
+  @@map("audit_logs")
+}

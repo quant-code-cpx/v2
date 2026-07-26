@@ -1,0 +1,42 @@
+@import "./design-tokens.css";
+
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+html {
+  background: var(--qv-bg-canvas);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--qv-bg-canvas);
+  color: var(--qv-text-primary);
+  font-family: var(--qv-font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+*:focus-visible {
+  outline: none;
+  box-shadow: var(--qv-focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

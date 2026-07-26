@@ -1,0 +1,1458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta
+    name="description"
+    content="quant-v2 API 服务最小架构方案：单一 NestJS API 进程，只保留用户管理与鉴权。"
+  >
+  <title>API 服务最小基础架构方案｜quant-v2</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #dfe4ec;
+      --surface: #f6f8fb;
+      --accent: #3157d5;
+      --accent-soft: #eef2ff;
+      --success: #176b4d;
+      --success-soft: #ecfdf3;
+      --warning: #8a4b08;
+      --warning-soft: #fff7e8;
+      --danger: #a12d2d;
+      --danger-soft: #fff1f1;
+      --radius: 14px;
+      --shadow: 0 12px 30px rgb(23 32 51 / 7%);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    a {
+      color: var(--accent);
+      text-underline-offset: 0.2em;
+    }
+
+    a:focus-visible {
+      outline: 3px solid rgb(49 87 213 / 28%);
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
+
+    code {
+      padding: 0.12em 0.35em;
+      border-radius: 5px;
+      background: var(--surface);
+      color: #233a92;
+      font: 0.9em/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+
+    .shell {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    header {
+      padding: 56px 0 34px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, var(--surface), #fff);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 750;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+    }
+
+    h1 {
+      max-width: 880px;
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 3.6rem);
+    }
+
+    h2 {
+      margin: 0 0 20px;
+      font-size: clamp(1.45rem, 3vw, 2rem);
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 1.08rem;
+    }
+
+    p {
+      max-width: 78ch;
+    }
+
+    ul,
+    ol {
+      padding-left: 1.35rem;
+    }
+
+    li + li {
+      margin-top: 0.35rem;
+    }
+
+    .lede {
+      max-width: 820px;
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 1.08rem;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 28px 0 0;
+    }
+
+    .meta div {
+      padding: 13px 15px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgb(255 255 255 / 85%);
+    }
+
+    .meta dt {
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .meta dd {
+      margin: 3px 0 0;
+      font-weight: 650;
+    }
+
+    .status {
+      color: var(--warning);
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 94%);
+      backdrop-filter: blur(12px);
+    }
+
+    nav ul {
+      display: flex;
+      gap: 20px;
+      width: max-content;
+      margin: 0;
+      padding: 12px 0;
+      list-style: none;
+    }
+
+    nav a {
+      color: var(--muted);
+      font-size: 0.88rem;
+      font-weight: 650;
+      text-decoration: none;
+    }
+
+    nav a:hover {
+      color: var(--accent);
+    }
+
+    main {
+      padding: 20px 0 72px;
+    }
+
+    section {
+      padding: 50px 0;
+      border-bottom: 1px solid var(--line);
+      scroll-margin-top: 54px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid > * {
+      min-width: 0;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      min-width: 0;
+      padding: 21px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .card p:last-child,
+    .card ul:last-child {
+      margin-bottom: 0;
+    }
+
+    .label,
+    .marker {
+      display: inline-block;
+      margin-bottom: 9px;
+      font-size: 0.75rem;
+      font-weight: 780;
+      letter-spacing: 0.06em;
+    }
+
+    .label {
+      color: var(--accent);
+    }
+
+    .marker {
+      padding: 2px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+    }
+
+    .marker.fact {
+      color: #344054;
+      background: var(--surface);
+    }
+
+    .marker.decision {
+      color: var(--success);
+      background: var(--success-soft);
+      border-color: #b7e2ca;
+    }
+
+    .marker.assumption {
+      color: var(--warning);
+      background: var(--warning-soft);
+      border-color: #f0cf9c;
+    }
+
+    .marker.open {
+      color: var(--danger);
+      background: var(--danger-soft);
+      border-color: #efc2c2;
+    }
+
+    .callout {
+      margin-top: 18px;
+      padding: 19px 21px;
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      background: var(--accent-soft);
+    }
+
+    .callout.warning {
+      border-left-color: var(--warning);
+      background: var(--warning-soft);
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .flow,
+    pre {
+      max-width: 100%;
+      overflow-x: auto;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #111827;
+      color: #e5e7eb;
+      font: 0.88rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      tab-size: 2;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    table {
+      width: 100%;
+      min-width: 720px;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--surface);
+      font-size: 0.82rem;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .compact td,
+    .compact th {
+      padding-top: 10px;
+      padding-bottom: 10px;
+    }
+
+    .steps {
+      padding-left: 1.25rem;
+    }
+
+    .steps li {
+      padding: 4px 0 12px 8px;
+    }
+
+    .risk {
+      color: var(--warning);
+      font-weight: 700;
+    }
+
+    .source-note {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .mt-16 {
+      margin-top: 16px;
+    }
+
+    .mt-28 {
+      margin-top: 28px;
+    }
+
+    .mt-30 {
+      margin-top: 30px;
+    }
+
+    footer {
+      padding: 28px 0 48px;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    @media (max-width: 800px) {
+      header {
+        padding-top: 40px;
+      }
+
+      .meta,
+      .grid,
+      .grid.two {
+        grid-template-columns: 1fr;
+      }
+
+      section {
+        padding: 38px 0;
+      }
+
+      .shell {
+        width: min(100% - 28px, 1120px);
+      }
+    }
+
+    @media print {
+      nav {
+        display: none;
+      }
+
+      header,
+      main,
+      section {
+        padding-top: 18px;
+      }
+
+      .shell {
+        width: 100%;
+      }
+
+      .card {
+        box-shadow: none;
+        break-inside: avoid;
+      }
+
+      .table-wrap {
+        overflow: visible;
+      }
+
+      table {
+        min-width: 0;
+        font-size: 9pt;
+      }
+
+      pre {
+        white-space: pre-wrap;
+        color: #111;
+        background: #fff;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      section,
+      .callout,
+      table {
+        break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Service API · 0001 · Minimal foundation</p>
+      <h1>API 服务最小基础架构方案</h1>
+      <p class="lede">
+        当前只建设一个 NestJS HTTP API 进程，业务范围只包含用户管理与鉴权。
+        保留 UserModule、AuthModule、PostgreSQL、Prisma，以及鉴权所需的 RedisModule；
+        不创建 Worker、Scheduler、队列、通用缓存、实时通信、市场数据或其他预留模块，依赖也只在源码实际使用时加入。
+      </p>
+
+      <dl class="meta">
+        <div>
+          <dt>状态</dt>
+          <dd class="status">Implemented</dd>
+        </div>
+        <div>
+          <dt>负责人</dt>
+          <dd>service-api 维护者</dd>
+        </div>
+        <div>
+          <dt>最后修改</dt>
+          <dd>2026-07-26</dd>
+        </div>
+        <div>
+          <dt>关联决策</dt>
+          <dd><a href="../../decisions/0005-service-api-runtime-and-architecture.md">ADR-0005</a></dd>
+        </div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">摘要</a></li>
+        <li><a href="#scope">目标与边界</a></li>
+        <li><a href="#reference">参考与优化</a></li>
+        <li><a href="#architecture">目标架构</a></li>
+        <li><a href="#components">功能划分</a></li>
+        <li><a href="#flows">核心流程</a></li>
+        <li><a href="#contracts">接口与数据</a></li>
+        <li><a href="#dependencies">依赖基线</a></li>
+        <li><a href="#quality">安全与质量</a></li>
+        <li><a href="#tradeoffs">方案取舍</a></li>
+        <li><a href="#delivery">实施与验收</a></li>
+        <li><a href="#open-questions">待决问题</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>摘要</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="marker fact">事实</span>
+          <h3>最小后端已落地</h3>
+          <p>
+            已交付可迁移、可容器化运行的 User/Auth API；没有异步任务、行情业务或兼容包袱，继续保持边界最小。
+          </p>
+        </article>
+        <article class="card">
+          <span class="marker decision">决策</span>
+          <h3>单进程 + User/Auth 双边界</h3>
+          <p>
+            Node.js 24 LTS + NestJS 11 + Express 5。保留 <code>UserModule</code> 与
+            <code>AuthModule</code>；PostgreSQL 保存权威状态，Redis 只保存短期鉴权安全状态。
+          </p>
+        </article>
+        <article class="card">
+          <span class="marker open">主要风险</span>
+          <h3 class="risk">后续账号策略仍待产品决定</h3>
+          <p>
+            公共注册、跨站 Cookie、角色粒度与密码找回尚未进入首期；变更前需要单独评审安全、schema 与接口影响。
+          </p>
+        </article>
+      </div>
+
+      <aside class="callout" aria-label="方案结论">
+        <strong>一句话结论</strong>
+        先把用户、凭证、会话和权限做对；Redis 只服务鉴权安全，没有当前需求的其他模块、进程、基础设施、目录和依赖都不进入工程。
+      </aside>
+    </section>
+
+    <section id="scope">
+      <h2>目标与边界</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="marker decision">目标</span>
+          <ul>
+            <li>建立可启动、可测试、可迁移、可部署的 NestJS 单 API 骨架。</li>
+            <li>实现用户生命周期、密码凭证、登录、Token 刷新、退出、角色与会话撤销边界。</li>
+            <li>从第一天启用 strict、配置校验、标准错误、结构化日志和数据库迁移。</li>
+            <li>Nest 依赖使用核验过的最新精确版本，直接依赖必须有当前源码使用者。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="marker fact">明确不做</span>
+          <ul>
+            <li>行情、研究、自选、策略、回测、组合、提醒、通知、Agent 和数据同步接入。</li>
+            <li>Worker、Scheduler、Queue、Outbox、Cron、WebSocket、SSE 和多进程入口。</li>
+            <li>通用业务缓存、事件平台、Prometheus Nest 集成和分布式追踪 SDK。</li>
+            <li>OAuth、MFA、短信、邮件、密码找回、多租户和公共注册，除非评审后加入。</li>
+            <li>为未来模块创建空目录、port、配置项或依赖。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="marker fact">硬约束</span>
+          <ul>
+            <li>服务只有一个 <code>main.ts</code>、一个 <code>AppModule</code>，业务模块仅有 User 与 Auth。</li>
+            <li>RedisModule 是鉴权基础设施，不承载用户、凭证或会话的权威状态。</li>
+            <li>API 不调用财经供应商，也不读取 <code>service-data-sync</code> 数据库。</li>
+            <li>数据库、账号、迁移和备份由 <code>service-api</code> 独占。</li>
+            <li>秘密只从环境变量或 secret 注入；日志禁止记录密码、Token、Cookie。</li>
+            <li>新增模块或基础设施时先证明当前必要性，再更新方案。</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="grid two mt-16">
+        <article class="card">
+          <span class="marker assumption">假设</span>
+          <h3>Redis 只做共享安全控制</h3>
+          <p>
+            PostgreSQL 承担用户与会话校验；Redis 提供跨副本登录/刷新限流、失败计数和短期锁定。
+            Redis 不做用户资料缓存，也不改变 PostgreSQL 的权威来源地位。
+          </p>
+        </article>
+        <article class="card">
+          <span class="marker decision">演进规则</span>
+          <h3>未来能力不在当前树中预留</h3>
+          <p>
+            新业务模块、Worker、队列、通用缓存或实时通道出现真实用例时，再新增编号方案并引入对应目录与依赖。
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section id="reference">
+      <h2>参考项目继承与删减</h2>
+      <p>
+        参考项目仍作为工程样本，但只迁移当前范围能直接验证的设计。以下删减是有意决策，不是遗漏。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">参考设计</th>
+              <th scope="col">处理</th>
+              <th scope="col">当前方案</th>
+              <th scope="col">原因</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>NestJS Module、DTO、Guard、Filter、Prisma 生命周期和测试结构</td>
+              <td><strong>保留思路</strong></td>
+              <td>只服务 User/Auth 垂直切片；不复制整个 <code>src</code>。</td>
+              <td>已有工程经验可复用，但新边界需要重新建模和 strict 化。</td>
+            </tr>
+            <tr>
+              <td>独立 Auth 与 User 模块</td>
+              <td><strong>保留并收紧</strong></td>
+              <td><code>AuthModule → UserModule</code> 单向依赖；User 不反向调用 Auth。</td>
+              <td>职责清楚；用户状态变化通过 <code>securityVersion</code> 使旧 Token/Session 失效，避免循环依赖。</td>
+            </tr>
+            <tr>
+              <td>Prisma + PostgreSQL</td>
+              <td><strong>保留</strong></td>
+              <td>只保存 users、credentials、sessions、audit_logs。</td>
+              <td>满足用户与会话事务、约束、审计和迁移需求。</td>
+            </tr>
+            <tr>
+              <td>API、Queue Worker、Agent Worker、Scheduler 多入口</td>
+              <td><strong>删除</strong></td>
+              <td>只有 HTTP API 入口。</td>
+              <td>当前没有长任务、计划任务或独立扩缩容需求。</td>
+            </tr>
+            <tr>
+              <td>Redis</td>
+              <td><strong>保留但限权</strong></td>
+              <td>独立 RedisModule；只做鉴权限流、失败计数和短期安全标记。</td>
+              <td>这些状态需要跨副本共享和自动过期；用户与会话仍以 PostgreSQL 为准。</td>
+            </tr>
+            <tr>
+              <td>BullMQ、Socket.IO、通用缓存与 Outbox</td>
+              <td><strong>删除</strong></td>
+              <td>不创建 Queue、Realtime、Cache 或事件抽象。</td>
+              <td>当前没有异步任务、实时推送或业务缓存需求。</td>
+            </tr>
+            <tr>
+              <td>Stock、Market、Backtest、Portfolio、Agent 等业务模块</td>
+              <td><strong>删除</strong></td>
+              <td>仓库内不创建对应目录或接口。</td>
+              <td>当前范围只有用户管理与鉴权。</td>
+            </tr>
+            <tr>
+              <td>所有端点只使用 POST</td>
+              <td><strong>不沿用</strong></td>
+              <td>使用标准 GET/POST/PATCH/DELETE 语义。</td>
+              <td>保留缓存、幂等、代理、审计和客户端工具的标准语义。</td>
+            </tr>
+            <tr>
+              <td>全局成功响应包装</td>
+              <td><strong>不沿用</strong></td>
+              <td>直接返回资源；错误采用 Problem Details。</td>
+              <td>避免双重包装，并保持 HTTP 状态、204 与 OpenAPI 类型清晰。</td>
+            </tr>
+            <tr>
+              <td>宽松 TypeScript 与 BigInt 全局转 Number</td>
+              <td><strong>不沿用</strong></td>
+              <td><code>strict: true</code>；跨 JSON 边界的 ID 显式使用字符串。</td>
+              <td>新项目没有兼容负担，不接受静默类型和精度错误。</td>
+            </tr>
+            <tr>
+              <td>Winston 文件轮转与 Prometheus Nest 集成</td>
+              <td><strong>延后</strong></td>
+              <td>Nest 结构化 stdout、requestId、基础错误计数。</td>
+              <td>先满足诊断；监控平台和指标需求确定后再增加依赖。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <h2>目标架构</h2>
+      <pre class="flow" role="img" aria-label="API 服务最小目标架构图">service-web / API Client
+          │ HTTPS · /api/v1
+          ▼
+┌────────────────── service-api 单一进程 ──────────────────┐
+│ main.ts → AppModule                                      │
+│             ├── ConfigModule / HealthController          │
+│             ├── DatabaseModule ──────────────┐            │
+│             ├── RedisModule ─────────────┐   │            │
+│             ├── UserModule              │   │            │
+│             │     └── User/Credential   │   │            │
+│             └── AuthModule              │   │            │
+│                   ├── imports UserModule ┘   │            │
+│                   └── Session/JWT/Guard ─────┘            │
+└─────────────────────────────┼─────────────┼───────────────┘
+                              ▼             ▼
+                    service-api PostgreSQL  Redis
+                    权威业务与会话状态       短期限流/锁定状态
+
+没有 Worker、Scheduler、Queue、通用 Cache、WebSocket 或跨服务调用。</pre>
+
+      <div class="grid">
+        <article class="card">
+          <span class="label">一个入口</span>
+          <h3>API 进程</h3>
+          <p><strong>加载：</strong>HTTP、配置、数据库、Redis、健康检查、User、Auth。</p>
+          <p><strong>不加载：</strong>Processor、Cron、实时 gateway、通用缓存。</p>
+          <p><strong>失败边界：</strong>PostgreSQL 或 Redis 不可用时 readiness 失败；进程不提供不可信降级认证。</p>
+        </article>
+        <article class="card">
+          <span class="label">用户边界</span>
+          <h3>UserModule</h3>
+          <p><strong>负责：</strong>用户、资料、角色、状态、密码凭证和 <code>securityVersion</code>。</p>
+          <p><strong>导出：</strong>只读认证查询接口，不导出 Prisma repository。</p>
+          <p><strong>边界：</strong>不依赖 AuthModule；改密、禁用或改角色只更新自身聚合版本。</p>
+        </article>
+        <article class="card">
+          <span class="label">鉴权边界</span>
+          <h3>AuthModule</h3>
+          <p><strong>负责：</strong>登录、JWT、Refresh Session、退出、Guard 与安全审计。</p>
+          <p><strong>依赖：</strong>UserModule 的窄查询接口、RedisModule 和 DatabaseModule。</p>
+          <p><strong>边界：</strong>校验用户状态及 <code>securityVersion</code>；不直接修改用户资料。</p>
+        </article>
+        <article class="card">
+          <span class="label">安全基础设施</span>
+          <h3>RedisModule</h3>
+          <p><strong>负责：</strong>连接生命周期、命名空间、TTL、原子计数和健康检查。</p>
+          <p><strong>保存：</strong>登录/刷新限流、失败计数、短期锁定与重放标记。</p>
+          <p><strong>边界：</strong>不保存权威用户、凭证或会话；业务代码不直接使用 Redis client。</p>
+        </article>
+        <article class="card">
+          <span class="label">权威存储</span>
+          <h3>PostgreSQL</h3>
+          <p><strong>保存：</strong>User/Auth 全部权威状态。</p>
+          <p><strong>迁移：</strong>部署阶段执行 Prisma migrate；应用启动不自动改生产 schema。</p>
+          <p><strong>恢复：</strong>依赖备份与迁移回滚窗口；Redis 丢失只影响短期安全状态，不用于恢复业务数据。</p>
+        </article>
+      </div>
+
+      <aside class="callout" aria-label="最小化约束">
+        <strong>禁止“先建空壳以后再用”</strong>
+        未进入当前业务范围的模块、目录、配置、接口和包全部不创建。后续扩展通过新增方案演进，不通过预留复杂度演进。
+      </aside>
+
+      <h3 class="mt-28">建议目录</h3>
+      <pre>service-api/
+├── src/
+│   ├── main.ts
+│   ├── app.module.ts
+│   ├── bootstrap/
+│   │   ├── configure-http.ts       # prefix、version、validation、security headers
+│   │   └── configure-shutdown.ts
+│   ├── platform/
+│   │   ├── config/
+│   │   ├── database/
+│   │   ├── health/
+│   │   ├── logging/
+│   │   └── redis/                  # client 生命周期、key namespace、TTL、健康检查
+│   └── modules/
+│       ├── user/
+│       │   ├── api/                # 用户与管理员端点、DTO
+│       │   ├── application/        # 用户资料、角色、状态、改密用例
+│       │   ├── domain/             # 用户聚合、凭证、securityVersion
+│       │   ├── infrastructure/     # Prisma user/credential repository
+│       │   └── user.module.ts
+│       └── auth/
+│           ├── api/                # login/refresh/logout、Guard、Strategy
+│           ├── application/        # 登录、轮换、撤销用例
+│           ├── domain/             # Session 与 Token 规则
+│           ├── infrastructure/     # Prisma session repository、JWT、Redis 安全状态
+│           └── auth.module.ts
+├── prisma/
+│   ├── schema.prisma
+│   └── migrations/
+├── test/
+│   ├── architecture/
+│   ├── integration/
+│   └── e2e/
+├── nest-cli.json
+├── package.json
+└── pnpm-lock.yaml</pre>
+      <p class="source-note">
+        <code>AuthModule</code> 只通过 <code>UserModule</code> 导出的窄接口读取认证所需用户状态；
+        不创建 <code>shared/</code> 杂物目录，也不使用 <code>forwardRef()</code> 掩盖循环依赖。
+      </p>
+    </section>
+
+    <section id="components">
+      <h2>功能划分</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">组件</th>
+              <th scope="col">唯一职责</th>
+              <th scope="col">输入 / 输出</th>
+              <th scope="col">状态</th>
+              <th scope="col">依赖与失败边界</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>UserModule</strong></td>
+              <td>用户生命周期、资料、角色、状态、密码凭证与安全版本。</td>
+              <td>User HTTP 请求；用户资源与供 Auth 使用的窄认证视图。</td>
+              <td>users、credentials；自身产生的 audit_logs。</td>
+              <td>依赖 DatabaseModule；不依赖 AuthModule，不导出 repository 或密码哈希。</td>
+            </tr>
+            <tr>
+              <td><strong>AuthModule</strong></td>
+              <td>登录、Token 签发验证、Refresh Session 轮换、退出和请求鉴权。</td>
+              <td>Auth HTTP 请求与 Bearer/Cookie；授权上下文。</td>
+              <td>sessions；自身产生的 audit_logs。</td>
+              <td>单向依赖 UserModule、RedisModule、DatabaseModule；关键校验失败一律拒绝授权。</td>
+            </tr>
+            <tr>
+              <td><strong>RedisModule</strong></td>
+              <td>提供命名空间化的短期安全状态、TTL、原子计数和连接健康。</td>
+              <td>Auth 安全策略调用；计数、锁定和短期重放结果。</td>
+              <td>可过期、可重建的安全 key，不含权威业务数据。</td>
+              <td>Redis 不可用时登录/刷新 fail closed，readiness 变红；已鉴权请求仍必须通过 PostgreSQL 校验。</td>
+            </tr>
+            <tr>
+              <td><strong>DatabaseModule</strong></td>
+              <td>提供 Prisma 生命周期、事务入口和连接健康，不暴露全局业务查询。</td>
+              <td>User/Auth repository 调用；事务结果与数据库错误。</td>
+              <td>无应用内状态；连接池属于进程资源。</td>
+              <td>数据库失败使 User/Auth 请求失败、readiness 变红；liveness 仍用于判断进程存活。</td>
+            </tr>
+            <tr>
+              <td><strong>HTTP Foundation</strong></td>
+              <td>配置、版本、校验、错误、requestId、日志、安全头、CORS 和优雅停机。</td>
+              <td>HTTP 请求/响应；结构化日志与健康状态。</td>
+              <td>仅进程生命周期状态。</td>
+              <td>配置非法时 fail fast；日志或 requestId 失败不得泄露凭证，也不得改变授权结果。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="flows">
+      <h2>核心流程</h2>
+
+      <h3>1. 登录</h3>
+      <ol class="steps">
+        <li>客户端调用 <code>POST /api/v1/auth/login</code>；AuthModule 使用 Redis 按 IP/账号组合执行共享限流与短期锁定。</li>
+        <li>通过 UserModule 导出的认证查询接口读取用户与凭证；不存在、被禁用、密码错误均返回相同外部错误。</li>
+        <li>使用 Argon2id 验证密码；成功后在 PostgreSQL 事务中创建带 <code>securityVersion</code> 的 session 与审计记录，并清理 Redis 失败计数。</li>
+        <li>返回短期 access token；refresh token 写入 Secure、HttpOnly Cookie，数据库只保存其摘要。</li>
+        <li>Redis、数据库、签名或审计关键写入失败时不签发任何 Token；认证入口不做宽松降级。</li>
+      </ol>
+
+      <h3 class="mt-30">2. 访问受保护资源</h3>
+      <pre class="flow" role="img" aria-label="受保护请求鉴权流程">Client ── Authorization: Bearer &lt;access-token&gt; ──▶ AuthModule / JwtAuthGuard
+   1. 验证签名、issuer、audience、exp
+   2. 读取 PostgreSQL session 与 UserModule 认证视图
+   3. 检查 session 未撤销、用户 ACTIVE、securityVersion 一致
+   4. 构造 AuthContext { userId, sessionId, role }
+                                  │
+                                  ▼
+                         Application Use Case
+                                  │
+                     资源归属 / ADMIN 权限校验
+                                  ▼
+                              Response</pre>
+      <p>
+        首期每次受保护请求查询 PostgreSQL，确保禁用用户和撤销会话立即生效。只有测量证明数据库压力不可接受时，
+        才评审用户/会话缓存及其撤销一致性；当前 RedisModule 不承担这类业务缓存。
+      </p>
+
+      <h3 class="mt-30">3. Refresh Token 轮换</h3>
+      <ol class="steps">
+        <li>客户端调用 <code>POST /api/v1/auth/refresh</code>，服务校验 Cookie、Origin/CSRF，并通过 Redis 执行刷新限流。</li>
+        <li>锁定 session，核对 refresh token 摘要、过期、撤销状态和 <code>securityVersion</code>。</li>
+        <li>事务内撤销旧 refresh token、生成新 token 摘要、记录轮换关系和审计。</li>
+        <li>发现旧 token 被再次使用时，在 PostgreSQL 撤销该会话族，并向 Redis 写入短期重放标记。</li>
+      </ol>
+
+      <h3 class="mt-30">4. 管理员禁用用户</h3>
+      <ol class="steps">
+        <li>ADMIN 调用 <code>PATCH /api/v1/users/{id}</code>，应用层校验权限与目标状态。</li>
+        <li>UserModule 在自身事务内更新用户为 <code>DISABLED</code>、递增 <code>securityVersion</code> 并写安全审计，不反向调用 AuthModule。</li>
+        <li>后续 access token 虽未过期，也因 token/session 版本与用户版本不一致而被 AuthModule 拒绝。</li>
+      </ol>
+    </section>
+
+    <section id="contracts">
+      <h2>接口与数据约定</h2>
+      <h3>首期端点</h3>
+      <div class="table-wrap">
+        <table class="compact">
+          <thead>
+            <tr>
+              <th scope="col">方法与路径</th>
+              <th scope="col">用途</th>
+              <th scope="col">权限</th>
+              <th scope="col">主要结果</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>POST /api/v1/auth/login</code></td>
+              <td>密码登录并创建会话。</td>
+              <td>Public + 严格限流</td>
+              <td>200 + access token；refresh cookie。</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/auth/refresh</code></td>
+              <td>轮换 refresh token。</td>
+              <td>有效 refresh session</td>
+              <td>200 + 新 access token/cookie。</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/auth/logout</code></td>
+              <td>撤销当前会话。</td>
+              <td>Authenticated</td>
+              <td>204。</td>
+            </tr>
+            <tr>
+              <td><code>GET /api/v1/users/me</code></td>
+              <td>读取当前用户。</td>
+              <td>Authenticated</td>
+              <td>200 + UserResource。</td>
+            </tr>
+            <tr>
+              <td><code>PATCH /api/v1/users/me</code></td>
+              <td>修改允许自助维护的资料。</td>
+              <td>Authenticated</td>
+              <td>200 + UserResource。</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/users/me/password</code></td>
+              <td>校验旧密码后修改密码，使现有会话失效。</td>
+              <td>Authenticated</td>
+              <td>204。</td>
+            </tr>
+            <tr>
+              <td><code>GET /api/v1/users</code></td>
+              <td>管理员分页查询用户。</td>
+              <td>ADMIN</td>
+              <td>200 + cursor page。</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/users</code></td>
+              <td>管理员创建用户；首期不开放公共注册。</td>
+              <td>ADMIN</td>
+              <td>201 + UserResource。</td>
+            </tr>
+            <tr>
+              <td><code>PATCH /api/v1/users/{id}</code></td>
+              <td>修改角色或账户状态。</td>
+              <td>ADMIN</td>
+              <td>200 + UserResource。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid two mt-28">
+        <article class="card">
+          <span class="marker decision">HTTP</span>
+          <ul>
+            <li>统一前缀 <code>/api/v1</code>；资源 ID 放 path，过滤和 cursor 放 query。</li>
+            <li>安全读取用 GET，创建用 POST，局部修改用 PATCH，退出/改密等动作用 POST。</li>
+            <li>单资源直接返回；列表返回 <code>{ items, page }</code>；错误使用 Problem Details。</li>
+            <li>DTO 拒绝未知字段；生产错误不暴露 stack、SQL、Token 或用户枚举信息。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="marker decision">数据类型</span>
+          <ul>
+            <li>外部 ID 使用不透明字符串；时间点使用 RFC 3339 UTC。</li>
+            <li>邮箱存规范化值与展示值；唯一约束作用于规范化标识。</li>
+            <li>角色首期只有 <code>USER</code>、<code>ADMIN</code>；状态只有 <code>ACTIVE</code>、<code>DISABLED</code>。</li>
+            <li>乐观锁使用 version；审计 metadata 必须脱敏且有大小上限。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3 class="mt-28">最小持久化模型</h3>
+      <div class="table-wrap">
+        <table class="compact">
+          <thead>
+            <tr>
+              <th scope="col">表</th>
+              <th scope="col">核心字段</th>
+              <th scope="col">约束与说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>users</code></td>
+              <td>id、email、display_name、role、status、security_version、version、timestamps</td>
+              <td>规范化 email 唯一；禁用、改密或改角色时递增 security_version。</td>
+            </tr>
+            <tr>
+              <td><code>credentials</code></td>
+              <td>user_id、password_hash、password_changed_at</td>
+              <td>与 user 一对一；密码哈希永不进入普通用户查询 DTO。</td>
+            </tr>
+            <tr>
+              <td><code>sessions</code></td>
+              <td>id、user_id、security_version、refresh_token_hash、expires_at、revoked_at、rotated_from_id</td>
+              <td>支持轮换、撤销与重用检测；版本不一致即失效；索引活动会话和到期清理查询。</td>
+            </tr>
+            <tr>
+              <td><code>audit_logs</code></td>
+              <td>actor_id、action、target_id、request_id、occurred_at、metadata</td>
+              <td>追加写；禁止保存密码、完整 Token、Cookie 或敏感请求体。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout" aria-label="契约交付规则">
+        <strong>契约交付规则</strong>
+        已提交版本化 <a href="../../contracts/0001-service-api-user-auth.openapi.yaml">OpenAPI 契约</a>，
+        运行时同时提供 <code>/openapi-json</code>。契约变更必须同步更新两处并经接口验证。
+      </aside>
+    </section>
+
+    <section id="dependencies">
+      <h2>最小 NestJS 依赖基线</h2>
+      <p>
+        版本沿用 2026-07-26 已核验的 npm <code>latest</code> 快照。安装分两步：
+        空骨架只装运行必需包；User/Auth/Redis 开始实现时再加入鉴权、契约、限流和 Redis client。
+      </p>
+      <p class="source-note">
+        NestJS 11 要求 Node.js ≥ 20；本方案使用
+        <a href="https://nodejs.org/en/about/previous-releases">Node.js 24 LTS</a>。
+        Express 5 兼容要求见 <a href="https://docs.nestjs.com/migration-guide">NestJS 官方迁移指南</a>。
+      </p>
+
+      <div class="table-wrap">
+        <table class="compact">
+          <thead>
+            <tr>
+              <th scope="col">阶段</th>
+              <th scope="col">包</th>
+              <th scope="col">精确版本</th>
+              <th scope="col">当前使用者</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td rowspan="4">工程骨架 · runtime</td>
+              <td><code>@nestjs/common</code></td>
+              <td><strong>11.1.28</strong></td>
+              <td>Module、Controller、Guard、Pipe、Filter 基础 API。</td>
+            </tr>
+            <tr>
+              <td><code>@nestjs/core</code></td>
+              <td><strong>11.1.28</strong></td>
+              <td>Nest 容器与启动。</td>
+            </tr>
+            <tr>
+              <td><code>@nestjs/platform-express</code></td>
+              <td><strong>11.1.28</strong></td>
+              <td>单一 HTTP adapter。</td>
+            </tr>
+            <tr>
+              <td><code>@nestjs/config</code></td>
+              <td><strong>4.0.4</strong></td>
+              <td>环境变量加载与启动配置。</td>
+            </tr>
+            <tr>
+              <td rowspan="2">工程骨架 · dev</td>
+              <td><code>@nestjs/cli</code></td>
+              <td><strong>11.0.24</strong></td>
+              <td>构建与开发启动。</td>
+            </tr>
+            <tr>
+              <td><code>@nestjs/testing</code></td>
+              <td><strong>11.1.28</strong></td>
+              <td>模块、Guard、Filter 与 e2e 测试。</td>
+            </tr>
+            <tr>
+              <td rowspan="3">User/Auth 实现时加入</td>
+              <td><code>@nestjs/jwt</code></td>
+              <td><strong>11.0.2</strong></td>
+              <td>access token 签发与验证。</td>
+            </tr>
+            <tr>
+              <td><code>@nestjs/passport</code></td>
+              <td><strong>11.0.5</strong></td>
+              <td>AuthModule 的 JWT Strategy 与 Guard 集成。</td>
+            </tr>
+            <tr>
+              <td><code>@nestjs/swagger</code></td>
+              <td><strong>11.4.6</strong></td>
+              <td>运行时 Swagger/OpenAPI 文档生成。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="mt-28">明确不直接安装</h3>
+      <div class="table-wrap">
+        <table class="compact">
+          <thead>
+            <tr>
+              <th scope="col">依赖</th>
+              <th scope="col">不安装原因</th>
+              <th scope="col">允许引入条件</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>@nestjs/bullmq</code>、BullMQ</td>
+              <td>没有异步任务和 Worker。</td>
+              <td>出现不能在 HTTP 请求内完成的真实任务，并完成可靠投递方案。</td>
+            </tr>
+            <tr>
+              <td><code>@nestjs/schedule</code></td>
+              <td>没有定时业务。</td>
+              <td>出现明确计划任务、幂等与多副本策略。</td>
+            </tr>
+            <tr>
+              <td><code>@nestjs/websockets</code>、<code>@nestjs/platform-socket.io</code></td>
+              <td>没有实时推送。</td>
+              <td>轮询无法满足已定义体验或容量目标。</td>
+            </tr>
+            <tr>
+              <td><code>@nestjs/terminus</code></td>
+              <td>普通 Controller 足够实现 liveness/readiness。</td>
+              <td>健康依赖数量增加且 Terminus 能明显减少自建代码。</td>
+            </tr>
+            <tr>
+              <td><code>@nestjs/throttler</code></td>
+              <td>登录和刷新只需要 Redis 安全计数；直接实现可明确 fail-closed 行为。</td>
+              <td>出现多类 HTTP 限流策略，且共享 storage adapter 能减少实际维护代码。</td>
+            </tr>
+            <tr>
+              <td><code>@willsoto/nestjs-prometheus</code>、Prometheus client</td>
+              <td>当前尚未确定指标采集平台。</td>
+              <td>部署方案明确 Prometheus 抓取、指标字典和告警责任。</td>
+            </tr>
+            <tr>
+              <td><code>@nestjs/schematics</code></td>
+              <td>CLI 的传递依赖足够；源码不直接使用。</td>
+              <td>项目脚本直接调用 schematics API。</td>
+            </tr>
+            <tr>
+              <td>Socket.IO、通用缓存库、Redis ORM/装饰器封装</td>
+              <td>Redis 只需要小型安全状态 API，官方 client + 本地 RedisModule 已足够。</td>
+              <td>出现明确实时需求，或多个业务模块需要一致缓存策略。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="mt-28">分阶段安装命令</h3>
+      <pre># 阶段 1：空骨架
+pnpm add -E \
+  @nestjs/common@11.1.28 @nestjs/core@11.1.28 \
+  @nestjs/platform-express@11.1.28 @nestjs/config@4.0.4
+
+pnpm add -DE \
+  @nestjs/cli@11.0.24 @nestjs/testing@11.1.28
+
+# 阶段 2：开始写 User/Auth 时所需的 Nest 依赖
+pnpm add -E \
+  @nestjs/jwt@11.0.2 @nestjs/passport@11.0.5 \
+  @nestjs/swagger@11.4.6</pre>
+      <p class="source-note">
+        实现已按此基线锁定依赖。Redis 使用官方 <code>redis</code> client，由本地 RedisModule 封装；
+        Prisma、Passport strategy、密码哈希、DTO 校验和测试工具也只在对应源码和测试实际使用时加入。
+      </p>
+    </section>
+
+    <section id="quality">
+      <h2>安全、可靠性与可观测性</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">主题</th>
+              <th scope="col">最小方案</th>
+              <th scope="col">验证</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>配置</strong></td>
+              <td>启动时校验端口、数据库 URL、Redis URL/namespace、JWT issuer/audience/key、Cookie 属性；业务代码不散读 <code>process.env</code>。</td>
+              <td>合法最小配置、缺失 secret、错误 URL 和生产不安全 Cookie 均有测试。</td>
+            </tr>
+            <tr>
+              <td><strong>密码</strong></td>
+              <td>Argon2id，参数可配置但有安全下限；错误消息不暴露账号是否存在。</td>
+              <td>正确/错误密码、升级哈希参数、超长输入和时序差异回归测试。</td>
+            </tr>
+            <tr>
+              <td><strong>Token 与会话</strong></td>
+              <td>短期 access token；refresh token 轮换、摘要存储、重用检测、服务端撤销；用户与 session 携带 securityVersion。</td>
+              <td>过期、撤销、版本不一致、并发刷新、旧 token 重放、用户禁用和改密测试。</td>
+            </tr>
+            <tr>
+              <td><strong>Cookie / CSRF / CORS</strong></td>
+              <td>Secure + HttpOnly + 最小 Domain/Path；SameSite 根据部署拓扑确定；refresh 校验 Origin/CSRF。</td>
+              <td>同站、跨站、非法 Origin、缺失凭证和预检请求测试。</td>
+            </tr>
+            <tr>
+              <td><strong>授权</strong></td>
+              <td>默认需要认证，显式 Public；ADMIN 与资源所有权在 application use case 校验。</td>
+              <td>普通用户访问管理端点、横向越权、禁用账户和角色修改回归测试。</td>
+            </tr>
+            <tr>
+              <td><strong>数据库</strong></td>
+              <td>User/Auth 各自 repository、明确事务、唯一约束、连接池预算；生产启动不自动迁移。</td>
+              <td>迁移 dry-run、并发创建、securityVersion 更新、连接失败和备份恢复演练。</td>
+            </tr>
+            <tr>
+              <td><strong>Redis</strong></td>
+              <td>只保存带 TTL 的限流、失败计数、锁定和短期重放 key；统一 namespace，禁止无 TTL 写入。</td>
+              <td>原子计数、TTL、key 隔离、Redis 中断/恢复；登录和刷新在 Redis 故障时 fail closed。</td>
+            </tr>
+            <tr>
+              <td><strong>健康与停机</strong></td>
+              <td><code>/health</code> 只看进程；<code>/ready</code> 检查 PostgreSQL 与 Redis；SIGTERM 先停止接流量再关闭 Prisma/Redis。</td>
+              <td>PostgreSQL/Redis 中断、恢复、滚动发布和超时关闭测试。</td>
+            </tr>
+            <tr>
+              <td><strong>日志</strong></td>
+              <td>Nest 结构化 JSON stdout；requestId、userId、sessionId 关联；敏感字段集中脱敏。</td>
+              <td>自动扫描日志，确保无密码、Authorization、refresh token、Cookie 或完整请求体。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>方案取舍</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">决策点</th>
+              <th scope="col">采用</th>
+              <th scope="col">不采用 / 延后</th>
+              <th scope="col">原因</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>业务边界</td>
+              <td><strong>UserModule + AuthModule</strong></td>
+              <td>合并 IdentityModule，或 User/Auth 双向依赖</td>
+              <td>保留清晰业务职责；Auth 单向读取 User，securityVersion 负责跨边界立即失效，避免 <code>forwardRef()</code>。</td>
+            </tr>
+            <tr>
+              <td>进程模型</td>
+              <td><strong>一个 HTTP API</strong></td>
+              <td>Worker、Scheduler、多入口</td>
+              <td>当前没有对应工作负载。</td>
+            </tr>
+            <tr>
+              <td>会话权威状态</td>
+              <td><strong>PostgreSQL 权威 + Redis 安全控制</strong></td>
+              <td>Redis-only session 或通用缓存</td>
+              <td>会话事务和恢复依赖 PostgreSQL；Redis 只处理适合 TTL/原子计数的跨副本短期状态。</td>
+            </tr>
+            <tr>
+              <td>JWT 集成</td>
+              <td><strong><code>@nestjs/jwt</code> + Passport JwtStrategy</strong></td>
+              <td>完全自建认证协议层</td>
+              <td>沿用成熟 Nest 集成；角色与资源授权仍由 application use case 显式完成。</td>
+            </tr>
+            <tr>
+              <td>健康检查</td>
+              <td><strong>普通 Controller + Prisma/Redis ping</strong></td>
+              <td>Terminus</td>
+              <td>当前仅两个外部依赖，少量显式检查无需新增 Nest 包。</td>
+            </tr>
+            <tr>
+              <td>接口语义</td>
+              <td><strong>标准 HTTP + Problem Details</strong></td>
+              <td>全部 POST + 全局成功 envelope</td>
+              <td>契约清晰，减少框架魔法与特殊旁路。</td>
+            </tr>
+            <tr>
+              <td>未来扩展</td>
+              <td><strong>需求出现后新增方案</strong></td>
+              <td>预建空模块、port 和依赖</td>
+              <td>让复杂度由真实用例驱动，降低当前维护面。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="delivery">
+      <h2>实施与验收</h2>
+      <aside class="callout" aria-label="实施状态">
+        <strong>当前状态</strong>
+        阶段 0 至阶段 2 已实现并通过容器化迁移、health/ready、管理员引导、登录、刷新、登出、lint、typecheck 和单元测试验证。
+        阶段 3 属于首次共享环境上线前的运维工作，不在本次本地基础架构交付范围。
+      </aside>
+      <ol class="steps">
+        <li>
+          <strong>阶段 0 — 冻结必要范围：</strong>
+          评审 ADR-0005，决定账号创建方式、登录标识、首个管理员、Cookie 拓扑、Redis 部署方式和首期角色。
+          <strong>退出条件：</strong>所有会影响 schema/安全的待决项有结论。
+        </li>
+        <li>
+          <strong>阶段 1 — 最小空骨架：</strong>
+          初始化单一 Nest API、strict、配置校验、结构化日志、错误模型、<code>/health</code> 和测试命令；
+          只安装工程骨架依赖。
+          <strong>退出条件：</strong>build、lint、unit、e2e、容器启动和 SIGTERM 冒烟通过。
+        </li>
+        <li>
+          <strong>阶段 2 — User/Auth 垂直切片：</strong>
+          加入 Prisma/PostgreSQL、RedisModule、UserModule、AuthModule、JWT/Passport、限流、OpenAPI；实现登录、刷新、退出、自助资料、
+          改密与管理员用户管理。
+          <strong>退出条件：</strong>数据库迁移、Redis 故障策略、契约、安全、越权、会话轮换和日志脱敏测试通过。
+        </li>
+        <li>
+          <strong>阶段 3 — 上线准备：</strong>
+          完成备份恢复、Cookie/CORS、边缘限流、TLS、密钥轮换、审计保留、灰度与回滚演练。
+          <strong>退出条件：</strong>上线清单通过；无未使用直接依赖和预留模块。
+        </li>
+      </ol>
+
+      <div class="grid">
+        <article class="card">
+          <h3>发布</h3>
+          <ul>
+            <li>单一不可变 API 镜像。</li>
+            <li>部署前执行 Prisma migrate；应用不自动迁移。</li>
+            <li>schema 使用 expand/contract，兼容窗口覆盖一次回滚。</li>
+            <li>PostgreSQL、Redis 配置和 secret 变更与镜像版本一起审计。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>回滚</h3>
+          <ul>
+            <li>认证 5xx、越权、Token 异常或数据错误触发回滚。</li>
+            <li>回滚镜像与配置，不立即撤销兼容性 schema 扩展。</li>
+            <li>密钥问题优先切换密钥版本并撤销受影响会话。</li>
+            <li>回滚后验证登录、刷新、禁用和 readiness。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>参考代码迁移</h3>
+          <ul>
+            <li>只迁移 Auth/User 相关规则和测试思路。</li>
+            <li>Redis 只迁移鉴权限流/锁定思路；不复制 BullMQ、业务缓存或 Worker。</li>
+            <li>不复制 Tushare、其他业务模块、Queue、WebSocket 和全局 SharedModule。</li>
+            <li>路由改为标准 HTTP；DTO 与错误模型重新定义。</li>
+            <li>strict 通过后才进入新服务。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3 class="mt-30">验收标准</h3>
+      <div class="table-wrap">
+        <table class="compact">
+          <thead>
+            <tr>
+              <th scope="col">类别</th>
+              <th scope="col">可验证条件</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>范围</td>
+              <td>业务源码只有 UserModule、AuthModule；基础设施只保留当前必需项（含 RedisModule），无 Worker、Scheduler、Queue、通用 Cache、Realtime 或其他业务目录。</td>
+            </tr>
+            <tr>
+              <td>依赖</td>
+              <td>直接依赖全部有源码/测试 import；禁止清单中的包不存在；只有一个 pnpm lock。</td>
+            </tr>
+            <tr>
+              <td>运行</td>
+              <td>只有一个 <code>main.ts</code> 和一个 API 启动命令；无进程角色配置。</td>
+            </tr>
+            <tr>
+              <td>架构</td>
+              <td>Auth 单向依赖 User/Redis，User 不依赖 Auth；Controller 不访问 Prisma/Redis client；模块外无法 import credentials/session repository。</td>
+            </tr>
+            <tr>
+              <td>类型与契约</td>
+              <td><code>strict: true</code> 无忽略通过；DTO 拒绝未知字段；版本化 OpenAPI 契约与 <code>/openapi-json</code> 可访问。</td>
+            </tr>
+            <tr>
+              <td>安全</td>
+              <td>密码、登录枚举、Token 轮换/重放、securityVersion、CSRF/CORS、越权、Redis fail-closed、限流和日志脱敏测试通过。</td>
+            </tr>
+            <tr>
+              <td>数据库</td>
+              <td>迁移、唯一约束、事务、并发、备份恢复和生产不自动迁移验证通过。</td>
+            </tr>
+            <tr>
+              <td>运维</td>
+              <td>PostgreSQL/Redis health/readiness、结构化日志、SIGTERM、灰度和回滚演练通过。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="open-questions">
+      <h2>待决问题</h2>
+      <div class="table-wrap">
+        <table class="compact">
+          <thead>
+            <tr>
+              <th scope="col">问题</th>
+              <th scope="col">当前默认</th>
+              <th scope="col">负责人</th>
+              <th scope="col">决定触发点</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>用户如何创建？</td>
+              <td>首期仅 ADMIN 创建，不开放公共注册。</td>
+              <td>产品 / 项目维护者</td>
+              <td>未来公共注册需求评审前。</td>
+            </tr>
+            <tr>
+              <td>首个 ADMIN 如何安全生成？</td>
+              <td>一次性部署脚本读取 secret，成功后不可再次运行。</td>
+              <td>项目维护者 / 运维</td>
+              <td>首个共享环境部署前。</td>
+            </tr>
+            <tr>
+              <td>登录标识是什么？</td>
+              <td>规范化 email + password。</td>
+              <td>产品 / 项目维护者</td>
+              <td>引入其他登录标识前。</td>
+            </tr>
+            <tr>
+              <td>Web 与 API 是否同站？</td>
+              <td>同站部署，refresh Cookie 使用 SameSite=Lax 或 Strict。</td>
+              <td>前端 / 运维</td>
+              <td>跨站 Web 部署评审前。</td>
+            </tr>
+            <tr>
+              <td>是否需要 MFA、OAuth、邮件验证或密码找回？</td>
+              <td>首期全部不做。</td>
+              <td>产品 / 项目维护者</td>
+              <td>出现明确用户流程和通道责任后，新建方案。</td>
+            </tr>
+            <tr>
+              <td>是否需要多租户？</td>
+              <td>单租户，不预留 tenant 字段。</td>
+              <td>项目维护者</td>
+              <td>首次多租户需求前；需 ADR 与数据迁移方案。</td>
+            </tr>
+            <tr>
+              <td>Redis 采用什么部署与隔离方式？</td>
+              <td>本地单实例；生产使用托管高可用实例、独立 ACL 用户和 service-api key namespace。</td>
+              <td>项目维护者 / 运维</td>
+              <td>首个共享环境部署前。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      API 服务最小基础架构方案 · 2026-07-26 已实现：单一 API 进程、UserModule、AuthModule 与鉴权所需 RedisModule；
+      其余业务模块、Worker、Scheduler、队列、通用缓存、实时能力及未使用依赖均未引入。
+    </div>
+  </footer>
+</body>
+</html>

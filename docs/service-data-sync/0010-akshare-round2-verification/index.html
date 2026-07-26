@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="AKShare 第二轮独立验证：65 项同步能力的 B00 协议、复测结果和实施准入结论。">
+  <title>0010｜AKShare 第二轮验证汇总</title>
+  <style>
+    :root{--ink:#17231d;--muted:#5c6b62;--line:#dce5df;--paper:#f8fbf8;--card:#fff;--good:#176b49;--good-bg:#e7f4eb;--warn:#8b5916;--warn-bg:#fff3d9;--bad:#a33e35;--bad-bg:#fbe9e7;--blue:#255e8a;--blue-bg:#e9f2f9;--radius:14px}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}a{color:var(--good);text-underline-offset:.18em}a:focus-visible{outline:3px solid rgb(23 107 73 / 30%);outline-offset:3px}code{font:.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}.shell{width:min(1120px,calc(100% - 36px));margin:auto}header{padding:52px 0 36px;background:#fff;border-bottom:1px solid var(--line)}.eyebrow{margin:0 0 10px;color:var(--good);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}h1,h2,h3{letter-spacing:-.025em;line-height:1.25}h1{max-width:900px;margin:0;font-size:clamp(31px,5vw,50px)}h2{margin:0 0 14px;font-size:clamp(24px,3vw,33px)}h3{margin:0 0 8px;font-size:17px}.lead{max-width:880px;margin:14px 0 0;color:var(--muted);font-size:17px}.meta{display:flex;flex-wrap:wrap;gap:9px;margin-top:24px}.pill,.tag{display:inline-block;border-radius:999px;font-size:12px;font-weight:750;white-space:nowrap}.pill{padding:5px 10px;background:#f0f5f1;color:#405148}.tag{padding:2px 7px}.tag.warn{color:var(--warn);background:var(--warn-bg)}.tag.bad{color:var(--bad);background:var(--bad-bg)}.tag.blue{color:var(--blue);background:var(--blue-bg)}.tag.good{color:var(--good);background:var(--good-bg)}nav{position:sticky;top:0;z-index:2;overflow-x:auto;border-bottom:1px solid var(--line);background:rgb(255 255 255 / 94%);backdrop-filter:blur(10px)}nav .shell{display:flex;gap:20px;width:max-content;padding:12px 0}nav a{color:var(--muted);font-size:13px;font-weight:750;text-decoration:none}nav a:hover{color:var(--good)}main{padding:18px 0 64px}section{padding:42px 0;border-bottom:1px solid var(--line);scroll-margin-top:52px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.grid.two{grid-template-columns:repeat(2,minmax(0,1fr)}.card{padding:18px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card)}.label{display:block;margin-bottom:7px;color:var(--good);font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}.metric{margin:3px 0;color:var(--ink);font-size:34px;font-weight:850;line-height:1}.callout{margin:18px 0;padding:16px 18px;border-left:4px solid var(--good);border-radius:0 10px 10px 0;background:var(--good-bg)}.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)}.callout.bad{border-left-color:var(--bad);background:var(--bad-bg)}.flow{overflow-x:auto;padding:17px 19px;border-radius:var(--radius);background:#12251b;color:#e9f4eb;font:13px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:#fff}table{width:100%;min-width:820px;border-collapse:collapse;font-size:13px}th,td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#f2f7f3;color:#435248;font-size:12px;white-space:nowrap}tr:last-child td{border-bottom:0}.facts{margin:0;padding-left:20px}.facts li+li{margin-top:5px}.muted{color:var(--muted)}footer{padding:25px 0 42px;color:var(--muted);font-size:12px}@media(max-width:760px){header{padding-top:32px}.shell{width:min(100% - 24px,1120px)}.grid,.grid.two{grid-template-columns:1fr}section{padding:32px 0}}@media print{@page{size:A4;margin:13mm}body{background:#fff;font-size:10pt}.shell{width:100%}nav{display:none}header{padding:0 0 18px}main{padding-bottom:0}section{padding:22px 0}.card,.callout,.table-wrap{break-inside:avoid}.table-wrap{overflow:visible}table{font-size:8pt}th,td{padding:5px 6px}a{color:inherit;text-decoration:none}}
+  </style>
+</head>
+<body>
+  <header><div class="shell">
+    <p class="eyebrow">Service Data Sync · Research 0010</p>
+    <h1>AKShare 第二轮独立验证：结论已收敛，生产准入未通过</h1>
+    <p class="lead">以 B00 的 65 项 capability 目录为准，在新的只读 Docker 环境中复测候选函数。二轮完成的是独立短探针验证，不是 3–5 个交易日稳定性验收；因此没有任何能力升级为 <code>FULL</code>。</p>
+    <div class="meta"><span class="pill">编号：0010</span><span class="pill">日期：2026-07-26（上海）</span><span class="pill">AKShare：1.18.78</span><span class="pill">环境：Python 3.12-slim · 只读容器</span><span class="pill">范围：调研证据，不建表/任务/API/真实 adapter</span></div>
+  </div></header>
+  <nav><div class="shell"><a href="#answer">结论</a><a href="#b00">B00 协议</a><a href="#matrix">批次矩阵</a><a href="#signals">关键信号</a><a href="#decision">准入决定</a><a href="#next">后续</a></div></nav>
+  <main class="shell">
+    <section id="answer">
+      <h2>结论</h2>
+      <div class="grid"><article class="card"><span class="label">完整支持</span><p class="metric">0 / 65</p><p>没有能力同时通过覆盖、语义、质量、稳定性与来源合规门槛。</p></article><article class="card"><span class="label">受限或不稳定</span><p class="metric">48 / 65</p><p>有局部候选，但存在市场/字段/历史/版本/稳定性缺口，继续由 Tushare 主用。</p></article><article class="card"><span class="label">当前无等价</span><p class="metric">17 / 65</p><p>缺正式等价接口或核心语义无法重建，不能用近似数据替换。</p></article></div>
+      <aside class="callout bad"><strong>实施决定：</strong>不创建生产 AKShare adapter、fallback 路由、同步任务、表、迁移或接口。生产数据读取仍只能经 provider-neutral port；任何来源 SDK、URL 与字段只能留在未来的具体 adapter 内，绝不能进入任务、应用、质量或持久化层。</aside>
+    </section>
+
+    <section id="b00">
+      <h2>B00：本轮采用的验收层级</h2>
+      <div class="flow" aria-label="验证与架构边界">研究短探针（本轮）
+  Docker / 固定 AKShare 版本 / 只读根文件系统 / 每调用 30 秒上限
+  → 候选函数 → 行数、schema fingerprint、耗时、空结果、错误类型
+  → capability verdict
+
+未来服务（未实现）
+  数据源 SDK / HTTP → concrete provider adapter → provider-neutral port
+  → application / task / quality / persistence
+
+禁止：application、task、quality、persistence 直接调用 AKShare、Tushare 或任何具体 adapter</div>
+      <div class="grid two"><article class="card"><h3>已完成：R2 独立复测</h3><ul class="facts"><li>使用新建临时 Docker 依赖卷，固定 <code>akshare==1.18.78</code>。</li><li>70 次候选调用：42 次返回非空结构化数据、2 次返回空集、26 次以超时/断连/解析或键错误失败。</li><li>记录 schema fingerprint、字段数、行数和错误类型；临时容器、卷和脚本将在交付前删除。</li></ul></article><article class="card"><h3>仍未完成：R3 生产准入</h3><ul class="facts"><li>连续 3–5 个交易日成功率、空结果率、延迟与 schema 漂移观察。</li><li>与持 token 的 Tushare 同日重叠样本做主键、单位、字段与数值容差对账。</li><li>底层网站条款、访问频率和再分发边界核查。</li></ul></article></div>
+      <aside class="callout warn"><strong>状态解释：</strong>“第二轮完成”表示 B00 的独立短探针环节结束；不等于服务可以接入数据源。R3 未通过前，所有业务 capability 维持 Tushare 主路由。</aside>
+    </section>
+
+    <section id="matrix">
+      <h2>B01–B07 二轮矩阵</h2>
+      <p class="muted">“返回”按候选调用计数，而不是 capability 通过数；一个 capability 可有多个候选，空集不计为有效覆盖。详细首轮证据见各批文档，本报告追加二轮复测结果并覆盖其“进行中”标签。</p>
+      <div class="table-wrap"><table><thead><tr><th>批次</th><th>65 项目录范围</th><th>二轮候选结果</th><th>本轮新增/确认的关键事实</th><th>当前结论</th></tr></thead><tbody>
+        <tr><td><a href="../0003-akshare-b01-initial-research/index.html">B01</a></td><td>主数据与参考数据（10）</td><td>5 非空 / 5 失败</td><td>公司档案、日历、申万一级、可转债、基金目录返回；A 股代码表 SSL 失败，概念目录超时，期权目录断连，三级成分列数漂移。</td><td><span class="tag warn">受限/不稳定</span></td></tr>
+        <tr><td><a href="../0004-akshare-b02-initial-research/index.html">B02</a></td><td>核心日频行情（12）</td><td>8 非空 / 4 失败</td><td>指数、ETF、期权、市场汇总和行业日线返回；A 股日/周/月线远端断连。可转债和期权样本的末日明显滞后，不能据此承诺时效。</td><td><span class="tag warn">受限/不稳定</span></td></tr>
+        <tr><td><a href="../0005-akshare-b03-initial-research/index.html">B03</a></td><td>市场规则与因子（7）</td><td>4 非空 / 1 失败；2 项仍无正式候选</td><td>停牌、指数权重、涨停池返回；筹码汇总断连。价格限制、预计算技术因子和完整筹码分布仍不能等价重建。</td><td><span class="tag blue">部分 + 无等价</span></td></tr>
+        <tr><td><a href="../0006-akshare-b04-initial-research/index.html">B04</a></td><td>财务核心（9）</td><td>5 非空 / 4 失败</td><td>三大报表、快报、预告仍可取；财务指标解析错误，预约披露与审计公告 30 秒超时，主营构成键缺失。</td><td><span class="tag warn">受限/不稳定</span></td></tr>
+        <tr><td><a href="../0007-akshare-b05-initial-research/index.html">B05</a></td><td>股东与公司行动（8）</td><td>4 非空 / 4 失败</td><td>分红、户数、质押、解禁返回；回购和高管/股东交易超时，十大股东两个候选报键错误。</td><td><span class="tag warn">受限/不稳定</span></td></tr>
+        <tr><td><a href="../0008-akshare-b06-initial-research/index.html">B06</a></td><td>资金流与特殊交易（10）</td><td>8 非空 / 2 空集 / 3 失败</td><td>北/南向历史、上交所两融、个股持股、龙虎榜、机构席位、大宗交易返回；个股/行业/市场资金流失败，深交所与北交所两融为空集。</td><td><span class="tag warn">受限/不稳定</span></td></tr>
+        <tr><td><a href="../0009-akshare-b07-initial-research/index.html">B07</a></td><td>基金、宏观与调研（9）</td><td>8 非空 / 5 失败</td><td>基金净值、持仓、CPI/PPI/GDP/SHIBOR、调研汇总返回；基金份额、复权行情和调研明细失败。</td><td><span class="tag warn">受限/不稳定</span></td></tr>
+      </tbody></table></div>
+      <aside class="callout"><strong>总纲状态：</strong><a href="../0002-data-catalog-and-akshare-research/index.html">0002</a> 的 B00 方法、65 项目录和 verdict 定义现在已有一轮独立复测证据；各批“继续条件”保留为 R3 准入条件，而不是未开始的调研工作。</aside>
+    </section>
+
+    <section id="signals">
+      <h2>二轮最重要的信号</h2>
+      <div class="grid two"><article class="card"><h3>可用性随调用波动</h3><p>首轮能取到的主题、期权目录、A 股日线、财务指标、回购与十大股东，本轮出现超时、断连、解析或键错误。一次成功不能作为 adapter 准入证据。</p></article><article class="card"><h3>非空不代表覆盖</h3><p>深交所、北交所两融返回空 DataFrame；停牌含未来生效项；日历还出现未来日期。adapter 未来必须把空集、计划/公告、实际状态与网络错误分开表达。</p></article><article class="card"><h3>历史与时效存在硬缺口</h3><p>可转债和期权样本停在历史日期；涨跌停池和筹码接口有近期窗口；快照型主数据缺有效期和版本链。这些不满足旧系统回测/回填默认需求。</p></article><article class="card"><h3>语义缺口不能由转换补齐</h3><p>财务 point-in-time 版本、公司行动状态链、历史涨跌停价、预计算技术因子、完整筹码分布和基金复权因子仍无可验证等价物。</p></article></div>
+    </section>
+
+    <section id="decision">
+      <h2>路由与实现边界</h2>
+      <div class="grid two"><article class="card"><h3>现在</h3><ul class="facts"><li>Tushare：所有现有业务 capability 的主路由。</li><li>AKShare：仅保留调研证据，未获生产路由资格。</li><li>API 服务：不直连同步服务数据库，也不直连第三方数据源；接口设计留待后续任务。</li></ul></article><article class="card"><h3>以后（仅在 R3 通过后）</h3><ul class="facts"><li>按 <code>capability + market + frequency</code> 配置独立路由。</li><li>AKShare/Tushare 都实现为独立 concrete adapter，返回相同中立 port 契约。</li><li>只有已批准的临时故障可回退；空集、字段漂移和语义缺失不得盲目回退。</li></ul></article></div>
+      <aside class="callout bad"><strong>再次确认：</strong>研究容器对 AKShare 的调用不属于服务实现。仓库服务源码中不增加 AKShare 直连、Tushare 直连或任何绕过适配层的代码。</aside>
+    </section>
+
+    <section id="next">
+      <h2>建议的下一步</h2>
+      <ol class="facts"><li><strong>先排 R3 观察窗口：</strong>在连续 3–5 个交易日自动执行同一份只读探针，记录成功/空集/失败、耗时和 schema fingerprint。</li><li><strong>做最小 Tushare 对账：</strong>优先选北/南向、指数权重、基金净值、CPI/PPI/GDP/SHIBOR 四个已有非空候选，明确主键、单位、发布日期和数值容差。</li><li><strong>只为通过项设计 adapter：</strong>每一项单独写映射与质量门槛；未通过项保留 Tushare，不用 AKShare “尽力填充”。</li><li><strong>再决定基础设施实现范围：</strong>R3 之前不开始表、任务、接口或数据落库，避免把仍不稳定的供应商契约固化进架构。</li></ol>
+    </section>
+    <section id="links"><h2>关联方案</h2><ul class="facts"><li><a href="../0001-data-sync-foundation/index.html">0001 同步服务基础架构</a></li><li><a href="../0002-data-catalog-and-akshare-research/index.html">0002 数据总纲与 B00 调研计划</a></li><li><a href="../../decisions/0004-market-data-provider-adapters.md">ADR-0004 多数据源适配层与供应商路由</a></li></ul></section>
+  </main>
+  <footer><div class="shell">0010 AKShare 第二轮独立验证 · 本文覆盖 B01–B07 的短探针完成状态；R3 连续观察、Tushare 对账与合规核查仍是生产准入前置条件。</div></footer>
+</body>
+</html>

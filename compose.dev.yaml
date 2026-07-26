@@ -1,0 +1,135 @@
+# Development override: local builds, hot reload, and loopback-only dependency ports.
+services:
+  service-web:
+    image: quant-v2/service-web:dev
+    build:
+      context: ./service-web
+      dockerfile: Dockerfile
+      target: development
+    environment:
+      VITE_API_BASE_URL: ${SERVICE_WEB_API_BASE_URL:-http://127.0.0.1:13000}
+    command: ["vp", "dev", "--host", "0.0.0.0", "--port", "5173"]
+    ports:
+      - "127.0.0.1:${SERVICE_WEB_PORT:-15173}:5173"
+    volumes:
+      - ./service-web/src:/app/src:ro
+      - ./service-web/index.html:/app/index.html:ro
+      - ./service-web/tsconfig.json:/app/tsconfig.json:ro
+      - ./service-web/vite.config.ts:/app/vite.config.ts:ro
+    tmpfs:
+      - /app/node_modules/.vite-temp:mode=1777
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5173/').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+
+  service-api-postgres:
+    ports:
+      - "127.0.0.1:${SERVICE_API_POSTGRES_PORT:-15433}:5432"
+
+  service-api-redis:
+    ports:
+      - "127.0.0.1:${SERVICE_API_REDIS_PORT:-16380}:6379"
+
+  service-api-migrate:
+    image: quant-v2/service-api:migrate-dev
+    build:
+      context: ./service-api
+      dockerfile: Dockerfile
+      target: migrate
+
+  service-api:
+    image: quant-v2/service-api:dev
+    build:
+      context: ./service-api
+      dockerfile: Dockerfile
+      target: development
+    command:
+      [
+        "/bin/sh",
+        "-ec",
+        "./node_modules/.bin/prisma generate && exec ./node_modules/.bin/tsx watch src/main.ts",
+      ]
+    environment:
+      NODE_ENV: development
+      COOKIE_SECURE: "false"
+      CORS_ORIGIN: ${SERVICE_API_DEV_CORS_ORIGIN:-http://127.0.0.1:15173}
+      TRUST_PROXY: "false"
+      HOME: /tmp
+    ports:
+      - "127.0.0.1:${SERVICE_API_PORT:-13000}:3000"
+    volumes:
+      - ./service-api/src/app.module.ts:/app/src/app.module.ts:ro
+      - ./service-api/src/main.ts:/app/src/main.ts:ro
+      - ./service-api/src/modules:/app/src/modules:ro
+      - ./service-api/src/platform:/app/src/platform:ro
+      - ./service-api/src/scripts:/app/src/scripts:ro
+      - ./service-api/src/types:/app/src/types:ro
+      - ./service-api/prisma:/app/prisma:ro
+      - ./service-api/prisma.config.ts:/app/prisma.config.ts:ro
+      - ./service-api/tsconfig.json:/app/tsconfig.json:ro
+
+  data-sync-postgres:
+    ports:
+      - "127.0.0.1:${DATA_SYNC_POSTGRES_PORT:-15432}:5432"
+
+  data-sync-redis:
+    ports:
+      - "127.0.0.1:${DATA_SYNC_REDIS_PORT:-16379}:6379"
+
+  data-sync-minio:
+    ports:
+      - "127.0.0.1:${DATA_SYNC_MINIO_PORT:-19000}:9000"
+      - "127.0.0.1:${DATA_SYNC_MINIO_CONSOLE_PORT:-19001}:9001"
+
+  data-sync-worker:
+    image: quant-v2/service-data-sync:dev
+    build:
+      context: ./service-data-sync
+      dockerfile: Dockerfile
+      target: development
+    environment:
+      DATA_SYNC_ENV: local
+      DATA_SYNC_LOG_FORMAT: console
+    volumes:
+      - ./service-data-sync/src:/app/src:ro
+      - ./service-data-sync/migrations:/app/migrations:ro
+      - ./service-data-sync/alembic.ini:/app/alembic.ini:ro
+
+  data-sync-test:
+    image: quant-v2/service-data-sync:test
+    profiles: ["data-sync-test"]
+    build:
+      context: ./service-data-sync
+      dockerfile: Dockerfile
+      target: test
+    command: ["pytest", "-m", "integration", "--no-cov"]
+    depends_on:
+      data-sync-postgres:
+        condition: service_healthy
+      data-sync-redis:
+        condition: service_healthy
+      data-sync-minio-init:
+        condition: service_completed_successfully
+    environment:
+      DATA_SYNC_ENV: test
+      DATA_SYNC_LOG_FORMAT: json
+      DATA_SYNC_LOG_LEVEL: ${DATA_SYNC_LOG_LEVEL:-INFO}
+      DATA_SYNC_RUN_INTEGRATION: "1"
+      DATA_SYNC_DATABASE_URL: postgresql+psycopg://${DATA_SYNC_POSTGRES_USER}:${DATA_SYNC_POSTGRES_PASSWORD}@data-sync-postgres:5432/${DATA_SYNC_POSTGRES_DATABASE}
+      DATA_SYNC_BROKER_URL: redis://:${DATA_SYNC_REDIS_PASSWORD}@data-sync-redis:6379/0
+      DATA_SYNC_S3_ENDPOINT_URL: http://data-sync-minio:9000
+      DATA_SYNC_S3_ACCESS_KEY: ${DATA_SYNC_S3_ACCESS_KEY:?set DATA_SYNC_S3_ACCESS_KEY}
+      DATA_SYNC_S3_SECRET_KEY: ${DATA_SYNC_S3_SECRET_KEY:?set DATA_SYNC_S3_SECRET_KEY}
+      DATA_SYNC_S3_BUCKET: ${DATA_SYNC_S3_BUCKET:?set DATA_SYNC_S3_BUCKET}
+      DATA_SYNC_S3_REGION: ${DATA_SYNC_S3_REGION:-us-east-1}
+      DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS: ${DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS:-10}
+    networks:
+      - data-sync-internal
+    read_only: true
+    tmpfs:
+      - /tmp

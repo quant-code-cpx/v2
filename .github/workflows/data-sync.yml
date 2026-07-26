@@ -1,0 +1,61 @@
+name: data-sync
+
+on:
+  pull_request:
+    paths:
+      - "service-data-sync/**"
+      - "compose.yaml"
+      - "compose.dev.yaml"
+      - "compose.prod.yaml"
+      - ".env.example"
+      - ".github/workflows/data-sync.yml"
+  push:
+    branches: [main]
+    paths:
+      - "service-data-sync/**"
+      - "compose.yaml"
+      - "compose.dev.yaml"
+      - "compose.prod.yaml"
+      - ".env.example"
+      - ".github/workflows/data-sync.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --target test --tag quant-v2/service-data-sync:test service-data-sync
+      - run: docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff format --check .
+      - run: docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff check .
+      - run: docker run --rm quant-v2/service-data-sync:test pyright
+      - run: docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test pytest tests/architecture --no-cov
+      - run: docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test pip-audit
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --target test --tag quant-v2/service-data-sync:test service-data-sync
+      - run: docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test pytest -m "not integration"
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example --profile data-sync-infra up -d
+      - run: docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example --profile data-sync-infra --profile data-sync-test run --rm data-sync-test
+      - if: always()
+        run: docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example logs --no-color
+      - if: always()
+        run: docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example --profile '*' down
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag quant-v2/service-data-sync:ci service-data-sync
+      - run: docker image inspect --format '{{.Config.User}}' quant-v2/service-data-sync:ci | grep -x 10001
+      - run: docker run --rm --read-only --tmpfs /tmp --user 10001:10001 quant-v2/service-data-sync:ci python -c "import service_data_sync"

@@ -1,0 +1,1486 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="quant-v2 数据同步服务 Python 工程骨架、基础设施接线与数据源适配边界方案">
+  <title>同步服务工程基础设施｜技术方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #18202f;
+      --muted: #667085;
+      --line: #dfe4ec;
+      --surface: #f7f8fa;
+      --accent: #0f766e;
+      --accent-strong: #115e59;
+      --accent-soft: #eaf7f5;
+      --blue-soft: #eef4ff;
+      --warning: #9a5800;
+      --warning-soft: #fff7e6;
+      --danger: #a2382b;
+      --success: #17725b;
+      --radius: 14px;
+      --shadow: 0 12px 30px rgb(24 32 47 / 7%);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    a {
+      color: var(--accent-strong);
+      text-underline-offset: 0.2em;
+    }
+
+    a:focus-visible {
+      outline: 3px solid rgb(15 118 110 / 28%);
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
+
+    code {
+      padding: 0.12rem 0.34rem;
+      border-radius: 5px;
+      background: #eef1f5;
+      color: #24324a;
+      font: 0.9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+
+    .shell {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .reading {
+      max-width: 78ch;
+    }
+
+    header {
+      padding: 54px 0 38px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, var(--surface), #fff);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 760;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4 {
+      line-height: 1.28;
+      letter-spacing: -0.02em;
+    }
+
+    h1 {
+      max-width: 820px;
+      margin: 0;
+      font-size: clamp(2rem, 5.4vw, 3.7rem);
+    }
+
+    h2 {
+      margin: 0 0 20px;
+      font-size: clamp(1.45rem, 3vw, 2rem);
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 1.08rem;
+    }
+
+    h4 {
+      margin: 24px 0 8px;
+      font-size: 0.98rem;
+    }
+
+    p {
+      max-width: 78ch;
+    }
+
+    .lede {
+      max-width: 800px;
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 1.08rem;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 30px 0 0;
+    }
+
+    .meta div {
+      padding: 13px 15px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgb(255 255 255 / 84%);
+    }
+
+    .meta dt {
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .meta dd {
+      margin: 3px 0 0;
+      font-weight: 670;
+    }
+
+    .status {
+      color: var(--success);
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 95%);
+      backdrop-filter: blur(12px);
+    }
+
+    nav ul {
+      display: flex;
+      gap: 21px;
+      width: max-content;
+      margin: 0;
+      padding: 12px 0;
+      list-style: none;
+    }
+
+    nav a {
+      color: var(--muted);
+      font-size: 0.88rem;
+      font-weight: 680;
+      text-decoration: none;
+    }
+
+    nav a:hover {
+      color: var(--accent);
+    }
+
+    main {
+      padding: 18px 0 72px;
+    }
+
+    section {
+      padding: 50px 0;
+      border-bottom: 1px solid var(--line);
+      scroll-margin-top: 56px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      min-width: 0;
+      padding: 21px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow);
+      overflow-wrap: anywhere;
+    }
+
+    .card p:last-child,
+    .card ul:last-child,
+    .card ol:last-child {
+      margin-bottom: 0;
+    }
+
+    .label,
+    .tag {
+      display: inline-block;
+      color: var(--accent);
+      font-size: 0.76rem;
+      font-weight: 780;
+      letter-spacing: 0.055em;
+    }
+
+    .label {
+      margin-bottom: 9px;
+      text-transform: uppercase;
+    }
+
+    .tag {
+      margin: 0 6px 4px 0;
+      padding: 2px 8px;
+      border: 1px solid #b7ddd8;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      letter-spacing: 0;
+    }
+
+    .tag.assumption {
+      color: #38558d;
+      border-color: #c9d8f6;
+      background: var(--blue-soft);
+    }
+
+    .tag.pending {
+      color: var(--warning);
+      border-color: #f0d29d;
+      background: var(--warning-soft);
+    }
+
+    .callout {
+      margin-top: 18px;
+      padding: 18px 21px;
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      background: var(--accent-soft);
+    }
+
+    .callout.warning {
+      border-left-color: var(--warning);
+      background: var(--warning-soft);
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    .flow,
+    pre {
+      overflow-x: auto;
+      padding: 20px;
+      border: 1px solid #273249;
+      border-radius: var(--radius);
+      background: #111827;
+      color: #e5e7eb;
+      font: 0.86rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .flow strong {
+      color: #9de7df;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      -webkit-overflow-scrolling: touch;
+    }
+
+    table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--surface);
+      font-size: 0.83rem;
+    }
+
+    td {
+      font-size: 0.94rem;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .decision {
+      color: var(--success);
+      font-weight: 750;
+    }
+
+    .risk {
+      color: var(--warning);
+      font-weight: 720;
+    }
+
+    .no {
+      color: var(--danger);
+      font-weight: 720;
+    }
+
+    .steps {
+      padding-left: 1.25rem;
+    }
+
+    .steps li {
+      padding: 3px 0 13px 8px;
+    }
+
+    .checklist {
+      padding-left: 1.1rem;
+      list-style: "✓  ";
+    }
+
+    .checklist li {
+      padding: 3px 0 7px 6px;
+    }
+
+    .compact li {
+      margin-bottom: 5px;
+    }
+
+    .stack {
+      display: grid;
+      grid-template-columns: minmax(170px, 0.7fr) minmax(0, 2.3fr);
+      gap: 0;
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .stack dt,
+    .stack dd {
+      margin: 0;
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .stack dt {
+      background: var(--surface);
+      font-weight: 730;
+    }
+
+    .stack dd:nth-last-child(-n + 1),
+    .stack dt:nth-last-child(-n + 2) {
+      border-bottom: 0;
+    }
+
+    .state-line {
+      overflow-x: auto;
+      padding: 14px 17px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      font: 0.87rem/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: nowrap;
+    }
+
+    .top-gap {
+      margin-top: 20px;
+    }
+
+    .top-gap-lg {
+      margin-top: 28px;
+    }
+
+    .top-gap-xl {
+      margin-top: 30px;
+    }
+
+    .refs {
+      columns: 2;
+      column-gap: 36px;
+      padding-left: 1.25rem;
+    }
+
+    .refs li {
+      margin-bottom: 8px;
+      break-inside: avoid;
+    }
+
+    footer {
+      padding: 26px 0 46px;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    @media (max-width: 800px) {
+      .shell {
+        width: min(100% - 28px, 1120px);
+      }
+
+      header {
+        padding-top: 38px;
+      }
+
+      .meta,
+      .grid,
+      .grid.two {
+        grid-template-columns: 1fr;
+      }
+
+      section {
+        padding: 38px 0;
+      }
+
+      .stack {
+        grid-template-columns: 1fr;
+      }
+
+      .stack dt,
+      .stack dd {
+        border-bottom: 1px solid var(--line) !important;
+      }
+
+      .stack dd:last-child {
+        border-bottom: 0 !important;
+      }
+
+      .refs {
+        columns: 1;
+      }
+    }
+
+    @media print {
+      nav {
+        display: none;
+      }
+
+      header,
+      main,
+      section {
+        padding-top: 18px;
+      }
+
+      .shell {
+        width: 100%;
+      }
+
+      .card {
+        box-shadow: none;
+        break-inside: avoid;
+      }
+
+      .flow,
+      pre {
+        white-space: pre-wrap;
+        color: #111;
+        background: #fff;
+        border-color: #999;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .table-wrap,
+      .callout {
+        break-inside: avoid;
+      }
+
+      h2,
+      h3 {
+        break-after: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Technical solution · service-data-sync · 0001</p>
+      <h1>同步服务工程基础设施</h1>
+      <p class="lede">
+        建立可安装、可测试、可诊断、可容器运行的 Python 服务骨架，并用自动化规则锁死多数据源适配边界。
+        本阶段不实现 API、不设计业务表、不创建迁移 revision、不调真实数据源、不执行同步流程。
+      </p>
+
+      <dl class="meta">
+        <div>
+          <dt>状态</dt>
+<dd class="status">Implemented（基础设施范围）</dd>
+        </div>
+        <div>
+          <dt>负责人</dt>
+          <dd>项目维护者</dd>
+        </div>
+        <div>
+          <dt>最后修改</dt>
+          <dd>2026-07-25</dd>
+        </div>
+        <div>
+          <dt>最大风险</dt>
+          <dd>把未来业务设计偷渡进基建</dd>
+        </div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">摘要</a></li>
+        <li><a href="#scope">范围</a></li>
+        <li><a href="#deliverables">交付物</a></li>
+        <li><a href="#architecture">工程结构</a></li>
+        <li><a href="#stack">技术栈</a></li>
+        <li><a href="#configuration">配置</a></li>
+        <li><a href="#containers">容器</a></li>
+        <li><a href="#lifecycle">生命周期</a></li>
+        <li><a href="#providers">适配边界</a></li>
+        <li><a href="#observability">可观测性</a></li>
+        <li><a href="#quality">质量门禁</a></li>
+        <li><a href="#delivery">实施</a></li>
+        <li><a href="#future">后续</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>摘要</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">事实</span>
+          <h3>当前只有服务占位目录</h3>
+          <p>没有 Python 包、锁文件、启动入口、依赖连接、测试命令或容器基线，业务能力无法安全开始。</p>
+        </article>
+        <article class="card">
+          <span class="label">决策</span>
+          <h3>先交付可运行骨架</h3>
+          <p>选择 Python 3.13 + uv，以显式依赖注入组织代码；本地依赖由根 Compose 统一编排。</p>
+        </article>
+        <article class="card">
+          <span class="label">硬约束</span>
+          <h3 class="risk">来源只能经 adapter</h3>
+          <p>核心只依赖 provider-neutral port。具体 SDK、HTTP 地址和字段一旦越层，架构测试直接失败。</p>
+        </article>
+      </div>
+
+      <aside class="callout" aria-label="本阶段完成定义">
+        <strong>完成标准</strong>
+        新环境可按 README 安装；三类依赖可一键启动并通过诊断；空载 worker 可启动退出；
+        fake adapter 可替换；格式化、静态检查、单测、架构测试和镜像 smoke test 可重复通过。
+      </aside>
+    </section>
+
+    <section id="scope">
+      <h2>目标、非目标与假设</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="tag">本次交付</span>
+          <h3>工程基础设施</h3>
+          <ul class="compact">
+            <li>src-layout Python 包、锁定依赖、统一命令。</li>
+            <li>配置、结构化日志、错误分类、显式 DI。</li>
+            <li>PostgreSQL、Redis、MinIO 本地容器与连接工厂。</li>
+            <li>诊断 CLI、空载 Celery worker、信号处理。</li>
+            <li>DataSourcePort、SourceRegistry 空实现、fake adapter。</li>
+            <li>单测、集成测试、架构测试、CI 与容器镜像。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="tag pending">明确排除</span>
+          <h3>本次不做</h3>
+          <ul class="compact">
+            <li>FastAPI app、route、认证、OpenAPI。</li>
+            <li>任何业务表、控制表、索引、分区和迁移 revision。</li>
+            <li>定时、重试、补数、幂等、outbox 和任务状态。</li>
+            <li>AKShare、Tushare 或其他真实 adapter/SDK。</li>
+            <li>标准化、质量校验、对账、入库、查询。</li>
+            <li>service-api 集成和生产部署清单。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="tag assumption">非阻塞假设</span>
+          <h3>先按可移植基线推进</h3>
+          <ul class="compact">
+            <li>开发机提供 Docker Compose v2。</li>
+            <li>支持 Linux amd64/arm64；不承诺 Windows 原生运行。</li>
+            <li>生产平台、镜像仓库、OTLP 后端尚未决定。</li>
+            <li>CI 只依赖标准 shell、uv 和 Docker，避免绑定平台。</li>
+            <li>未来接口、表、调度各自创建后续编号方案。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="deliverables">
+      <h2>交付物清单</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>交付物</th>
+              <th>位置</th>
+              <th>内容</th>
+              <th>验收信号</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Python 项目</td>
+              <td><code>service-data-sync/</code></td>
+              <td><code>pyproject.toml</code>、<code>uv.lock</code>、src-layout、README</td>
+              <td><code>uv sync --frozen</code> 可重复成功</td>
+            </tr>
+            <tr>
+              <td>运行骨架</td>
+              <td><code>src/service_data_sync/</code></td>
+              <td>settings、logging、DI、客户端工厂、diagnostics、worker</td>
+              <td>包可导入；入口返回明确退出码</td>
+            </tr>
+            <tr>
+              <td>本地依赖</td>
+              <td>根 <code>compose.yaml</code></td>
+              <td>独立 PostgreSQL、Redis、MinIO、bucket 初始化</td>
+              <td><code>docker compose ... --wait</code> 全部 healthy</td>
+            </tr>
+            <tr>
+              <td>容器镜像</td>
+              <td><code>service-data-sync/Dockerfile</code></td>
+              <td>多阶段构建、锁定安装、非 root runtime、健康入口</td>
+              <td>构建、启动、SIGTERM、只读文件系统 smoke test</td>
+            </tr>
+            <tr>
+              <td>测试</td>
+              <td><code>service-data-sync/tests/</code></td>
+              <td>unit、integration、architecture、contract</td>
+              <td>无网络单测通过；越层样例能使架构测试失败</td>
+            </tr>
+            <tr>
+              <td>配置样例</td>
+              <td>根 <code>.env.example</code></td>
+              <td>仅 DATA_SYNC 前缀占位值，无真实凭据</td>
+              <td>示例可驱动本地 Compose；secret 扫描无命中</td>
+            </tr>
+            <tr>
+              <td>工程文档</td>
+              <td>README、ADR、当前方案</td>
+              <td>安装、命令、边界、故障定位和清理说明</td>
+              <td>新开发者不读源码即可完成诊断</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <h2>工程结构与依赖方向</h2>
+      <pre class="flow" role="img" aria-label="本阶段工程目录结构">service-data-sync/
+├── pyproject.toml
+├── uv.lock
+├── Dockerfile
+├── .dockerignore
+├── alembic.ini                         # 只有工具配置，无 revision
+├── migrations/
+│   ├── env.py                          # target_metadata 为空
+│   └── versions/                       # 保持为空
+├── src/service_data_sync/
+│   ├── application/
+│   │   └── ports/
+│   │       └── data_source.py          # 仅 Protocol 与来源无关 DTO
+│   ├── bootstrap/
+│   │   ├── settings.py                 # Pydantic Settings
+│   │   ├── logging.py                  # JSON/console、脱敏、contextvars
+│   │   └── container.py                # 显式构造依赖，无 DI 框架
+│   ├── infrastructure/
+│   │   ├── database/connection.py      # engine / ping / close
+│   │   ├── messaging/celery_app.py     # 空 task registry
+│   │   ├── object_storage/client.py    # S3 client / head bucket
+│   │   └── providers/                  # 预留；本次无真实 adapter
+│   └── entrypoints/
+│       ├── diagnostics.py              # 机器可读诊断 CLI
+│       └── worker.py                   # worker app 导出
+└── tests/
+    ├── unit/
+    ├── integration/
+    ├── architecture/
+    ├── contract/
+    └── fakes/data_source.py</pre>
+
+      <pre class="flow" role="img" aria-label="代码依赖只能向内">entrypoints ───────┐
+bootstrap ─────────┼──▶ application/ports
+infrastructure ────┘
+
+允许：bootstrap 组合具体 infrastructure
+禁止：application → infrastructure
+禁止：provider adapter → persistence / messaging
+禁止：adapter 目录外 → provider SDK / HTTP / provider 字段</pre>
+
+      <div class="grid">
+        <article class="card">
+          <span class="label">Application Port</span>
+          <h3>只定义边界</h3>
+          <p><strong>输入：</strong>来源无关请求对象。</p>
+          <p><strong>输出：</strong>来源无关批次对象或通用错误。</p>
+          <p><strong>状态：</strong>无。</p>
+          <p><strong>失败边界：</strong>不得 import SDK、DataFrame、数据库或 Celery。</p>
+        </article>
+        <article class="card">
+          <span class="label">Infrastructure</span>
+          <h3>只包装外部依赖</h3>
+          <p><strong>输入：</strong>经过校验的 settings。</p>
+          <p><strong>输出：</strong>client factory、ping、close。</p>
+          <p><strong>状态：</strong>连接池和 SDK client，不保存业务状态。</p>
+          <p><strong>失败边界：</strong>异常转为基础设施错误，不在模块内重试业务操作。</p>
+        </article>
+        <article class="card">
+          <span class="label">Bootstrap / Entrypoint</span>
+          <h3>负责组合与生命周期</h3>
+          <p><strong>输入：</strong>环境变量、进程参数、信号。</p>
+          <p><strong>输出：</strong>diagnostics 结果或 worker 进程。</p>
+          <p><strong>状态：</strong>仅进程级依赖容器。</p>
+          <p><strong>失败边界：</strong>配置错误快速退出；关闭时反序释放资源。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="stack">
+      <h2>技术栈与安装边界</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>能力</th>
+              <th>选择</th>
+              <th>本阶段安装/实现</th>
+              <th>明确后置</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>运行时</td>
+              <td>Python 3.13、uv</td>
+              <td>要求 <code>&gt;=3.13,&lt;3.14</code>；uv 精确锁定直接与传递依赖</td>
+              <td>Python 3.14 升级</td>
+            </tr>
+            <tr>
+              <td>配置</td>
+              <td>Pydantic v2 / pydantic-settings</td>
+              <td>类型校验、嵌套配置、SecretStr、环境前缀</td>
+              <td>运行时配置修改</td>
+            </tr>
+            <tr>
+              <td>日志</td>
+              <td>structlog + 标准 logging</td>
+              <td>JSON、console、contextvars、脱敏</td>
+              <td>集中式日志平台</td>
+            </tr>
+            <tr>
+              <td>持久化工具</td>
+              <td>SQLAlchemy 2、psycopg 3、Alembic</td>
+              <td>engine factory、ping、close、空迁移环境</td>
+              <td>model、table、repository、revision</td>
+            </tr>
+            <tr>
+              <td>任务运行时</td>
+              <td>Celery、Redis broker</td>
+              <td>app factory、broker 连接、空载 worker、信号处理</td>
+              <td>task、schedule、retry、result backend</td>
+            </tr>
+            <tr>
+              <td>对象存储</td>
+              <td>S3 API、boto3；本地 MinIO</td>
+              <td>client factory、head bucket、关闭</td>
+              <td>对象命名、manifest、保留策略</td>
+            </tr>
+            <tr>
+              <td>未来内部 API</td>
+              <td>FastAPI</td>
+              <td class="no">不安装、不创建 app</td>
+              <td>route、OpenAPI、认证、查询</td>
+            </tr>
+            <tr>
+              <td>真实来源</td>
+              <td>AKShare、Tushare</td>
+              <td class="no">不安装、不调用</td>
+              <td>adapter、capability、fallback</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid two top-gap">
+        <article class="card">
+          <span class="tag">runtime dependencies</span>
+          <h3>只保留进程运行所需</h3>
+          <p>pydantic-settings、structlog、SQLAlchemy、psycopg、Alembic、Celery/Redis、boto3。</p>
+          <p>不提前加入 FastAPI、AKShare、Tushare、Pandas、PyArrow。</p>
+        </article>
+        <article class="card">
+          <span class="tag">dev dependencies</span>
+          <h3>质量工具单独分组</h3>
+          <p>Ruff、Pyright、pytest、pytest-cov、pytest-timeout、pip-audit。</p>
+          <p>CI 使用 <code>uv sync --frozen --all-groups</code>；运行镜像不包含 dev 组。</p>
+        </article>
+      </div>
+
+      <aside class="callout" aria-label="依赖版本策略">
+        <strong>版本策略</strong>
+        Python minor 固定；Python 包由 uv.lock 精确锁定；基础镜像和 Compose 镜像使用明确 tag + digest。
+        依赖更新单独提交，必须重新跑静态检查、测试、镜像构建和诊断。
+      </aside>
+    </section>
+
+    <section id="configuration">
+      <h2>配置与秘密契约</h2>
+      <p class="reading">
+        所有变量使用 <code>DATA_SYNC_</code> 前缀；生产配置只从环境或 secret manager 注入。
+        根 <code>.env.example</code> 提供本地占位值，<code>.env</code> 必须被 Git 忽略。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>变量</th>
+              <th>必需</th>
+              <th>敏感</th>
+              <th>本地默认</th>
+              <th>用途</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>DATA_SYNC_ENV</code></td>
+              <td>是</td>
+              <td>否</td>
+              <td><code>local</code></td>
+              <td>仅允许 local/test/staging/production</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_LOG_LEVEL</code></td>
+              <td>否</td>
+              <td>否</td>
+              <td><code>INFO</code></td>
+              <td>进程日志级别</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_LOG_FORMAT</code></td>
+              <td>否</td>
+              <td>否</td>
+              <td><code>console</code></td>
+              <td>local 可读文本；非 local 强制 json</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_DATABASE_URL</code></td>
+              <td>是</td>
+              <td>是</td>
+              <td>占位 URL</td>
+              <td>同步服务独立 PostgreSQL role/database</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_BROKER_URL</code></td>
+              <td>worker 必需</td>
+              <td>是</td>
+              <td>占位 Redis URL</td>
+              <td>仅供同步 worker broker</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_S3_ENDPOINT_URL</code></td>
+              <td>是</td>
+              <td>否</td>
+              <td><code>http://127.0.0.1:19000</code></td>
+              <td>本地 MinIO 或生产 S3 endpoint</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_S3_ACCESS_KEY</code></td>
+              <td>是</td>
+              <td>是</td>
+              <td>占位值</td>
+              <td>同步服务独立对象存储身份</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_S3_SECRET_KEY</code></td>
+              <td>是</td>
+              <td>是</td>
+              <td>占位值</td>
+              <td>仅由 SecretStr 持有</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_S3_BUCKET</code></td>
+              <td>是</td>
+              <td>否</td>
+              <td><code>quant-data-sync-local</code></td>
+              <td>仅验证 bucket 存在，不定义对象结构</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_S3_REGION</code></td>
+              <td>否</td>
+              <td>否</td>
+              <td><code>us-east-1</code></td>
+              <td>S3 client region</td>
+            </tr>
+            <tr>
+              <td><code>DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS</code></td>
+              <td>否</td>
+              <td>否</td>
+              <td><code>10</code></td>
+              <td>整个诊断命令上限，范围 1–60 秒</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid two top-gap">
+        <article class="card">
+          <span class="label">加载顺序</span>
+          <h3>环境变量覆盖本地文件</h3>
+          <p>默认值 → local-only <code>.env</code> → 进程环境。test 使用显式 fixture，不读取开发者个人 <code>.env</code>。</p>
+        </article>
+        <article class="card">
+          <span class="label">脱敏规则</span>
+          <h3>值和键双重防护</h3>
+          <p>SecretStr 禁止序列化；日志处理器屏蔽 password、secret、token、key、authorization、cookie 及连接 URL 凭据。</p>
+        </article>
+      </div>
+
+      <aside class="callout warning" aria-label="当前不创建数据源配置">
+        <strong>当前没有 provider 配置</strong>
+        不添加 AKShare/Tushare token、优先级、capability 或 fallback 变量。真实 adapter 方案建立后再定义这些契约。
+      </aside>
+    </section>
+
+    <section id="containers">
+      <h2>本地容器与数据隔离</h2>
+      <pre class="flow" role="img" aria-label="本地 Compose 拓扑">开发机
+  │
+  ├─ 127.0.0.1:15432 ─▶ data-sync-postgres ─▶ volume: data_sync_postgres
+  ├─ 127.0.0.1:16379 ─▶ data-sync-redis    ─▶ volume: data_sync_redis
+  ├─ 127.0.0.1:19000 ─▶ data-sync-minio    ─▶ volume: data_sync_minio
+  └─ 127.0.0.1:19001 ─▶ MinIO console
+
+data-sync-minio-init ──wait healthy──▶ ensure local bucket exists ──exit 0
+data-sync-worker ──────depends healthy──▶ Redis；本阶段不注册业务 task</pre>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Compose service</th>
+              <th>镜像基线</th>
+              <th>状态</th>
+              <th>健康检查</th>
+              <th>隔离要求</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>data-sync-postgres</code></td>
+              <td>PostgreSQL 17；实现时固定 patch + digest</td>
+              <td>named volume</td>
+              <td><code>pg_isready</code> 指定独立 user/database</td>
+              <td>API 无 role、密码和 network access</td>
+            </tr>
+            <tr>
+              <td><code>data-sync-redis</code></td>
+              <td>Redis 7.4；实现时固定 patch + digest</td>
+              <td>named volume；仅 broker</td>
+              <td>带认证 <code>PING</code></td>
+              <td>不与 API cache 共实例或凭据</td>
+            </tr>
+            <tr>
+              <td><code>data-sync-minio</code></td>
+              <td>MinIO release tag + digest</td>
+              <td>named volume</td>
+              <td>官方 live endpoint</td>
+              <td>独立 identity 与 bucket</td>
+            </tr>
+            <tr>
+              <td><code>data-sync-minio-init</code></td>
+              <td>匹配版本 mc + digest</td>
+              <td>one-shot，无 volume</td>
+              <td>成功创建/确认 bucket 后退出 0</td>
+              <td>只做 bucket 基建，不上传业务对象</td>
+            </tr>
+            <tr>
+              <td><code>data-sync-worker</code></td>
+              <td>本仓库多阶段镜像</td>
+              <td>无持久 volume</td>
+              <td>进程存活 + broker readiness</td>
+              <td>非 root；不挂载源码与 Docker socket</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid top-gap">
+        <article class="card">
+          <span class="label">Compose 所有权</span>
+          <h3>根目录统一编排</h3>
+          <p>根 <code>compose.yaml</code> 使用 <code>data-sync-infra</code> profile；build context 只指向 <code>service-data-sync/</code>，不发送其他服务源码。</p>
+        </article>
+        <article class="card">
+          <span class="label">端口与网络</span>
+          <h3>只绑定 loopback</h3>
+          <p>宿主端口可通过环境变量覆盖；默认只监听 127.0.0.1。Compose network 不声明 external，service-api 不加入。</p>
+        </article>
+        <article class="card">
+          <span class="label">数据清理</span>
+          <h3>普通停止不删 volume</h3>
+          <p><code>docker compose down</code> 保留状态；删除 volume 必须用单独、明确、带警告的开发命令，不能成为日常脚本。</p>
+        </article>
+      </div>
+
+      <aside class="callout" aria-label="容器镜像基线">
+        <strong>镜像基线</strong>
+        多阶段构建；先复制 pyproject/lock 复用依赖层，再复制源码；runtime 使用固定 Python 3.13 slim digest、
+        非 root UID/GID、无编译器、无 dev 依赖；日志写 stdout/stderr；SIGTERM 由主进程直接接收。
+      </aside>
+    </section>
+
+    <section id="lifecycle">
+      <h2>启动、诊断与关闭</h2>
+      <pre class="flow" role="img" aria-label="进程启动和关闭流程">启动
+load settings
+  ├─ invalid ─▶ 输出脱敏配置错误 ─▶ exit 2
+  └─ valid
+      └─ configure logging
+          └─ build explicit dependency container
+              ├─ diagnostics ─▶ 并行 ping DB / broker / S3 ─▶ JSON + exit code
+              └─ worker ─▶ connect broker ─▶ ready ─▶ wait signal
+
+关闭
+SIGTERM / SIGINT ─▶ stop accepting work ─▶ close S3/Redis/DB ─▶ flush logs ─▶ exit ≤ 10s</pre>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>入口</th>
+              <th>行为</th>
+              <th>成功</th>
+              <th>失败</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>python -m service_data_sync.entrypoints.diagnostics</code></td>
+              <td>并行检查配置、PostgreSQL、Redis broker、S3 bucket；支持 console/json</td>
+              <td>所有检查通过，exit 0</td>
+              <td>固定退出码；每项含耗时和安全错误摘要</td>
+            </tr>
+            <tr>
+              <td><code>celery -A service_data_sync.entrypoints.worker:app worker</code></td>
+              <td>启动空 task registry，连接 broker，等待信号</td>
+              <td>broker 可用后 ready</td>
+              <td>30 秒内无法连接则非零退出，由编排器重启</td>
+            </tr>
+            <tr>
+              <td><code>alembic current</code></td>
+              <td>验证迁移工具可载入，metadata 与 revisions 均为空</td>
+              <td>不创建或修改任何对象</td>
+              <td>配置错误非零退出</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="top-gap-lg">诊断退出码</h3>
+      <div class="state-line">0=全部通过 · 1=未知内部错误 · 2=配置无效 · 3=PostgreSQL 失败 · 4=Redis 失败 · 5=S3/MinIO 失败 · 6=多个依赖失败</div>
+
+      <div class="grid two top-gap">
+        <article class="card">
+          <span class="label">超时</span>
+          <h3>诊断有硬上限</h3>
+          <p>默认总预算 10 秒；单项连接超时不超过 5 秒。诊断不执行无限重试，也不写入依赖。</p>
+        </article>
+        <article class="card">
+          <span class="label">资源释放</span>
+          <h3>反序关闭、重复安全</h3>
+          <p>close 钩子可调用多次；部分初始化失败时只关闭已创建资源，关闭错误不覆盖原始错误。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="providers">
+      <h2>多数据源适配边界</h2>
+      <p class="reading">
+        本阶段建立最小协议、注册边界和防绕过测试。生产注册表为空；fake adapter 只存在于测试。
+        不安装 AKShare/Tushare，不实现真实 fetch、路由或 fallback。
+      </p>
+
+      <pre class="flow" role="img" aria-label="数据源端口最小形态">class DataSourcePort(Protocol):
+    provider_id: str
+    def capabilities(self) -&gt; frozenset[str]: ...
+    async def fetch(self, request: SourceRequest) -&gt; ProviderBatch: ...
+
+约束：
+- provider_id 是开放字符串，不是 akshare/tushare 枚举
+- SourceRequest / ProviderBatch 是冻结、来源无关类型
+- 不允许 DataFrame、SDK 类型、数据库 session、Celery task 进入协议
+- adapter 只能返回批次或抛出通用 ProviderError</pre>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>架构规则</th>
+              <th>检测方式</th>
+              <th>故意失败样例</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>application 不得依赖 infrastructure</td>
+              <td>AST import graph</td>
+              <td>在 port 中 import boto3 应失败</td>
+            </tr>
+            <tr>
+              <td>adapter 外不得 import provider SDK</td>
+              <td>AST 扫描禁止模块根</td>
+              <td>task 中 import akshare 应失败</td>
+            </tr>
+            <tr>
+              <td>adapter 不得依赖 persistence/messaging</td>
+              <td>包路径依赖规则</td>
+              <td>adapter import repository 应失败</td>
+            </tr>
+            <tr>
+              <td>通用 DTO 不得出现供应商字段</td>
+              <td>源码与类型注解规则</td>
+              <td><code>ts_code</code>、供应商 DataFrame 类型应失败</td>
+            </tr>
+            <tr>
+              <td>fake adapter 必须可替换</td>
+              <td>共享 contract test</td>
+              <td>替换 fake 后 application 测试无需修改</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid two top-gap">
+        <article class="card">
+          <span class="tag">未来策略信息</span>
+          <h3>AKShare → Tushare</h3>
+          <p>AKShare 第一优先级因为免费；Tushare 第二优先级因为仍有半年以上会员权益。顺序未来必须配置化。</p>
+        </article>
+        <article class="card">
+          <span class="tag pending">当前禁止</span>
+          <h3>不能提前写任何分支</h3>
+          <p>核心、任务、表名、环境变量和协议不得出现“如果 AKShare 失败则调用 Tushare”之类供应商分支。</p>
+        </article>
+      </div>
+
+      <aside class="callout warning" aria-label="真实数据接入前置条件">
+        <strong>真实接入前置条件</strong>
+        后续方案必须确认许可、频率、会员权限、字段映射、质量和切换语义；任何结果仍只能从 adapter 进入核心。
+      </aside>
+    </section>
+
+    <section id="observability">
+      <h2>日志、错误与诊断输出</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>要求</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>timestamp</code></td>
+              <td>必有</td>
+              <td>UTC、RFC 3339、毫秒精度</td>
+            </tr>
+            <tr>
+              <td><code>level</code> / <code>event</code></td>
+              <td>必有</td>
+              <td>稳定事件名，不用整句文本作为 event</td>
+            </tr>
+            <tr>
+              <td><code>service</code></td>
+              <td>固定</td>
+              <td><code>service-data-sync</code></td>
+            </tr>
+            <tr>
+              <td><code>environment</code> / <code>process_role</code></td>
+              <td>必有</td>
+              <td>区分 diagnostics、worker 与环境</td>
+            </tr>
+            <tr>
+              <td><code>correlation_id</code></td>
+              <td>可空</td>
+              <td>通过 contextvars 预留；未来请求和任务复用</td>
+            </tr>
+            <tr>
+              <td><code>dependency</code> / <code>duration_ms</code></td>
+              <td>诊断必有</td>
+              <td>仅标识 postgres、redis、s3，不记录 endpoint 凭据</td>
+            </tr>
+            <tr>
+              <td><code>error.type</code> / <code>error.code</code></td>
+              <td>失败必有</td>
+              <td>稳定分类；stack trace 只在 DEBUG 或未知异常记录</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid top-gap">
+        <article class="card">
+          <span class="label">配置错误</span>
+          <h3>启动前失败</h3>
+          <p>缺变量、类型错误、非法环境值统一映射为 <code>ConfigurationError</code>，不打印原始 secret。</p>
+        </article>
+        <article class="card">
+          <span class="label">依赖错误</span>
+          <h3>标识依赖和阶段</h3>
+          <p>DNS、认证、超时、拒绝连接映射为 <code>DependencyUnavailable</code>，保留 cause 供 debug。</p>
+        </article>
+        <article class="card">
+          <span class="label">OTel</span>
+          <h3>只留上下文接口</h3>
+          <p>本阶段不选择 exporter 或监控平台；trace/span 字段可空，未来接入不改变日志 schema。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="quality">
+      <h2>开发命令与 CI 门禁</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>目的</th>
+              <th>标准命令（在 service-data-sync 内）</th>
+              <th>门禁</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>安装</td>
+              <td><code>uv sync --frozen --all-groups</code></td>
+              <td>lock 与 pyproject 不一致即失败</td>
+            </tr>
+            <tr>
+              <td>格式检查</td>
+              <td><code>uv run ruff format --check .</code></td>
+              <td>不允许 CI 自动改文件</td>
+            </tr>
+            <tr>
+              <td>Lint</td>
+              <td><code>uv run ruff check .</code></td>
+              <td>零 warning 基线</td>
+            </tr>
+            <tr>
+              <td>类型检查</td>
+              <td><code>uv run pyright</code></td>
+              <td>src 与 tests 均检查</td>
+            </tr>
+            <tr>
+              <td>单测</td>
+              <td><code>uv run pytest -m "not integration"</code></td>
+              <td>禁止外网；基础模块覆盖率不低于 85%</td>
+            </tr>
+            <tr>
+              <td>架构测试</td>
+              <td><code>uv run pytest tests/architecture</code></td>
+              <td>provider 越层、依赖反向立即失败</td>
+            </tr>
+            <tr>
+              <td>依赖审计</td>
+              <td><code>uv run pip-audit</code></td>
+              <td>高危/严重漏洞必须修复或记录期限明确的例外</td>
+            </tr>
+            <tr>
+              <td>集成诊断</td>
+              <td>根 Compose 启动后运行 diagnostics</td>
+              <td>DB、broker、S3 全部通过；随后正常 shutdown</td>
+            </tr>
+            <tr>
+              <td>镜像 smoke</td>
+              <td><code>docker build</code> + diagnostics/worker 启停</td>
+              <td>非 root、无 dev 依赖、SIGTERM ≤ 10 秒</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="top-gap-lg">CI 分层</h3>
+      <ol class="steps">
+        <li><strong>static：</strong>frozen install、format、Ruff、Pyright、架构测试；最快失败。</li>
+        <li><strong>unit：</strong>无 Docker、无网络单测与覆盖率。</li>
+        <li><strong>integration：</strong>启动 data-sync-infra profile，执行 diagnostics，保存失败日志，始终关闭容器。</li>
+        <li><strong>image：</strong>构建 runtime 镜像，检查用户、依赖、导入、worker 启停和信号。</li>
+      </ol>
+
+      <aside class="callout" aria-label="质量命令一致性">
+        <strong>本地与 CI 使用相同命令</strong>
+        CI 文件只负责排序、缓存和上传日志，不复制另一套脚本。所有命令先写入 README，再接入 CI。
+      </aside>
+    </section>
+
+    <section id="delivery">
+      <h2>实施批次、退出条件与回滚</h2>
+      <ol class="steps">
+        <li>
+          <strong>F0｜项目初始化：</strong>
+          创建 src-layout、pyproject、uv.lock、Ruff、Pyright、pytest、基础 README。
+          <br><span class="decision">退出：</span>frozen install、import、静态检查通过。
+        </li>
+        <li>
+          <strong>F1｜配置与日志：</strong>
+          实现 settings、SecretStr、JSON/console 日志、脱敏、错误基类、显式 DI。
+          <br><span class="decision">退出：</span>配置矩阵和 secret 回归测试通过。
+        </li>
+        <li>
+          <strong>F2｜本地依赖：</strong>
+          根 Compose 加 PostgreSQL、Redis、MinIO、init、healthcheck、named volume、loopback port。
+          <br><span class="decision">退出：</span>全新 volume 能启动到 healthy，普通 down 保留数据。
+        </li>
+        <li>
+          <strong>F3｜客户端与诊断：</strong>
+          实现 DB/broker/S3 client factory、ping、timeout、close 和 diagnostics JSON/退出码。
+          <br><span class="decision">退出：</span>正常、单依赖失败、多依赖失败测试全部通过。
+        </li>
+        <li>
+          <strong>F4｜适配边界与 worker：</strong>
+          实现 DataSourcePort、空 SourceRegistry、fake adapter、架构测试、空载 worker。
+          <br><span class="decision">退出：</span>无 provider SDK；故意越层 fixture 能稳定失败；SIGTERM 正常。
+        </li>
+        <li>
+          <strong>F5｜镜像、CI 与文档：</strong>
+          完成非 root 多阶段镜像、CI 四层门禁、README、环境变量和故障定位。
+          <br><span class="decision">退出：</span>新环境按文档完成 build → up → diagnose → worker → down。
+        </li>
+      </ol>
+
+      <div class="grid">
+        <article class="card">
+          <h3>Definition of Done</h3>
+          <ul class="checklist">
+            <li>所有交付文件存在且由 uv lock 驱动。</li>
+            <li>三类依赖 healthy，诊断输出可被机器解析。</li>
+            <li>worker 无业务 task，可启动并优雅退出。</li>
+            <li>无 API、OpenAPI、业务表和迁移 revision。</li>
+            <li>无 AKShare/Tushare 安装、import 或网络请求。</li>
+            <li>fake adapter contract 与架构负例通过。</li>
+            <li>镜像非 root，build context 不含其他服务和秘密。</li>
+            <li>README 覆盖安装、检查、启动、诊断、停止和故障定位。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>回滚</h3>
+          <p>代码、Compose 和 CI 可按提交回退。由于没有业务表、revision 或外部写入，不需要数据回滚。</p>
+          <p>回滚不得自动删除 named volume；本地产生的 volume 由开发者单独确认后清理。</p>
+        </article>
+        <article class="card">
+          <h3>故障定位最小信息</h3>
+          <ul class="compact">
+            <li>命令退出码与 diagnostics JSON。</li>
+            <li>Compose service health 状态。</li>
+            <li>脱敏后的最近启动日志。</li>
+            <li>锁文件 hash、镜像 tag/digest、Python 版本。</li>
+            <li>不收集连接 URL、token 或原始环境变量。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="future">
+      <h2>后续需求与非阻塞待决</h2>
+      <p class="reading">
+        下列内容继续有效，但当前只记录主题，不预占编号。真正创建方案时，按
+        <code>docs/service-data-sync/</code> 当时最大四位编号加一。
+      </p>
+
+      <div class="grid">
+        <article class="card">
+          <span class="label">后续主题</span>
+          <h3>数据模型与持久化</h3>
+          <p>数据集、canonical schema、业务键、血缘、幂等、修订、表、索引、分区、迁移和回滚。</p>
+        </article>
+        <article class="card">
+          <span class="label">后续主题</span>
+          <h3>同步执行与调度</h3>
+          <p>真实 adapter、来源路由、定时、手动命令用例、重试、补数、质量、对账和恢复。</p>
+        </article>
+        <article class="card">
+          <span class="label">后续主题</span>
+          <h3>内部 API 与跨服务访问</h3>
+          <p>手动同步、配置修改、任务状态、查询/投影契约、认证和 OpenAPI；service-api 仍禁止直连数据库。</p>
+        </article>
+      </div>
+
+      <div class="grid two top-gap">
+        <article class="card">
+          <span class="tag pending">待决但不阻塞</span>
+          <h3>生产运行平台</h3>
+          <p>容器平台、secret manager、镜像仓库、备份平台、OTLP/日志后端在生产部署方案中确定。</p>
+        </article>
+        <article class="card">
+          <span class="tag pending">进入业务前必须决定</span>
+          <h3>数据语义与许可</h3>
+          <p>首期市场/数据集、交易日历、时区、复权、数据许可、Tushare 权益和供应商切换规则。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="decisions">
+      <h2>关联决策与依据</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">ADR-0002</span>
+          <h3>未来跨服务访问</h3>
+          <p><a href="../../decisions/0002-data-sync-ownership-and-access.md">API 不得直连同步数据库；本阶段不实现接口</a></p>
+        </article>
+        <article class="card">
+          <span class="label">ADR-0003</span>
+          <h3>运行时技术栈</h3>
+          <p><a href="../../decisions/0003-data-sync-runtime-stack.md">Python、持久化、任务和对象存储选择及分阶段边界</a></p>
+        </article>
+        <article class="card">
+          <span class="label">ADR-0004</span>
+          <h3>多数据源适配</h3>
+          <p><a href="../../decisions/0004-market-data-provider-adapters.md">核心只依赖通用 port；具体来源只能存在于 adapter</a></p>
+        </article>
+      </div>
+
+      <h3 class="top-gap-xl">官方资料</h3>
+      <ul class="refs">
+        <li><a href="https://docs.astral.sh/uv/concepts/projects/">uv Projects</a></li>
+        <li><a href="https://docs.pydantic.dev/latest/concepts/pydantic_settings/">Pydantic Settings</a></li>
+        <li><a href="https://docs.sqlalchemy.org/en/20/">SQLAlchemy 2.0</a></li>
+        <li><a href="https://alembic.sqlalchemy.org/en/latest/">Alembic</a></li>
+        <li><a href="https://docs.celeryq.dev/en/stable/userguide/">Celery User Guide</a></li>
+        <li><a href="https://docs.docker.com/compose/how-tos/startup-order/">Docker Compose startup order</a></li>
+        <li><a href="https://docs.min.io/enterprise/aistor-object-store/operations/monitoring/healthcheck-probe/">MinIO health checks</a></li>
+        <li><a href="https://fastapi.tiangolo.com/features/">FastAPI（后续阶段）</a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      同步服务工程基础设施 · 变更摘要：补全工程文件、依赖、配置、Compose、生命周期、诊断、日志、CI、实施与回滚细节；业务能力继续后置。
+    </div>
+  </footer>
+</body>
+</html>

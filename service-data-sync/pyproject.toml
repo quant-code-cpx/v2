@@ -1,0 +1,69 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "service-data-sync"
+version = "0.1.0"
+description = "Foundation runtime for the quant-v2 market data synchronization service."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "alembic>=1.16,<2",
+  "boto3>=1.39,<2",
+  "celery>=5.5,<6",
+  "psycopg[binary]>=3.2,<4",
+  "pydantic-settings>=2.10,<3",
+  "redis>=5.2,<6",
+  "sqlalchemy>=2.0,<3",
+  "structlog>=25.0,<26",
+]
+
+[dependency-groups]
+dev = [
+  "pip-audit>=2.8,<3",
+  "pyright>=1.1.400,<2",
+  "pytest>=9.0.3,<10",
+  "pytest-cov>=6,<7",
+  "pytest-timeout>=2.3,<3",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+data-sync-diagnostics = "service_data_sync.entrypoints.diagnostics:main"
+data-sync-worker = "service_data_sync.entrypoints.worker:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/service_data_sync"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers --import-mode=importlib --cov=service_data_sync --cov-branch --cov-fail-under=85"
+markers = [
+  "integration: requires PostgreSQL, Redis, and S3-compatible object storage.",
+]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["service_data_sync"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["service_data_sync"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false

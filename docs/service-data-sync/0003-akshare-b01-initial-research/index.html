@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="AKShare B01 主数据与参考数据首轮调研证据、差异与路由建议。">
+  <title>0003｜AKShare B01 首轮调研</title>
+  <style>
+    :root {
+      --ink: #15211c;
+      --muted: #5f6f66;
+      --line: #dfe6e1;
+      --paper: #fbfcfa;
+      --accent: #176c4a;
+      --accent-soft: #e8f4ec;
+      --warning: #8a5914;
+      --warning-soft: #fff4da;
+      --danger: #a24437;
+      --danger-soft: #fbeae7;
+      --blue: #245e8d;
+      --blue-soft: #e9f2fa;
+      --radius: 14px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+    a { color: var(--accent); text-underline-offset: .18em; }
+    a:focus-visible { outline: 3px solid rgb(23 108 74 / 28%); outline-offset: 3px; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .88em;
+      overflow-wrap: anywhere;
+    }
+    .shell { width: min(1120px, calc(100% - 36px)); margin: 0 auto; }
+    header { padding: 48px 0 34px; border-bottom: 1px solid var(--line); background: #fff; }
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { letter-spacing: -.02em; line-height: 1.28; }
+    h1 { max-width: 860px; margin: 0; font-size: clamp(30px, 5vw, 50px); }
+    h2 { margin: 0 0 14px; font-size: clamp(23px, 3vw, 32px); }
+    h3 { margin: 0 0 8px; font-size: 17px; }
+    p { max-width: 84ch; }
+    .lede { max-width: 820px; margin: 14px 0 0; color: var(--muted); font-size: 17px; }
+    .meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 26px; }
+    .meta div { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+    .meta dt { color: var(--muted); font-size: 12px; }
+    .meta dd { margin: 3px 0 0; font-weight: 750; }
+    .status { color: var(--warning); }
+    nav { position: sticky; top: 0; z-index: 2; overflow-x: auto; border-bottom: 1px solid var(--line); background: rgb(255 255 255 / 94%); backdrop-filter: blur(10px); }
+    nav ul { display: flex; gap: 20px; width: max-content; margin: 0; padding: 12px 0; list-style: none; }
+    nav a { color: var(--muted); font-size: 13px; font-weight: 750; text-decoration: none; }
+    nav a:hover { color: var(--accent); }
+    main { padding: 18px 0 64px; }
+    section { padding: 42px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 52px; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .card { padding: 19px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
+    .label { display: block; margin-bottom: 7px; color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .08em; }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+    .callout { margin: 18px 0; padding: 16px 18px; border-left: 4px solid var(--accent); border-radius: 0 10px 10px 0; background: var(--accent-soft); }
+    .callout.warn { border-left-color: var(--warning); background: var(--warning-soft); }
+    .callout.danger { border-left-color: var(--danger); background: var(--danger-soft); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
+    table { width: 100%; min-width: 800px; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 11px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+    th { color: #44534a; background: #f3f7f3; font-size: 12px; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .badge { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+    .badge.partial { color: var(--warning); background: var(--warning-soft); }
+    .badge.unstable { color: var(--danger); background: var(--danger-soft); }
+    .badge.none { color: var(--blue); background: var(--blue-soft); }
+    .flow {
+      overflow-x: auto;
+      padding: 17px 19px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #13251c;
+      color: #e7f3ea;
+      font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .facts { margin: 0; padding-left: 20px; }
+    .facts li + li { margin-top: 5px; }
+    footer { padding: 25px 0 42px; color: var(--muted); font-size: 12px; }
+
+    @media (max-width: 760px) {
+      header { padding-top: 32px; }
+      .meta, .grid, .grid.two { grid-template-columns: 1fr; }
+      section { padding: 32px 0; }
+      .shell { width: min(100% - 24px, 1120px); }
+    }
+
+    @media print {
+      @page { size: A4; margin: 13mm; }
+      body { background: #fff; font-size: 10pt; }
+      .shell { width: 100%; }
+      nav { display: none; }
+      header { padding: 0 0 18px; }
+      main { padding-bottom: 0; }
+      section { padding: 22px 0; }
+      .card, .callout, .table-wrap { break-inside: avoid; }
+      .table-wrap { overflow: visible; }
+      table { font-size: 8pt; }
+      th, td { padding: 5px 6px; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Service Data Sync · Research 0003</p>
+      <h1>AKShare B01 主数据与参考数据：首轮调研</h1>
+      <p class="lede">
+        已完成一次固定版本的 Docker 实测和旧 Tushare 契约对照。10 项能力均已有候选接口和初步结论；
+        当前没有一项满足 <code>FULL</code>，因此尚不变更生产路由或开始 adapter、表、接口实现。
+      </p>
+      <dl class="meta">
+        <div><dt>状态</dt><dd class="status">Draft · 第二轮短探针完成；R3 待验收</dd></div>
+        <div><dt>负责人</dt><dd>service-data-sync</dd></div>
+        <div><dt>最后修改</dt><dd>2026-07-26</dd></div>
+        <div><dt>关联方案</dt><dd><a href="../0002-data-catalog-and-akshare-research/index.html">0002</a> · <a href="../../decisions/0004-market-data-provider-adapters.md">ADR-0004</a></dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">结论</a></li>
+        <li><a href="#baseline">基线</a></li>
+        <li><a href="#evidence">逐项证据</a></li>
+        <li><a href="#gaps">差异</a></li>
+        <li><a href="#risk">风险与合规</a></li>
+        <li><a href="#next">继续条件</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>结论</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">事实</span>
+          <h3>6 项有成功返回</h3>
+          <p>公司概况、交易日历、可转债、同花顺目录、基金目录、上交所期权分片均取得结构化结果。</p>
+        </article>
+        <article class="card">
+          <span class="label">决策</span>
+          <h3>Tushare 仍为 B01 主路由</h3>
+          <p>AKShare 只保留候选证据；未配置任何生产 fallback，也未创建真实 adapter。</p>
+        </article>
+        <article class="card">
+          <span class="label">主要风险</span>
+          <h3>多底层站点当前不稳定</h3>
+          <p>上交所、乐咕乐股、东方财富部分请求出现 45 秒超时、断连或 TLS EOF。</p>
+        </article>
+      </div>
+      <aside class="callout">
+        <strong>本轮决定：</strong>
+        B01 继续调研，不提前宣告 AKShare 可主用。结论来自一次执行，仅用于缩小下一步验证范围；
+        <code>FULL</code> 仍要求连续 3–5 个交易日观察、字段映射评审与底层来源使用边界确认。
+      </aside>
+    </section>
+
+    <section id="baseline">
+      <h2>可复现基线</h2>
+      <div class="grid two">
+        <article class="card">
+          <h3>执行环境</h3>
+          <ul class="facts">
+            <li>Docker：24.0.2。</li>
+            <li>镜像：<code>python:3.13-slim-bookworm</code>，解析摘要 <code>sha256:9d7f…1bbb10e8d64</code>。</li>
+            <li>Python：3.13.14。</li>
+            <li>AKShare：<code>1.18.78</code>，容器内 <code>pip install akshare==1.18.78</code>。</li>
+            <li>观测：2026-07-25 17:38–17:45 UTC（上海时间 2026-07-26）。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>证据边界</h3>
+          <ul class="facts">
+            <li>只记录函数签名、模块、底层 URL 片段、行数、字段、类型、耗时、schema 哈希与错误类型。</li>
+            <li>没有写入 PostgreSQL、Redis、S3 或 canonical 数据库。</li>
+            <li>没有提交原始行情、证券清单、账户、令牌或生产配置。</li>
+            <li>对照对象为旧项目 Prisma 中 10 个 B01 模型；未因无 Tushare token 重跑其 API。</li>
+          </ul>
+        </article>
+      </div>
+      <pre class="flow" aria-label="本轮探针边界">Docker 临时探针
+  └─ 固定 AKShare 版本
+       └─ 调用 AKShare 候选函数
+            └─ 仅输出 schema / 哈希 / 耗时 / 错误
+                 └─ 对照旧 Tushare 模型
+                      └─ 生成本报告
+
+无 service task · 无 canonical write · 无生产路由变更</pre>
+    </section>
+
+    <section id="evidence">
+      <h2>逐项证据与初步 verdict</h2>
+      <p>“成功”只表示该次调用返回结果；不等于质量、历史覆盖、授权或稳定性通过。</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th>AKShare 候选 / 底层来源</th>
+              <th>本轮观测</th>
+              <th>相对旧契约的关键差异</th>
+              <th>Verdict</th>
+              <th>建议路由</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>equity.instrument_master</code></td>
+              <td><code>stock_info_a_code_name</code>；沪深京交易所</td>
+              <td>聚合和上交所拆分接口均在 <code>query.sse.com.cn</code> 45 秒超时；深交所上市清单 TLS EOF；北交所 330 行成功；深交所退市清单 208 行成功。</td>
+              <td>旧 <code>StockBasic</code> 还需交易所、状态、上市/退市日、市场、全称、行业、地区等。</td>
+              <td><span class="badge unstable">UNSTABLE</span></td>
+              <td>Tushare 主用；AKShare 仅保留拆分来源候选。</td>
+            </tr>
+            <tr>
+              <td><code>issuer.company_profile</code></td>
+              <td><code>stock_profile_cninfo</code>；巨潮资讯</td>
+              <td>600030 成功，1.357 秒，1 行、26 字段；包含公司/英文名、代码、市场、行业、法人、注册资本、日期、联系信息、主营业务、经营范围。</td>
+              <td>缺旧 <code>StockCompany</code> 中经理、董秘、省市、员工数、公告日等明确字段。</td>
+              <td><span class="badge partial">PARTIAL</span></td>
+              <td>Tushare 主用；AKShare 可作为公司资料补充候选。</td>
+            </tr>
+            <tr>
+              <td><code>calendar.exchange_session</code></td>
+              <td><code>tool_trade_date_hist_sina</code>；新浪财经</td>
+              <td>0.915 秒成功，8797 行，唯一字段 <code>trade_date</code>。</td>
+              <td>旧 <code>TradeCal</code> 需要 exchange、开闭市标记、前一交易日；该接口只有开市日期列表。</td>
+              <td><span class="badge partial">PARTIAL</span></td>
+              <td>Tushare 主用；AKShare 仅可辅助开市日集合。</td>
+            </tr>
+            <tr>
+              <td><code>classification.sw_industry</code></td>
+              <td><code>sw_index_first_info</code>、<code>sw_index_second_info</code>、<code>sw_index_third_info</code>；乐咕乐股</td>
+              <td>3 个接口均在 <code>legulegu.com</code> 45 秒超时。官方文档显示有三级行业代码、名称和部分父级/估值字段。</td>
+              <td>旧 <code>IndexClassify</code> 还需 L1/L2/L3、父代码、来源版本（SW2014/SW2021）、发布标识。</td>
+              <td><span class="badge unstable">UNSTABLE</span></td>
+              <td>Tushare 主用，不接入 AKShare 路由。</td>
+            </tr>
+            <tr>
+              <td><code>classification.sw_membership</code></td>
+              <td><code>sw_index_third_cons</code>；乐咕乐股</td>
+              <td><code>850111.SI</code> 探针 45 秒超时。文档只声明当前三级成分及纳入时间。</td>
+              <td>旧 <code>IndexMemberAll</code> 需要三级代码、证券、in/out date 和是否最新；文档未见退出日、历史版本完整语义。</td>
+              <td><span class="badge unstable">UNSTABLE</span></td>
+              <td>Tushare 主用，不接入 AKShare 路由。</td>
+            </tr>
+            <tr>
+              <td><code>convertible_bond.instrument_master</code></td>
+              <td><code>bond_zh_cov_info_ths</code>；同花顺。<br><code>bond_zh_cov_info</code>；东方财富</td>
+              <td>同花顺全量清单 945 行、16 字段、2.056 秒；东方财富单债详情 1 行、67+ 字段、1.437 秒。</td>
+              <td>身份、正股、上市/到期、转股价、赎回/回售和多项条款可候选映射；但详情需逐债调用，尚未测全量成本、缺失和字段语义。</td>
+              <td><span class="badge partial">PARTIAL</span></td>
+              <td>Tushare 主用；优先进入下一轮全量成本与字段映射验证。</td>
+            </tr>
+            <tr>
+              <td><code>thematic_index.instrument_master</code></td>
+              <td><code>stock_board_concept_name_ths</code>、<code>stock_board_industry_name_ths</code>；同花顺</td>
+              <td>概念目录 374 行、<code>name/code</code>、40.217 秒；行业目录 90 行、同 schema、0.800 秒。</td>
+              <td>旧 <code>ThsIndex</code> 还含地域/特色类型、成分数、交易所和上市日。</td>
+              <td><span class="badge partial">PARTIAL</span></td>
+              <td>Tushare 主用；AKShare 可保留概念/行业目录候选。</td>
+            </tr>
+            <tr>
+              <td><code>thematic_index.membership</code></td>
+              <td>当前导出中未发现概念或行业成分函数；旧候选名未导出</td>
+              <td><code>stock_board_concept_cons_ths</code> 与 <code>stock_board_industry_cons_ths</code> 在 1.18.78 中均为 <code>not_exported</code>。</td>
+              <td>无法产出旧 <code>ThsMember</code> 所需板块代码、股票代码、名称与最新标识。</td>
+              <td><span class="badge none">NO_EQUIVALENT</span></td>
+              <td>Tushare 主用；除非未来版本恢复正式接口，否则不接入。</td>
+            </tr>
+            <tr>
+              <td><code>fund.instrument_master</code></td>
+              <td><code>fund_name_em</code>；天天基金网 / 东方财富</td>
+              <td>3.387 秒成功，27333 行，字段为基金代码、拼音缩写、简称、基金类型、拼音全称。</td>
+              <td>旧 <code>FundBasic</code> 还需管理人、托管人、成立/到期/上市/发行日期、费用、规模、状态、市场等。</td>
+              <td><span class="badge partial">PARTIAL</span></td>
+              <td>Tushare 主用；AKShare 可作为代码名称目录候选。</td>
+            </tr>
+            <tr>
+              <td><code>option.contract_master</code></td>
+              <td><code>option_sse_list_sina</code>、<code>option_sse_codes_sina</code>；新浪。<br><code>option_current_em</code>；东方财富</td>
+              <td>上交所 50ETF 到期月列表成功（4 项，0.764 秒）；看涨代码成功（12 行，0.615 秒）；东方财富全量接口 6.394 秒远端断连。CFFEX 列表函数存在，但未形成统一目录。</td>
+              <td>旧 <code>OptBasic</code> 需要全交易所、名称、单位、认购认沽、行权类型/价、到期、上市退市、报价单位与最小变动。</td>
+              <td><span class="badge partial">PARTIAL</span></td>
+              <td>Tushare 主用；AKShare 只保留上交所分片研究候选。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="gaps">
+      <h2>与旧 Tushare 基线的共性差异</h2>
+      <div class="grid two">
+        <article class="card">
+          <h3>身份与历史有效期</h3>
+          <p>AKShare 多数候选只给当前目录或日期列表。旧模型常要求上市/退市、进入/退出、是否最新和来源版本；这些不能靠“本次快照”推导。</p>
+        </article>
+        <article class="card">
+          <h3>全量与详情拆分</h3>
+          <p>可转债最明显：全量列表轻量，条款详情逐债取得。后续需评估首次回填时长、并发、限流、断点和增量识别。</p>
+        </article>
+        <article class="card">
+          <h3>板块与期权并非统一目录</h3>
+          <p>同花顺板块只观测到概念/行业目录；期权接口按交易所、标的、到期月切片。不能把若干局部接口包装成“完整 master”。</p>
+        </article>
+        <article class="card">
+          <h3>静态 schema 不等于稳定契约</h3>
+          <p>同一 AKShare 版本中，部分来源可返回大量数据，部分站点直接超时或断连。adapter 需要把来源失败、空结果与 schema 漂移分开处理。</p>
+        </article>
+      </div>
+      <aside class="callout warn">
+        <strong>映射约束：</strong>
+        这些仅是研究映射方向，不是 canonical schema 决策。缺少的字段不得以默认值、抓取时刻或反向猜测填充；
+        例如交易日历的闭市日、申万成分退出日、基金管理人和期权行权信息必须由明确来源提供。
+      </aside>
+    </section>
+
+    <section id="risk">
+      <h2>可靠性与合规</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">事实</span>
+          <h3>来源脆弱性已实测</h3>
+          <p>本轮出现 SSE 超时、乐咕乐股超时、SZSE TLS EOF、东方财富远端断连。它们应在未来 adapter 中归为 provider 可观测事件，不可吞掉。</p>
+        </article>
+        <article class="card">
+          <span class="label">事实</span>
+          <h3>AKShare 本身为 MIT</h3>
+          <p>官方仓库采用 MIT；但官方声明数据仅供学术研究参考，接口可能被移除。代码许可证不替代各底层网站的数据使用条款。</p>
+        </article>
+        <article class="card">
+          <span class="label">决策</span>
+          <h3>没有授权结论就不进生产</h3>
+          <p>每项最终路由仍需核查巨潮、交易所、同花顺、东方财富、新浪、乐咕乐股等底层来源的使用与再分发边界。</p>
+        </article>
+      </div>
+      <aside class="callout danger">
+        <strong>禁止推断：</strong>
+        AKShare 免费、MIT 或一次调用成功，都不能推导出可商业使用、可再分发、可长期稳定运行或可替代 Tushare。
+      </aside>
+    </section>
+
+    <section id="next">
+      <h2>B01 继续条件</h2>
+      <ol class="facts">
+        <li><strong>稳定性窗口：</strong>在未来 3–5 个交易日，以相同镜像和 AKShare 版本重跑成功候选；记录成功率、空结果、耗时分位和 schema fingerprint。</li>
+        <li><strong>失败复测：</strong>将上交所、深交所、乐咕乐股、东方财富失败项按来源拆分复测，确认是站点临时异常、网络策略还是接口失效。</li>
+        <li><strong>语义矩阵：</strong>对可转债、公司概况、日历、基金与期权完成字段级映射；为每个缺失字段标注“可由其他 AKShare 正式接口补足”或“只能由 Tushare 提供”。</li>
+        <li><strong>合规核查：</strong>记录每个底层来源的页面、条款、访问频率限制和再分发结论；没有证据的项不得升级为 <code>FULL</code>。</li>
+        <li><strong>架构保持：</strong>后续若提交探针或真实接入，只能位于 <code>infrastructure/providers/akshare/</code>；应用、任务、质量、持久化层仍只依赖 <code>DataSourcePort</code>。</li>
+      </ol>
+      <div class="grid two">
+        <article class="card">
+          <h3>下一优先项</h3>
+          <p>先深挖可转债：它已有全量清单和详情双源，最有机会在 B01 稳定性与全量成本验证后获得可用的受限结论。</p>
+        </article>
+        <article class="card">
+          <h3>明确不做</h3>
+          <p>本轮不建业务表、不接 Celery、不改 API、不创建生产 adapter、不改来源路由，也不把临时探针作为服务代码提交。</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>证据来源</h2>
+      <ul class="facts">
+        <li><a href="https://akshare.akfamily.xyz/data/stock/stock.html">AKShare 股票文档</a>：A 股列表、巨潮公司概况、同花顺板块。</li>
+        <li><a href="https://akshare.akfamily.xyz/data/tool/tool.html">AKShare 工具箱文档</a>：新浪交易日历。</li>
+        <li><a href="https://akshare.akfamily.xyz/data/index/index.html">AKShare 指数文档</a>：申万三级目录与成分接口。</li>
+        <li><a href="https://akshare.akfamily.xyz/data/bond/bond.html">AKShare 债券文档</a>：同花顺可转债列表与东方财富详情。</li>
+        <li><a href="https://akshare.akfamily.xyz/data/fund/fund_public.html">AKShare 公募基金文档</a>、<a href="https://akshare.akfamily.xyz/data/option/option.html">期权文档</a>。</li>
+        <li><a href="https://github.com/akfamily/akshare">AKShare 官方仓库</a>：MIT 代码许可证与数据使用声明。</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">0003 AKShare B01 首轮调研 · 变更摘要：新增一次 Docker 实测证据、逐项初步 verdict 与 B01 继续条件。</div>
+  </footer>
+</body>
+</html>

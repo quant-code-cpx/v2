@@ -1,0 +1,1056 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>0002｜同步数据总纲与 AKShare 分批调研计划</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17211b;
+      --muted: #5f6d63;
+      --paper: #fbfcf8;
+      --surface: #ffffff;
+      --line: #dfe6dc;
+      --green: #1f6a45;
+      --green-soft: #e9f4ec;
+      --amber: #8a5a13;
+      --amber-soft: #fff4d8;
+      --red: #9a3d35;
+      --red-soft: #fbe9e6;
+      --blue: #285e8e;
+      --blue-soft: #eaf2fa;
+      --shadow: 0 18px 50px rgba(36, 57, 43, .08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--paper);
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 85% 4%, rgba(78, 145, 99, .11), transparent 24rem),
+        var(--paper);
+      font: 15px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    a { color: var(--green); }
+    code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: .9em;
+      overflow-wrap: anywhere;
+    }
+
+    .page {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 34px 0 72px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: clamp(30px, 6vw, 70px);
+      color: #f8fff9;
+      background: linear-gradient(135deg, #153b2a 0%, #1f6a45 58%, #367853 100%);
+      border-radius: 26px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 360px;
+      height: 360px;
+      right: -150px;
+      top: -210px;
+      border: 1px solid rgba(255, 255, 255, .25);
+      border-radius: 50%;
+      box-shadow: 0 0 0 54px rgba(255, 255, 255, .05), 0 0 0 108px rgba(255, 255, 255, .03);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: #ccebd5;
+      font-size: 12px;
+      font-weight: 750;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      max-width: 820px;
+      margin-bottom: 16px;
+      font-size: clamp(31px, 5vw, 57px);
+      line-height: 1.12;
+      letter-spacing: -.035em;
+    }
+
+    .lead {
+      max-width: 850px;
+      margin-bottom: 26px;
+      color: #e1f1e5;
+      font-size: clamp(16px, 2vw, 20px);
+    }
+
+    .meta, .hero-answer {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 4px 11px;
+      color: inherit;
+      background: rgba(255, 255, 255, .1);
+      border: 1px solid rgba(255, 255, 255, .16);
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .hero-answer {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 34px;
+    }
+
+    .hero-answer > div {
+      padding: 18px;
+      background: rgba(7, 33, 21, .28);
+      border: 1px solid rgba(255, 255, 255, .12);
+      border-radius: 15px;
+    }
+
+    .hero-answer strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #aee3bd;
+      font-size: 12px;
+      letter-spacing: .08em;
+    }
+
+    .hero-answer span { font-size: 14px; }
+
+    .toc {
+      position: sticky;
+      top: 10px;
+      z-index: 5;
+      display: flex;
+      gap: 8px;
+      margin: 20px 0 42px;
+      padding: 10px;
+      overflow-x: auto;
+      background: rgba(251, 252, 248, .88);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      backdrop-filter: blur(12px);
+    }
+
+    .toc a {
+      flex: none;
+      padding: 6px 10px;
+      color: var(--muted);
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .toc a:hover {
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    section {
+      margin: 0 0 54px;
+      scroll-margin-top: 80px;
+    }
+
+    .section-kicker {
+      margin-bottom: 5px;
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin-bottom: 12px;
+      font-size: clamp(24px, 3vw, 36px);
+      line-height: 1.25;
+      letter-spacing: -.02em;
+    }
+
+    h3 {
+      margin-bottom: 9px;
+      font-size: 18px;
+      line-height: 1.4;
+    }
+
+    .section-intro {
+      max-width: 840px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    .card {
+      padding: 22px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 8px 24px rgba(36, 57, 43, .04);
+    }
+
+    .card p:last-child, .callout p:last-child { margin-bottom: 0; }
+
+    .metric {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--green);
+      font-size: 34px;
+      font-weight: 820;
+      line-height: 1;
+    }
+
+    .muted { color: var(--muted); }
+
+    .callout {
+      margin: 20px 0;
+      padding: 18px 20px;
+      background: var(--green-soft);
+      border-left: 4px solid var(--green);
+      border-radius: 0 12px 12px 0;
+    }
+
+    .callout.warn {
+      background: var(--amber-soft);
+      border-left-color: var(--amber);
+    }
+
+    .callout.danger {
+      background: var(--red-soft);
+      border-left-color: var(--red);
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 24px;
+      margin-top: 24px;
+    }
+
+    .flow > div {
+      position: relative;
+      min-height: 118px;
+      padding: 17px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+    }
+
+    .flow > div:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      right: -19px;
+      top: 39px;
+      color: var(--green);
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    .flow b {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--green);
+      font-size: 12px;
+      letter-spacing: .06em;
+    }
+
+    .table-wrap {
+      margin-top: 18px;
+      overflow-x: auto;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+    }
+
+    th {
+      color: #445148;
+      background: #f4f7f2;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: #fbfdf9; }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 23px;
+      padding: 2px 8px;
+      color: var(--green);
+      background: var(--green-soft);
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .tag.amber { color: var(--amber); background: var(--amber-soft); }
+    .tag.blue { color: var(--blue); background: var(--blue-soft); }
+    .tag.red { color: var(--red); background: var(--red-soft); }
+
+    .batch {
+      margin-top: 22px;
+      padding: 24px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 8px 24px rgba(36, 57, 43, .035);
+    }
+
+    .batch-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 10px;
+    }
+
+    .batch-head h3 { margin: 0; }
+
+    .batch-goal {
+      max-width: 820px;
+      color: var(--muted);
+    }
+
+    ol, ul { padding-left: 21px; }
+    li + li { margin-top: 5px; }
+
+    .decision {
+      display: grid;
+      grid-template-columns: 170px 1fr;
+      gap: 0;
+      margin-top: 20px;
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+    }
+
+    .decision > div {
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .decision > div:nth-last-child(-n+2) { border-bottom: 0; }
+    .decision > div:nth-child(odd) {
+      color: var(--green);
+      background: #f4f7f2;
+      font-weight: 800;
+    }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      margin-top: 70px;
+      padding-top: 18px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      font-size: 12px;
+    }
+
+    @media (max-width: 900px) {
+      .hero-answer, .grid, .grid.two { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr; gap: 12px; }
+      .flow > div { min-height: auto; }
+      .flow > div:not(:last-child)::after {
+        content: "↓";
+        right: 20px;
+        top: auto;
+        bottom: -20px;
+        z-index: 1;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .page {
+        width: min(100% - 22px, 1180px);
+        padding-top: 12px;
+      }
+      .hero { padding: 27px 21px; border-radius: 18px; }
+      .toc { margin-bottom: 34px; }
+      section { margin-bottom: 42px; }
+      .card, .batch { padding: 18px; }
+      .batch-head { display: block; }
+      .batch-head .tag { margin-top: 8px; }
+      .decision { grid-template-columns: 1fr; }
+      .decision > div:nth-child(odd) { border-bottom: 0; }
+      .decision > div:nth-last-child(-n+2) { border-bottom: 1px solid var(--line); }
+      .decision > div:last-child { border-bottom: 0; }
+      .footer { display: block; }
+    }
+
+    @media print {
+      @page { size: A4; margin: 13mm; }
+      body { background: #fff; font-size: 10pt; }
+      .page { width: 100%; padding: 0; }
+      .hero {
+        color: var(--ink);
+        background: #fff;
+        border: 1px solid var(--line);
+        box-shadow: none;
+      }
+      .hero::after, .toc { display: none; }
+      .lead, .hero-answer strong { color: var(--muted); }
+      .pill, .hero-answer > div {
+        color: var(--ink);
+        background: #fff;
+        border-color: var(--line);
+      }
+      section { margin-bottom: 26px; break-inside: auto; }
+      .card, .batch, .table-wrap, .flow > div { box-shadow: none; }
+      .card, .batch, .callout, .flow > div { break-inside: avoid; }
+      .table-wrap { overflow: visible; }
+      table { font-size: 8pt; }
+      th, td { padding: 5px 6px; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">Service Data Sync · Proposal 0002</p>
+      <h1>同步数据总纲与 AKShare 分批调研计划</h1>
+      <p class="lead">
+        以旧项目已运行的 Tushare 数据能力为基线，先建立供应商无关的 65 项数据目录，
+        再逐批验证 AKShare 的覆盖、语义、质量、稳定性与授权边界，为后续适配器实现提供可验收依据。
+      </p>
+      <div class="meta">
+        <span class="pill">状态：Draft · B00/R2 已完成，R3 待验收</span>
+        <span class="pill">日期：2026-07-26</span>
+        <span class="pill">Owner：service-data-sync</span>
+        <span class="pill">范围：总纲与调研，不建表、不写接口</span>
+      </div>
+      <div class="hero-answer">
+        <div>
+          <strong>问题</strong>
+          <span>旧系统数据较全，但模型、任务和运行表均以 Tushare 命名，不能直接成为多数据源服务的目标设计。</span>
+        </div>
+        <div>
+          <strong>结论</strong>
+          <span>保留其 65 项业务能力作为基线，改用中立 capability key；AKShare 是否主用按单项调研结论决定。</span>
+        </div>
+        <div>
+          <strong>首要风险</strong>
+          <span>AKShare 聚合多个网站，接口存在字段漂移、限流、历史范围变化和底层来源授权差异。</span>
+        </div>
+      </div>
+      <div class="callout warn"><strong>2026-07-26 更新：</strong>65 项目录已完成 B01–B07 的第二轮独立短探针；结果见 <a href="../0010-akshare-round2-verification/index.html">0010 第二轮验证汇总</a>。这不替代 3–5 个交易日稳定性观察、Tushare 同日对账与底层来源合规核查，故尚无 <code>FULL</code> 准入。</div>
+    </header>
+
+    <nav class="toc" aria-label="目录">
+      <a href="#summary">结论</a>
+      <a href="#evidence">旧系统盘点</a>
+      <a href="#boundary">边界</a>
+      <a href="#catalog">数据总纲</a>
+      <a href="#batches">调研批次</a>
+      <a href="#method">调研方法</a>
+      <a href="#routing">路由规则</a>
+      <a href="#acceptance">交付验收</a>
+      <a href="#questions">待确认项</a>
+    </nav>
+
+    <section id="summary">
+      <p class="section-kicker">Decision summary</p>
+      <h2>先确定“同步什么”，再决定“由谁同步”</h2>
+      <p class="section-intro">
+        数据能力不属于 AKShare 或 Tushare。新服务先定义稳定的业务契约，再由适配层把不同来源映射到该契约。
+        “AKShare 第一优先级”表示成本与可用性目标，不代表所有能力都必须强行切换到 AKShare。
+      </p>
+      <div class="grid">
+        <article class="card">
+          <span class="metric">65</span>
+          <h3>业务数据能力</h3>
+          <p class="muted">来自旧项目实际模型与注册任务的交集，作为第一版同步目录基线。</p>
+        </article>
+        <article class="card">
+          <span class="metric">B00–B07</span>
+          <h3>八个调研批次</h3>
+          <p class="muted">先定方法，再从主数据、核心行情扩展到财务、资金流、基金和宏观。</p>
+        </article>
+        <article class="card">
+          <span class="metric">逐能力</span>
+          <h3>供应商路由</h3>
+          <p class="muted">每个 capability 独立配置首选与备用来源，不设置一个覆盖全服务的固定顺序。</p>
+        </article>
+      </div>
+      <div class="callout">
+        <strong>硬约束：</strong>
+        调度、应用、领域、质量和持久化层只能调用 provider-neutral port。
+        AKShare/Tushare SDK、HTTP 地址、原始字段和来源特例只能存在于对应 adapter；
+        adapter 只返回标准化结果，绝不直接写 canonical 数据库。
+      </div>
+    </section>
+
+    <section id="evidence">
+      <p class="section-kicker">Legacy evidence</p>
+      <h2>旧项目能证明什么</h2>
+      <p class="section-intro">
+        本次读取了旧项目 <code>prisma/tushare</code>、质量模型、Tushare API 服务和同步注册表。
+        它可以证明 Tushare 侧的数据范围和运行经验，但不等同于新系统的数据模型。
+      </p>
+      <div class="grid">
+        <article class="card">
+          <h3>数据覆盖</h3>
+          <p><strong>68</strong> 个 Tushare 目录模型，其中 <strong>65</strong> 个是外部业务数据，
+            <strong>3</strong> 个是同步日志、进度和重试队列。</p>
+        </article>
+        <article class="card">
+          <h3>任务能力</h3>
+          <p>65 个任务均支持手动触发；64 个定时任务；63 个参与初始化；64 个支持全量同步。</p>
+        </article>
+        <article class="card">
+          <h3>运行经验</h3>
+          <p>已有定时、补偿、分布式锁、并发组、进度、重试、质量检查、缓存失效等可参考能力。</p>
+        </article>
+      </div>
+      <div class="callout warn">
+        <strong>不能照搬：</strong>
+        旧系统的 <code>TushareSyncLog</code>、<code>TushareSyncProgress</code>、
+        <code>TushareSyncRetryQueue</code> 和任务枚举都绑定供应商。新系统后续应采用中立的运行模型，
+        并单独记录实际 provider 与 provenance。
+      </div>
+      <div class="callout danger">
+        <strong>已发现的数据建模风险：</strong>
+        旧财务报表模型大量使用代理主键，缺少明确的业务唯一约束。
+        后续设计 canonical schema 前，必须先确定“证券 + 报告期 + 报表类型 + 公告版本/修订版本”的身份和去重语义。
+      </div>
+    </section>
+
+    <section id="boundary">
+      <p class="section-kicker">Scope &amp; ownership</p>
+      <h2>目录边界</h2>
+      <div class="grid two">
+        <article class="card">
+          <h3>纳入本总纲</h3>
+          <ul>
+            <li>证券、指数、基金、期权等主数据与交易日历。</li>
+            <li>日/周/月行情、复权、每日指标、停复牌和涨跌停。</li>
+            <li>财务报表、财务指标、业绩、股东与公司行动。</li>
+            <li>资金流、互联互通、融资融券和特殊交易榜单。</li>
+            <li>基金净值/持仓、宏观指标、机构调研。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>不纳入业务同步目录</h3>
+          <ul>
+            <li>用户、权限、自选股、组合、策略、AI 对话等 API 业务数据。</li>
+            <li>同步运行日志、进度、锁、重试队列；这些属于平台运行控制。</li>
+            <li>质量检查结果；它们属于质量域，不是外部数据 capability。</li>
+            <li>分钟线、逐笔、期货、数字货币、完整港美股；旧项目未形成同等基线，留作后续扩展。</li>
+          </ul>
+        </article>
+      </div>
+      <div class="flow" aria-label="从旧系统基线到后续实现的流程">
+        <div><b>01 基线</b>旧 Tushare 模型、接口和已运行任务</div>
+        <div><b>02 契约</b>供应商无关 capability 与 canonical 语义</div>
+        <div><b>03 调研</b>AKShare 候选接口、底层来源和样本探针</div>
+        <div><b>04 判定</b>覆盖、质量、稳定、授权和成本结论</div>
+        <div><b>05 后续实现</b>按 capability 配置 adapter 与主备路由</div>
+      </div>
+    </section>
+
+    <section id="catalog">
+      <p class="section-kicker">Canonical catalog</p>
+      <h2>第一版同步数据总纲</h2>
+      <p class="section-intro">
+        下列 capability key 是调研阶段的中立标识草案。旧任务名只用于追溯和与已运行 Tushare 能力对照，
+        不会进入领域层接口。所有 AKShare 状态初始均为“待调研”。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>数据域</th><th>数量</th><th>依赖</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>主数据与参考数据</td><td>10</td><td>无 / 最先完成</td><td>其他数据的证券、日历、分类和合约身份基础。</td></tr>
+            <tr><td>核心日频行情</td><td>12</td><td>主数据、交易日历</td><td>形成可用市场时间序列和主要估值指标。</td></tr>
+            <tr><td>市场规则与因子</td><td>7</td><td>主数据、核心行情</td><td>价格限制、停牌、成分权重、技术与筹码数据。</td></tr>
+            <tr><td>财务核心</td><td>9</td><td>主数据</td><td>重点解决报告期、公告日、合并口径和修订版本。</td></tr>
+            <tr><td>股东与公司行动</td><td>8</td><td>主数据</td><td>分红、回购、股东、质押和解禁事件。</td></tr>
+            <tr><td>资金流与特殊交易</td><td>10</td><td>主数据、交易日历</td><td>资金流、互联互通、两融、龙虎榜和大宗交易。</td></tr>
+            <tr><td>基金、宏观与调研</td><td>9</td><td>基金主数据 / 各自日历</td><td>低耦合补充能力，可在核心批次之后并行推进。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <article class="batch">
+        <div class="batch-head">
+          <h3>B01｜主数据与参考数据</h3>
+          <span class="tag">10 项</span>
+        </div>
+        <p class="batch-goal">先统一证券代码、交易所、状态、日期和分类身份，为所有事实数据提供稳定外键。</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Capability key</th><th>旧任务</th><th>旧调度参考</th><th>AKShare 重点</th></tr></thead>
+            <tbody>
+              <tr><td>01</td><td><code>equity.instrument_master</code></td><td>STOCK_BASIC</td><td>每日盘前</td><td>上市/退市状态、代码变更、市场枚举</td></tr>
+              <tr><td>02</td><td><code>issuer.company_profile</code></td><td>STOCK_COMPANY</td><td>每周</td><td>公司与证券关系、注册信息更新</td></tr>
+              <tr><td>03</td><td><code>calendar.exchange_session</code></td><td>TRADE_CAL</td><td>每周</td><td>交易所日历、开闭市和补班语义</td></tr>
+              <tr><td>04</td><td><code>classification.sw_industry</code></td><td>INDEX_CLASSIFY</td><td>每周</td><td>申万版本、层级、有效期</td></tr>
+              <tr><td>05</td><td><code>classification.sw_membership</code></td><td>INDEX_MEMBER_ALL</td><td>每周</td><td>成员进入/退出日期和历史覆盖</td></tr>
+              <tr><td>06</td><td><code>convertible_bond.instrument_master</code></td><td>CB_BASIC</td><td>每周</td><td>正股映射、转股期和退市状态</td></tr>
+              <tr><td>07</td><td><code>thematic_index.instrument_master</code></td><td>THS_INDEX</td><td>每周</td><td>板块代码稳定性和名称变更</td></tr>
+              <tr><td>08</td><td><code>thematic_index.membership</code></td><td>THS_MEMBER</td><td>每周</td><td>概念成员历史有效期</td></tr>
+              <tr><td>09</td><td><code>fund.instrument_master</code></td><td>FUND_BASIC</td><td>每周</td><td>场内/场外、基金类型和状态</td></tr>
+              <tr><td>10</td><td><code>option.contract_master</code></td><td>OPT_BASIC</td><td>每周</td><td>标的映射、行权价、到期和合约单位</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="batch">
+        <div class="batch-head">
+          <h3>B02｜核心日频行情</h3>
+          <span class="tag">12 项</span>
+        </div>
+        <p class="batch-goal">优先形成最小可用行情闭环，验证代码、日期、价格、成交量、成交额和复权的统一语义。</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Capability key</th><th>旧任务</th><th>旧调度参考</th><th>AKShare 重点</th></tr></thead>
+            <tbody>
+              <tr><td>11</td><td><code>equity.bar.1d</code></td><td>DAILY</td><td>交易日收盘后</td><td>前后复权参数、停牌行、量额单位</td></tr>
+              <tr><td>12</td><td><code>equity.bar.1w</code></td><td>WEEKLY</td><td>周五收盘后</td><td>周边界、未完整周、复权口径</td></tr>
+              <tr><td>13</td><td><code>equity.bar.1mo</code></td><td>MONTHLY</td><td>月度</td><td>月边界、未完整月和历史范围</td></tr>
+              <tr><td>14</td><td><code>equity.adjustment_factor</code></td><td>ADJ_FACTOR</td><td>交易日收盘后</td><td>因子基准、修订和与价格计算一致性</td></tr>
+              <tr><td>15</td><td><code>equity.daily_metrics</code></td><td>DAILY_BASIC</td><td>交易日收盘后</td><td>市值、换手、估值的单位和空值</td></tr>
+              <tr><td>16</td><td><code>index.bar.1d</code></td><td>INDEX_DAILY</td><td>交易日收盘后</td><td>指数范围、成交量额含义</td></tr>
+              <tr><td>17</td><td><code>index.daily_metrics</code></td><td>INDEX_DAILY_BASIC</td><td>交易日收盘后</td><td>估值字段覆盖和指数集合</td></tr>
+              <tr><td>18</td><td><code>convertible_bond.bar.1d</code></td><td>CB_DAILY</td><td>交易日收盘后</td><td>量价单位、停牌和退市债历史</td></tr>
+              <tr><td>19</td><td><code>fund.bar.1d</code></td><td>FUND_DAILY</td><td>交易日收盘后</td><td>ETF/LOF 范围和量价单位</td></tr>
+              <tr><td>20</td><td><code>option.bar.1d</code></td><td>OPT_DAILY</td><td>交易日收盘后</td><td>结算价、持仓量、合约覆盖</td></tr>
+              <tr><td>21</td><td><code>market.daily_summary</code></td><td>DAILY_INFO</td><td>交易日收盘后</td><td>市场层级枚举和统计口径</td></tr>
+              <tr><td>22</td><td><code>thematic_index.bar.1d</code></td><td>THS_DAILY</td><td>交易日收盘后</td><td>板块历史、代码稳定性、量额口径</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="batch">
+        <div class="batch-head">
+          <h3>B03｜市场规则与因子</h3>
+          <span class="tag">7 项</span>
+        </div>
+        <p class="batch-goal">覆盖行情解释和交易约束；筹码类接口单独关注来源稳定性、历史深度与批量成本。</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Capability key</th><th>旧任务</th><th>旧调度参考</th><th>AKShare 重点</th></tr></thead>
+            <tbody>
+              <tr><td>23</td><td><code>equity.price_limit</code></td><td>STK_LIMIT</td><td>交易日收盘后</td><td>ST/新股/北交所规则和价格精度</td></tr>
+              <tr><td>24</td><td><code>equity.suspension</code></td><td>SUSPEND_D</td><td>交易日收盘后</td><td>全天/盘中停牌、原因和恢复时间</td></tr>
+              <tr><td>25</td><td><code>index.constituent_weight</code></td><td>INDEX_WEIGHT</td><td>月度</td><td>指数范围、权重日期与合计容差</td></tr>
+              <tr><td>26</td><td><code>equity.technical_factor</code></td><td>STK_FACTOR</td><td>交易日收盘后</td><td>原始字段定义、可复算性、未来函数风险</td></tr>
+              <tr><td>27</td><td><code>equity.chip_performance</code></td><td>CYQ_PERF</td><td>交易日收盘后</td><td>算法/来源透明度和历史覆盖</td></tr>
+              <tr><td>28</td><td><code>equity.chip_distribution</code></td><td>CYQ_CHIPS</td><td>每周</td><td>逐股调用成本、分桶语义、空数据</td></tr>
+              <tr><td>29</td><td><code>equity.limit_event</code></td><td>LIMIT_LIST_D</td><td>交易日收盘后</td><td>涨跌停类型、封单和统计字段定义</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="batch">
+        <div class="batch-head">
+          <h3>B04｜财务核心</h3>
+          <span class="tag">9 项</span>
+        </div>
+        <p class="batch-goal">不只对齐字段，还必须验证报表版本、累计/单季、合并/母公司、单位和历史修订。</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Capability key</th><th>旧任务</th><th>旧调度参考</th><th>AKShare 重点</th></tr></thead>
+            <tbody>
+              <tr><td>30</td><td><code>financial.income_statement</code></td><td>INCOME</td><td>每周</td><td>报告类型、累计值、公告版本和单位</td></tr>
+              <tr><td>31</td><td><code>financial.balance_sheet</code></td><td>BALANCE_SHEET</td><td>每周</td><td>报告类型、修订、字段覆盖和单位</td></tr>
+              <tr><td>32</td><td><code>financial.cashflow_statement</code></td><td>CASHFLOW</td><td>每周</td><td>累计口径、修订、字段覆盖和单位</td></tr>
+              <tr><td>33</td><td><code>financial.performance_express</code></td><td>EXPRESS</td><td>每日晚间</td><td>快报版本、与正式财报替代关系</td></tr>
+              <tr><td>34</td><td><code>financial.indicator</code></td><td>FINA_INDICATOR</td><td>每周</td><td>计算口径、稀释/摊薄、单位</td></tr>
+              <tr><td>35</td><td><code>financial.forecast</code></td><td>FORECAST</td><td>每日晚间</td><td>区间值、预告类型和版本</td></tr>
+              <tr><td>36</td><td><code>financial.disclosure_schedule</code></td><td>DISCLOSURE_DATE</td><td>每周</td><td>预约日期多次变更和最终披露日</td></tr>
+              <tr><td>37</td><td><code>financial.audit_opinion</code></td><td>FINA_AUDIT</td><td>每周</td><td>意见类型标准化和签字机构</td></tr>
+              <tr><td>38</td><td><code>financial.main_business</code></td><td>FINA_MAINBZ</td><td>每周</td><td>产品/地区分类、收入成本和占比单位</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="batch">
+        <div class="batch-head">
+          <h3>B05｜股东与公司行动</h3>
+          <span class="tag">8 项</span>
+        </div>
+        <p class="batch-goal">重点验证事件多版本、实施状态、生效日期和持股单位，避免只保留最新快照。</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Capability key</th><th>旧任务</th><th>旧调度参考</th><th>AKShare 重点</th></tr></thead>
+            <tbody>
+              <tr><td>39</td><td><code>corporate_action.dividend</code></td><td>DIVIDEND</td><td>每日晚间</td><td>预案/股东会/实施状态和除权日</td></tr>
+              <tr><td>40</td><td><code>corporate_action.repurchase</code></td><td>REPURCHASE</td><td>每日收盘后</td><td>方案与执行进度、金额/数量单位</td></tr>
+              <tr><td>41</td><td><code>ownership.top10_holders</code></td><td>TOP10_HOLDERS</td><td>每周</td><td>报告期、公告日和持股单位</td></tr>
+              <tr><td>42</td><td><code>ownership.top10_float_holders</code></td><td>TOP10_FLOAT_HOLDERS</td><td>每周</td><td>流通口径、报告期和持股单位</td></tr>
+              <tr><td>43</td><td><code>ownership.holder_count</code></td><td>STK_HOLDER_NUMBER</td><td>每周</td><td>统计日与公告日、修订记录</td></tr>
+              <tr><td>44</td><td><code>ownership.holder_trade</code></td><td>STK_HOLDER_TRADE</td><td>每日晚间</td><td>股东身份、方向、方式和变动区间</td></tr>
+              <tr><td>45</td><td><code>ownership.pledge_statistics</code></td><td>PLEDGE_STAT</td><td>每周</td><td>汇总日、比例分母和单位</td></tr>
+              <tr><td>46</td><td><code>corporate_action.share_unlock</code></td><td>SHARE_FLOAT</td><td>每周</td><td>解禁批次、实际日期和数量单位</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="batch">
+        <div class="batch-head">
+          <h3>B06｜资金流与特殊交易</h3>
+          <span class="tag">10 项</span>
+        </div>
+        <p class="batch-goal">这批来源最分散，优先识别底层网站、分页上限、历史窗口和统计口径是否稳定。</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Capability key</th><th>旧任务</th><th>旧调度参考</th><th>AKShare 重点</th></tr></thead>
+            <tbody>
+              <tr><td>47</td><td><code>equity.moneyflow</code></td><td>MONEYFLOW</td><td>交易日收盘后</td><td>大中小单阈值和净流入口径</td></tr>
+              <tr><td>48</td><td><code>sector.moneyflow</code></td><td>MONEYFLOW_IND_DC</td><td>交易日收盘后</td><td>行业分类版本和汇总口径</td></tr>
+              <tr><td>49</td><td><code>market.moneyflow</code></td><td>MONEYFLOW_MKT_DC</td><td>交易日收盘后</td><td>全市场范围和金额单位</td></tr>
+              <tr><td>50</td><td><code>connect.moneyflow</code></td><td>MONEYFLOW_HSGT</td><td>交易日收盘后</td><td>北向/南向定义、额度和历史变更</td></tr>
+              <tr><td>51</td><td><code>connect.ggt_daily</code></td><td>GGT_DAILY</td><td>交易日收盘后</td><td>港股通成交统计范围和币种</td></tr>
+              <tr><td>52</td><td><code>margin.detail</code></td><td>MARGIN_DETAIL</td><td>交易日收盘后</td><td>交易所范围、余额/买入额单位</td></tr>
+              <tr><td>53</td><td><code>connect.stock_holding</code></td><td>HK_HOLD</td><td>旧系统仅手动</td><td>历史窗口、持股口径和批量成本</td></tr>
+              <tr><td>54</td><td><code>market.top_list</code></td><td>TOP_LIST</td><td>交易日收盘后</td><td>上榜原因、席位聚合和分页</td></tr>
+              <tr><td>55</td><td><code>market.top_institution</code></td><td>TOP_INST</td><td>交易日收盘后</td><td>机构席位身份和买卖净额</td></tr>
+              <tr><td>56</td><td><code>market.block_trade</code></td><td>BLOCK_TRADE</td><td>交易日收盘后</td><td>成交单位、折溢价和买卖方</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="batch">
+        <div class="batch-head">
+          <h3>B07｜基金、宏观与机构调研</h3>
+          <span class="tag">9 项</span>
+        </div>
+        <p class="batch-goal">补足基金非行情数据、宏观时间序列与机构活动；分别定义净值日期、统计期和发布修订语义。</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Capability key</th><th>旧任务</th><th>旧调度参考</th><th>AKShare 重点</th></tr></thead>
+            <tbody>
+              <tr><td>57</td><td><code>fund.nav</code></td><td>FUND_NAV</td><td>每周</td><td>单位/累计净值、复权和场外覆盖</td></tr>
+              <tr><td>58</td><td><code>fund.share</code></td><td>FUND_SHARE</td><td>工作日晚间</td><td>份额日期、单位和历史深度</td></tr>
+              <tr><td>59</td><td><code>fund.portfolio</code></td><td>FUND_PORTFOLIO</td><td>月度</td><td>报告期、公告日和持仓披露范围</td></tr>
+              <tr><td>60</td><td><code>fund.adjustment_factor</code></td><td>FUND_ADJ</td><td>工作日晚间</td><td>因子基准和与基金行情一致性</td></tr>
+              <tr><td>61</td><td><code>macro.cpi</code></td><td>CN_CPI</td><td>每月</td><td>同比/环比/定基、统计期和修订</td></tr>
+              <tr><td>62</td><td><code>macro.ppi</code></td><td>CN_PPI</td><td>每月</td><td>同比/环比/定基、统计期和修订</td></tr>
+              <tr><td>63</td><td><code>macro.gdp</code></td><td>CN_GDP</td><td>每季度</td><td>累计/当季、名义/实际和修订</td></tr>
+              <tr><td>64</td><td><code>rates.shibor</code></td><td>SHIBOR</td><td>工作日</td><td>期限枚举、发布时间和缺失日</td></tr>
+              <tr><td>65</td><td><code>research.institutional_survey</code></td><td>STK_SURV</td><td>交易日收盘后</td><td>活动日期、参与机构、文本字段稳定性</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section id="batches">
+      <p class="section-kicker">Research roadmap</p>
+      <h2>AKShare 分批调研计划</h2>
+      <p class="section-intro">
+        批次按依赖和业务价值排序，不按旧代码目录排序。B00 是所有后续批次的前置；
+        B01、B02 通过后，B03–B07 可按资源并行，但每批仍需独立验收。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>批次</th><th>范围</th><th>项数</th><th>目标</th><th>退出条件</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tag blue">B00</span></td><td>方法与基线</td><td>—</td>
+              <td>冻结 Tushare 参考契约，统一样本、证据、容差和判定模板。</td>
+              <td>模板、版本策略、样本集和 verdict 定义评审通过。</td>
+            </tr>
+            <tr>
+              <td><span class="tag">B01</span></td><td>主数据与参考数据</td><td>10</td>
+              <td>解决代码、身份、状态、日历和分类。</td>
+              <td>关键标识可稳定映射，历史有效期缺口已记录。</td>
+            </tr>
+            <tr>
+              <td><span class="tag">B02</span></td><td>核心日频行情</td><td>12</td>
+              <td>形成 A 股核心行情最小闭环。</td>
+              <td>主键、单位、复权、停牌、收盘时效和容差可落地。</td>
+            </tr>
+            <tr>
+              <td><span class="tag amber">B03</span></td><td>市场规则与因子</td><td>7</td>
+              <td>补齐交易规则、权重、技术和筹码类数据。</td>
+              <td>不可复算字段有来源说明；不稳定接口已降级判定。</td>
+            </tr>
+            <tr>
+              <td><span class="tag amber">B04</span></td><td>财务核心</td><td>9</td>
+              <td>确定报表语义、版本身份和修订保留策略。</td>
+              <td>关键报表跨报告期比对通过，版本与去重规则明确。</td>
+            </tr>
+            <tr>
+              <td><span class="tag amber">B05</span></td><td>股东与公司行动</td><td>8</td>
+              <td>覆盖事件生命周期与持股披露。</td>
+              <td>事件唯一性、状态变化、日期和单位均有映射结论。</td>
+            </tr>
+            <tr>
+              <td><span class="tag amber">B06</span></td><td>资金流与特殊交易</td><td>10</td>
+              <td>评估来源分散、分页、口径和稳定性。</td>
+              <td>每项底层来源、历史窗口、限流和替代路线明确。</td>
+            </tr>
+            <tr>
+              <td><span class="tag amber">B07</span></td><td>基金、宏观与调研</td><td>9</td>
+              <td>完成第一版目录的剩余能力。</td>
+              <td>统计期、发布日期、修订和基金日期语义明确。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout">
+        <strong>建议节奏：</strong>
+        每个业务批次先做 1–2 个代表接口的短探针，再展开全批次；完成字段映射后至少观察
+        3–5 个交易日的成功、空结果、延迟和 schema fingerprint。宏观月/季频接口以多期历史样本替代连续日观察。
+      </div>
+    </section>
+
+    <section id="method">
+      <p class="section-kicker">Research protocol</p>
+      <h2>每项能力怎么调研</h2>
+      <div class="grid two">
+        <article class="card">
+          <h3>1. 建立可追溯证据</h3>
+          <ol>
+            <li>固定 Python 与 AKShare 版本。</li>
+            <li>记录候选函数、文档/源码位置和底层网站来源。</li>
+            <li>记录参数、最大返回量、分页、频率、更新时间和时区。</li>
+            <li>保存最小化样本的 schema fingerprint、元数据与哈希，不保存大体积原始行情。</li>
+          </ol>
+        </article>
+        <article class="card">
+          <h3>2. 做边界样本探针</h3>
+          <ol>
+            <li>正常交易日与非交易日。</li>
+            <li>停牌、新股、退市股和无结果。</li>
+            <li>单日、跨年和尽可能长的历史窗口。</li>
+            <li>分页临界点、重复请求和失败恢复。</li>
+          </ol>
+        </article>
+        <article class="card">
+          <h3>3. 与 Tushare 基线对照</h3>
+          <ol>
+            <li>比较证券与日期覆盖率、主键一致率。</li>
+            <li>比较字段完整度、空值分布、单位与枚举。</li>
+            <li>按字段定义数值容差，不用一个全局误差。</li>
+            <li>比较修订行为、历史回补和重复数据。</li>
+          </ol>
+        </article>
+        <article class="card">
+          <h3>4. 评估可运营性</h3>
+          <ol>
+            <li>观察成功率、空结果率、错误类型、延迟和字段漂移。</li>
+            <li>区分可重试失败、永久缺失和来源变更。</li>
+            <li>按底层数据网站核查使用条款与再分发边界。</li>
+            <li>给出主用、备用或暂不接入建议。</li>
+          </ol>
+        </article>
+      </div>
+      <div class="callout warn">
+        调研代码也必须遵守适配层边界：探针放在 AKShare adapter 的 research/实验区域，
+        不得从应用层直接调用 AKShare，不得写 canonical 数据库。结果以报告、schema 和最小样本元数据交付。
+      </div>
+    </section>
+
+    <section id="routing">
+      <p class="section-kicker">Provider verdict &amp; routing</p>
+      <h2>结论代码与后续路由</h2>
+      <div class="decision">
+        <div>FULL</div><div>覆盖、语义、质量、稳定性和授权均满足，可将 AKShare 配为该 capability 首选。</div>
+        <div>PARTIAL</div><div>只能覆盖部分市场、字段或历史；可承担受限范围，其余由 Tushare 补充。</div>
+        <div>UNSTABLE</div><div>有等价数据但稳定性不达标；保留 adapter，可作为低优先级备用或人工恢复来源。</div>
+        <div>NO_EQUIVALENT</div><div>未找到语义等价接口；该 capability 继续以已验证的 Tushare 为首选。</div>
+        <div>BLOCKED_LICENSE</div><div>技术上可取但使用或再分发边界不满足；不进入生产路由。</div>
+      </div>
+      <div class="callout">
+        <strong>配置粒度：</strong>
+        路由键至少包含 <code>capability</code>，必要时增加市场和频率。
+        例如 A 股日线可首选 AKShare，而财务报表仍首选 Tushare；不能用一个全局开关表达全部数据源顺序。
+      </div>
+      <div class="grid two">
+        <article class="card">
+          <h3>可以自动回退</h3>
+          <p>超时、连接错误、限流、明确的临时服务失败；回退结果仍需通过 capability 质量门槛。</p>
+        </article>
+        <article class="card">
+          <h3>不能盲目回退</h3>
+          <p>空数据、字段缺失或 schema 漂移不一定是临时故障。必须先分类，防止备用来源用不同口径悄悄污染数据。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="acceptance">
+      <p class="section-kicker">Deliverables &amp; acceptance</p>
+      <h2>每批交付物和验收标准</h2>
+      <div class="grid two">
+        <article class="card">
+          <h3>每批必须交付</h3>
+          <ul>
+            <li>capability 调研矩阵与最终 verdict。</li>
+            <li>AKShare 候选接口、底层来源、版本和调用约束。</li>
+            <li>供应商字段到中立字段的映射草案。</li>
+            <li>主键、日期、时区、单位、枚举、空值和修订语义。</li>
+            <li>样本元数据、对照指标、失败记录和稳定性观察。</li>
+            <li>质量门槛、首选/备用建议与未解决缺口。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>批次完成定义</h3>
+          <ul>
+            <li>批次内每项能力都有结论，不能只列候选函数。</li>
+            <li>结论可由脚本和证据复现，版本已固定。</li>
+            <li>差异被解释，不以“数据看起来接近”代替语义确认。</li>
+            <li>授权边界按底层来源核查，而非只看 AKShare 开源许可。</li>
+            <li>不确定项明确归档，不在实现阶段临时猜测。</li>
+          </ul>
+        </article>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>检查维度</th><th>最低要求</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>契约</td><td>主键、字段、类型、单位、日期/时区完整</td><td>字段少不等于不可用，但必须明确能力边界。</td></tr>
+            <tr><td>覆盖</td><td>市场、证券、日期和历史深度有量化结果</td><td>按 capability 定目标，不设伪统一比例。</td></tr>
+            <tr><td>质量</td><td>与 Tushare 重叠样本完成一致率和字段容差比较</td><td>Tushare 是参考，不默认任何一方绝对正确。</td></tr>
+            <tr><td>稳定</td><td>完成规定观察窗口并记录 schema fingerprint</td><td>出现漂移必须重新判定。</td></tr>
+            <tr><td>合规</td><td>底层来源和使用边界可追溯</td><td>不明确时结论不得为 FULL。</td></tr>
+            <tr><td>路由</td><td>给出 AKShare/Tushare 的明确优先级与失败策略</td><td>结论落实到 capability 粒度。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="questions">
+      <p class="section-kicker">Open decisions</p>
+      <h2>进入实现前仍需确认</h2>
+      <p class="section-intro">
+        这些问题不阻塞本轮调研启动，但会影响后续 canonical schema、存储成本和首次回填范围。
+      </p>
+      <div class="grid two">
+        <article class="card">
+          <h3>历史深度与保留</h3>
+          <p>各数据域首次回填到哪一年；是否永久保留供应商原始响应或只保留标准化值与 provenance。</p>
+        </article>
+        <article class="card">
+          <h3>财务版本策略</h3>
+          <p>保留全部公告修订，还是仅保留最新版本并记录变化；回测通常需要 point-in-time 版本。</p>
+        </article>
+        <article class="card">
+          <h3>首个实现切片</h3>
+          <p>建议调研通过后按 B01 + B02 的最小闭环实施，而不是一次性建完 65 项表和适配器。</p>
+        </article>
+        <article class="card">
+          <h3>未来市场范围</h3>
+          <p>分钟线、期货、完整港美股等不在本版基线；出现明确业务需求时新增目录批次和 ADR。</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <p class="section-kicker">Related decisions</p>
+      <h2>关联文档</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>0001 工程基础设施</h3>
+          <p><a href="../0001-data-sync-foundation/index.html">同步服务工程基础设施方案</a></p>
+        </article>
+        <article class="card">
+          <h3>0003 B01 首轮调研</h3>
+          <p><a href="../0003-akshare-b01-initial-research/index.html">AKShare 主数据与参考数据证据</a></p>
+        </article>
+        <article class="card">
+          <h3>0004 B02 首轮调研</h3>
+          <p><a href="../0004-akshare-b02-initial-research/index.html">AKShare 核心日频行情证据</a></p>
+        </article>
+        <article class="card">
+          <h3>0005 B03 首轮调研</h3>
+          <p><a href="../0005-akshare-b03-initial-research/index.html">AKShare 市场规则与因子证据</a></p>
+        </article>
+        <article class="card">
+          <h3>0006 B04 首轮调研</h3>
+          <p><a href="../0006-akshare-b04-initial-research/index.html">AKShare 财务核心证据</a></p>
+        </article>
+        <article class="card">
+          <h3>0007 B05 首轮调研</h3>
+          <p><a href="../0007-akshare-b05-initial-research/index.html">AKShare 股东与公司行动证据</a></p>
+        </article>
+        <article class="card">
+          <h3>0008 B06 首轮调研</h3>
+          <p><a href="../0008-akshare-b06-initial-research/index.html">AKShare 资金流与特殊交易证据</a></p>
+        </article>
+        <article class="card">
+          <h3>0009 B07 首轮调研</h3>
+          <p><a href="../0009-akshare-b07-initial-research/index.html">AKShare 基金、宏观与机构调研证据</a></p>
+        </article>
+        <article class="card">
+          <h3>ADR-0002</h3>
+          <p><a href="../../decisions/0002-data-sync-ownership-and-access.md">数据归属与 API 访问边界</a></p>
+        </article>
+        <article class="card">
+          <h3>ADR-0004</h3>
+          <p><a href="../../decisions/0004-market-data-provider-adapters.md">多数据源适配层与供应商路由</a></p>
+        </article>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>quant-v2 / docs / service-data-sync / 0002</span>
+      <span>本方案只定义数据总纲与调研计划，不授权创建业务表、接口或生产同步任务。</span>
+    </footer>
+  </main>
+</body>
+</html>

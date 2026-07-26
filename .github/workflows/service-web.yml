@@ -1,0 +1,66 @@
+name: service-web
+
+on:
+  pull_request:
+    paths:
+      - "service-web/**"
+      - "compose.yaml"
+      - "compose.dev.yaml"
+      - "compose.prod.yaml"
+      - ".env.example"
+      - ".github/workflows/service-web.yml"
+  push:
+    branches: [main]
+    paths:
+      - "service-web/**"
+      - "compose.yaml"
+      - "compose.dev.yaml"
+      - "compose.prod.yaml"
+      - ".env.example"
+      - ".github/workflows/service-web.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: service-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version: "24.18.0"
+          cache: true
+      - run: vp install --frozen-lockfile
+      - run: vp check
+      - run: vp test
+      - run: vp build
+
+  e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: service-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version: "24.18.0"
+          cache: true
+      - run: vp install --frozen-lockfile
+      - run: vp build
+      - run: vp exec playwright install --with-deps chromium
+      - run: vp run e2e
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag quant-v2/service-web:ci service-web
+      - run: docker run -d --name service-web-ci -p 18080:8080 --read-only --tmpfs /tmp quant-v2/service-web:ci
+      - run: until curl --fail --silent http://127.0.0.1:18080/healthz; do sleep 1; done
+      - if: always()
+        run: docker rm --force service-web-ci

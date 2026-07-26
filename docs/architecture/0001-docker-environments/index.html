@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="quant-v2 三服务 Docker Compose 开发与生产环境分层、配置和发布方案">
+  <title>Docker 开发与生产环境｜技术方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #dfe4ec;
+      --surface: #f6f8fb;
+      --accent: #3157d5;
+      --accent-soft: #eef2ff;
+      --success: #176b4d;
+      --warning: #8a4b08;
+      --radius: 14px;
+      --shadow: 0 12px 30px rgb(23 32 51 / 7%);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font: 16px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+    a { color: var(--accent); text-underline-offset: .2em; }
+    a:focus-visible { outline: 3px solid rgb(49 87 213 / 28%); outline-offset: 3px; }
+    .shell { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+    header { padding: 56px 0 38px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .eyebrow, .label {
+      color: var(--accent);
+      font-size: .78rem;
+      font-weight: 750;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { line-height: 1.25; letter-spacing: -.02em; }
+    h1 { max-width: 820px; margin: 6px 0 0; font-size: clamp(2rem, 6vw, 3.7rem); }
+    h2 { margin: 0 0 20px; font-size: clamp(1.45rem, 3vw, 2rem); }
+    h3 { margin: 8px 0; font-size: 1.05rem; }
+    p { max-width: 76ch; }
+    .lede { max-width: 780px; margin: 16px 0 0; color: var(--muted); font-size: 1.08rem; }
+    .meta, .grid { display: grid; gap: 14px; }
+    .meta { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 28px; }
+    .meta div, .card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+    }
+    .meta dt { color: var(--muted); font-size: .78rem; }
+    .meta dd { margin: 3px 0 0; font-weight: 650; }
+    .status { color: var(--success); }
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 96%);
+    }
+    nav ul { display: flex; gap: 22px; width: max-content; margin: 0; padding: 13px 0; list-style: none; }
+    nav a { color: var(--muted); font-size: .9rem; font-weight: 650; text-decoration: none; }
+    main { padding: 20px 0 72px; }
+    section { padding: 48px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 56px; }
+    .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card { box-shadow: var(--shadow); }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+    .risk { color: var(--warning); }
+    .callout {
+      margin-top: 18px;
+      padding: 18px 20px;
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      background: var(--accent-soft);
+    }
+    pre {
+      overflow-x: auto;
+      padding: 20px;
+      border-radius: var(--radius);
+      background: #111827;
+      color: #e5e7eb;
+      font: .9rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+    table { width: 100%; min-width: 760px; border-collapse: collapse; }
+    th, td { padding: 13px 15px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--surface); font-size: .84rem; }
+    tr:last-child td { border-bottom: 0; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    footer { padding: 28px 0 48px; color: var(--muted); font-size: .88rem; }
+    @media (max-width: 800px) {
+      header { padding-top: 40px; }
+      .meta, .grid { grid-template-columns: 1fr; }
+      section { padding: 38px 0; }
+    }
+    @media print {
+      nav { display: none; }
+      header, main, section { padding-top: 18px; }
+      .shell { width: 100%; }
+      .card { box-shadow: none; break-inside: avoid; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Technical solution · Cross-service deployment</p>
+      <h1>Docker 开发与生产环境</h1>
+      <p class="lede">
+        公共 Compose 保存唯一拓扑，开发和生产 override 只表达环境差异。开发获得热更新和回环端口；
+        生产只使用不可变镜像、隔离基础设施网络，并从受保护环境文件或 secret 注入凭据。
+      </p>
+      <dl class="meta">
+        <div><dt>状态</dt><dd class="status">Accepted</dd></div>
+        <div><dt>负责人</dt><dd>项目维护者</dd></div>
+        <div><dt>最后修改</dt><dd>2026-07-26</dd></div>
+        <div><dt>关联决策</dt><dd><a href="../../decisions/0007-compose-environment-strategy.md">ADR-0007</a></dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">摘要</a></li>
+        <li><a href="#scope">目标与边界</a></li>
+        <li><a href="#components">功能划分</a></li>
+        <li><a href="#flow">核心流程</a></li>
+        <li><a href="#config">配置与安全</a></li>
+        <li><a href="#tradeoffs">方案取舍</a></li>
+        <li><a href="#delivery">实施与验收</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>摘要</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">事实</span>
+          <h3>单文件混合多种语义</h3>
+          <p>原 Compose 同时包含本地端口、测试容器和生产镜像阶段，无法一眼判断发布面与 secret 边界。</p>
+        </article>
+        <article class="card">
+          <span class="label">决策</span>
+          <h3>公共拓扑 + 双 override</h3>
+          <p><code>compose.yaml</code> 保存公共关系，开发和生产文件仅覆盖 build、端口、挂载、镜像及安全策略。</p>
+        </article>
+        <article class="card">
+          <span class="label">主要风险</span>
+          <h3 class="risk">生产仍是单节点基线</h3>
+          <p>TLS、反向代理、HA、托管存储和 secret manager 尚未选型；本方案不把单机 Compose 描述成最终平台。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="scope">
+      <h2>目标与边界</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>目标</h3>
+          <ul>
+            <li>三个服务可独立选择 profile、构建和运行。</li>
+            <li>开发支持 Web/API 热更新及本机依赖调试。</li>
+            <li>生产隐藏状态服务端口并强制发布镜像引用。</li>
+            <li>真实凭据只进入不提交的配置源。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>非目标</h3>
+          <ul>
+            <li>不决定云厂商、Kubernetes 或托管数据库。</li>
+            <li>不新增未冻结的跨服务 API 或数据同步任务。</li>
+            <li>不在 Compose 内实现 TLS、证书签发或镜像发布。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>约束</h3>
+          <ul>
+            <li>API migration 必须与应用启动分离。</li>
+            <li>同步 worker 需要受控外部网络出口。</li>
+            <li><code>VITE_*</code> 是构建时公开值，不是运行时 secret。</li>
+            <li>日常停止不得删除 named volume。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="components">
+      <h2>功能划分</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">Common</span>
+          <h3><code>compose.yaml</code></h3>
+          <p><strong>职责：</strong>服务依赖、健康检查、容器内连接、网络和持久卷。</p>
+          <p><strong>输入 / 输出：</strong>环境变量输入；输出稳定公共拓扑。</p>
+          <p><strong>状态：</strong>仅声明 named volume，不持有凭据。</p>
+          <p><strong>失败边界：</strong>依赖不健康时阻止下游进程启动。</p>
+        </article>
+        <article class="card">
+          <span class="label">Development</span>
+          <h3><code>compose.dev.yaml</code></h3>
+          <p><strong>职责：</strong>本地 build target、源码挂载、热更新、测试服务和回环端口。</p>
+          <p><strong>输入 / 输出：</strong>读取本地 <code>.env</code>；输出可调试容器。</p>
+          <p><strong>状态：</strong>使用开发项目名隔离 volume。</p>
+          <p><strong>失败边界：</strong>只影响开发项目，不触及生产 volume 或网络。</p>
+        </article>
+        <article class="card">
+          <span class="label">Production</span>
+          <h3><code>compose.prod.yaml</code></h3>
+          <p><strong>职责：</strong>不可变镜像、公开业务端口、内部网络和业务容器最小权限。</p>
+          <p><strong>输入 / 输出：</strong>读取受保护配置；输出单节点生产拓扑。</p>
+          <p><strong>状态：</strong>生产项目名下的独立 volume。</p>
+          <p><strong>失败边界：</strong>migration 失败时 API 不启动；状态服务不暴露宿主机端口。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="flow">
+      <h2>核心流程</h2>
+      <pre aria-label="Compose 分层与服务启动流程">开发者 / 部署流程
+  │
+  ├─ 选择 compose.yaml + compose.dev.yaml
+  │    └─ 本地 build → 依赖 healthy → migration → API / Web / worker
+  │
+  └─ 选择 compose.yaml + compose.prod.yaml
+       └─ 校验 secret 与 digest → 拉取镜像 → 依赖 healthy → migration
+                                                  └─ 成功后启动 API
+
+浏览器 ──▶ Web / API 公共端口
+API ──▶ API PostgreSQL + Redis（生产 internal network）
+data-sync worker ──▶ PostgreSQL + Redis + MinIO（internal）
+                 └─▶ 外部 provider（独立 egress network）</pre>
+      <aside class="callout">
+        <strong>关键失败路径</strong>
+        生产 migration 非零退出时，<code>service-api</code> 的
+        <code>service_completed_successfully</code> 条件不满足。修复配置或 migration 后重跑；
+        不允许通过绕过 migration 条件强行启动新版本。
+      </aside>
+    </section>
+
+    <section id="config">
+      <h2>配置与安全</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>分类</th><th>示例</th><th>开发来源</th><th>生产要求</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Secret</td>
+              <td>DB/Redis 密码、JWT secret、MinIO/S3 secret、管理员初始密码</td>
+              <td>Git 忽略的根 <code>.env</code></td>
+              <td>受保护 env 文件或 secret manager；禁止进入镜像和仓库</td>
+            </tr>
+            <tr>
+              <td>非敏感运行配置</td>
+              <td>端口、issuer、TTL、日志级别、bucket、CORS origin</td>
+              <td><code>.env</code>，契约见 <code>.env.example</code></td>
+              <td>按环境显式配置并接受发布审查</td>
+            </tr>
+            <tr>
+              <td>浏览器公开配置</td>
+              <td><code>VITE_API_BASE_URL</code></td>
+              <td>开发进程环境</td>
+              <td>构建 Web 发布镜像时注入；不得放 secret</td>
+            </tr>
+            <tr>
+              <td>发布供应链</td>
+              <td><code>*_IMAGE_REF</code></td>
+              <td>开发文件忽略</td>
+              <td>必须替换为发布 CI 生成的 immutable digest</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        <a href="../../../.env.example">根环境变量模板</a>只包含保留域名、零 digest 和开发假凭据。
+        它用于契约审查和 CI，不构成生产默认值。
+      </p>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>方案取舍</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>候选</th><th>优势</th><th>成本 / 风险</th><th>结论</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>公共文件 + 双 override</td>
+              <td>公共拓扑唯一；环境差异可审查；保留服务 profile</td>
+              <td>命令必须指定两个文件；需查看 merge 后结果</td>
+              <td><strong>采用</strong></td>
+            </tr>
+            <tr>
+              <td>两份完整 Compose</td>
+              <td>单文件即可启动；阅读直接</td>
+              <td>依赖、健康检查、网络和 volume 重复漂移</td>
+              <td>不采用</td>
+            </tr>
+            <tr>
+              <td>单文件 + profile 切环境</td>
+              <td>文件少</td>
+              <td>profile 不适合表达 mount、build、端口和安全策略覆盖</td>
+              <td>不采用</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="delivery">
+      <h2>实施与验收</h2>
+      <ol>
+        <li><strong>配置：</strong>从 <code>.env.example</code> 创建不提交的 <code>.env</code>，替换本地 secret。</li>
+        <li><strong>开发：</strong>合并公共与开发文件，按 profile 构建；验证健康检查、热更新和集成测试。</li>
+        <li><strong>发布：</strong>分别构建四个发布镜像，推送后记录 digest；先执行 production config 审查。</li>
+        <li><strong>启动：</strong>基础设施健康后执行 migration；migration 成功才启动长期业务容器。</li>
+      </ol>
+      <div class="grid">
+        <article class="card">
+          <h3>验收标准</h3>
+          <ul>
+            <li>开发与生产 Compose 均通过 <code>config --quiet</code>。</li>
+            <li>三个 runtime 镜像为非 root，健康检查可用。</li>
+            <li>生产状态服务无宿主机端口，内部网络隔离。</li>
+            <li>仓库不跟踪 <code>.env</code> 或真实 secret。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>回滚</h3>
+          <p>保留 volume，停止当前项目，恢复上一组 Compose 与镜像 digest。schema 回滚按独立 migration
+          流程执行；禁止用 <code>down -v</code> 作为部署回滚。</p>
+        </article>
+        <article class="card">
+          <h3>待决问题</h3>
+          <ul>
+            <li>TLS 与统一入口 — 部署平台选型时决定。</li>
+            <li>托管存储与 HA — 容量/SLO 明确后决定。</li>
+            <li>secret manager 与镜像签名 — 发布流水线方案决定。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+  </main>
+  <footer>
+    <div class="shell">Docker 开发与生产环境 · 变更摘要：建立公共拓扑、双环境 override、secret 与镜像发布契约。</div>
+  </footer>
+</body>
+</html>

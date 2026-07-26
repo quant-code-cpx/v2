@@ -20,3 +20,12 @@ NNNN-short-title.md
 4. 评审后改为 `Accepted`、`Rejected`、`Deprecated` 或 `Superseded`。
 5. 实现与文档链接对应 ADR。
 
+## 决策索引
+
+- [0001：服务目录与技术方案文档布局](0001-service-repository-layout.md) — Accepted
+- [0002：同步数据归属与跨服务访问](0002-data-sync-ownership-and-access.md) — Proposed
+- [0003：数据同步服务运行时与存储技术栈](0003-data-sync-runtime-stack.md) — Proposed
+- [0004：多数据源适配与路由](0004-market-data-provider-adapters.md) — Proposed
+- [0005：API 服务最小运行时与 User/Auth 架构](0005-service-api-runtime-and-architecture.md) — Implemented
+- [0006：Web 前端运行时与工程技术栈](0006-service-web-frontend-stack.md) — Accepted
+- [0007：Docker Compose 开发与生产环境分层](0007-compose-environment-strategy.md) — Accepted

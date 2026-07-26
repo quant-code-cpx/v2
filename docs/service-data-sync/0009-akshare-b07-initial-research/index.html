@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="AKShare B07 基金、宏观与机构调研首轮调研：逐项比对旧 Tushare 契约、记录隔离 Docker 实测和准入条件。">
+  <title>AKShare B07 基金、宏观与机构调研首轮调研｜quant-v2</title>
+  <style>
+    :root { color-scheme:light; --ink:#182235; --muted:#62708a; --line:#dbe2ec; --soft:#f5f7fb; --blue:#3159cf; --blue-soft:#edf2ff; --green:#16674d; --green-soft:#eaf7f1; --amber:#9a5712; --amber-soft:#fff5e8; --red:#b13342; --red-soft:#fff0f2; --radius:14px; }
+    * { box-sizing:border-box; } html { scroll-behavior:smooth; }
+    body { margin:0; color:var(--ink); background:#fff; font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif; }
+    a { color:var(--blue); text-underline-offset:.2em; } a:focus-visible { outline:3px solid rgb(49 89 207 / 28%); outline-offset:3px; border-radius:4px; }
+    .shell { width:min(1160px,calc(100% - 40px)); margin:0 auto; }
+    header { padding:62px 0 38px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,var(--soft),#fff); }
+    .eyebrow { margin:0 0 10px; color:var(--blue); font-size:.78rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+    h1,h2,h3 { line-height:1.25; letter-spacing:-.02em; } h1 { max-width:900px; margin:0; font-size:clamp(2rem,5.6vw,3.8rem); } h2 { margin:0 0 18px; font-size:clamp(1.45rem,3vw,2rem); } h3 { margin:0 0 8px; font-size:1.05rem; }
+    p { max-width:84ch; } .lede { max-width:820px; margin:18px 0 0; color:var(--muted); font-size:1.08rem; }
+    .meta { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:30px 0 0; } .meta div,.card { border:1px solid var(--line); border-radius:var(--radius); background:#fff; } .meta div { padding:14px 16px; }
+    dt { color:var(--muted); font-size:.78rem; } dd { margin:3px 0 0; font-weight:700; } .draft { color:var(--amber); }
+    nav { position:sticky; top:0; z-index:2; overflow-x:auto; border-bottom:1px solid var(--line); background:rgb(255 255 255 / 94%); backdrop-filter:blur(12px); } nav ul { display:flex; gap:22px; width:max-content; margin:0; padding:13px 0; list-style:none; } nav a { color:var(--muted); font-size:.9rem; font-weight:700; text-decoration:none; } nav a:hover { color:var(--blue); }
+    main { padding:24px 0 72px; } section { padding:50px 0; border-bottom:1px solid var(--line); scroll-margin-top:56px; } .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; } .card { padding:20px; box-shadow:0 9px 24px rgb(24 34 53 / 5%); } .card p:last-child,.card ul:last-child { margin-bottom:0; }
+    .label { display:inline-block; margin-bottom:9px; color:var(--blue); font-size:.76rem; font-weight:800; letter-spacing:.07em; } .callout { margin:20px 0; padding:18px 20px; border-left:4px solid var(--blue); border-radius:0 var(--radius) var(--radius) 0; background:var(--blue-soft); } .callout strong { display:block; margin-bottom:4px; } .warning { border-left-color:var(--amber); background:var(--amber-soft); } .danger { border-left-color:var(--red); background:var(--red-soft); }
+    .table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); } table { width:100%; min-width:820px; border-collapse:collapse; } th,td { padding:13px 15px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; } th { background:var(--soft); font-size:.82rem; white-space:nowrap; } tr:last-child td { border-bottom:0; }
+    code { padding:.08em .35em; border-radius:4px; background:#eef1f6; font:.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; } .tag { display:inline-block; padding:2px 8px; border-radius:999px; font-size:.76rem; font-weight:800; white-space:nowrap; } .candidate { color:var(--green); background:var(--green-soft); } .conditional { color:var(--amber); background:var(--amber-soft); } .blocked { color:var(--red); background:var(--red-soft); }
+    .flow { overflow-x:auto; padding:19px; border:1px solid var(--line); border-radius:var(--radius); background:#111827; color:#e7edf8; font:.88rem/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; } .steps { padding-left:1.3rem; } .steps li { padding:4px 0 13px 8px; } footer { padding:28px 0 48px; color:var(--muted); font-size:.88rem; }
+    @media (max-width:800px) { header { padding-top:42px; } .meta,.grid { grid-template-columns:1fr; } section { padding:38px 0; } } @media print { nav { display:none; } header,main,section { padding-top:20px; } .shell { width:100%; } .card { box-shadow:none; break-inside:avoid; } a { color:inherit; text-decoration:none; } }
+  </style>
+</head>
+<body>
+  <header><div class="shell">
+    <p class="eyebrow">Research note · 0009</p>
+    <h1>AKShare B07 基金、宏观与机构调研首轮调研</h1>
+    <p class="lede">以旧项目九项 Tushare 能力为基线。宏观 CPI、GDP 和 Shibor 取得高度同构的历史结果；基金净值与组合可部分映射；基金份额、复权因子和机构调研明细尚不具备可调度同步条件。</p>
+    <dl class="meta"><div><dt>状态</dt><dd class="draft">Draft · 第二轮短探针完成；R3 待验收</dd></div><div><dt>范围</dt><dd>B07 / 9 项</dd></div><div><dt>实测日期</dt><dd>2026-07-26</dd></div><div><dt>关联约束</dt><dd><a href="../../decisions/0004-market-data-provider-adapters.md">ADR-0004</a></dd></div></dl>
+  </div></header>
+  <nav aria-label="页面目录"><div class="shell"><ul><li><a href="#summary">摘要</a></li><li><a href="#baseline">旧基线</a></li><li><a href="#evidence">实测证据</a></li><li><a href="#mapping">准入结论</a></li><li><a href="#boundary">架构边界</a></li><li><a href="#next">下一步</a></li></ul></div></nav>
+  <main class="shell">
+    <section id="summary">
+      <h2>摘要</h2>
+      <div class="grid">
+        <article class="card"><span class="label">问题</span><h3>频率、修订与量纲比字段名更关键</h3><p>基金净值、份额、季度组合、宏观指标和机构调研来自不同来源。字段可见不代表能表达旧系统的公告日、复权、季度范围或每日增量。</p></article>
+        <article class="card"><span class="label">决策</span><h3>宏观优先做能力级映射</h3><p>先为验证通过的宏观能力设计 adapter DTO 和质量规则；基金能力保留 Tushare 参考契约，直到历史、单位和来源稳定性全部通过。</p></article>
+        <article class="card"><span class="label">最大风险</span><h3>详细机构调研的成本与稳定性</h3><p>最近日期无明细时抛出 <code>TypeError</code>；月度窗口 71 秒、处理 54/176 项后同样失败。它不能作为日终同步的基础。</p></article>
+      </div>
+      <aside class="callout danger"><strong>本轮没有生产变更</strong>未创建表、迁移、接口、任务或 AKShare adapter。所有调用仅发生在一次性只读 Docker 探针中，未挂载项目目录或数据库。</aside>
+    </section>
+    <section id="baseline">
+      <h2>旧 Tushare 基线</h2>
+      <p>能力范围来自 <a href="../0002-data-catalog-and-akshare-research/index.html">0002 数据总纲</a>；旧 Prisma 模型与同步服务只用于比对数据契约和频率，不复用其代码。旧系统基金净值按基金代码周批量、份额与复权因子按交易日、组合按月、宏观按其发布频率、机构调研按日期范围获取。</p>
+      <div class="table-wrap"><table><thead><tr><th>#</th><th>Capability key</th><th>旧核心契约</th><th>首轮 AKShare 重点</th></tr></thead><tbody>
+        <tr><td>57</td><td><code>fund.nav</code></td><td>公告/净值日期、单位/累计净值、分红累计、净资产、复权净值</td><td>历史深度，是否有公告/资产/复权字段</td></tr>
+        <tr><td>58</td><td><code>fund.share</code></td><td>交易日、场内基金代码、总份额（万份）</td><td>沪深 ETF 范围、历史日和实际单位</td></tr>
+        <tr><td>59</td><td><code>fund.portfolio</code></td><td>公告日、报告期、证券、持股数/市值/两种比例</td><td>季度解析、公告日、股票范围和万股/万元换算</td></tr>
+        <tr><td>60</td><td><code>fund.adjustment_factor</code></td><td>基金、交易日、显式复权因子</td><td>是否存在同等的可审计因子，不以复权价格替代</td></tr>
+        <tr><td>61–63</td><td><code>macro.*</code></td><td>CPI 13 字段、PPI 31 字段、GDP 9 字段</td><td>统计期、累计/当期、单位和发布后修订</td></tr>
+        <tr><td>64</td><td><code>rates.shibor</code></td><td>日频九期限 O/N 至 1Y</td><td>一次返回九期限、最早数据日和变动单位</td></tr>
+        <tr><td>65</td><td><code>research.institutional_survey</code></td><td>机构访客/类型、接待方、方式、地点与调研日</td><td>汇总与明细粒度、公告日、日期窗口成本</td></tr>
+      </tbody></table></div>
+    </section>
+    <section id="evidence">
+      <h2>隔离 Docker 实测证据</h2>
+      <p>固定 <code>akshare==1.18.78</code> 与 Python 3.12-slim；根文件系统只读，<code>/tmp</code> 为 tmpfs，依赖位于专用临时命名卷。每次探针只打印行数、列名、首尾样本和失败类别；不写入任何业务数据。</p>
+      <div class="table-wrap"><table><thead><tr><th>候选接口 / 参数</th><th>结果</th><th>返回结构或失败证据</th><th>首轮可确认事实</th></tr></thead><tbody>
+        <tr><td><code>fund_open_fund_info_em</code><br><code>000001, 单位净值走势</code></td><td><span class="tag candidate">成功</span></td><td>5,970 行，列为净值日期、单位净值、日增长率；2001-12-18 至 2026-07-24。</td><td>单基金单位净值历史深度可用；调用粒度是单基金。</td></tr>
+        <tr><td><code>fund_open_fund_info_em</code><br><code>000001, 累计净值走势</code></td><td><span class="tag candidate">成功</span></td><td>5,970 行，列为净值日期、累计净值；同一首尾日期。</td><td>累计净值需与单位净值通过两个请求按日期合并；没有公告日和净资产字段。</td></tr>
+        <tr><td><code>fund_etf_scale_sse</code><br><code>20250115</code></td><td><span class="tag blocked">失败</span></td><td>76.8 秒后 <code>RemoteDisconnected</code>。</td><td>文档声明按日返回沪市 ETF 份额，但本环境未通过可用性验证。</td></tr>
+        <tr><td><code>fund_etf_scale_szse</code></td><td><span class="tag blocked">失败</span></td><td><code>TypeError: Expected file path name or file-like object, got &lt;class 'bytes'&gt;</code>。</td><td>深市最新交易日快照候选在固定版本运行失败。</td></tr>
+        <tr><td><code>fund_portfolio_hold_em</code><br><code>000001, 2024</code></td><td><span class="tag candidate">成功</span></td><td>40 行；股票代码/名称、占净值比例、持股数、持仓市值、季度；首尾为 2024 年一至四季度。</td><td>持股数是万股，市值是万元；均须乘以 10,000 后映射到旧 canonical 单位。</td></tr>
+        <tr><td><code>fund_etf_hist_em</code><br><code>510300, raw / qfq</code></td><td><span class="tag blocked">两种模式失败</span></td><td>不复权与前复权请求均为 <code>RemoteDisconnected</code>。</td><td>即使行情可读，它返回的是价格序列，不是旧模型要求的显式复权因子。</td></tr>
+        <tr><td><code>macro_china_cpi</code></td><td><span class="tag candidate">成功</span></td><td>222 行，完整返回全国/城市/农村的当月、同比、环比、累计；最新 2026 年 6 月，最早 2008 年 1 月。</td><td>13 个核心观测字段与旧 CPI 契约一一对应；月份字符串需标准化为 <code>YYYYMM</code>。</td></tr>
+        <tr><td><code>macro_china_ppi</code></td><td><span class="tag conditional">成功但字段不足</span></td><td>246 行，仅月份、当月、当月同比增长、累计；2006 年 1 月至 2026 年 6 月。</td><td>可做总 PPI；不能替代旧 31 字段的生产资料/生活资料分项。</td></tr>
+        <tr><td><code>macro_china_gdp</code></td><td><span class="tag candidate">成功</span></td><td>82 行，GDP 及一二三产业的绝对值（亿元）和同比；最早 2006 年一季度，最新含 2026 年第 1–2 季度累计值。</td><td>9 个核心量可映射；“第 1–2 季度”与单季口径必须在 canonical 层显式区分。</td></tr>
+        <tr><td><code>macro_china_shibor_all</code></td><td><span class="tag candidate">成功</span></td><td>2,331 行，日期、O/N 至 1Y 九期限定价及变动；2015-05-08 至 2026-07-24。</td><td>当前九期限能一次映射；变动值是额外信息，不可误写为利率。</td></tr>
+        <tr><td><code>rate_interbank</code><br><code>Shibor 人民币, 隔夜</code></td><td><span class="tag candidate">成功</span></td><td>4,944 行，报告日、利率（%）、涨跌（BP）；2006-10-08 至 2026-07-24。</td><td>可作为 O/N 更长历史候选；九期限历史回补仍需逐期限验证。</td></tr>
+        <tr><td><code>stock_jgdy_tj_em</code><br><code>20260724</code></td><td><span class="tag conditional">成功</span></td><td>2 行；代码、名称、接待机构数量、方式、人员、地点、接待日、公告日。</td><td>可支持活动汇总与公告时点；不含逐机构名称和机构类型。</td></tr>
+        <tr><td><code>stock_jgdy_detail_em</code><br><code>20260724 / 20260701</code></td><td><span class="tag blocked">失败</span></td><td>最近日立即 <code>NoneType</code>；月窗口 71.43 秒、进度 54/176 后同样抛出 <code>NoneType</code>。</td><td>详细粒度在当前版本不可稳定完成，不能支撑日终任务。</td></tr>
+      </tbody></table></div>
+      <aside class="callout warning"><strong>事实与结论分开</strong>成功只代表固定版本与样本下能取得结构化结果；失败只代表当前同步环境不可依赖。两者都不是生产上线许可，仍须经过发布窗口连续观察和同日对账。</aside>
+    </section>
+    <section id="mapping">
+      <h2>能力级准入结论</h2>
+      <p><span class="tag candidate">条件候选</span>：已验证核心结构，仍需补齐字段/窗口；<span class="tag conditional">部分候选</span>：只能表达子集，需 ADR 或回退；<span class="tag blocked">暂不准入</span>：稳定性、历史或语义已经阻断当前同步。</p>
+      <div class="table-wrap"><table><thead><tr><th>Capability</th><th>结论</th><th>映射与缺口</th><th>实现前退出条件</th></tr></thead><tbody>
+        <tr><td><code>fund.nav</code></td><td><span class="tag conditional">部分候选</span></td><td>单位/累计净值与日期可得；缺公告日、累计分红、净资产、总净资产与显式复权净值。</td><td>明确基金全集与并发/限速；补齐字段来源或将其移出 canonical 契约。</td></tr>
+        <tr><td><code>fund.share</code></td><td><span class="tag blocked">暂不准入</span></td><td>沪市历史候选断连，深市快照解析失败；只见 ETF 语义，尚未证明旧范围。</td><td>沪深交易日连续成功，确认份额单位、历史日范围、代码全集与幂等键。</td></tr>
+        <tr><td><code>fund.portfolio</code></td><td><span class="tag candidate">条件候选</span></td><td>股票持仓、比例、万股/万元和季度可得；缺公告日、浮通股占比，季度文本需解析。</td><td>对账报告期/公告期与单位；定义同基金同证券多季度的稳定键及披露修订策略。</td></tr>
+        <tr><td><code>fund.adjustment_factor</code></td><td><span class="tag blocked">暂不准入</span></td><td>候选行情不可读，且复权价格不等价于可审计的因子。</td><td>找到显式因子来源；若改为价格派生，先以 ADR 决定基准、精度和事件处理。</td></tr>
+        <tr><td><code>macro.cpi</code></td><td><span class="tag candidate">条件候选</span></td><td>13 字段、月频和百分比口径高度同构。</td><td>锁定月份解析、发布日期与修订检测；同月与 Tushare 逐字段对账。</td></tr>
+        <tr><td><code>macro.ppi</code></td><td><span class="tag conditional">部分候选</span></td><td>只有总指数四列，旧模型含 31 项分项。</td><td>寻找分项来源；否则先以 ADR 缩小 canonical 数据集，再实现 adapter。</td></tr>
+        <tr><td><code>macro.gdp</code></td><td><span class="tag candidate">条件候选</span></td><td>旧 9 项可映射，单位同为亿元；累计季度不是单季值。</td><td>定义 <code>quarter</code> 与累计范围的编码及修订覆盖策略。</td></tr>
+        <tr><td><code>rates.shibor</code></td><td><span class="tag candidate">条件候选</span></td><td>2015 年后九期限同表可得；隔夜单期限可追至 2006 年。</td><td>确认九期限完整历史回补、非交易日缺失和百分比精度后再准入。</td></tr>
+        <tr><td><code>research.institutional_survey</code></td><td><span class="tag conditional">仅汇总候选</span></td><td>统计接口缺逐机构与机构类型；详细接口运行不稳。</td><td>先决定是否只保留汇总；需要明细则找到稳定替代来源或直接路由 Tushare。</td></tr>
+      </tbody></table></div>
+    </section>
+    <section id="boundary">
+      <h2>架构边界与来源路由</h2>
+      <pre class="flow" aria-label="未来实现的数据流边界">scheduler / manual trigger
+          │
+          ▼
+application use case ──▶ provider-neutral DataSourcePort
+                                  │
+                  provider router │ capability + period + market
+                     ┌────────────┴────────────┐
+                     ▼                         ▼
+              AKShare adapter            Tushare adapter
+                     │                         │
+                     └──── provider DTO ──────┘
+                                  │
+                                  ▼
+            canonical mapper / quality gate / repository</pre>
+      <div class="grid">
+        <article class="card"><span class="label">事实</span><h3>现有 port 已足够承载能力路由</h3><p>当前服务已有 <code>DataSourcePort</code> 与 <code>SourceRegistry</code>。本轮不改变其接口，不把任何 AKShare SDK 调用写入应用、任务、质量或持久化代码。</p></article>
+        <article class="card"><span class="label">决策</span><h3>优先级按能力执行</h3><p>AKShare 仍为默认优先 provider；但标为暂不准入的能力，路由必须直接选择可用 provider，不能让业务任务直接重试第三方 SDK。</p></article>
+        <article class="card"><span class="label">待决</span><h3>分项与修订进入 canonical 前必须决策</h3><p>PPI 分项、基金复权因子、机构调研明细和宏观发布修订会影响 schema。未决定前不创建业务表或迁移。</p></article>
+      </div>
+      <aside class="callout"><strong>禁止绕过 adapter</strong>供应商 SDK、HTTP 地址和原始字段只能位于独立 adapter；adapter 返回 provider DTO，不直接写 canonical 数据库。这是 <a href="../../decisions/0004-market-data-provider-adapters.md">ADR-0004</a> 与服务架构测试的边界。</aside>
+    </section>
+    <section id="next">
+      <h2>下一步与验收</h2>
+      <ol class="steps">
+        <li><strong>发布窗口连续观察：</strong>CPI/PPI/GDP 在各自发布月，Shibor 在连续交易日，基金净值在收盘更新后，记录最新观测期、修订和成功率。</li>
+        <li><strong>同日对账：</strong>对候选能力与旧 Tushare 样本逐字段比对。基金组合先完成万股/万元换算、季度和公告期解析；宏观先完成统计期编码。</li>
+        <li><strong>只实现通过项：</strong>先定义 provider DTO、mapper 与质量测试；基金份额、复权因子、详细调研仍保持 Tushare 或其他 provider 路由，不建同步任务。</li>
+      </ol>
+      <div class="grid">
+        <article class="card"><h3>主要风险</h3><p>基金与调研来源多次在数据量或响应阶段失败。必须设能力级超时、失败分类和回退，不得因宏观接口稳定而推广至整个 AKShare。</p></article>
+        <article class="card"><h3>待决问题</h3><p>旧 PPI 31 字段是否继续保留；ETF 复权因子是否必须保留为显式序列；机构调研是否接受汇总降级。它们需要字段对账后再写 ADR。</p></article>
+        <article class="card"><h3>外部证据</h3><p><a href="https://akshare.akfamily.xyz/data/fund/fund_public.html">AKShare 公募基金文档</a>说明净值、ETF 份额、组合持仓的参数和单位；<a href="https://akshare.akfamily.xyz/data/macro/macro.html">宏观数据文档</a>说明 CPI/PPI/GDP 的频率和口径；<a href="https://akshare.akfamily.xyz/data/interest_rate/interest_rate.html">利率数据文档</a>说明 Shibor 单期限利率与 BP 变动。</p></article>
+      </div>
+    </section>
+  </main>
+  <footer><div class="shell">0009 · AKShare B07 基金、宏观与机构调研首轮调研 · 本次新增实测证据与能力级准入结论。</div></footer>
+</body>
+</html>

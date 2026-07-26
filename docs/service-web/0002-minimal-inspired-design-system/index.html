@@ -1,0 +1,1581 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta
+    name="description"
+    content="基于 Minimal UI 三个代表页面与关键浮层的实测结果，定义 quant-v2 可实施的颜色、间距、圆角、阴影、MUI 组件尺寸和页面模式。"
+  >
+  <title>Minimal 风格设计系统与 MUI 落地方案｜技术方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1c252e;
+      --muted: #637381;
+      --subtle: #919eab;
+      --line: rgb(145 158 171 / 24%);
+      --surface: #f4f6f8;
+      --surface-soft: #f9fafb;
+      --accent: #00a76f;
+      --accent-dark: #007867;
+      --accent-soft: #e9fbf2;
+      --success: #118d57;
+      --warning: #b76e00;
+      --danger: #b71d18;
+      --radius: 16px;
+      --shadow:
+        0 0 2px rgb(145 158 171 / 20%),
+        0 12px 24px -4px rgb(145 158 171 / 12%);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    a {
+      color: var(--accent-dark);
+      text-underline-offset: 0.2em;
+    }
+
+    a:focus-visible,
+    button:focus-visible {
+      outline: 3px solid rgb(0 167 111 / 28%);
+      outline-offset: 3px;
+      border-radius: 4px;
+    }
+
+    code {
+      padding: 0.1em 0.35em;
+      border-radius: 5px;
+      background: var(--surface);
+      font: 0.9em/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .shell {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    header {
+      padding: 44px 0 34px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, var(--surface-soft), #fff);
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent-dark);
+      font-size: 0.76rem;
+      font-weight: 750;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+    }
+
+    h1 {
+      max-width: 940px;
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 3.35rem);
+    }
+
+    h2 {
+      margin: 0 0 20px;
+      font-size: clamp(1.45rem, 3vw, 2rem);
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 1.05rem;
+    }
+
+    p {
+      max-width: 78ch;
+    }
+
+    ul {
+      padding-left: 1.25rem;
+    }
+
+    li + li {
+      margin-top: 0.35rem;
+    }
+
+    .lede {
+      max-width: 870px;
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 1.04rem;
+    }
+
+    .snapshot {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .snapshot article {
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgb(255 255 255 / 82%);
+    }
+
+    .snapshot strong {
+      display: block;
+      margin-bottom: 2px;
+      color: var(--accent-dark);
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+    }
+
+    .snapshot p {
+      margin: 0;
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 14px 0 0;
+    }
+
+    .meta div {
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgb(255 255 255 / 70%);
+    }
+
+    .meta dt {
+      color: var(--muted);
+      font-size: 0.75rem;
+    }
+
+    .meta dd {
+      margin: 1px 0 0;
+      font-size: 0.9rem;
+      font-weight: 650;
+    }
+
+    .status {
+      color: var(--success);
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 94%);
+      backdrop-filter: blur(12px);
+    }
+
+    nav ul {
+      display: flex;
+      gap: 22px;
+      width: max-content;
+      margin: 0;
+      padding: 13px 0;
+      list-style: none;
+    }
+
+    nav li + li {
+      margin: 0;
+    }
+
+    nav a {
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 650;
+      text-decoration: none;
+    }
+
+    nav a:hover {
+      color: var(--accent);
+    }
+
+    main {
+      padding: 22px 0 72px;
+    }
+
+    section {
+      padding: 50px 0;
+      border-bottom: 1px solid var(--line);
+      scroll-margin-top: 58px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .card p:last-child,
+    .card ul:last-child {
+      margin-bottom: 0;
+    }
+
+    .label {
+      display: inline-block;
+      margin-bottom: 9px;
+      color: var(--accent-dark);
+      font-size: 0.76rem;
+      font-weight: 750;
+      letter-spacing: 0.06em;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 0.12rem 0.48rem;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent-dark);
+      font-size: 0.76rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .tag.fact {
+      background: #e9fbf2;
+      color: #0b6b43;
+    }
+
+    .tag.assumption {
+      background: #fff5cc;
+      color: #7a4100;
+    }
+
+    .tag.open {
+      background: #ffe9d5;
+      color: #7a0916;
+    }
+
+    .callout {
+      margin-top: 18px;
+      padding: 18px 20px;
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      background: var(--accent-soft);
+    }
+
+    .callout.warning {
+      border-left-color: var(--warning);
+      background: #fff8ed;
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--surface);
+      font-size: 0.82rem;
+    }
+
+    td {
+      font-size: 0.93rem;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .swatches {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .swatch {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+    }
+
+    .swatch-color {
+      height: 62px;
+      background: var(--swatch);
+    }
+
+    .swatch-meta {
+      padding: 9px 10px 10px;
+      font-size: 0.76rem;
+      line-height: 1.45;
+    }
+
+    .swatch-meta strong,
+    .swatch-meta code {
+      display: block;
+    }
+
+    .specimen {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+      gap: 24px;
+      align-items: start;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .specimen + .specimen {
+      margin-top: 18px;
+    }
+
+    .metric-demo {
+      min-height: 154px;
+      padding: 24px;
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .metric-demo small {
+      display: block;
+      font-weight: 650;
+    }
+
+    .metric-demo strong {
+      display: block;
+      margin: 12px 0 8px;
+      font-size: 2rem;
+      line-height: 1.5;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .metric-demo span {
+      color: var(--success);
+      font-size: 0.875rem;
+    }
+
+    .control-demo {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .demo-button,
+    .demo-field {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font: inherit;
+    }
+
+    .demo-button {
+      min-height: 36px;
+      padding: 6px 12px;
+      border: 0;
+      background: var(--ink);
+      color: #fff;
+      font-size: 0.875rem;
+      font-weight: 700;
+    }
+
+    .demo-field {
+      min-height: 56px;
+      padding: 16px 14px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 0.9375rem;
+    }
+
+    .steps {
+      padding-left: 1.25rem;
+    }
+
+    .steps li {
+      padding: 4px 0 12px 8px;
+    }
+
+    .decision {
+      color: var(--success);
+      font-weight: 700;
+    }
+
+    .risk {
+      color: var(--warning);
+      font-weight: 700;
+    }
+
+    .mockup-grid {
+      display: grid;
+      gap: 28px;
+      margin-top: 24px;
+    }
+
+    .mockup {
+      margin: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .mockup img {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: #f4f6f8;
+    }
+
+    .mockup figcaption {
+      padding: 16px 20px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.65;
+    }
+
+    .mockup figcaption strong {
+      color: var(--ink);
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    footer {
+      padding: 28px 0 48px;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    @media (max-width: 800px) {
+      header {
+        padding-top: 34px;
+      }
+
+      .snapshot,
+      .meta,
+      .grid,
+      .grid.two,
+      .specimen {
+        grid-template-columns: 1fr;
+      }
+
+      .swatches {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      section {
+        padding: 40px 0;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .shell {
+        width: min(100% - 28px, 1120px);
+      }
+
+      .card,
+      .specimen {
+        padding: 17px;
+      }
+
+      .swatches {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media print {
+      nav {
+        display: none;
+      }
+
+      header,
+      main,
+      section {
+        padding-top: 18px;
+      }
+
+      .shell {
+        width: 100%;
+      }
+
+      .card,
+      .snapshot article,
+      .specimen {
+        box-shadow: none;
+        break-inside: avoid;
+      }
+
+      .card,
+      .snapshot article,
+      .specimen,
+      tr {
+        break-inside: avoid;
+      }
+
+      h2,
+      h3 {
+        break-after: avoid;
+      }
+
+      .table-wrap {
+        overflow: visible;
+      }
+
+      table {
+        min-width: 0;
+      }
+
+      thead {
+        display: table-header-group;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Technical solution · service-web · 0002</p>
+      <h1>Minimal 风格设计系统与 MUI 落地方案</h1>
+      <p class="lede">
+        基于 <a href="https://minimals.cc/dashboard">Minimal UI</a> 三个代表页面、
+        两类浮层、深浅主题和移动端布局的浏览器实测，建立 quant-v2 可执行的 UI 规范。
+        配色、字体、8px 网格、16px 卡片、轻阴影、组件尺寸与交互状态均采用 Minimal 体系；
+        唯一业务特例是中国市场红涨绿跌，并始终配合正负号、箭头或文字。
+      </p>
+
+      <div class="snapshot" aria-label="方案一屏摘要">
+        <article>
+          <strong>问题</strong>
+          <p>现有 MUI theme 只有基础颜色、12px 圆角和两项组件覆盖，页面密度与组件状态尚无统一合同。</p>
+        </article>
+        <article>
+          <strong>决策</strong>
+          <p>完整采用 Minimal 色板、字体、间距、圆角、阴影、组件尺寸和交互；仅保留中国市场红涨绿跌。</p>
+        </article>
+        <article>
+          <strong>主要风险</strong>
+          <p>参考站点是商业模板；视觉规范可复现，模板代码、品牌、插图、图标和受许可资产不可直接复制。</p>
+        </article>
+      </div>
+
+      <dl class="meta">
+        <div>
+          <dt>状态</dt>
+          <dd class="status">Proposed</dd>
+        </div>
+        <div>
+          <dt>负责人</dt>
+          <dd>service-web 团队</dd>
+        </div>
+        <div>
+          <dt>最后修改</dt>
+          <dd>2026-07-26</dd>
+        </div>
+        <div>
+          <dt>关联基线</dt>
+          <dd><a href="../0001-frontend-foundation/index.html">方案 0001</a></dd>
+        </div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#evidence">研究范围</a></li>
+        <li><a href="#principles">设计语言</a></li>
+        <li><a href="#tokens">基础令牌</a></li>
+        <li><a href="#geometry">尺寸与布局</a></li>
+        <li><a href="#patterns">组件规范</a></li>
+        <li><a href="#mockups">验证稿</a></li>
+        <li><a href="#responsive">响应式与可用性</a></li>
+        <li><a href="#implementation">实施</a></li>
+        <li><a href="#acceptance">验收</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="evidence">
+      <h2>研究范围与证据强度</h2>
+      <p>
+        达到模式饱和后提前结束，共检查 <strong>3 个页面</strong>，未触及 10 页上限。
+        数值来自 2560×1156 Chrome 视口下的可见界面与 computed styles；
+        移动端在 390×844 视口复核。2026-07-26 的站点版本可能后续变化。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>样本</th>
+              <th>覆盖能力</th>
+              <th>提取重点</th>
+              <th>结论</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>/dashboard</code></td>
+              <td>仪表盘、数据卡、图表卡、简表、导航</td>
+              <td>页面骨架、卡片、层级、图表配色、阴影</td>
+              <td><span class="tag fact">实测</span> 建立基础语言</td>
+            </tr>
+            <tr>
+              <td><code>/dashboard/user/list</code></td>
+              <td>Tab、筛选、搜索、复杂表格、分页、状态</td>
+              <td>表头/行高、密度、筛选区、表格卡组合</td>
+              <td><span class="tag fact">实测</span> 建立数据工作台模式</td>
+            </tr>
+            <tr>
+              <td><code>/dashboard/user/new</code></td>
+              <td>上传、开关、两列表单、主操作</td>
+              <td>字段高度、表单栅格、卡片宽度、移动折叠</td>
+              <td><span class="tag fact">实测</span> 建立编辑模式</td>
+            </tr>
+            <tr>
+              <td>Quick update 弹窗</td>
+              <td>中型 Dialog、Alert、密集表单、Actions</td>
+              <td>720px 宽、24px 内距、16px 圆角、动作顺序</td>
+              <td><span class="tag fact">实测</span> 覆盖弹窗</td>
+            </tr>
+            <tr>
+              <td>Settings 抽屉</td>
+              <td>右侧 Drawer、滚动容器、设置卡</td>
+              <td>360px 宽、68px Header、半透明 Paper、阴影</td>
+              <td><span class="tag fact">实测</span> 覆盖抽屉</td>
+            </tr>
+            <tr>
+              <td>深色 + 390px 移动端</td>
+              <td>主题语义、导航收缩、卡片堆叠</td>
+              <td>深色 surface、16px 页边距、64px AppBar</td>
+              <td><span class="tag fact">实测</span> 覆盖响应式</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout">
+        <strong>结论可信度</strong>
+        颜色、字体、圆角、阴影和组件尺寸为实测事实；中文字体回退、
+        金融红涨绿跌、触控尺寸和落地顺序属于本方案决策；未检查的复杂空态不写成事实。
+      </aside>
+    </section>
+
+    <section id="principles">
+      <h2>设计语言</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">01 · Neutral first</span>
+          <h3>中性色承担结构</h3>
+          <p>
+            大面积纯白或深灰，边界用低透明度灰；Minimal 主绿只出现在主要动作、选中、焦点和关键序列。
+            不用彩色卡片堆叠制造层级。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">02 · Quiet depth</span>
+          <h3>圆角与轻阴影分层</h3>
+          <p>
+            控件 8px、卡片与 Dialog 16px。卡片通常无实线边框，使用两段灰色阴影；
+            表格、输入和分隔线才使用细边界。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">03 · Data hierarchy</span>
+          <h3>数字优先，说明退后</h3>
+          <p>
+            主指标 32/48、标题 14/22、补充信息 12–14px。数字启用 tabular-nums；
+            涨跌同时显示符号、文字与颜色。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">04 · 8px rhythm</span>
+          <h3>规则密度，不随机留白</h3>
+          <p>
+            以 8px 为主网格，4px 只用于图标微调或紧凑关系；常用间隔 8、12、16、24、32、40、64px。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">05 · Composed surfaces</span>
+          <h3>一个任务，一个容器</h3>
+          <p>
+            Tab、筛选、表格、分页组合在同一 Card；Dialog 由 Title、Content、Actions 组成；
+            避免每个小区块都套 Paper。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">06 · Progressive density</span>
+          <h3>桌面高效，移动可触</h3>
+          <p>
+            桌面允许 36px 操作按钮和 76px 信息行；移动端主要动作至少 44px，
+            多列表单和卡片栅格单列化，表格横向滚动或切换列表视图。
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section id="tokens">
+      <h2>基础令牌</h2>
+      <h3>颜色：完整采用 Minimal 色板</h3>
+      <p>
+        完整采用 Minimal 色板：主色 <code>#00A76F</code>、辅助色 <code>#8E33FF</code>，
+        中性色从 <code>#FCFDFD</code> 到 <code>#141A21</code>，信息/成功/警告/错误分别为
+        <code>#00B8D9</code>、<code>#22C55E</code>、<code>#FFAB00</code>、<code>#FF5630</code>。
+        中国市场上涨复用错误红、下跌复用成功绿，但必须用正负号、箭头或文字消除语义歧义。
+      </p>
+
+      <div class="swatches" aria-label="核心颜色">
+        <div class="swatch">
+          <div class="swatch-color" style="--swatch:#00a76f"></div>
+          <div class="swatch-meta"><strong>Primary</strong><code>#00A76F</code></div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="--swatch:#1c252e"></div>
+          <div class="swatch-meta"><strong>Text primary</strong><code>#1C252E</code></div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="--swatch:#637381"></div>
+          <div class="swatch-meta"><strong>Text secondary</strong><code>#637381</code></div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="--swatch:#f4f6f8"></div>
+          <div class="swatch-meta"><strong>Neutral surface</strong><code>#F4F6F8</code></div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="--swatch:#8e33ff"></div>
+          <div class="swatch-meta"><strong>Secondary</strong><code>#8E33FF</code></div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="--swatch:#00b8d9"></div>
+          <div class="swatch-meta"><strong>Info</strong><code>#00B8D9</code></div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="--swatch:#22c55e"></div>
+          <div class="swatch-meta"><strong>Success / 跌</strong><code>#22C55E</code></div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="--swatch:#ffab00"></div>
+          <div class="swatch-meta"><strong>Warning</strong><code>#FFAB00</code></div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="--swatch:#ff5630"></div>
+          <div class="swatch-meta"><strong>Error / 涨</strong><code>#FF5630</code></div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="--swatch:#141a21"></div>
+          <div class="swatch-meta"><strong>Dark canvas</strong><code>#141A21</code></div>
+        </div>
+      </div>
+
+      <div class="grid two" style="margin-top: 18px;">
+        <article class="card">
+          <span class="label">Light mode</span>
+          <h3>白色画布，浅灰结构</h3>
+          <ul>
+            <li>Canvas / Paper：<code>#FFFFFF</code></li>
+            <li>Neutral surface：<code>#F4F6F8</code></li>
+            <li>Primary text：<code>#1C252E</code></li>
+            <li>Secondary text：<code>#637381</code></li>
+            <li>Divider：<code>rgb(145 158 171 / 20%)</code></li>
+            <li>Hover / Selected：灰色 8% / 16%</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">Dark mode · 实测</span>
+          <h3>深灰画布，Paper 提亮一级</h3>
+          <ul>
+            <li>Canvas：<code>#141A21</code></li>
+            <li>Paper：<code>#1C252E</code></li>
+            <li>Neutral surface：<code>#28323D</code></li>
+            <li>Primary text：<code>#FFFFFF</code></li>
+            <li>Secondary text：<code>#919EAB</code></li>
+            <li>Divider 仍为灰色 20%；阴影改用黑色透明层</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3 style="margin-top: 28px;">字体</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>层级</th>
+              <th>Minimal 实测</th>
+              <th>quant-v2 规范</th>
+              <th>使用场景</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>H1</td>
+              <td>Barlow 800 · 40/50</td>
+              <td>Barlow 800 · 40/50；中文回退 Public Sans/系统字体</td>
+              <td>极少使用的一级产品标题</td>
+            </tr>
+            <tr>
+              <td>H2</td>
+              <td>Barlow 800 · 32/42.7</td>
+              <td>Barlow 800 · 32/43；中文回退 Public Sans/系统字体</td>
+              <td>关键数据或大区块标题</td>
+            </tr>
+            <tr>
+              <td>H3</td>
+              <td>Barlow 700 · 24/36</td>
+              <td>Barlow 700 · 24/36；中文回退 Public Sans/系统字体</td>
+              <td>页面标题</td>
+            </tr>
+            <tr>
+              <td>H4 / H5 / H6</td>
+              <td>20/30 · 18/27 · 17/28</td>
+              <td>同尺寸，700 / 700 / 600</td>
+              <td>卡片标题、Dialog 标题、工具区</td>
+            </tr>
+            <tr>
+              <td>Body 1 / 2</td>
+              <td>16/24 · 14/22</td>
+              <td>同尺寸，400</td>
+              <td>正文 / 表格、说明与控件</td>
+            </tr>
+            <tr>
+              <td>Button</td>
+              <td>14/24 · 700</td>
+              <td>同尺寸；禁止全大写</td>
+              <td>所有操作按钮</td>
+            </tr>
+            <tr>
+              <td>Caption / Overline</td>
+              <td>12/18 · 400 / 700</td>
+              <td>同尺寸</td>
+              <td>时间、单位、组标签</td>
+            </tr>
+            <tr>
+              <td>金融数字</td>
+              <td>指标值 32/48 · 700</td>
+              <td>32/48 · 700，<code>tabular-nums</code></td>
+              <td>价格、收益、规模、变化率</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout warning">
+        <strong>字体取舍</strong>
+        <strong>字体同样采用 Minimal：</strong>Public Sans Variable 负责正文、控件和中小标题，
+        Barlow 负责 H1–H3 与大数字。两者必须随应用自托管，不使用远程 CDN；
+        中文依次回退到 PingFang SC、Microsoft YaHei 和系统无衬线字体。
+      </aside>
+
+      <h3 style="margin-top: 28px;">可直接使用的文件</h3>
+      <ul>
+        <li>
+          <a href="../../../service-web/src/styles/design-tokens.css">
+            前端生效的 CSS variables：service-web/src/styles/design-tokens.css
+          </a>
+        </li>
+        <li>
+          <a href="../../../service-web/src/styles/design-tokens.ts">
+            TypeScript tokens：service-web/src/styles/design-tokens.ts
+          </a>
+        </li>
+        <li>
+          <a href="../../../service-web/src/styles/theme.tsx">
+            前端生效的 MUI v7 theme：service-web/src/styles/theme.tsx
+          </a>
+        </li>
+        <li>
+          <a href="../../../.agents/skills/quant-v2-ui-design/SKILL.md">
+            仓库级设计技能：quant-v2-ui-design
+          </a>
+        </li>
+        <li><a href="examples/design-tokens.css">研究快照：design-tokens.css</a></li>
+        <li><a href="examples/mui-theme.ts">研究快照：mui-theme.ts</a></li>
+      </ul>
+    </section>
+
+    <section id="geometry">
+      <h2>间距、圆角、边界与布局</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">Spacing</span>
+          <h3>8px 主网格，4px 半步</h3>
+          <p><code>0 / 4 / 8 / 12 / 16 / 20 / 24 / 32 / 40 / 48 / 64</code></p>
+          <ul>
+            <li>图标与文字：8px</li>
+            <li>紧密字段/标签：12px</li>
+            <li>移动页边距：16px</li>
+            <li>卡片与 Dialog 内容：24px</li>
+            <li>卡片栅格：24px</li>
+            <li>页面底部：64px</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">Radius</span>
+          <h3>8px 控件，16px 容器</h3>
+          <ul>
+            <li>XS 4px：微型状态、内嵌图形</li>
+            <li>SM 8px：Button、Input、Nav item、Alert</li>
+            <li>MD 12px：局部媒体、嵌套面板</li>
+            <li>LG 16px：Card、Dialog、设置 Tile</li>
+            <li>Pill：Avatar、Badge、圆形 IconButton</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">Elevation</span>
+          <h3>边界少，阴影轻</h3>
+          <ul>
+            <li>Card：双段灰色阴影，无 elevation 编号依赖</li>
+            <li>Drawer：向内容侧投射 -40px 影</li>
+            <li>Dialog：黑色 24% 大范围阴影</li>
+            <li>输入/表格：1px divider，不加阴影</li>
+            <li>嵌套 Card 默认只用边框，不叠两层阴影</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3 style="margin-top: 28px;">布局尺寸</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>区域</th>
+              <th>实测值</th>
+              <th>quant-v2 规范</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>桌面侧栏</td>
+              <td>300px</td>
+              <td>300px；页面少于 5 个一级入口时可暂不启用</td>
+              <td>固定导航，不把业务筛选塞入全局侧栏</td>
+            </tr>
+            <tr>
+              <td>桌面 AppBar</td>
+              <td>72px</td>
+              <td>72px</td>
+              <td>透明/模糊背景，工具按钮 36px</td>
+            </tr>
+            <tr>
+              <td>移动 AppBar</td>
+              <td>64px</td>
+              <td>64px</td>
+              <td>侧栏变临时 Drawer；保留主任务与账号入口</td>
+            </tr>
+            <tr>
+              <td>内容最大宽度</td>
+              <td>1200px</td>
+              <td>1200px</td>
+              <td>数据大屏允许显式 full-bleed，默认不可无限拉宽</td>
+            </tr>
+            <tr>
+              <td>桌面内容内距</td>
+              <td>左右 40px，底 64px</td>
+              <td>≥1200px 使用 40px；中屏 24px</td>
+              <td>页面标题与主卡片共享左边线</td>
+            </tr>
+            <tr>
+              <td>移动内容内距</td>
+              <td>左右 16px，底 64px</td>
+              <td>16px</td>
+              <td>390px 下卡片实测宽约 343px</td>
+            </tr>
+            <tr>
+              <td>栅格间距</td>
+              <td>24px 为主</td>
+              <td>24px；紧凑统计区可 16px</td>
+              <td>不要出现 17/22/26px 等孤立值</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="patterns">
+      <h2>MUI 组件尺寸与模式</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>MUI 组件</th>
+              <th>基准尺寸</th>
+              <th>内距 / 圆角</th>
+              <th>使用规则</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>Button</code></td>
+              <td>small 28 / medium 36 / large 44px</td>
+              <td>8px；medium 6×12</td>
+              <td>桌面默认 medium；移动主操作 large；disableElevation</td>
+            </tr>
+            <tr>
+              <td><code>IconButton</code></td>
+              <td>36×36px</td>
+              <td>8px，圆形 hit area</td>
+              <td>无文字必须有 aria-label 与 Tooltip；触控外层保证 44px</td>
+            </tr>
+            <tr>
+              <td><code>OutlinedInput</code></td>
+              <td>56px</td>
+              <td>16×14px；8px</td>
+              <td>输入 15/24；默认边框灰 20%，focus 2px</td>
+            </tr>
+            <tr>
+              <td><code>Card</code></td>
+              <td>内容决定</td>
+              <td>24px；16px</td>
+              <td>默认无边框、elevation 0、使用 custom card shadow</td>
+            </tr>
+            <tr>
+              <td><code>Tab</code></td>
+              <td>42px 高</td>
+              <td>9px 垂直；组间 40px</td>
+              <td>14/22、600；短下划线表示选中，数量用 Badge</td>
+            </tr>
+            <tr>
+              <td><code>TableCell</code></td>
+              <td>Head 56px；Row 76px</td>
+              <td>16px</td>
+              <td>14/22；head 600；dense row 52px</td>
+            </tr>
+            <tr>
+              <td><code>Chip</code></td>
+              <td>24px 高</td>
+              <td>左右 8px；6px</td>
+              <td>状态色使用浅底+深文字；保留文本，不用纯色点</td>
+            </tr>
+            <tr>
+              <td><code>Alert</code></td>
+              <td>最小 52px</td>
+              <td>6×16px；8px</td>
+              <td>浅色背景、16% 边界；不用于普通说明文字</td>
+            </tr>
+            <tr>
+              <td><code>Dialog</code></td>
+              <td>medium 720px</td>
+              <td>Title/Content/Actions 24px；16px</td>
+              <td>屏幕边距 16px；Actions 右对齐、间隔 12px</td>
+            </tr>
+            <tr>
+              <td><code>Drawer</code></td>
+              <td>360px，移动 100vw</td>
+              <td>Header 68px；内容左右 20px</td>
+              <td>右侧详情/设置；内容独立滚动；Header 固定</td>
+            </tr>
+            <tr>
+              <td>Vertical nav item</td>
+              <td>44px</td>
+              <td>4/8/4/12px；8px</td>
+              <td>选中使用 Minimal 主绿 8% 背景，不使用实心按钮</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="specimen" style="margin-top: 22px;">
+        <div>
+          <span class="label">Card specimen</span>
+          <h3>指标卡</h3>
+          <p>
+            24px 内距、16px 圆角、双段轻阴影。标签 14/22 600；
+            主值 32/48 700；趋势与周期放同一行。
+          </p>
+        </div>
+        <div class="metric-demo" aria-label="指标卡示例">
+          <small>总资产</small>
+          <strong>¥ 1,286,540.32</strong>
+          <span>▲ +2.6% · 近 7 日</span>
+        </div>
+      </div>
+
+      <div class="specimen">
+        <div>
+          <span class="label">Control specimen</span>
+          <h3>表单控件</h3>
+          <p>
+            56px 字段建立稳定扫描线；36px 桌面按钮保持紧凑。
+            页面在触控断点下将主要按钮提升到 44px。
+          </p>
+        </div>
+        <div class="control-demo" aria-label="控件示例">
+          <div class="demo-field">证券代码 / 名称</div>
+          <button class="demo-button" type="button">查询</button>
+        </div>
+      </div>
+
+      <h3 style="margin-top: 30px;">卡片</h3>
+      <div class="grid">
+        <article class="card">
+          <span class="label">Metric card</span>
+          <h3>单一指标</h3>
+          <ul>
+            <li>默认最小高 154–162px，内距 24px。</li>
+            <li>同组卡片等高，主值必须可比较。</li>
+            <li>迷你图放右侧，不抢标题与数值层级。</li>
+            <li>整卡可点击时提供 hover 和键盘焦点。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">Chart card</span>
+          <h3>标题、工具、画布</h3>
+          <ul>
+            <li>Header 由标题/说明与右侧筛选组成。</li>
+            <li>画布与 Card 共用背景，不再套 Paper。</li>
+            <li>图例靠近图表，颜色来自共享 chart tokens。</li>
+            <li>loading/empty/error 保持同一最小高度。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">Table card</span>
+          <h3>一个工作台容器</h3>
+          <ul>
+            <li>Tab、筛选、表格、分页同一 Card。</li>
+            <li>容器负责 overflow；Table 不自行圆角。</li>
+            <li>底部工具区与分页共享 64px 左右高度。</li>
+            <li>避免 Card 中再放有阴影 Card。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3 style="margin-top: 30px;">表格</h3>
+      <div class="grid two">
+        <article class="card">
+          <span class="label">结构</span>
+          <h3>Tab → Filter → Head → Rows → Footer</h3>
+          <ul>
+            <li>Tab 区 42px 高，左右内距 20px。</li>
+            <li>筛选字段 56px，工具区上下 20px、左右 20px。</li>
+            <li>表头 56px，背景 neutral-200，文字 secondary。</li>
+            <li>标准行 76px，可放 Avatar + 两行文本；纯数字表可 56–64px。</li>
+            <li>不使用斑马纹；hover 用灰色 8%。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">行为</span>
+          <h3>高信息密度仍可解释</h3>
+          <ul>
+            <li>数字右对齐并使用 tabular-nums；文本默认左对齐。</li>
+            <li>排序按钮覆盖完整表头，显示方向和无障碍状态。</li>
+            <li>状态 Chip 同时显示文字；涨跌同时显示符号。</li>
+            <li>行操作保持最后一列，默认最多 2 个；更多进入 Menu。</li>
+            <li>Dense 是用户偏好，不是所有表格默认。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3 style="margin-top: 30px;">表单</h3>
+      <div class="grid">
+        <article class="card">
+          <span class="label">布局</span>
+          <h3>任务分组，而非字段平铺</h3>
+          <ul>
+            <li>桌面主表单两列，列间 16px、行间 24px。</li>
+            <li>关联设置可放窄侧卡；移动端全部单列。</li>
+            <li>卡片内距 24px，字段高度 56px。</li>
+            <li>主操作右对齐；多步流程使用稳定底栏。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">状态</span>
+          <h3>默认、悬浮、焦点、错误完整</h3>
+          <ul>
+            <li>默认边界灰 20%，hover 灰 32%。</li>
+            <li>focus 2px 品牌边界 + 外部可见焦点环。</li>
+            <li>错误使用红色边界、图标和文本，不只改颜色。</li>
+            <li>helper text 12/18；异步校验说明当前状态。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">内容</span>
+          <h3>标签描述字段，不把示例当标签</h3>
+          <ul>
+            <li>所有输入具有持久 label；placeholder 只给格式示例。</li>
+            <li>金额、比例、数量明确单位与精度。</li>
+            <li>危险/不可逆操作与普通保存分离。</li>
+            <li>提交中禁用重复提交，并保持按钮宽度不跳动。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3 style="margin-top: 30px;">抽屉与弹窗</h3>
+      <div class="grid two">
+        <article class="card">
+          <span class="label">Drawer · 360px</span>
+          <h3>保留页面上下文的侧任务</h3>
+          <ul>
+            <li>用于筛选、设置、详情预览、轻量编辑。</li>
+            <li>Header 68px，标题 18/28，IconButton 36px。</li>
+            <li>Paper 90% 不透明 + 20px blur；内容独立滚动。</li>
+            <li>纯设置可使用 invisible backdrop；会改业务数据的 Drawer 必须显示 backdrop。</li>
+            <li>移动端宽 100vw，并保留关闭按钮与返回手势。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">Dialog · 720px</span>
+          <h3>阻断式确认或短任务</h3>
+          <ul>
+            <li>用于必须先处理的确认、短表单、错误恢复。</li>
+            <li>外边距 16px、圆角 16px、Title/Content/Actions 各 24px。</li>
+            <li>中型表单 720px；普通确认由 quant-v2 收敛到 480px。</li>
+            <li>默认操作顺序：取消 → 主操作；危险动作使用 error 色并重复对象名称。</li>
+            <li>必须 focus trap、Esc 关闭策略、恢复触发点焦点。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="mockups">
+      <h2>视觉验证稿</h2>
+      <p>
+        以下四张 1536×1024 桌面稿用于校验理解，不是逐像素页面实现。
+        它们共同采用 Minimal 的绿色主色、紫色辅助色、中性灰、16px 卡片圆角、轻阴影、
+        300px 导航侧栏与紧凑 MUI 控件；行情语义统一为中国市场习惯的红涨绿跌。
+      </p>
+
+      <div class="mockup-grid">
+        <figure class="mockup">
+          <img src="assets/homepage.png" alt="量化平台首页：侧栏、指标卡、净值曲线、资产分布与自选行情">
+          <figcaption>
+            <strong>首页：</strong>
+            验证 AppShell、指标卡、图表卡、资产分布与行情列表的层级；绿色只承担品牌与主操作，
+            涨跌仍由红绿及正负号双重编码。
+          </figcaption>
+        </figure>
+
+        <figure class="mockup">
+          <img src="assets/stock-table.png" alt="带标签页、搜索、筛选条件和分页的股票数据表格">
+          <figcaption>
+            <strong>带筛选的表格页：</strong>
+            验证 Tabs、搜索、Select、Filter Chip、批量操作、固定密度表格、状态 Chip 与分页组合。
+          </figcaption>
+        </figure>
+
+        <figure class="mockup">
+          <img src="assets/stock-screener-form.png" alt="股票筛选策略表单：分区卡片、两列字段、开关和底部操作">
+          <figcaption>
+            <strong>表单页：</strong>
+            验证持久标签、两列字段、分组标题、辅助文字、Switch、Select 与明确的取消/保存操作层级。
+          </figcaption>
+        </figure>
+
+        <figure class="mockup">
+          <img src="assets/quick-edit-dialog.png" alt="数据表格上方的快速编辑弹窗，背景带遮罩">
+          <figcaption>
+            <strong>弹窗：</strong>
+            验证 720px Dialog、背景遮罩、短表单、关闭按钮、焦点任务与取消/确认按钮顺序。
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="responsive">
+      <h2>响应式、交互与无障碍</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>断点</th>
+              <th>页面骨架</th>
+              <th>卡片与表单</th>
+              <th>表格与操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>xs · 0–599</strong></td>
+              <td>64px AppBar；16px 页边距；无常驻侧栏</td>
+              <td>单列、全宽；主要按钮 44px</td>
+              <td>横滚或卡片列表；冻结第一关键列需专项验证</td>
+            </tr>
+            <tr>
+              <td><strong>sm · 600–899</strong></td>
+              <td>24px 页边距；临时侧栏</td>
+              <td>统计卡可两列；表单视字段长度决定 1–2 列</td>
+              <td>隐藏次要列，保留行 Menu</td>
+            </tr>
+            <tr>
+              <td><strong>md · 900–1199</strong></td>
+              <td>可启用紧凑侧栏；内容 24px</td>
+              <td>表单两列；图表主次布局</td>
+              <td>标准表格；筛选可换行</td>
+            </tr>
+            <tr>
+              <td><strong>lg · 1200–1535</strong></td>
+              <td>300px 侧栏；内容最大 1200px</td>
+              <td>完整栅格，24px gap</td>
+              <td>标准密度，完整列</td>
+            </tr>
+            <tr>
+              <td><strong>xl · ≥1536</strong></td>
+              <td>内容仍限制 1200px，分析大屏可显式扩展</td>
+              <td>不因屏幕宽而无限增加列数</td>
+              <td>优先提高图表宽度，不拉长文本行</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid" style="margin-top: 18px;">
+        <article class="card">
+          <span class="label">Keyboard</span>
+          <h3>所有操作可达</h3>
+          <ul>
+            <li>焦点环 3px，不能被 Card overflow 截断。</li>
+            <li>Menu、Dialog、Drawer 有正确焦点进入与返回。</li>
+            <li>表头排序、Tab、分页与图表工具支持键盘。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">Contrast</span>
+          <h3>目标 WCAG 2.2 AA</h3>
+          <ul>
+            <li>正文 ≥4.5:1；大字和图形 ≥3:1。</li>
+            <li>secondary/disabled 只用于相应层级，不承载关键结果。</li>
+            <li>状态使用图标、正负号或文字作为第二编码。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">Motion</span>
+          <h3>反馈清晰，不装饰</h3>
+          <ul>
+            <li>hover/focus 120ms，Drawer/Dialog 200ms 为实现默认值。</li>
+            <li>遵从 reduced-motion；图表不使用无意义循环动画。</li>
+            <li>加载骨架匹配最终几何，避免布局跳动。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="implementation">
+      <h2>实施边界与迁移顺序</h2>
+      <p>
+        本方案先提供设计合同与可复制示例，不直接修改当前应用主题。
+        落地时以 MUI theme 为组件唯一入口，CSS variables 服务于全局 CSS、图表容器和非 MUI 元素；
+        禁止页面继续新增散落颜色、圆角和阴影。
+      </p>
+
+      <ol class="steps">
+        <li>
+          <strong>阶段 1｜令牌与主题：</strong>
+          将 <a href="examples/design-tokens.css">design-tokens.css</a> 迁入
+          <code>service-web/src/styles/</code>，用
+          <a href="examples/mui-theme.ts">mui-theme.ts</a> 合并现有
+          <code>src/app/theme.tsx</code>；保留现有颜色模式存储行为，并由
+          <code>ColorModeProvider</code> 同步
+          <code>document.documentElement.dataset.colorScheme = mode</code>，
+          使非 MUI 元素与 CSS variables 同步切换。自托管 Public Sans Variable 与 Barlow，
+          不从远程 CDN 加载字体。
+        </li>
+        <li>
+          <strong>阶段 2｜基础组件：</strong>
+          固化 AppShell、PageHeader、SurfaceCard、MetricCard、StatusChip、DataTableToolbar、
+          EmptyState、ConfirmDialog 与 DetailDrawer；只封装重复语义，不做万能组件。
+        </li>
+        <li>
+          <strong>阶段 3｜代表页面：</strong>
+          先迁移市场概览、标的分析两条现有路由；统一卡片、图表 Header、状态和响应式，
+          同步更新 KLineChart/ECharts 的共享视觉令牌。
+        </li>
+        <li>
+          <strong>阶段 4｜数据工作台：</strong>
+          首个真实列表按本方案组合 Tab、Filter、Table、Pagination；在真实数据量出现前不引入 MUI X。
+        </li>
+        <li>
+          <strong>阶段 5｜视觉回归：</strong>
+          固定 light/dark × 390/768/1200/1440 四组视口，覆盖默认、loading、empty、error、
+          Drawer、Dialog 和键盘焦点。
+        </li>
+      </ol>
+
+      <div class="grid">
+        <article class="card">
+          <span class="label">Theme owns</span>
+          <h3>跨产品视觉合同</h3>
+          <ul>
+            <li>palette、typography、spacing、shape、elevation</li>
+            <li>Button/Input/Card/Table/Dialog/Drawer 默认覆盖</li>
+            <li>focus、disabled、hover、selected 状态</li>
+            <li>深浅主题与 chart visual tokens</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">Feature owns</span>
+          <h3>业务语义与组合</h3>
+          <ul>
+            <li>页面信息架构与字段顺序</li>
+            <li>指标、状态、错误与权限文案</li>
+            <li>表格列、筛选、分页和空态</li>
+            <li>图表数据、单位、涨跌和交互</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">Forbidden</span>
+          <h3>避免重新碎片化</h3>
+          <ul>
+            <li>页面硬编码 hex、随机 padding/radius/shadow</li>
+            <li>Card 内反复嵌套有阴影 Paper</li>
+            <li>使用颜色作为唯一业务状态</li>
+            <li>复制 Minimal 品牌、插图、图标或页面源码</li>
+          </ul>
+        </article>
+      </div>
+
+      <aside class="callout warning">
+        <strong>兼容风险</strong>
+        当前主题使用 12px 全局圆角、Card 1px 边框和浅色画布 <code>#F5F7FB</code>。
+        切换到 8px 基础圆角 + 16px Card、白色画布 + 阴影后会产生明显视觉变化；
+        必须按代表页面迁移并保留一条提交级回滚路径，不能一次性机械替换全部 <code>sx</code>。
+      </aside>
+    </section>
+
+    <section id="acceptance">
+      <h2>验收标准与待决问题</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">Token contract</span>
+          <h3>无散落视觉常量</h3>
+          <ul>
+            <li>颜色、间距、圆角、阴影都来自 theme/token。</li>
+            <li>light/dark 语义一致，图表与 MUI 共用颜色源。</li>
+            <li>金融涨跌同时有符号/文字，不只依赖红绿。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">Component contract</span>
+          <h3>尺寸与状态一致</h3>
+          <ul>
+            <li>Card 16/24，Input 56/8，桌面 Button 36/8。</li>
+            <li>Table head 56、row 76/dense 52。</li>
+            <li>Drawer 360，Dialog 720/480，两者焦点管理通过。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">Experience contract</span>
+          <h3>四类视口可用</h3>
+          <ul>
+            <li>390–1440px 无页面级横向溢出。</li>
+            <li>键盘可完成导航、筛选、弹窗和抽屉任务。</li>
+            <li>light/dark、reduced motion、200% zoom 可读。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3 style="margin-top: 28px;">验证命令与检查</h3>
+      <ul>
+        <li><code>vp check</code>：格式化、lint、TypeScript。</li>
+        <li><code>vp test</code>：theme mapper、状态颜色、组件默认值。</li>
+        <li><code>vp build</code>：生产构建与无意外字体/资产依赖。</li>
+        <li><code>vp run e2e</code>：主题、响应式、Dialog/Drawer、键盘焦点。</li>
+        <li>人工检查：中文/数字基线、图表 tooltip、表格密度、200% zoom、打印/导出视图。</li>
+      </ul>
+
+      <div class="table-wrap" style="margin-top: 18px;">
+        <table>
+          <thead>
+            <tr>
+              <th>待决问题</th>
+              <th>推荐默认</th>
+              <th>决定时点</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Public Sans / Barlow 如何分发？</td>
+              <td><strong>应用内自托管</strong>；禁止远程字体 CDN</td>
+              <td>设计系统首次实现时</td>
+            </tr>
+            <tr>
+              <td>一级导航何时改为 300px 侧栏？</td>
+              <td><strong>一级入口达到 5 个或层级达到 2 级时</strong></td>
+              <td>信息架构冻结时</td>
+            </tr>
+            <tr>
+              <td>列表移动端用横滚还是卡片？</td>
+              <td>行情矩阵横滚；管理列表卡片化</td>
+              <td>首个真实列表字段与主任务确定时</td>
+            </tr>
+            <tr>
+              <td>是否采购或直接使用 Minimal 资产？</td>
+              <td><strong>否</strong>；复现视觉与交互规范，不使用模板代码或资产</td>
+              <td>若未来需要模板代码，先完成许可评估</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      Minimal 风格设计系统与 MUI 落地方案 · 变更摘要（2026-07-26）：
+      完成 3 页抽样、Dialog/Drawer/深浅主题/移动端实测，改用 Minimal 原生绿紫配色，并输出
+      CSS variables、MUI theme 映射、组件规范与 4 张视觉验证稿。
+    </div>
+  </footer>
+</body>
+</html>
