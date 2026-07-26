@@ -1,0 +1,4 @@
+interface:
+  display_name: "API 技术方案"
+  short_description: "设计 NestJS 模块、API 契约、鉴权安全、存储与发布演进方案"
+  default_prompt: "使用 $service-api-solution 为新的 API 能力设计契约优先且可演进的技术方案。"

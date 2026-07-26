@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta
     name="description"
-    content="基于 Minimal UI 三个代表页面与关键浮层的实测结果，定义 quant-v2 可实施的颜色、间距、圆角、阴影、MUI 组件尺寸和页面模式。"
+    content="基于 Minimal UI 的结构语言与中国市场语义，定义 quant-v2 紫晶电蓝主题、间距、圆角、阴影、MUI 组件尺寸和页面模式。"
   >
   <title>Minimal 风格设计系统与 MUI 落地方案｜技术方案</title>
   <style>
@@ -17,9 +17,9 @@
       --line: rgb(145 158 171 / 24%);
       --surface: #f4f6f8;
       --surface-soft: #f9fafb;
-      --accent: #00a76f;
-      --accent-dark: #007867;
-      --accent-soft: #e9fbf2;
+      --accent: #6d5ce7;
+      --accent-dark: #4f46b8;
+      --accent-soft: #f0eeff;
       --success: #118d57;
       --warning: #b76e00;
       --danger: #b71d18;
@@ -54,7 +54,7 @@
 
     a:focus-visible,
     button:focus-visible {
-      outline: 3px solid rgb(0 167 111 / 28%);
+      outline: 3px solid rgb(109 92 231 / 28%);
       outline-offset: 3px;
       border-radius: 4px;
     }
@@ -74,7 +74,7 @@
     header {
       padding: 44px 0 34px;
       border-bottom: 1px solid var(--line);
-      background: linear-gradient(180deg, var(--surface-soft), #fff);
+      background: var(--surface-soft);
     }
 
     .eyebrow {
@@ -601,8 +601,8 @@
       <p class="lede">
         基于 <a href="https://minimals.cc/dashboard">Minimal UI</a> 三个代表页面、
         两类浮层、深浅主题和移动端布局的浏览器实测，建立 quant-v2 可执行的 UI 规范。
-        配色、字体、8px 网格、16px 卡片、轻阴影、组件尺寸与交互状态均采用 Minimal 体系；
-        唯一业务特例是中国市场红涨绿跌，并始终配合正负号、箭头或文字。
+        保留字体、8px 网格、16px 卡片、轻阴影、组件尺寸与交互结构，品牌色改为紫晶电蓝；
+        中国市场继续红涨绿跌，并始终配合正负号、箭头或文字。
       </p>
 
       <div class="snapshot" aria-label="方案一屏摘要">
@@ -612,7 +612,7 @@
         </article>
         <article>
           <strong>决策</strong>
-          <p>完整采用 Minimal 色板、字体、间距、圆角、阴影、组件尺寸和交互；仅保留中国市场红涨绿跌。</p>
+          <p>采用紫晶 <code>#6D5CE7</code> + 电蓝 <code>#2F6BFF</code> 品牌色；绿色退出品牌层，仅保留明确下跌与成功语义。</p>
         </article>
         <article>
           <strong>主要风险</strong>
@@ -623,7 +623,7 @@
       <dl class="meta">
         <div>
           <dt>状态</dt>
-          <dd class="status">Proposed</dd>
+          <dd class="status">Implemented</dd>
         </div>
         <div>
           <dt>负责人</dt>
@@ -731,7 +731,7 @@
           <span class="label">01 · Neutral first</span>
           <h3>中性色承担结构</h3>
           <p>
-            大面积纯白或深灰，边界用低透明度灰；Minimal 主绿只出现在主要动作、选中、焦点和关键序列。
+            大面积纯白或深灰，边界用低透明度灰；紫晶主色只出现在主要动作、选中、焦点和关键序列。
             不用彩色卡片堆叠制造层级。
           </p>
         </article>
@@ -779,18 +779,19 @@
 
     <section id="tokens">
       <h2>基础令牌</h2>
-      <h3>颜色：完整采用 Minimal 色板</h3>
+      <h3>颜色：紫晶电蓝品牌层 + 中国市场语义层</h3>
       <p>
-        完整采用 Minimal 色板：主色 <code>#00A76F</code>、辅助色 <code>#8E33FF</code>，
-        中性色从 <code>#FCFDFD</code> 到 <code>#141A21</code>，信息/成功/警告/错误分别为
-        <code>#00B8D9</code>、<code>#22C55E</code>、<code>#FFAB00</code>、<code>#FF5630</code>。
-        中国市场上涨复用错误红、下跌复用成功绿，但必须用正负号、箭头或文字消除语义歧义。
+        品牌主色为紫晶 <code>#6D5CE7</code>，辅助色为电蓝 <code>#2F6BFF</code>，
+        信息色与警告色分别为 <code>#008FB3</code>、<code>#D99118</code>；中性色保持
+        <code>#FCFDFD</code> 到 <code>#141A21</code>。上涨复用错误红 <code>#FF5630</code>，
+        下跌复用成功绿 <code>#22C55E</code>，且必须用正负号、箭头或文字消除语义歧义。
+        绿色不得用于品牌、选中、焦点、普通运行状态或非方向图表序列。
       </p>
 
       <div class="swatches" aria-label="核心颜色">
         <div class="swatch">
-          <div class="swatch-color" style="--swatch:#00a76f"></div>
-          <div class="swatch-meta"><strong>Primary</strong><code>#00A76F</code></div>
+          <div class="swatch-color" style="--swatch:#6d5ce7"></div>
+          <div class="swatch-meta"><strong>Primary</strong><code>#6D5CE7</code></div>
         </div>
         <div class="swatch">
           <div class="swatch-color" style="--swatch:#1c252e"></div>
@@ -805,20 +806,20 @@
           <div class="swatch-meta"><strong>Neutral surface</strong><code>#F4F6F8</code></div>
         </div>
         <div class="swatch">
-          <div class="swatch-color" style="--swatch:#8e33ff"></div>
-          <div class="swatch-meta"><strong>Secondary</strong><code>#8E33FF</code></div>
+          <div class="swatch-color" style="--swatch:#2f6bff"></div>
+          <div class="swatch-meta"><strong>Secondary</strong><code>#2F6BFF</code></div>
         </div>
         <div class="swatch">
-          <div class="swatch-color" style="--swatch:#00b8d9"></div>
-          <div class="swatch-meta"><strong>Info</strong><code>#00B8D9</code></div>
+          <div class="swatch-color" style="--swatch:#008fb3"></div>
+          <div class="swatch-meta"><strong>Info</strong><code>#008FB3</code></div>
         </div>
         <div class="swatch">
           <div class="swatch-color" style="--swatch:#22c55e"></div>
           <div class="swatch-meta"><strong>Success / 跌</strong><code>#22C55E</code></div>
         </div>
         <div class="swatch">
-          <div class="swatch-color" style="--swatch:#ffab00"></div>
-          <div class="swatch-meta"><strong>Warning</strong><code>#FFAB00</code></div>
+          <div class="swatch-color" style="--swatch:#d99118"></div>
+          <div class="swatch-meta"><strong>Warning</strong><code>#D99118</code></div>
         </div>
         <div class="swatch">
           <div class="swatch-color" style="--swatch:#ff5630"></div>
@@ -1131,7 +1132,7 @@
               <td>Vertical nav item</td>
               <td>44px</td>
               <td>4/8/4/12px；8px</td>
-              <td>选中使用 Minimal 主绿 8% 背景，不使用实心按钮</td>
+              <td>选中使用紫晶主色 8% 背景，不使用实心按钮</td>
             </tr>
           </tbody>
         </table>
@@ -1292,42 +1293,18 @@
     <section id="mockups">
       <h2>视觉验证稿</h2>
       <p>
-        以下四张 1536×1024 桌面稿用于校验理解，不是逐像素页面实现。
-        它们共同采用 Minimal 的绿色主色、紫色辅助色、中性灰、16px 卡片圆角、轻阴影、
-        300px 导航侧栏与紧凑 MUI 控件；行情语义统一为中国市场习惯的红涨绿跌。
+        下图用于校验紫晶电蓝主题在高密度市场首页中的品牌层、图表序列、操作状态与行情语义。
+        采用白色壳层、中性灰结构、16px 卡片圆角、轻阴影和紧凑控件；行情继续红涨绿跌。
+        表格、表单与 Dialog 的结构规则不变，颜色统一从当前 Token 获取。
       </p>
 
       <div class="mockup-grid">
         <figure class="mockup">
-          <img src="assets/homepage.png" alt="量化平台首页：侧栏、指标卡、净值曲线、资产分布与自选行情">
+          <img src="assets/homepage-amethyst-electric-blue.png" alt="QUANT V2 紫晶电蓝主题市场首页：侧栏、指标卡、市场走势、智能体、重点标的与资讯摘要">
           <figcaption>
-            <strong>首页：</strong>
-            验证 AppShell、指标卡、图表卡、资产分布与行情列表的层级；绿色只承担品牌与主操作，
-            涨跌仍由红绿及正负号双重编码。
-          </figcaption>
-        </figure>
-
-        <figure class="mockup">
-          <img src="assets/stock-table.png" alt="带标签页、搜索、筛选条件和分页的股票数据表格">
-          <figcaption>
-            <strong>带筛选的表格页：</strong>
-            验证 Tabs、搜索、Select、Filter Chip、批量操作、固定密度表格、状态 Chip 与分页组合。
-          </figcaption>
-        </figure>
-
-        <figure class="mockup">
-          <img src="assets/stock-screener-form.png" alt="股票筛选策略表单：分区卡片、两列字段、开关和底部操作">
-          <figcaption>
-            <strong>表单页：</strong>
-            验证持久标签、两列字段、分组标题、辅助文字、Switch、Select 与明确的取消/保存操作层级。
-          </figcaption>
-        </figure>
-
-        <figure class="mockup">
-          <img src="assets/quick-edit-dialog.png" alt="数据表格上方的快速编辑弹窗，背景带遮罩">
-          <figcaption>
-            <strong>弹窗：</strong>
-            验证 720px Dialog、背景遮罩、短表单、关闭按钮、焦点任务与取消/确认按钮顺序。
+            <strong>紫晶电蓝首页：</strong>
+            紫晶承担主要动作、选中、焦点和第一图表序列；电蓝与青蓝承担次级分类。
+            绿色仅表示下跌，红色仅表示上涨，均同时使用正负号或文字。
           </figcaption>
         </figure>
       </div>
@@ -1414,8 +1391,8 @@
     <section id="implementation">
       <h2>实施边界与迁移顺序</h2>
       <p>
-        本方案先提供设计合同与可复制示例，不直接修改当前应用主题。
-        落地时以 MUI theme 为组件唯一入口，CSS variables 服务于全局 CSS、图表容器和非 MUI 元素；
+        紫晶电蓝 Token 已同步进入当前 MUI theme、CSS variables、共享图表色板和可复制示例。
+        MUI theme 是组件唯一入口，CSS variables 服务于全局 CSS、图表容器和非 MUI 元素；
         禁止页面继续新增散落颜色、圆角和阴影。
       </p>
 
@@ -1573,8 +1550,8 @@
   <footer>
     <div class="shell">
       Minimal 风格设计系统与 MUI 落地方案 · 变更摘要（2026-07-26）：
-      完成 3 页抽样、Dialog/Drawer/深浅主题/移动端实测，改用 Minimal 原生绿紫配色，并输出
-      CSS variables、MUI theme 映射、组件规范与 4 张视觉验证稿。
+      将品牌色从绿色调整为紫晶 <code>#6D5CE7</code> 与电蓝 <code>#2F6BFF</code>，
+      同步 CSS variables、MUI theme、图表序列、示例与视觉验证稿；绿色仅保留明确下跌和成功语义。
     </div>
   </footer>
 </body>

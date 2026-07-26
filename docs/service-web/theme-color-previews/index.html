@@ -1,0 +1,1274 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QUANT V2 主题配色预览</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --canvas: #f4f6f8;
+        --paper: #ffffff;
+        --paper-soft: #f9fafb;
+        --text: #172033;
+        --text-2: #637381;
+        --text-3: #919eab;
+        --divider: rgba(145, 158, 171, 0.2);
+        --up: #ef4444;
+        --up-soft: rgba(239, 68, 68, 0.1);
+        --down: #16a34a;
+        --down-soft: rgba(22, 163, 74, 0.1);
+        --flat: #637381;
+        --warning: #d99118;
+        --primary: #2563eb;
+        --primary-dark: #1d4ed8;
+        --primary-soft: #eaf2ff;
+        --primary-faint: rgba(37, 99, 235, 0.08);
+        --secondary: #5b5bd6;
+        --secondary-soft: #eeeefd;
+        --accent: #0891b2;
+        --chart-4: #d99118;
+        --shadow:
+          0 0 2px rgba(145, 158, 171, 0.2),
+          0 12px 24px -4px rgba(145, 158, 171, 0.12);
+        --primary-shadow: 0 8px 18px rgba(37, 99, 235, 0.18);
+      }
+
+      :root[data-theme="b"] {
+        --text: #14263a;
+        --primary: #174a7e;
+        --primary-dark: #0b2d4f;
+        --primary-soft: #e8eff6;
+        --primary-faint: rgba(23, 74, 126, 0.08);
+        --secondary: #b7791f;
+        --secondary-soft: #fff4dc;
+        --accent: #496b91;
+        --chart-4: #7956d8;
+        --warning: #b7791f;
+        --primary-shadow: 0 8px 18px rgba(23, 74, 126, 0.18);
+      }
+
+      :root[data-theme="c"] {
+        --text: #211d3a;
+        --primary: #6d5ce7;
+        --primary-dark: #4f46b8;
+        --primary-soft: #f0eeff;
+        --primary-faint: rgba(109, 92, 231, 0.08);
+        --secondary: #2f6bff;
+        --secondary-soft: #eaf0ff;
+        --accent: #008fb3;
+        --chart-4: #d99118;
+        --primary-shadow: 0 8px 18px rgba(109, 92, 231, 0.18);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        min-width: 1360px;
+        min-height: 900px;
+        margin: 0;
+        background: var(--canvas);
+        color: var(--text);
+        font-family:
+          "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
+          "Segoe UI", sans-serif;
+        font-size: 14px;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: 252px minmax(0, 1fr);
+        min-height: 100vh;
+        background: var(--canvas);
+      }
+
+      .sidebar {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+        padding: 24px 16px 18px;
+        background: var(--paper);
+        border-right: 1px solid var(--divider);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 10px 24px;
+      }
+
+      .brand-mark {
+        position: relative;
+        width: 38px;
+        height: 38px;
+      }
+
+      .brand-mark::before,
+      .brand-mark::after,
+      .brand-mark span {
+        position: absolute;
+        content: "";
+        width: 10px;
+        height: 32px;
+        border-radius: 7px;
+        background: var(--primary);
+        transform-origin: bottom center;
+      }
+
+      .brand-mark::before {
+        left: 6px;
+        bottom: 2px;
+        transform: rotate(31deg);
+      }
+
+      .brand-mark::after {
+        right: 6px;
+        bottom: 2px;
+        transform: rotate(-31deg);
+        background: var(--secondary);
+      }
+
+      .brand-mark span {
+        left: 14px;
+        bottom: 5px;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--paper);
+        box-shadow: 0 0 0 4px var(--primary);
+      }
+
+      .brand-name {
+        font-size: 19px;
+        font-weight: 800;
+        letter-spacing: -0.3px;
+      }
+
+      .brand-subtitle {
+        margin-top: 3px;
+        color: var(--text-2);
+        font-size: 11px;
+      }
+
+      .nav {
+        display: grid;
+        gap: 6px;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 44px;
+        padding: 0 14px;
+        border-radius: 8px;
+        color: #52617a;
+        font-weight: 600;
+      }
+
+      .nav-item.active {
+        color: var(--primary-dark);
+        background: var(--primary-soft);
+      }
+
+      .nav-icon {
+        display: grid;
+        width: 20px;
+        height: 20px;
+        place-items: center;
+        color: currentColor;
+      }
+
+      .nav-icon svg {
+        width: 20px;
+        height: 20px;
+      }
+
+      .badge {
+        min-width: 20px;
+        height: 20px;
+        margin-left: auto;
+        padding: 0 6px;
+        border-radius: 10px;
+        background: var(--up);
+        color: white;
+        font-size: 11px;
+        font-weight: 800;
+        line-height: 20px;
+        text-align: center;
+      }
+
+      .collapse {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 44px;
+        margin-top: auto;
+        padding: 0 14px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: var(--paper-soft);
+        color: var(--text-2);
+        font-weight: 600;
+      }
+
+      .main {
+        min-width: 0;
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: 1fr minmax(420px, 600px) 1fr;
+        align-items: center;
+        height: 72px;
+        padding: 0 30px;
+        background: var(--paper);
+        border-bottom: 1px solid var(--divider);
+      }
+
+      .scheme-tag {
+        justify-self: start;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 30px;
+        padding: 0 12px;
+        border-radius: 6px;
+        background: var(--primary-soft);
+        color: var(--primary-dark);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .scheme-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--primary);
+        box-shadow: 12px 0 0 var(--secondary), 24px 0 0 var(--accent);
+        margin-right: 24px;
+      }
+
+      .search {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 42px;
+        padding: 0 12px;
+        border: 1px solid var(--divider);
+        border-radius: 8px;
+        background: var(--paper);
+        color: var(--text-3);
+      }
+
+      .search svg {
+        width: 18px;
+        height: 18px;
+      }
+
+      .shortcut {
+        margin-left: auto;
+        padding: 3px 7px;
+        border-radius: 6px;
+        background: var(--paper-soft);
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .top-actions {
+        justify-self: end;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .icon-btn {
+        position: relative;
+        display: grid;
+        width: 38px;
+        height: 38px;
+        place-items: center;
+        border-radius: 50%;
+        color: #52617a;
+      }
+
+      .icon-btn svg {
+        width: 20px;
+        height: 20px;
+      }
+
+      .icon-btn .badge {
+        position: absolute;
+        top: -2px;
+        right: -5px;
+        min-width: 18px;
+        height: 18px;
+        line-height: 18px;
+      }
+
+      .avatar {
+        display: grid;
+        width: 38px;
+        height: 38px;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--primary);
+        color: white;
+        font-weight: 800;
+        box-shadow: var(--primary-shadow);
+      }
+
+      .user {
+        display: grid;
+        gap: 2px;
+      }
+
+      .user strong {
+        font-size: 13px;
+      }
+
+      .user span {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .content {
+        display: grid;
+        gap: 20px;
+        max-width: 1536px;
+        margin: 0 auto;
+        padding: 20px 24px 26px;
+      }
+
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .card {
+        border-radius: 16px;
+        background: var(--paper);
+        box-shadow: var(--shadow);
+      }
+
+      .metric {
+        display: grid;
+        grid-template-columns: 52px minmax(0, 1fr) 72px;
+        align-items: center;
+        min-height: 122px;
+        padding: 18px;
+      }
+
+      .metric-icon {
+        display: grid;
+        width: 44px;
+        height: 44px;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--primary-soft);
+        color: var(--primary);
+      }
+
+      .metric-icon.alt {
+        background: var(--secondary-soft);
+        color: var(--secondary);
+      }
+
+      .metric-icon.warn {
+        background: rgba(217, 145, 24, 0.11);
+        color: var(--warning);
+      }
+
+      .metric-icon svg {
+        width: 24px;
+        height: 24px;
+      }
+
+      .metric-label {
+        color: var(--text-2);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .metric-value {
+        margin-top: 5px;
+        color: var(--text);
+        font-size: 24px;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .metric-compare {
+        margin-top: 7px;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .up {
+        color: var(--up) !important;
+      }
+
+      .down {
+        color: var(--down) !important;
+      }
+
+      .mini-chart {
+        align-self: end;
+        width: 72px;
+        height: 42px;
+        overflow: visible;
+      }
+
+      .mini-chart path {
+        fill: none;
+        stroke: var(--primary);
+        stroke-width: 2.2;
+      }
+
+      .mini-chart.alt path {
+        stroke: var(--secondary);
+      }
+
+      .mini-chart.warn path {
+        stroke: var(--warning);
+      }
+
+      .middle-grid,
+      .bottom-grid {
+        display: grid;
+        grid-template-columns: 7fr 5fr;
+        gap: 20px;
+      }
+
+      .panel {
+        min-width: 0;
+        padding: 18px 20px;
+      }
+
+      .panel-head {
+        display: flex;
+        align-items: center;
+        min-height: 30px;
+        margin-bottom: 12px;
+      }
+
+      .panel-title {
+        font-size: 16px;
+        font-weight: 800;
+      }
+
+      .info {
+        margin-left: 7px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .ranges {
+        display: flex;
+        gap: 4px;
+        margin-left: auto;
+      }
+
+      .range {
+        min-width: 40px;
+        height: 30px;
+        padding: 0 9px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text-2);
+        font-weight: 700;
+      }
+
+      .range.active {
+        background: var(--primary-soft);
+        color: var(--primary-dark);
+      }
+
+      .legend {
+        display: flex;
+        gap: 34px;
+        margin-bottom: 8px;
+      }
+
+      .legend-item {
+        display: grid;
+        grid-template-columns: 10px auto;
+        gap: 2px 9px;
+        align-items: center;
+      }
+
+      .legend-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--primary);
+      }
+
+      .legend-item:nth-child(2) .legend-dot {
+        background: var(--secondary);
+      }
+
+      .legend-item:nth-child(3) .legend-dot {
+        background: var(--accent);
+      }
+
+      .legend-name {
+        color: var(--text-2);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .legend-value {
+        grid-column: 2;
+        color: var(--text);
+        font-size: 14px;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .market-chart {
+        width: 100%;
+        height: 183px;
+      }
+
+      .market-chart text {
+        fill: var(--text-3);
+        font-size: 10px;
+        font-family: inherit;
+      }
+
+      .gridline {
+        stroke: rgba(145, 158, 171, 0.18);
+        stroke-dasharray: 3 4;
+      }
+
+      .series {
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 2.2;
+      }
+
+      .series.one {
+        stroke: var(--primary);
+      }
+
+      .series.two {
+        stroke: var(--secondary);
+      }
+
+      .series.three {
+        stroke: var(--accent);
+      }
+
+      .area {
+        fill: var(--primary-faint);
+        stroke: none;
+      }
+
+      .more {
+        margin-left: auto;
+        color: var(--primary);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .agent-list {
+        overflow: hidden;
+        border: 1px solid var(--divider);
+        border-radius: 10px;
+      }
+
+      .agent {
+        display: grid;
+        grid-template-columns: 42px minmax(0, 1fr) 86px 18px;
+        align-items: center;
+        min-height: 63px;
+        padding: 8px 14px;
+        border-bottom: 1px solid var(--divider);
+      }
+
+      .agent:last-child {
+        border-bottom: 0;
+      }
+
+      .agent-icon {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--primary-soft);
+        color: var(--primary);
+        font-size: 14px;
+        font-weight: 900;
+      }
+
+      .agent:nth-child(2) .agent-icon {
+        background: var(--secondary-soft);
+        color: var(--secondary);
+      }
+
+      .agent:nth-child(3) .agent-icon {
+        background: rgba(8, 145, 178, 0.1);
+        color: var(--accent);
+      }
+
+      .agent-name {
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .status {
+        display: inline-flex;
+        height: 20px;
+        margin-left: 7px;
+        padding: 0 7px;
+        align-items: center;
+        border-radius: 6px;
+        background: var(--primary-soft);
+        color: var(--primary-dark);
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      .agent-desc,
+      .coverage-label {
+        margin-top: 3px;
+        color: var(--text-3);
+        font-size: 10px;
+      }
+
+      .coverage {
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .chevron {
+        color: var(--text-3);
+        font-size: 18px;
+      }
+
+      .outline-btn {
+        width: 100%;
+        height: 31px;
+        margin-top: 10px;
+        border: 1px solid var(--primary);
+        border-radius: 8px;
+        background: white;
+        color: var(--primary);
+        font-weight: 800;
+      }
+
+      .table-wrap {
+        overflow: hidden;
+        border: 1px solid var(--divider);
+        border-radius: 10px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11px;
+      }
+
+      th {
+        height: 36px;
+        padding: 0 12px;
+        background: var(--paper-soft);
+        color: var(--text-3);
+        font-weight: 600;
+        text-align: left;
+      }
+
+      td {
+        height: 42px;
+        padding: 0 12px;
+        border-top: 1px dashed var(--divider);
+        color: #52617a;
+      }
+
+      th.num,
+      td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      td strong {
+        color: var(--text);
+      }
+
+      .score {
+        display: inline-flex;
+        height: 22px;
+        padding: 0 8px;
+        align-items: center;
+        border-radius: 6px;
+        background: var(--primary-soft);
+        color: var(--primary-dark);
+        font-weight: 800;
+      }
+
+      .action {
+        color: var(--primary);
+        font-weight: 800;
+      }
+
+      .feed {
+        display: grid;
+      }
+
+      .feed-row {
+        display: grid;
+        grid-template-columns: 26px 10px 48px minmax(0, 1fr) 42px;
+        gap: 9px;
+        align-items: center;
+        min-height: 42px;
+        border-bottom: 1px dashed var(--divider);
+      }
+
+      .feed-row:last-child {
+        border-bottom: 0;
+      }
+
+      .feed-icon {
+        display: grid;
+        width: 24px;
+        height: 24px;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--primary-soft);
+        color: var(--primary);
+        font-size: 11px;
+        font-weight: 900;
+      }
+
+      .feed-row.alert .feed-icon {
+        background: rgba(217, 145, 24, 0.11);
+        color: var(--warning);
+      }
+
+      .feed-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--primary);
+      }
+
+      .feed-row.alert .feed-dot {
+        background: var(--up);
+      }
+
+      .feed-label {
+        display: inline-grid;
+        height: 21px;
+        place-items: center;
+        border: 1px solid var(--divider);
+        border-radius: 6px;
+        color: var(--text-3);
+        font-size: 10px;
+      }
+
+      .feed-copy {
+        overflow: hidden;
+        color: #52617a;
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .feed-time {
+        color: var(--text-3);
+        font-size: 10px;
+        text-align: right;
+      }
+
+      .swatches {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-left: 12px;
+      }
+
+      .swatch {
+        width: 13px;
+        height: 13px;
+        border: 2px solid white;
+        border-radius: 50%;
+        box-shadow: 0 0 0 1px var(--divider);
+      }
+
+      .swatch.primary {
+        background: var(--primary);
+      }
+
+      .swatch.secondary {
+        background: var(--secondary);
+      }
+
+      .swatch.accent {
+        background: var(--accent);
+      }
+
+      .swatch.warning {
+        background: var(--warning);
+      }
+
+      @media (max-width: 1480px) {
+        .shell {
+          grid-template-columns: 220px minmax(0, 1fr);
+        }
+
+        .sidebar {
+          padding-inline: 12px;
+        }
+
+        .content {
+          padding-inline: 18px;
+        }
+
+        .metric {
+          grid-template-columns: 46px minmax(0, 1fr) 58px;
+          padding-inline: 14px;
+        }
+
+        .mini-chart {
+          width: 58px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark"><span></span></div>
+          <div>
+            <div class="brand-name">QUANT V2</div>
+            <div class="brand-subtitle">智能投研与市场分析平台</div>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="主导航">
+          <div class="nav-item active">
+            <span class="nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M3 10.5 12 3l9 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5v-9Z" fill="currentColor"/>
+                <path d="M9 21v-7h6v7" stroke="white" stroke-width="1.6"/>
+              </svg>
+            </span>
+            今日市场
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="3" y="4" width="18" height="16" rx="3"/>
+                <path d="M7 15l3-3 3 2 4-6"/>
+              </svg>
+            </span>
+            市场监控
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M4 18V8m5 10V4m5 14v-7m5 7V6"/>
+                <path d="M3 20h18"/>
+              </svg>
+            </span>
+            股票分析
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M12 2v4m0 12v4M2 12h4m12 0h4M5 5l3 3m8 8 3 3m0-14-3 3M8 16l-3 3"/>
+              </svg>
+            </span>
+            AI 智能体
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="m4 18 5-6 4 3 7-9"/>
+                <path d="M4 21h16"/>
+              </svg>
+            </span>
+            策略回测
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M5 4h14v16H5z"/>
+                <path d="M8 8h8m-8 4h8m-8 4h5"/>
+              </svg>
+            </span>
+            资讯舆情
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/>
+                <path d="M10 21h4"/>
+              </svg>
+            </span>
+            预警中心
+            <span class="badge">12</span>
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M4 6h16v14H4z"/>
+                <path d="M8 3v6m8-6v6M4 11h16"/>
+              </svg>
+            </span>
+            数据中心
+          </div>
+          <div class="nav-item">
+            <span class="nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/>
+              </svg>
+            </span>
+            设置
+          </div>
+        </nav>
+
+        <div class="collapse">‹　收起侧边栏</div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="scheme-tag">
+            <span class="scheme-dot"></span>
+            <span id="scheme-name">方案 A · 澄曜蓝</span>
+            <span class="swatches">
+              <i class="swatch primary"></i>
+              <i class="swatch secondary"></i>
+              <i class="swatch accent"></i>
+              <i class="swatch warning"></i>
+            </span>
+          </div>
+
+          <div class="search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="7"/>
+              <path d="m20 20-4-4"/>
+            </svg>
+            搜索股票、指数、策略、资讯或功能…
+            <span class="shortcut">⌘ K</span>
+          </div>
+
+          <div class="top-actions">
+            <span class="icon-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/>
+                <path d="M10 21h4"/>
+              </svg>
+              <span class="badge">12</span>
+            </span>
+            <span class="icon-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M9.8 9a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.2.9-1.2 1.8"/>
+                <circle cx="12" cy="17" r=".6" fill="currentColor"/>
+              </svg>
+            </span>
+            <span class="avatar">Z</span>
+            <span class="user"><strong>张明远</strong><span>高级会员</span></span>
+          </div>
+        </header>
+
+        <div class="content">
+          <section class="metric-grid" aria-label="市场指标">
+            <article class="card metric">
+              <div class="metric-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="9"/>
+                  <circle cx="9" cy="10" r="1" fill="currentColor"/>
+                  <circle cx="15" cy="10" r="1" fill="currentColor"/>
+                  <path d="M8 15c2 2 6 2 8 0"/>
+                </svg>
+              </div>
+              <div>
+                <div class="metric-label">今日市场情绪　ⓘ</div>
+                <div class="metric-value">偏多 / 72</div>
+                <div class="metric-compare">较昨日　<span class="up">+6</span></div>
+              </div>
+              <svg class="mini-chart" viewBox="0 0 72 42" aria-hidden="true">
+                <path d="M1 34 10 31 18 21 27 26 36 34 45 33 55 25 63 12 71 12"/>
+              </svg>
+            </article>
+
+            <article class="card metric">
+              <div class="metric-icon alt">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 3v9h9"/>
+                  <path d="M21 12a9 9 0 1 1-9-9"/>
+                </svg>
+              </div>
+              <div>
+                <div class="metric-label">跟踪股票数</div>
+                <div class="metric-value">128</div>
+                <div class="metric-compare">较昨日　<span style="color:var(--primary)">+3</span></div>
+              </div>
+              <svg class="mini-chart alt" viewBox="0 0 72 42" aria-hidden="true">
+                <path d="M1 33 10 31 18 21 27 17 36 26 46 26 58 15 66 10 71 14"/>
+              </svg>
+            </article>
+
+            <article class="card metric">
+              <div class="metric-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="5" y="7" width="14" height="11" rx="3"/>
+                  <path d="M12 3v4M8 11h.1M16 11h.1M9 15h6"/>
+                </svg>
+              </div>
+              <div>
+                <div class="metric-label">AI 智能体在线数</div>
+                <div class="metric-value">6</div>
+                <div class="metric-compare">较昨日　<span style="color:var(--primary)">+1</span></div>
+              </div>
+              <svg class="mini-chart" viewBox="0 0 72 42" aria-hidden="true">
+                <path d="M1 34 12 32 21 20 31 17 40 21 50 27 60 25 71 24"/>
+              </svg>
+            </article>
+
+            <article class="card metric">
+              <div class="metric-icon warn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/>
+                  <path d="M10 21h4"/>
+                </svg>
+              </div>
+              <div>
+                <div class="metric-label">今日预警</div>
+                <div class="metric-value">18</div>
+                <div class="metric-compare">较昨日　<span class="down">−3</span></div>
+              </div>
+              <svg class="mini-chart warn" viewBox="0 0 72 42" aria-hidden="true">
+                <path d="M1 34 10 31 18 27 27 16 36 12 45 20 55 17 65 12 71 16"/>
+              </svg>
+            </article>
+          </section>
+
+          <section class="middle-grid">
+            <article class="card panel">
+              <div class="panel-head">
+                <div class="panel-title">市场总览</div>
+                <div class="info">ⓘ</div>
+                <div class="ranges">
+                  <button class="range active">1D</button>
+                  <button class="range">1W</button>
+                  <button class="range">1M</button>
+                  <button class="range">1Y</button>
+                </div>
+              </div>
+
+              <div class="legend">
+                <div class="legend-item">
+                  <span class="legend-dot"></span>
+                  <span class="legend-name">上证指数</span>
+                  <span class="legend-value">3,154.32　<span class="up">+0.62%</span></span>
+                </div>
+                <div class="legend-item">
+                  <span class="legend-dot"></span>
+                  <span class="legend-name">深证成指</span>
+                  <span class="legend-value">9,812.38　<span class="up">+1.02%</span></span>
+                </div>
+                <div class="legend-item">
+                  <span class="legend-dot"></span>
+                  <span class="legend-name">创业板指</span>
+                  <span class="legend-value">1,894.68　<span class="up">+1.37%</span></span>
+                </div>
+              </div>
+
+              <svg class="market-chart" viewBox="0 0 720 183" preserveAspectRatio="none" aria-label="市场指数日内走势">
+                <line class="gridline" x1="52" y1="20" x2="708" y2="20"/>
+                <line class="gridline" x1="52" y1="58" x2="708" y2="58"/>
+                <line class="gridline" x1="52" y1="96" x2="708" y2="96"/>
+                <line class="gridline" x1="52" y1="134" x2="708" y2="134"/>
+                <text x="2" y="23">2.50%</text>
+                <text x="2" y="61">1.25%</text>
+                <text x="24" y="99">0%</text>
+                <text x="2" y="137">−1.25%</text>
+                <path class="area" d="M52 145 L74 129 L96 120 L118 116 L140 104 L162 108 L184 96 L206 90 L228 101 L250 89 L272 80 L294 86 L316 74 L338 82 L360 74 L382 71 L404 78 L426 67 L448 61 L470 68 L492 57 L514 63 L536 50 L558 55 L580 45 L602 51 L624 38 L646 44 L668 31 L690 38 L708 32 L708 158 L52 158 Z"/>
+                <polyline class="series one" points="52,145 74,129 96,120 118,116 140,104 162,108 184,96 206,90 228,101 250,89 272,80 294,86 316,74 338,82 360,74 382,71 404,78 426,67 448,61 470,68 492,57 514,63 536,50 558,55 580,45 602,51 624,38 646,44 668,31 690,38 708,32"/>
+                <polyline class="series two" points="52,151 74,139 96,134 118,130 140,125 162,127 184,121 206,119 228,114 250,116 272,111 294,108 316,112 338,105 360,101 382,104 404,96 426,100 448,92 470,95 492,87 514,90 536,81 558,86 580,73 602,80 624,66 646,72 668,59 690,67 708,60"/>
+                <polyline class="series three" points="52,139 74,113 96,106 118,92 140,84 162,88 184,78 206,84 228,69 250,78 272,67 294,74 316,58 338,66 360,60 382,65 404,51 426,57 448,43 470,51 492,38 514,46 536,32 558,41 580,29 602,35 624,20 646,30 668,16 690,23 708,19"/>
+                <text x="52" y="178">09:30</text>
+                <text x="202" y="178">10:30</text>
+                <text x="356" y="178">11:30 / 13:00</text>
+                <text x="542" y="178">14:00</text>
+                <text x="677" y="178">15:00</text>
+              </svg>
+            </article>
+
+            <article class="card panel">
+              <div class="panel-head">
+                <div class="panel-title">AI 智能体工作台</div>
+                <div class="more">更多 ›</div>
+              </div>
+              <div class="agent-list">
+                <div class="agent">
+                  <div class="agent-icon">◎</div>
+                  <div>
+                    <div class="agent-name">市场扫描 Agent <span class="status">运行中</span></div>
+                    <div class="agent-desc">市场情绪识别与机会扫描</div>
+                  </div>
+                  <div><div class="coverage-label">覆盖市场</div><div class="coverage">92%</div></div>
+                  <div class="chevron">›</div>
+                </div>
+                <div class="agent">
+                  <div class="agent-icon">▤</div>
+                  <div>
+                    <div class="agent-name">财报解读 Agent <span class="status">运行中</span></div>
+                    <div class="agent-desc">重点公司财报提炼</div>
+                  </div>
+                  <div><div class="coverage-label">覆盖报告</div><div class="coverage">91%</div></div>
+                  <div class="chevron">›</div>
+                </div>
+                <div class="agent">
+                  <div class="agent-icon">↗</div>
+                  <div>
+                    <div class="agent-name">舆情监控 Agent <span class="status">运行中</span></div>
+                    <div class="agent-desc">舆情监控与风险预警</div>
+                  </div>
+                  <div><div class="coverage-label">多因子准确率</div><div class="coverage">87%</div></div>
+                  <div class="chevron">›</div>
+                </div>
+              </div>
+              <button class="outline-btn">进入智能体中心</button>
+            </article>
+          </section>
+
+          <section class="bottom-grid">
+            <article class="card panel">
+              <div class="panel-head">
+                <div class="panel-title">自选股 / 重点标的</div>
+                <div class="more">查看全部 ›</div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>代码</th>
+                      <th>名称</th>
+                      <th class="num">现价</th>
+                      <th class="num">涨跌幅</th>
+                      <th class="num">AI 评分</th>
+                      <th class="num">操作建议</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><strong>600519</strong></td>
+                      <td>贵州茅台</td>
+                      <td class="num">1,468.22</td>
+                      <td class="num up">+1.74%</td>
+                      <td class="num"><span class="score">92　优秀</span></td>
+                      <td class="num action">关注</td>
+                    </tr>
+                    <tr>
+                      <td><strong>300750</strong></td>
+                      <td>宁德时代</td>
+                      <td class="num">204.61</td>
+                      <td class="num up">+2.18%</td>
+                      <td class="num"><span class="score">88　良好</span></td>
+                      <td class="num action">关注</td>
+                    </tr>
+                    <tr>
+                      <td><strong>601318</strong></td>
+                      <td>中国平安</td>
+                      <td class="num">62.48</td>
+                      <td class="num down">−0.54%</td>
+                      <td class="num"><span class="score">81　良好</span></td>
+                      <td class="num" style="color:var(--text-3)">观察</td>
+                    </tr>
+                    <tr>
+                      <td><strong>000858</strong></td>
+                      <td>五粮液</td>
+                      <td class="num">127.36</td>
+                      <td class="num up">+0.86%</td>
+                      <td class="num"><span class="score">79　中性</span></td>
+                      <td class="num action">持有</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+
+            <article class="card panel">
+              <div class="panel-head">
+                <div class="panel-title">智能预警与资讯摘要</div>
+                <div class="more">更多 ›</div>
+              </div>
+              <div class="feed">
+                <div class="feed-row alert">
+                  <span class="feed-icon">!</span>
+                  <span class="feed-dot"></span>
+                  <span class="feed-label">预警</span>
+                  <span class="feed-copy">宁德时代：股价异动提醒，成交额放大 32%</span>
+                  <span class="feed-time">10:23</span>
+                </div>
+                <div class="feed-row">
+                  <span class="feed-icon">讯</span>
+                  <span class="feed-dot"></span>
+                  <span class="feed-label">资讯</span>
+                  <span class="feed-copy">美联储会议纪要：维持利率不变，关注通胀路径</span>
+                  <span class="feed-time">09:55</span>
+                </div>
+                <div class="feed-row">
+                  <span class="feed-icon">析</span>
+                  <span class="feed-dot"></span>
+                  <span class="feed-label">分析</span>
+                  <span class="feed-copy">半导体板块：AI 需求强劲，行业景气度持续提升</span>
+                  <span class="feed-time">09:32</span>
+                </div>
+                <div class="feed-row">
+                  <span class="feed-icon">情</span>
+                  <span class="feed-dot"></span>
+                  <span class="feed-label">舆情</span>
+                  <span class="feed-copy">新能源产业链讨论热度上升，市场分歧加大</span>
+                  <span class="feed-time">09:10</span>
+                </div>
+                <div class="feed-row">
+                  <span class="feed-icon">机</span>
+                  <span class="feed-dot" style="background:var(--chart-4)"></span>
+                  <span class="feed-label">机会</span>
+                  <span class="feed-copy">北向资金净流入创年内新高，关注大盘蓝筹机会</span>
+                  <span class="feed-time">08:45</span>
+                </div>
+              </div>
+            </article>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      const theme = new URLSearchParams(window.location.search).get("theme") || "a";
+      const names = {
+        a: "方案 A · 澄曜蓝",
+        b: "方案 B · 墨蓝琥珀",
+        c: "方案 C · 紫晶电蓝",
+      };
+      document.documentElement.dataset.theme = theme;
+      document.getElementById("scheme-name").textContent = names[theme] || names.a;
+      document.title = `${names[theme] || names.a}｜QUANT V2`;
+    </script>
+  </body>
+</html>

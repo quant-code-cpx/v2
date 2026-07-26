@@ -14,20 +14,20 @@
   --qv-neutral-800: #1c252e;
   --qv-neutral-900: #141a21;
 
-  --qv-primary-lighter: #c8fad6;
-  --qv-primary-light: #5be49b;
-  --qv-primary-main: #00a76f;
-  --qv-primary-dark: #007867;
-  --qv-primary-darker: #004b50;
-  --qv-secondary-lighter: #efd6ff;
-  --qv-secondary-light: #c684ff;
-  --qv-secondary-main: #8e33ff;
-  --qv-secondary-dark: #5119b7;
-  --qv-secondary-darker: #27097a;
+  --qv-primary-lighter: #f0eeff;
+  --qv-primary-light: #a99ef7;
+  --qv-primary-main: #6d5ce7;
+  --qv-primary-dark: #4f46b8;
+  --qv-primary-darker: #332d7a;
+  --qv-secondary-lighter: #eaf0ff;
+  --qv-secondary-light: #7ba2ff;
+  --qv-secondary-main: #2f6bff;
+  --qv-secondary-dark: #1d4ed8;
+  --qv-secondary-darker: #173a9a;
 
-  --qv-info-500: #00b8d9;
+  --qv-info-500: #008fb3;
   --qv-success-500: #22c55e;
-  --qv-warning-500: #ffab00;
+  --qv-warning-500: #d99118;
   --qv-error-500: #ff5630;
 
   /* Semantic colors */
@@ -46,7 +46,7 @@
   --qv-color-primary: var(--qv-primary-main);
   --qv-color-primary-hover: var(--qv-primary-dark);
   --qv-color-primary-pressed: var(--qv-primary-darker);
-  --qv-color-primary-soft: rgb(0 167 111 / 8%);
+  --qv-color-primary-soft: rgb(109 92 231 / 8%);
   --qv-color-on-primary: #ffffff;
   --qv-color-secondary: var(--qv-secondary-main);
   --qv-color-info: var(--qv-info-500);
@@ -114,7 +114,7 @@
     0 12px 24px -4px rgb(145 158 171 / 12%);
   --qv-shadow-drawer: -40px 40px 80px -8px rgb(145 158 171 / 24%);
   --qv-shadow-dialog: -40px 40px 80px -8px rgb(0 0 0 / 24%);
-  --qv-shadow-primary: 0 8px 16px rgb(0 167 111 / 24%);
+  --qv-shadow-primary: 0 8px 16px rgb(109 92 231 / 24%);
 
   /* Component geometry */
   --qv-control-height-sm: 1.75rem;
@@ -134,7 +134,7 @@
   --qv-appbar-height-mobile: 4rem;
 
   /* Interaction */
-  --qv-focus-ring: 0 0 0 3px rgb(0 167 111 / 28%);
+  --qv-focus-ring: 0 0 0 3px rgb(109 92 231 / 28%);
   --qv-duration-fast: 120ms;
   --qv-duration-normal: 200ms;
   --qv-easing-standard: cubic-bezier(0.4, 0, 0.2, 1);

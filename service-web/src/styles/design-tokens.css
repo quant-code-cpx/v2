@@ -14,20 +14,20 @@
   --qv-neutral-800: #1c252e;
   --qv-neutral-900: #141a21;
 
-  --qv-primary-lighter: #c8fad6;
-  --qv-primary-light: #5be49b;
-  --qv-primary-main: #00a76f;
-  --qv-primary-dark: #007867;
-  --qv-primary-darker: #004b50;
-  --qv-secondary-lighter: #efd6ff;
-  --qv-secondary-light: #c684ff;
-  --qv-secondary-main: #8e33ff;
-  --qv-secondary-dark: #5119b7;
-  --qv-secondary-darker: #27097a;
+  --qv-primary-lighter: #f0eeff;
+  --qv-primary-light: #a99ef7;
+  --qv-primary-main: #6d5ce7;
+  --qv-primary-dark: #4f46b8;
+  --qv-primary-darker: #332d7a;
+  --qv-secondary-lighter: #eaf0ff;
+  --qv-secondary-light: #7ba2ff;
+  --qv-secondary-main: #2f6bff;
+  --qv-secondary-dark: #1d4ed8;
+  --qv-secondary-darker: #173a9a;
 
-  --qv-info-main: #00b8d9;
+  --qv-info-main: #008fb3;
   --qv-success-main: #22c55e;
-  --qv-warning-main: #ffab00;
+  --qv-warning-main: #d99118;
   --qv-error-main: #ff5630;
 
   /* Semantic surfaces and text */
@@ -43,7 +43,7 @@
   --qv-action-hover: rgb(145 158 171 / 8%);
   --qv-action-selected: rgb(145 158 171 / 16%);
   --qv-action-disabled-bg: rgb(145 158 171 / 24%);
-  --qv-primary-soft: rgb(0 167 111 / 8%);
+  --qv-primary-soft: rgb(109 92 231 / 8%);
 
   /* China-market semantics: never use color without sign, arrow, or label. */
   --qv-market-up: var(--qv-error-main);
@@ -54,9 +54,9 @@
   --qv-market-flat-soft: rgb(145 158 171 / 12%);
 
   /* Non-directional chart series */
-  --qv-chart-primary: var(--qv-primary-dark);
-  --qv-chart-secondary: var(--qv-info-main);
-  --qv-chart-accent: var(--qv-secondary-main);
+  --qv-chart-primary: var(--qv-primary-main);
+  --qv-chart-secondary: var(--qv-secondary-main);
+  --qv-chart-accent: var(--qv-info-main);
   --qv-chart-warning: var(--qv-warning-main);
   --qv-chart-comparison: var(--qv-neutral-400);
   --qv-chart-grid: rgb(145 158 171 / 20%);
@@ -112,7 +112,7 @@
   --qv-shadow-card: 0 0 2px 0 rgb(145 158 171 / 20%), 0 12px 24px -4px rgb(145 158 171 / 12%);
   --qv-shadow-drawer: -40px 40px 80px -8px rgb(145 158 171 / 24%);
   --qv-shadow-dialog: -40px 40px 80px -8px rgb(0 0 0 / 24%);
-  --qv-shadow-primary: 0 8px 16px rgb(0 167 111 / 24%);
+  --qv-shadow-primary: 0 8px 16px rgb(109 92 231 / 24%);
 
   /* Component geometry */
   --qv-button-height-sm: 2rem;
@@ -140,7 +140,7 @@
   --qv-grid-gap: 1.5rem;
 
   /* Interaction */
-  --qv-focus-ring: 0 0 0 3px rgb(0 167 111 / 28%);
+  --qv-focus-ring: 0 0 0 3px rgb(109 92 231 / 28%);
   --qv-duration-fast: 120ms;
   --qv-duration-normal: 200ms;
   --qv-easing-standard: cubic-bezier(0.4, 0, 0.2, 1);

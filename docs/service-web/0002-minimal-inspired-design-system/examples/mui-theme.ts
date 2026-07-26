@@ -27,20 +27,20 @@ export function createMinimalInspiredTheme(mode: PaletteMode): Theme {
     palette: {
       mode,
       primary: {
-        light: "#5BE49B",
-        main: "#00A76F",
-        dark: "#007867",
+        light: "#A99EF7",
+        main: "#6D5CE7",
+        dark: "#4F46B8",
         contrastText: "#FFFFFF",
       },
       secondary: {
-        light: "#C684FF",
-        main: "#8E33FF",
-        dark: "#5119B7",
+        light: "#7BA2FF",
+        main: "#2F6BFF",
+        dark: "#1D4ED8",
         contrastText: "#FFFFFF",
       },
-      info: { main: "#00B8D9" },
+      info: { main: "#008FB3", contrastText: neutral[900] },
       success: { main: "#22C55E" },
-      warning: { main: "#FFAB00" },
+      warning: { main: "#D99118" },
       error: { main: "#FF5630" },
       grey: neutral,
       background: dark
@@ -104,7 +104,7 @@ export function createMinimalInspiredTheme(mode: PaletteMode): Theme {
             fontVariantNumeric: "tabular-nums",
           },
           "*:focus-visible": {
-            outline: "3px solid rgb(0 167 111 / 28%)",
+            outline: "3px solid rgb(109 92 231 / 28%)",
             outlineOffset: 2,
           },
         },

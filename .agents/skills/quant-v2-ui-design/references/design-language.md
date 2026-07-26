@@ -25,11 +25,11 @@ Core palette:
 - Secondary text: `#637381`
 - Disabled text: `#919EAB`
 - Divider: `rgb(145 158 171 / 20%)`
-- Primary: `#00A76F`
-- Primary dark: `#007867`
-- Secondary: `#8E33FF`
-- Info: `#00B8D9`
-- Warning: `#FFAB00`
+- Primary: `#6D5CE7`
+- Primary dark: `#4F46B8`
+- Secondary: `#2F6BFF`
+- Info: `#008FB3`
+- Warning: `#D99118`
 - Error: `#FF5630`
 - Success: `#22C55E`
 
@@ -40,7 +40,9 @@ China-market override:
 - Flat: `#637381`
 - Pair every directional color with `+`, `−`, arrow, or explicit label.
 
-Do not use market red/green for category identity. Use teal, cyan, purple, amber, and neutral gray for non-directional series.
+Green is not a brand color. Reserve it for explicit market-down semantics and success feedback with
+an accompanying icon or label. Use amethyst, electric blue, cyan, amber, and neutral gray for
+brand identity and non-directional series.
 
 ## Typography
 
@@ -124,7 +126,7 @@ Use the 1536px analytics grid for market dashboards and chart-heavy analysis. Us
 ## Interaction and accessibility
 
 - Every clickable element needs hover, active, focus, disabled, and loading behavior where relevant.
-- Focus ring: `0 0 0 3px rgb(0 167 111 / 28%)`.
+- Focus ring: `0 0 0 3px rgb(109 92 231 / 28%)`.
 - Minimum touch target: 40px; use 44–48px for mobile primary controls.
 - Target WCAG 2.2 AA.
 - Never rely on color alone.

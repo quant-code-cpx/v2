@@ -1,0 +1,4 @@
+interface:
+  display_name: "Data Sync 技术方案"
+  short_description: "设计同步任务、供应商适配、数据质量、持久化与可恢复运行链路"
+  default_prompt: "使用 $service-data-sync-solution 为新的同步任务设计可实施、可恢复的技术方案。"

@@ -12,23 +12,28 @@ export const neutralColors = {
 } as const;
 
 export const brandColors = {
-  primaryLighter: "#C8FAD6",
-  primaryLight: "#5BE49B",
-  primary: "#00A76F",
-  primaryDark: "#007867",
-  primaryDarker: "#004B50",
-  secondaryLighter: "#EFD6FF",
-  secondaryLight: "#C684FF",
-  secondary: "#8E33FF",
-  secondaryDark: "#5119B7",
-  secondaryDarker: "#27097A",
+  primaryLighter: "#F0EEFF",
+  primaryLight: "#A99EF7",
+  primary: "#6D5CE7",
+  primaryDark: "#4F46B8",
+  primaryDarker: "#332D7A",
+  secondaryLighter: "#EAF0FF",
+  secondaryLight: "#7BA2FF",
+  secondary: "#2F6BFF",
+  secondaryDark: "#1D4ED8",
+  secondaryDarker: "#173A9A",
 } as const;
 
 export const feedbackColors = {
-  info: "#00B8D9",
+  info: "#008FB3",
   success: "#22C55E",
-  warning: "#FFAB00",
+  warning: "#D99118",
   error: "#FF5630",
+} as const;
+
+export const interactionColors = {
+  primarySoft: "rgb(109 92 231 / 8%)",
+  focusRingShadow: "0 0 0 3px rgb(109 92 231 / 28%)",
 } as const;
 
 /**
@@ -45,9 +50,9 @@ export const marketColors = {
 } as const;
 
 export const chartColors = {
-  primary: brandColors.primaryDark,
-  secondary: feedbackColors.info,
-  accent: brandColors.secondary,
+  primary: brandColors.primary,
+  secondary: brandColors.secondary,
+  accent: feedbackColors.info,
   warning: feedbackColors.warning,
   comparison: neutralColors[400],
   grid: "rgb(145 158 171 / 20%)",
@@ -59,7 +64,7 @@ export const shadows = {
   drawer: "-40px 40px 80px -8px rgb(145 158 171 / 24%)",
   drawerDark: "-40px 40px 80px -8px rgb(0 0 0 / 24%)",
   dialog: "-40px 40px 80px -8px rgb(0 0 0 / 24%)",
-  primary: "0 8px 16px rgb(0 167 111 / 24%)",
+  primary: "0 8px 16px rgb(109 92 231 / 24%)",
 } as const;
 
 export const componentGeometry = {
