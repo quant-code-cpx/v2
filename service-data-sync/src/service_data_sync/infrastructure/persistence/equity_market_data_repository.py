@@ -18,9 +18,18 @@ from service_data_sync.application.ports.market_data import (
     StoredEquityInstrument,
 )
 from service_data_sync.domain.equity import EquityDailyBar, EquityIdentifier
+from service_data_sync.domain.equity_master import EquityIdentityResolutionStatus
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.persistence.equity_identity_resolver import (
+    resolve_identity_on_connection,
+)
+from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 
 _DATASET = "equity.bar.1d.raw"
+
+
+class PossibleCodeReuseError(ValueError):
+    """表示退市后出现同代码行情，必须等待主数据显式确认而非误绑旧身份。"""
 
 
 class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
@@ -45,9 +54,6 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
             raise ValueError("bars must not be empty")
         now = datetime.now(UTC)
         with self._engine.begin() as connection:
-            # 日线可能早于交易所主数据到达。
-            # 使用 `PENDING` 身份可避免丢失证券或猜测名称、上市状态。
-            instrument = self._ensure_instrument(connection, identifier, now)
             source_batch_id = self._record_source_batch(
                 connection,
                 provider_id=provider_id,
@@ -55,6 +61,15 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
                 raw_uri=raw_uri,
                 observed_at=observed_at,
                 created_at=now,
+            )
+            # 日线可能早于交易所主数据到达。
+            # 使用带来源证据的 `PENDING` 标识可避免丢失证券或猜测名称、上市状态。
+            instrument = self._ensure_instrument(
+                connection,
+                identifier=identifier,
+                fact_date=min(bar.trade_date for bar in bars),
+                source_batch_id=source_batch_id,
+                now=now,
             )
             inserted_count, unchanged_count = self._write_revisions(
                 connection,
@@ -172,17 +187,62 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
     def _ensure_instrument(
         self,
         connection: Connection,
+        *,
         identifier: EquityIdentifier,
+        fact_date: date,
+        source_batch_id: UUID,
         now: datetime,
     ) -> StoredEquityInstrument:
-        """日线早于交易所主数据发布时创建 `PENDING` 证券身份。"""
-        existing = (
+        """日线早于主数据发布时创建带事实日期和证据的 `PENDING` 身份。"""
+        resolution = resolve_identity_on_connection(
+            connection,
+            exchange=identifier.exchange,
+            symbol=identifier.symbol,
+            fact_date=fact_date,
+            known_at=now,
+        )
+        if resolution.status is EquityIdentityResolutionStatus.CONFLICT:
+            # 多个历史身份命中属于 canonical 损坏；不能依名称、状态或排序任取一条写日线。
+            raise ValueError("equity identity resolution conflict")
+        if resolution.status is EquityIdentityResolutionStatus.RESOLVED:
+            if self._is_delisted_on_fact_date(
+                connection,
+                security_id=resolution.security_id,
+                fact_date=fact_date,
+                known_at=now,
+            ):
+                # 退市后同代码行情只能作为可能复用候选隔离，不能借当前标识回写旧证券。
+                raise PossibleCodeReuseError("possible code reuse after delisting")
+            existing = (
+                connection.execute(
+                    text(
+                        """
+                        SELECT security_id, instrument_id, exchange, symbol, name, listing_status
+                        FROM equity_instrument
+                        WHERE security_id = :security_id
+                        """
+                    ),
+                    {"security_id": resolution.security_id},
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if existing is None:
+                raise ValueError("resolved equity identity anchor is missing")
+            return _stored_instrument(existing)
+        pending = (
             connection.execute(
                 text(
                     """
                 SELECT security_id, instrument_id, exchange, symbol, name, listing_status
-                FROM equity_instrument
-                WHERE exchange = :exchange AND symbol = :symbol
+                FROM equity_instrument AS instrument
+                INNER JOIN equity_identifier_version AS identifier
+                  ON identifier.security_id = instrument.security_id
+                WHERE identifier.exchange = :exchange
+                  AND identifier.symbol = :symbol
+                  AND identifier.identity_state = 'PENDING'
+                  AND identifier.known_to IS NULL
+                ORDER BY instrument.security_id
                 """
                 ),
                 {"exchange": identifier.exchange.value, "symbol": identifier.symbol},
@@ -190,44 +250,102 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
             .mappings()
             .one_or_none()
         )
-        if existing is not None:
-            return _stored_instrument(existing)
+        if pending is not None:
+            # 同代码历史占位只能由同一 PENDING 身份复用；绝不从确认身份当前列回退。
+            return _stored_instrument(pending)
         instrument_id = uuid4()
         # 主数据同步会补全该占位证券。
         # 行情同步绝不能自行猜测名称或上市状态。
-        connection.execute(
-            text(
-                """
-                INSERT INTO equity_instrument (
-                  instrument_id, exchange, symbol, listing_status, created_at, updated_at
-                ) VALUES (
-                  :instrument_id, :exchange, :symbol, 'PENDING', :created_at, :updated_at
-                )
-                """
-            ),
-            {
-                "instrument_id": instrument_id,
-                "exchange": identifier.exchange.value,
-                "symbol": identifier.symbol,
-                "created_at": now,
-                "updated_at": now,
-            },
-        )
         created = (
             connection.execute(
                 text(
                     """
-                SELECT security_id, instrument_id, exchange, symbol, name, listing_status
-                FROM equity_instrument
-                WHERE instrument_id = :instrument_id
-                """
+                    INSERT INTO equity_instrument (
+                      instrument_id, exchange, symbol, listing_status, created_at, updated_at
+                    ) VALUES (
+                      :instrument_id, :exchange, :symbol, 'PENDING', :created_at, :updated_at
+                    )
+                    RETURNING security_id
+                    """
                 ),
-                {"instrument_id": instrument_id},
+                {
+                    "instrument_id": instrument_id,
+                    "exchange": identifier.exchange.value,
+                    "symbol": identifier.symbol,
+                    "created_at": now,
+                    "updated_at": now,
+                },
             )
             .mappings()
             .one()
         )
-        return _stored_instrument(created)
+        # PENDING 版本只为历史写入保留稳定锚点；主数据确认前绝不对 API 发布。
+        connection.execute(
+            text(
+                """
+                INSERT INTO equity_identifier_version (
+                  version_id, security_id, exchange, symbol, identity_state,
+                  effective_from, effective_to, known_from, known_to,
+                  effective_date_precision, source_batch_id, content_sha256
+                ) VALUES (
+                  :version_id, :security_id, :exchange, :symbol, 'PENDING',
+                  :effective_from, NULL, :known_from, NULL,
+                  'OBSERVATION_DATE', :source_batch_id, :content_sha256
+                )
+                """
+            ),
+            {
+                "version_id": uuid4(),
+                "security_id": created["security_id"],
+                "exchange": identifier.exchange.value,
+                "symbol": identifier.symbol,
+                "effective_from": fact_date,
+                "known_from": now,
+                "source_batch_id": source_batch_id,
+                "content_sha256": _pending_identity_content_hash(identifier, fact_date),
+            },
+        )
+        return StoredEquityInstrument(
+            security_id=created["security_id"],
+            instrument_id=instrument_id,
+            identifier=identifier,
+            name=None,
+            listing_status="PENDING",
+        )
+
+    def _is_delisted_on_fact_date(
+        self,
+        connection: Connection,
+        *,
+        security_id: int | None,
+        fact_date: date,
+        known_at: datetime,
+    ) -> bool:
+        """检查已解析身份在事实日是否已有明确退市状态，不以当前投影替代历史。"""
+        if security_id is None:
+            raise ValueError("resolved equity identity must include security_id")
+        row = (
+            connection.execute(
+                text(
+                    """
+                    SELECT 1
+                    FROM equity_listing_status_version
+                    WHERE security_id = :security_id
+                      AND status = 'DELISTED'
+                      AND effective_range @> :fact_date
+                      AND knowledge_range @> :known_at
+                    """
+                ),
+                {
+                    "security_id": security_id,
+                    "fact_date": fact_date,
+                    "known_at": known_at,
+                },
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return row is not None
 
     def _record_source_batch(
         self,
@@ -239,38 +357,16 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         observed_at: datetime,
         created_at: datetime,
     ) -> UUID:
-        """对相同原始证据去重，同时保留稳定的来源批次身份。"""
-        source_batch_id = uuid4()
-        row = (
-            connection.execute(
-                text(
-                    """
-                INSERT INTO source_batch (
-                  source_batch_id, provider_id, capability, payload_sha256,
-                  raw_uri, observed_at, created_at
-                ) VALUES (
-                  :source_batch_id, :provider_id, :capability, :payload_sha256,
-                  :raw_uri, :observed_at, :created_at
-                )
-                ON CONFLICT (provider_id, capability, payload_sha256)
-                DO UPDATE SET raw_uri = EXCLUDED.raw_uri
-                RETURNING source_batch_id
-                """
-                ),
-                {
-                    "source_batch_id": source_batch_id,
-                    "provider_id": provider_id,
-                    "capability": _DATASET,
-                    "payload_sha256": source_payload_sha256,
-                    "raw_uri": raw_uri,
-                    "observed_at": observed_at,
-                    "created_at": created_at,
-                },
-            )
-            .mappings()
-            .one()
+        """登记独立外部观测；相同 payload 不得折叠来源批次。"""
+        return record_source_observation(
+            connection,
+            provider_id=provider_id,
+            capability=_DATASET,
+            source_payload_sha256=source_payload_sha256,
+            raw_uri=raw_uri,
+            observed_at=observed_at,
+            created_at=created_at,
         )
-        return row["source_batch_id"]
 
     def _write_revisions(
         self,
@@ -454,4 +550,10 @@ def _bar_content_hash(bar: EquityDailyBar) -> bytes:
         separators=(",", ":"),
         sort_keys=True,
     ).encode()
+    return hashlib.sha256(serialized).digest()
+
+
+def _pending_identity_content_hash(identifier: EquityIdentifier, fact_date: date) -> bytes:
+    """为行情创建的 PENDING 标识保存可复验的最小业务摘要。"""
+    serialized = f"{identifier.qualified_symbol}|{fact_date.isoformat()}|PENDING".encode()
     return hashlib.sha256(serialized).digest()

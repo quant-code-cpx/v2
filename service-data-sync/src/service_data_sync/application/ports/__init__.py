@@ -12,6 +12,7 @@ from service_data_sync.application.ports.market_data import (
     RawPayloadStore,
 )
 from service_data_sync.application.ports.sector_market_data import SectorMarketDataRepository
+from service_data_sync.application.ports.sector_membership import SectorMembershipRepository
 
 __all__ = [
     "DataSourcePort",
@@ -21,5 +22,6 @@ __all__ = [
     "ProviderErrorCode",
     "RawPayloadStore",
     "SectorMarketDataRepository",
+    "SectorMembershipRepository",
     "SourceRequest",
 ]

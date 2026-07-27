@@ -34,3 +34,8 @@ NNNN-short-title.md
 - [0009：A 股个股数据来源、复权语义与服务边界](0009-equity-data-source-and-serving-boundary.md) — Proposed
 - [0010：行业、概念板块分类与派生数据边界](0010-sector-taxonomy-and-derived-data-boundary.md) — Proposed
 - [0011：板块行情跨服务读取与公开 API 边界](0011-sector-market-data-api-boundary.md) — Implemented
+- [0012：板块成分观测历史与跨服务读取模型](0012-sector-membership-temporal-model.md) — Proposed
+- [0013：A 股证券身份、上市生命周期与跨服务读取边界](0013-equity-instrument-identity-lifecycle.md) — Proposed
+- [0014：板块 EOD 横截面快照、修订与排行定义](0014-sector-eod-snapshot-definition.md) — Proposed
+- [0015：财务 point-in-time 与估值边界](0015-financial-point-in-time-and-valuation.md) — Proposed
+- [0016：日频资金流方法学与数据边界](0016-money-flow-methodology-boundary.md) — Proposed

@@ -2,7 +2,7 @@ import { Box, Stack, Typography } from "@mui/material";
 
 import { brandColors } from "../styles/design-tokens";
 
-/** Render the Apex market-signal mark and product wordmark without remote image assets. */
+/** 渲染不依赖远程图片的 Apex 市场信号标志与产品字标。 */
 export function ApexBrand() {
   return (
     <Stack direction="row" spacing={1.25} alignItems="center">

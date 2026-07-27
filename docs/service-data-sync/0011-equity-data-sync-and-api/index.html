@@ -262,6 +262,14 @@
             <strong>同一 canonical 数据集在同一发布时间点只允许一种明确口径</strong>，来源切换必须显式产生新版本，
             不能在失败时静默混入另一来源。
           </p>
+          <div class="decision warning">
+            <strong>后续细化：</strong>
+            证券身份、目录和上市生命周期以
+            <a href="../0014-equity-instrument-master/index.html">0014 证券主数据方案</a>为实施权威；
+            财务报表、财务指标和估值以
+            <a href="../0016-financial-statements-valuation/index.html">0016 财务与估值方案</a>为实施权威。
+            本文中与二者重叠的早期表和接口草案不再单独实施，行情、复权与公司行动等未重叠范围继续有效。
+          </div>
           <div class="cards">
             <div class="card">
               <strong>事实基线</strong>
@@ -715,8 +723,8 @@
                 </tr>
                 <tr>
                   <td><code>source_batch</code></td>
-                  <td>provider、capability、request_json、raw_uri、payload_sha256、adapter_version、observed_at</td>
-                  <td><code>UNIQUE(provider, capability, payload_sha256)</code>；raw URI 不可覆盖。</td>
+                  <td>provider、capability、request_json、raw_uri、payload_sha256、adapter_version、observed_at；后续由 0014 expand 增加 run_id、partition_key、observation_seq 与 schema_fingerprint。</td>
+                  <td>每次外部获取是独立观测，<code>UNIQUE(run_id, partition_key, observation_seq)</code>；payload hash 仅作非唯一查重索引，raw 对象可按内容去重但 URI 不可覆盖。</td>
                 </tr>
                 <tr>
                   <td><code>dataset_publication</code></td>

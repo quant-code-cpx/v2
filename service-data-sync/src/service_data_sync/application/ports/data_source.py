@@ -52,6 +52,9 @@ class ProviderBatch:
     content_type: str = "application/octet-stream"
     raw_payload: bytes | None = None
     raw_content_type: str | None = None
+    upstream_source: str | None = None
+    adapter_version: str = "unversioned"
+    schema_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         """校验不透明适配器输出保留来源、能力与时区溯源信息。"""
@@ -63,6 +66,12 @@ class ProviderBatch:
             raise ValueError("observed_at must include a timezone")
         if self.raw_payload is None and self.raw_content_type is not None:
             raise ValueError("raw_content_type requires raw_payload")
+        if not self.adapter_version.strip():
+            raise ValueError("adapter_version must not be blank")
+        if self.upstream_source is not None and not self.upstream_source.strip():
+            raise ValueError("upstream_source must not be blank when provided")
+        if self.schema_fingerprint is not None and len(self.schema_fingerprint) != 64:
+            raise ValueError("schema_fingerprint must be a SHA-256 hex digest")
 
     @classmethod
     def empty(cls, provider_id: str, capability: str) -> ProviderBatch:

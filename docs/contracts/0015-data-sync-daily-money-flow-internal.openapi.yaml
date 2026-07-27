@@ -1,0 +1,1219 @@
+openapi: 3.1.1
+info:
+  title: service-data-sync daily money-flow internal API
+  version: 1.0.0
+  description: |
+    Proposed read-only contract for published vendor-derived daily money-flow
+    series and supplier ranking snapshots. Consumers must discover methodology
+    first. Daily source observations and supplier rolling windows are separate
+    resources and can never fill or derive one another.
+  x-contract-status: Proposed
+servers:
+  - url: http://service-data-sync:8000
+    description: Compose service network
+tags:
+  - name: money-flow-methodologies
+  - name: money-flow-daily-series
+  - name: money-flow-supplier-rankings
+security:
+  - serviceBearer: []
+paths:
+  /internal/v1/money-flow/methodologies:
+    get:
+      tags: [money-flow-methodologies]
+      operationId: listInternalMoneyFlowMethodologies
+      summary: List published money-flow methodologies before requesting values
+      description: |
+        Returns governed methodology versions. Research entries may be visible
+        internally, but productionEnabled remains false until source approval.
+        A cursor is bound to filters and dataVersion.
+      parameters:
+        - $ref: '#/components/parameters/SemanticFamily'
+        - $ref: '#/components/parameters/MethodologyStatus'
+        - $ref: '#/components/parameters/ScopeTypeFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/CatalogLimit'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: One methodology catalog page from one publication.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalMethodologyPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/QueryConflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/NoPublication'
+
+  /internal/v1/money-flow/methodologies/{methodologyId}/daily-series/equities/{exchange}/{symbol}:
+    get:
+      tags: [money-flow-daily-series]
+      operationId: listInternalEquityDailyMoneyFlow
+      summary: Read one explicit equity daily series
+      description: |
+        Reads source-reported daily observations only. Historical identifiers
+        are resolved for each tradeDate through the instrument-master temporal
+        identity model; current-code lookup is not used. Maximum requested
+        calendar span is 366 days.
+      parameters:
+        - $ref: '#/components/parameters/MethodologyId'
+        - $ref: '#/components/parameters/Exchange'
+        - $ref: '#/components/parameters/Symbol'
+        - $ref: '#/components/parameters/MethodologyVersion'
+        - $ref: '#/components/parameters/Bucket'
+        - $ref: '#/components/parameters/Start'
+        - $ref: '#/components/parameters/End'
+        - $ref: '#/components/parameters/KnownAt'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/SeriesLimit'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          $ref: '#/components/responses/EquityDailySeries'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/QueryConflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/NoPublication'
+
+  /internal/v1/money-flow/methodologies/{methodologyId}/daily-series/sectors/{scheme}/{sectorCode}:
+    get:
+      tags: [money-flow-daily-series]
+      operationId: listInternalSectorDailyMoneyFlow
+      summary: Read one explicit sector daily series
+      description: |
+        Reads a supplier sector series. It never aggregates constituent equity
+        observations and never substitutes another scheme or methodology.
+        Maximum requested calendar span is 366 days.
+      parameters:
+        - $ref: '#/components/parameters/MethodologyId'
+        - $ref: '#/components/parameters/SectorScheme'
+        - $ref: '#/components/parameters/SectorCode'
+        - $ref: '#/components/parameters/MethodologyVersion'
+        - $ref: '#/components/parameters/Bucket'
+        - $ref: '#/components/parameters/Start'
+        - $ref: '#/components/parameters/End'
+        - $ref: '#/components/parameters/KnownAt'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/SeriesLimit'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          $ref: '#/components/responses/SectorDailySeries'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/QueryConflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/NoPublication'
+
+  /internal/v1/money-flow/methodologies/{methodologyId}/daily-series/markets/{marketCode}:
+    get:
+      tags: [money-flow-daily-series]
+      operationId: listInternalMarketDailyMoneyFlow
+      summary: Read one explicit market daily series
+      description: |
+        Reads the upstream market scope as published. It is not a sum of equity
+        or sector observations. Maximum requested calendar span is 366 days.
+      parameters:
+        - $ref: '#/components/parameters/MethodologyId'
+        - $ref: '#/components/parameters/MarketCode'
+        - $ref: '#/components/parameters/MethodologyVersion'
+        - $ref: '#/components/parameters/Bucket'
+        - $ref: '#/components/parameters/Start'
+        - $ref: '#/components/parameters/End'
+        - $ref: '#/components/parameters/KnownAt'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/SeriesLimit'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          $ref: '#/components/responses/MarketDailySeries'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/QueryConflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/NoPublication'
+
+  /internal/v1/money-flow/methodologies/{methodologyId}/supplier-rankings:
+    get:
+      tags: [money-flow-supplier-rankings]
+      operationId: listInternalSupplierMoneyFlowRanking
+      summary: Read one supplier ranking snapshot
+      description: |
+        Requires one methodology version, universe, scope type, supplier window,
+        and ranking bucket. Omit tradeDate for latest; provide tradeDate for an
+        exact published snapshot. Results preserve supplier position and are
+        never reconstructed from daily series. windowSize must be 1 when
+        windowType is supplier_day and greater than 1 for supplier_rolling.
+      parameters:
+        - $ref: '#/components/parameters/MethodologyId'
+        - $ref: '#/components/parameters/MethodologyVersion'
+        - $ref: '#/components/parameters/RankingScopeType'
+        - $ref: '#/components/parameters/UniverseId'
+        - $ref: '#/components/parameters/WindowType'
+        - $ref: '#/components/parameters/WindowSize'
+        - $ref: '#/components/parameters/Bucket'
+        - $ref: '#/components/parameters/TradeDate'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/RankingLimit'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: One page of an immutable supplier ranking snapshot.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalRankingPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/QueryConflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/NoPublication'
+
+components:
+  securitySchemes:
+    serviceBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: service-credential
+      description: Dedicated service credential injected by runtime secret.
+  parameters:
+    MethodologyId:
+      name: methodologyId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/MethodologyId'
+    MethodologyVersion:
+      name: methodologyVersion
+      in: query
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+      description: Exact immutable methodology version; latest is not accepted.
+    SemanticFamily:
+      name: semanticFamily
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/SemanticFamily'
+    MethodologyStatus:
+      name: methodologyStatus
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/MethodologyStatus'
+    ScopeTypeFilter:
+      name: scopeType
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/ScopeType'
+    Exchange:
+      name: exchange
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Exchange'
+    Symbol:
+      name: symbol
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9]{6}$'
+    SectorScheme:
+      name: scheme
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+    SectorCode:
+      name: sectorCode
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+    MarketCode:
+      name: marketCode
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 32
+    Bucket:
+      name: bucket
+      in: query
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z][a-z0-9_-]{0,63}$'
+      description: Exact governed bucket code from the selected methodology version.
+    Start:
+      name: start
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+    End:
+      name: end
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+      description: Inclusive end; start must not follow end and span must not exceed 366 days.
+    KnownAt:
+      name: knownAt
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+      description: |
+        UTC knowledge cutoff. Omit for current published revisions. Historical
+        backfills are visible only after their real knownFrom instant.
+    RankingScopeType:
+      name: scopeType
+      in: query
+      required: true
+      schema:
+        type: string
+        enum: [equity, sector]
+    UniverseId:
+      name: universe
+      in: query
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 100
+      description: Exact governed universe identity from methodology catalog.
+    WindowType:
+      name: windowType
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/RankingWindowType'
+    WindowSize:
+      name: windowSize
+      in: query
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 252
+    TradeDate:
+      name: tradeDate
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+      description: Exact snapshot trade date; omit to select latest published.
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 2048
+      description: Opaque cursor bound to all filters and dataVersion.
+    CatalogLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    SeriesLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 250
+    RankingLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 256
+  headers:
+    ETag:
+      schema:
+        type: string
+      description: Strong tag derived from dataVersion and normalized projection.
+    PrivateRevalidate:
+      schema:
+        type: string
+        example: private, max-age=0, must-revalidate
+  responses:
+    EquityDailySeries:
+      description: Published daily equity observations from one explicit series.
+      headers:
+        ETag:
+          $ref: '#/components/headers/ETag'
+        Cache-Control:
+          $ref: '#/components/headers/PrivateRevalidate'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InternalEquityDailySeriesPage'
+    SectorDailySeries:
+      description: Published daily sector observations from one explicit series.
+      headers:
+        ETag:
+          $ref: '#/components/headers/ETag'
+        Cache-Control:
+          $ref: '#/components/headers/PrivateRevalidate'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InternalSectorDailySeriesPage'
+    MarketDailySeries:
+      description: Published daily market observations from one explicit series.
+      headers:
+        ETag:
+          $ref: '#/components/headers/ETag'
+        Cache-Control:
+          $ref: '#/components/headers/PrivateRevalidate'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InternalMarketDailySeriesPage'
+    ValidationProblem:
+      description: Query, path, range, methodology, bucket, window, or cursor is invalid.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing or invalid service credential.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Exact methodology, scope, series, bucket, or snapshot is not published.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    QueryConflict:
+      description: |
+        Cursor query identity or dataVersion no longer matches, or an equity
+        date range crosses a historical canonical-security identity boundary.
+        Restart at page one or split the request at the returned boundary.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    RateLimited:
+      description: Service caller exceeded its approved read budget.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NoPublication:
+      description: |
+        Canonical storage is unavailable or no publishable version exists.
+        Candidate, quarantined, mixed-methodology, or unmarked stale data is
+        never returned.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    MethodologyId:
+      type: string
+      pattern: '^[a-z][a-z0-9.-]{2,99}$'
+    SemanticFamily:
+      type: string
+      enum: [trade_direction_flow, order_size_flow]
+    MethodologyStatus:
+      type: string
+      enum: [unknown, research, validated, retired]
+    ScopeType:
+      type: string
+      enum: [equity, sector, market]
+    Exchange:
+      type: string
+      enum: [SSE, SZSE, BSE]
+    RankingWindowType:
+      type: string
+      enum: [supplier_day, supplier_rolling]
+    Finality:
+      type: string
+      enum: [source_reported_daily, post_close_observation, unknown]
+    QualityStatus:
+      type: string
+      enum: [passed, warned]
+      description: Blocking failures are never published.
+    DefinitionStatus:
+      type: string
+      enum: [documented, inferred_unapproved, unknown]
+    SupportedMeasure:
+      type: string
+      enum: [gross_inflow, gross_outflow, net_amount, net_ratio]
+    DecimalString:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    NullableDecimalString:
+      oneOf:
+        - $ref: '#/components/schemas/DecimalString'
+        - type: 'null'
+    NullableDateTime:
+      oneOf:
+        - type: string
+          format: date-time
+        - type: 'null'
+    WindowDefinition:
+      type: object
+      required: [windowType, windowSize, label]
+      additionalProperties: false
+      properties:
+        windowType:
+          type: string
+          enum: [daily_source, supplier_day, supplier_rolling]
+        windowSize:
+          type: integer
+          minimum: 1
+          maximum: 252
+        label:
+          type: string
+          minLength: 1
+          maxLength: 100
+    BucketDefinition:
+      type: object
+      required:
+        - bucket
+        - label
+        - definitionStatus
+        - thresholdMin
+        - thresholdMax
+        - thresholdUnit
+      additionalProperties: false
+      properties:
+        bucket:
+          type: string
+          pattern: '^[a-z][a-z0-9_-]{0,63}$'
+        label:
+          type: string
+          minLength: 1
+          maxLength: 100
+        definitionStatus:
+          $ref: '#/components/schemas/DefinitionStatus'
+        thresholdMin:
+          $ref: '#/components/schemas/NullableDecimalString'
+        thresholdMax:
+          $ref: '#/components/schemas/NullableDecimalString'
+        thresholdUnit:
+          type: [string, 'null']
+          maxLength: 32
+    InternalMethodology:
+      type: object
+      required:
+        - methodologyUuid
+        - methodologyId
+        - methodologyVersion
+        - methodologyStatus
+        - productionEnabled
+        - adapterProvider
+        - upstreamSource
+        - sourceDataset
+        - semanticFamily
+        - scopeTypes
+        - universeIds
+        - supportedWindows
+        - buckets
+        - supportedMeasures
+        - ratioDenominator
+        - directionDefinition
+        - finality
+        - currency
+        - rawAmountUnit
+        - standardAmountUnit
+        - conversionVersion
+        - effectiveFrom
+        - retiredAt
+      additionalProperties: false
+      properties:
+        methodologyUuid:
+          type: string
+          format: uuid
+        methodologyId:
+          $ref: '#/components/schemas/MethodologyId'
+        methodologyVersion:
+          type: string
+          minLength: 1
+          maxLength: 64
+        methodologyStatus:
+          $ref: '#/components/schemas/MethodologyStatus'
+        productionEnabled:
+          type: boolean
+        adapterProvider:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Internal adapter identity; never copied to the public API.
+        upstreamSource:
+          type: string
+          minLength: 1
+          maxLength: 100
+        sourceDataset:
+          type: string
+          minLength: 1
+          maxLength: 160
+        semanticFamily:
+          $ref: '#/components/schemas/SemanticFamily'
+        scopeTypes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/ScopeType'
+        universeIds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+        supportedWindows:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/WindowDefinition'
+        buckets:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/BucketDefinition'
+        supportedMeasures:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/SupportedMeasure'
+          description: Unsupported measures remain null for every observation.
+        ratioDenominator:
+          type: string
+          minLength: 1
+          maxLength: 160
+        directionDefinition:
+          type: string
+          minLength: 1
+          maxLength: 300
+        finality:
+          $ref: '#/components/schemas/Finality'
+        currency:
+          type: [string, 'null']
+          pattern: '^[A-Z]{3}$'
+        rawAmountUnit:
+          type: string
+          minLength: 1
+          maxLength: 64
+        standardAmountUnit:
+          type: [string, 'null']
+          maxLength: 64
+        conversionVersion:
+          type: [string, 'null']
+          maxLength: 64
+        effectiveFrom:
+          type: string
+          format: date-time
+        retiredAt:
+          $ref: '#/components/schemas/NullableDateTime'
+    InternalMethodologyPage:
+      type: object
+      required: [dataVersion, publishedAt, items, nextCursor]
+      additionalProperties: false
+      properties:
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/InternalMethodology'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 2048
+    InternalEquityScope:
+      type: object
+      required: [scopeType, securityId, instrumentId, exchange, symbol, name]
+      additionalProperties: false
+      properties:
+        scopeType:
+          type: string
+          const: equity
+        securityId:
+          type: integer
+          format: int64
+          minimum: 1
+        instrumentId:
+          type: string
+          format: uuid
+        exchange:
+          $ref: '#/components/schemas/Exchange'
+        symbol:
+          type: string
+          pattern: '^[0-9]{6}$'
+        name:
+          type: [string, 'null']
+          maxLength: 200
+    InternalSectorScope:
+      type: object
+      required: [scopeType, sectorId, scheme, sectorCode, name]
+      additionalProperties: false
+      properties:
+        scopeType:
+          type: string
+          const: sector
+        sectorId:
+          type: string
+          format: uuid
+        scheme:
+          type: string
+          minLength: 1
+          maxLength: 64
+        sectorCode:
+          type: string
+          minLength: 1
+          maxLength: 64
+        name:
+          type: [string, 'null']
+          maxLength: 200
+    InternalMarketScope:
+      type: object
+      required: [scopeType, marketCode, name]
+      additionalProperties: false
+      properties:
+        scopeType:
+          type: string
+          const: market
+        marketCode:
+          type: string
+          minLength: 1
+          maxLength: 32
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+    InternalRankingScope:
+      oneOf:
+        - $ref: '#/components/schemas/InternalEquityScope'
+        - $ref: '#/components/schemas/InternalSectorScope'
+    DailyObservation:
+      type: object
+      required:
+        - tradeDate
+        - observedAt
+        - knownFrom
+        - finality
+        - grossInflow
+        - grossOutflow
+        - netAmount
+        - netRatio
+        - qualityStatus
+      additionalProperties: false
+      properties:
+        tradeDate:
+          type: string
+          format: date
+        observedAt:
+          type: string
+          format: date-time
+        knownFrom:
+          type: string
+          format: date-time
+        finality:
+          $ref: '#/components/schemas/Finality'
+        grossInflow:
+          $ref: '#/components/schemas/NullableDecimalString'
+        grossOutflow:
+          $ref: '#/components/schemas/NullableDecimalString'
+        netAmount:
+          $ref: '#/components/schemas/NullableDecimalString'
+        netRatio:
+          $ref: '#/components/schemas/NullableDecimalString'
+        qualityStatus:
+          $ref: '#/components/schemas/QualityStatus'
+    InternalEquityDailySeriesPage:
+      type: object
+      required:
+        - seriesId
+        - methodologyId
+        - methodologyVersion
+        - upstreamSource
+        - sourceDataset
+        - semanticFamily
+        - scope
+        - universe
+        - bucket
+        - supportedMeasures
+        - ratioDenominator
+        - directionDefinition
+        - windowType
+        - windowSize
+        - currency
+        - amountUnit
+        - knownAtApplied
+        - dataVersion
+        - publishedAt
+        - items
+        - nextCursor
+      additionalProperties: false
+      properties:
+        seriesId:
+          type: string
+          format: uuid
+        methodologyId:
+          $ref: '#/components/schemas/MethodologyId'
+        methodologyVersion:
+          type: string
+        upstreamSource:
+          type: string
+        sourceDataset:
+          type: string
+        semanticFamily:
+          $ref: '#/components/schemas/SemanticFamily'
+        scope:
+          $ref: '#/components/schemas/InternalEquityScope'
+        universe:
+          type: string
+        bucket:
+          type: string
+        supportedMeasures:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/SupportedMeasure'
+        ratioDenominator:
+          type: string
+        directionDefinition:
+          type: string
+        windowType:
+          type: string
+          const: daily_source
+        windowSize:
+          type: integer
+          const: 1
+        currency:
+          type: [string, 'null']
+        amountUnit:
+          type: string
+        knownAtApplied:
+          $ref: '#/components/schemas/NullableDateTime'
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/DailyObservation'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 2048
+    InternalSectorDailySeriesPage:
+      type: object
+      required:
+        - seriesId
+        - methodologyId
+        - methodologyVersion
+        - upstreamSource
+        - sourceDataset
+        - semanticFamily
+        - scope
+        - universe
+        - bucket
+        - supportedMeasures
+        - ratioDenominator
+        - directionDefinition
+        - windowType
+        - windowSize
+        - currency
+        - amountUnit
+        - knownAtApplied
+        - dataVersion
+        - publishedAt
+        - items
+        - nextCursor
+      additionalProperties: false
+      properties:
+        seriesId:
+          type: string
+          format: uuid
+        methodologyId:
+          $ref: '#/components/schemas/MethodologyId'
+        methodologyVersion:
+          type: string
+        upstreamSource:
+          type: string
+        sourceDataset:
+          type: string
+        semanticFamily:
+          $ref: '#/components/schemas/SemanticFamily'
+        scope:
+          $ref: '#/components/schemas/InternalSectorScope'
+        universe:
+          type: string
+        bucket:
+          type: string
+        supportedMeasures:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/SupportedMeasure'
+        ratioDenominator:
+          type: string
+        directionDefinition:
+          type: string
+        windowType:
+          type: string
+          const: daily_source
+        windowSize:
+          type: integer
+          const: 1
+        currency:
+          type: [string, 'null']
+        amountUnit:
+          type: string
+        knownAtApplied:
+          $ref: '#/components/schemas/NullableDateTime'
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/DailyObservation'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 2048
+    InternalMarketDailySeriesPage:
+      type: object
+      required:
+        - seriesId
+        - methodologyId
+        - methodologyVersion
+        - upstreamSource
+        - sourceDataset
+        - semanticFamily
+        - scope
+        - universe
+        - bucket
+        - supportedMeasures
+        - ratioDenominator
+        - directionDefinition
+        - windowType
+        - windowSize
+        - currency
+        - amountUnit
+        - knownAtApplied
+        - dataVersion
+        - publishedAt
+        - items
+        - nextCursor
+      additionalProperties: false
+      properties:
+        seriesId:
+          type: string
+          format: uuid
+        methodologyId:
+          $ref: '#/components/schemas/MethodologyId'
+        methodologyVersion:
+          type: string
+        upstreamSource:
+          type: string
+        sourceDataset:
+          type: string
+        semanticFamily:
+          $ref: '#/components/schemas/SemanticFamily'
+        scope:
+          $ref: '#/components/schemas/InternalMarketScope'
+        universe:
+          type: string
+        bucket:
+          type: string
+        supportedMeasures:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/SupportedMeasure'
+        ratioDenominator:
+          type: string
+        directionDefinition:
+          type: string
+        windowType:
+          type: string
+          const: daily_source
+        windowSize:
+          type: integer
+          const: 1
+        currency:
+          type: [string, 'null']
+        amountUnit:
+          type: string
+        knownAtApplied:
+          $ref: '#/components/schemas/NullableDateTime'
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/DailyObservation'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 2048
+    InternalRankingItem:
+      type: object
+      required:
+        - supplierPosition
+        - scope
+        - grossInflow
+        - grossOutflow
+        - netAmount
+        - netRatio
+      additionalProperties: false
+      properties:
+        supplierPosition:
+          type: integer
+          minimum: 1
+          description: Supplier page order; not a platform-computed rank.
+        scope:
+          $ref: '#/components/schemas/InternalRankingScope'
+        grossInflow:
+          $ref: '#/components/schemas/NullableDecimalString'
+        grossOutflow:
+          $ref: '#/components/schemas/NullableDecimalString'
+        netAmount:
+          $ref: '#/components/schemas/NullableDecimalString'
+        netRatio:
+          $ref: '#/components/schemas/NullableDecimalString'
+    InternalRankingPage:
+      type: object
+      required:
+        - snapshotId
+        - methodologyId
+        - methodologyVersion
+        - upstreamSource
+        - sourceDataset
+        - semanticFamily
+        - scopeType
+        - universe
+        - targetTradeDate
+        - sourceCutoffAt
+        - observedAt
+        - finality
+        - windowType
+        - windowSize
+        - bucket
+        - supportedMeasures
+        - ratioDenominator
+        - directionDefinition
+        - rankingBasis
+        - currency
+        - amountUnit
+        - qualityStatus
+        - dataVersion
+        - publishedAt
+        - items
+        - nextCursor
+      additionalProperties: false
+      properties:
+        snapshotId:
+          type: string
+          format: uuid
+        methodologyId:
+          $ref: '#/components/schemas/MethodologyId'
+        methodologyVersion:
+          type: string
+        upstreamSource:
+          type: string
+        sourceDataset:
+          type: string
+        semanticFamily:
+          $ref: '#/components/schemas/SemanticFamily'
+        scopeType:
+          type: string
+          enum: [equity, sector]
+        universe:
+          type: string
+        targetTradeDate:
+          type: string
+          format: date
+        sourceCutoffAt:
+          type: string
+          format: date-time
+        observedAt:
+          type: string
+          format: date-time
+        finality:
+          $ref: '#/components/schemas/Finality'
+        windowType:
+          $ref: '#/components/schemas/RankingWindowType'
+        windowSize:
+          type: integer
+          minimum: 1
+          maximum: 252
+        bucket:
+          type: string
+        supportedMeasures:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/SupportedMeasure'
+        ratioDenominator:
+          type: string
+        directionDefinition:
+          type: string
+        rankingBasis:
+          type: string
+          enum: [supplier_reported_order, supplier_order_unknown]
+        currency:
+          type: [string, 'null']
+        amountUnit:
+          type: string
+        qualityStatus:
+          $ref: '#/components/schemas/QualityStatus'
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/InternalRankingItem'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 2048
+    Problem:
+      type: object
+      required: [type, title, status, code, requestId]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        code:
+          type: string
+        detail:
+          type: string
+        requestId:
+          type: string

@@ -9,11 +9,13 @@ from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID, uuid4
 
+import pytest
 from sqlalchemy import Engine
 
 from service_data_sync.domain.equity import EquityDailyBar, EquityIdentifier
 from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.persistence.equity_market_data_repository import (
+    PossibleCodeReuseError,
     SqlAlchemyEquityMarketDataRepository,
     _bar_content_hash,
 )
@@ -85,8 +87,10 @@ def test_repository_appends_changed_bar_and_advances_publication() -> None:
     source_batch_id = uuid4()
     engine = FakeEngine(
         [
-            _instrument_row(instrument_id),
             {"source_batch_id": source_batch_id},
+            [{"security_id": 1, "identity_state": "CONFIRMED"}],
+            None,
+            _instrument_row(instrument_id),
             None,
             None,
             None,
@@ -106,7 +110,11 @@ def test_repository_appends_changed_bar_and_advances_publication() -> None:
     assert publication.instrument.instrument_id == instrument_id
     assert publication.inserted_count == 1
     assert publication.unchanged_count == 0
-    assert len(engine.connection.statements) == 6
+    assert len(engine.connection.statements) == 8
+    assert (
+        "ON CONFLICT (provider_id, capability, payload_sha256)"
+        not in engine.connection.statements[0]
+    )
 
 
 def test_repository_keeps_current_publication_when_all_bars_are_unchanged() -> None:
@@ -116,8 +124,10 @@ def test_repository_keeps_current_publication_when_all_bars_are_unchanged() -> N
     data_version = uuid4()
     engine = FakeEngine(
         [
-            _instrument_row(instrument_id),
             {"source_batch_id": uuid4()},
+            [{"security_id": 1, "identity_state": "CONFIRMED"}],
+            None,
+            _instrument_row(instrument_id),
             {"revision": 1, "content_sha256": _bar_content_hash(bar)},
             {"data_version": data_version},
         ]
@@ -136,7 +146,64 @@ def test_repository_keeps_current_publication_when_all_bars_are_unchanged() -> N
     assert publication.data_version == data_version
     assert publication.inserted_count == 0
     assert publication.unchanged_count == 1
-    assert len(engine.connection.statements) == 4
+    assert len(engine.connection.statements) == 6
+
+
+def test_repository_creates_pending_identity_version_for_unknown_daily_bar() -> None:
+    """日线先到时，仓储必须以该来源批次创建不可公开的 PENDING 标识版本。"""
+    engine = FakeEngine(
+        [
+            {"source_batch_id": uuid4()},
+            [],
+            None,
+            {"security_id": 8},
+            None,
+            None,
+            None,
+            None,
+        ]
+    )
+    repository = _repository(engine)
+
+    publication = repository.publish_daily_bars(
+        identifier=EquityIdentifier.parse("SZSE.000001"),
+        bars=(_bar(),),
+        provider_id="test-provider",
+        source_payload_sha256="d" * 64,
+        raw_uri="s3://test/raw.json",
+        observed_at=datetime(2026, 7, 1, tzinfo=UTC),
+    )
+
+    assert publication.instrument.listing_status == "PENDING"
+    assert "identity_state" in engine.connection.statements[4]
+    assert "'PENDING'" in engine.connection.statements[4]
+    assert len(engine.connection.statements) == 9
+
+
+def test_repository_rejects_possible_code_reuse_after_explicit_delisting() -> None:
+    """退市后同代码行情不得误绑旧证券或自行创建未经确认的新证券。"""
+    engine = FakeEngine(
+        [
+            {"source_batch_id": uuid4()},
+            [{"security_id": 8, "identity_state": "CONFIRMED"}],
+            {"exists": 1},
+        ]
+    )
+    repository = _repository(engine)
+
+    with pytest.raises(PossibleCodeReuseError, match="possible code reuse"):
+        repository.publish_daily_bars(
+            identifier=EquityIdentifier.parse("SSE.600519"),
+            bars=(_bar(),),
+            provider_id="test-provider",
+            source_payload_sha256="e" * 64,
+            raw_uri="s3://test/raw.json",
+            observed_at=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+
+    joined = "\n".join(engine.connection.statements)
+    assert "INSERT INTO equity_daily_bar" not in joined
+    assert "INSERT INTO equity_instrument" not in joined
 
 
 def test_repository_reads_instrument_catalog_and_current_daily_bars() -> None:

@@ -18,3 +18,12 @@
 - [0010：AKShare 第二轮独立验证汇总](0010-akshare-round2-verification/index.html) — Draft（R2 完成；无能力获 FULL 准入）
 - [0011：个股数据同步、存储与查询 API 技术方案](0011-equity-data-sync-and-api/index.html) — Proposed
 - [0012：行业与板块数据同步技术方案](0012-industry-and-sector-data-sync/index.html) — Proposed（明确排除分时数据）
+- [0013：板块成分股与观测历史技术方案](0013-sector-membership-history/index.html) — Proposed
+- [0014：A 股证券主数据与上市生命周期技术方案](0014-equity-instrument-master/index.html) — Proposed
+- [0015：板块 EOD 横截面快照与排行技术方案](0015-sector-eod-snapshot-ranking/index.html) — Proposed
+- [0016：财务报表与估值技术方案](0016-financial-statements-valuation/index.html) — Proposed
+- [0017：日频资金流向技术方案](0017-daily-money-flow/index.html) — Proposed（明确排除分钟与分时）
+
+0013–0017 按业务价值优先级排列。实施依赖顺序不同：先完成 0014 的证券身份与共享
+`source_batch` expand，再实施 0013/0015，随后实施依赖证券身份的 0016/0017；各来源通过生产准入门后
+才能打开生产同步与公开发布。

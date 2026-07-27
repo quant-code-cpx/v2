@@ -4,12 +4,18 @@ import type { ZodType } from 'zod';
 import { AppConfigService } from '../../platform/config/app-config.service.js';
 import { PublicProblemException } from '../../platform/http/problem.exception.js';
 import {
+  internalEquitySectorPageSchema,
   internalSectorBarPageSchema,
+  internalSectorConstituentPageSchema,
   internalSectorPageSchema,
+  type EquitySectorPage,
+  type InternalEquitySectorPage,
   type InternalSectorBarPage,
+  type InternalSectorConstituentPage,
   type InternalSectorPage,
   type Sector,
   type SectorBarPage,
+  type SectorConstituentPage,
   type SectorPage,
 } from './sector-market-data.contract.js';
 
@@ -86,6 +92,53 @@ export class SectorMarketDataClient {
     );
   }
 
+  /** 读取一个板块在固定观测 release 中的 verified 成分页，并删除内部身份 UUID。 */
+  public listConstituents(input: {
+    scheme: string;
+    code: string;
+    asOf?: string | undefined;
+    cursor?: string | undefined;
+    limit: number;
+    ifNoneMatch?: string | undefined;
+  }): Promise<UpstreamResponse<SectorConstituentPage>> {
+    const parameters = new URLSearchParams({ limit: String(input.limit) });
+    if (input.asOf !== undefined) parameters.set('asOf', input.asOf);
+    if (input.cursor !== undefined) parameters.set('cursor', input.cursor);
+    return this.request(
+      `/internal/v1/sectors/${encodeURIComponent(input.scheme)}/${encodeURIComponent(input.code)}/constituents?${parameters.toString()}`,
+      input.ifNoneMatch,
+      internalSectorConstituentPageSchema,
+    ).then((response) =>
+      response.status === 304
+        ? response
+        : { ...response, body: publicSectorConstituentPage(response.body) },
+    );
+  }
+
+  /** 读取一只证券在固定 release 中的板块观测归属，并删除服务内 UUID。 */
+  public listEquitySectors(input: {
+    exchange: string;
+    symbol: string;
+    scheme: string;
+    asOf?: string | undefined;
+    cursor?: string | undefined;
+    limit: number;
+    ifNoneMatch?: string | undefined;
+  }): Promise<UpstreamResponse<EquitySectorPage>> {
+    const parameters = new URLSearchParams({ scheme: input.scheme, limit: String(input.limit) });
+    if (input.asOf !== undefined) parameters.set('asOf', input.asOf);
+    if (input.cursor !== undefined) parameters.set('cursor', input.cursor);
+    return this.request(
+      `/internal/v1/equities/${encodeURIComponent(input.exchange)}/${encodeURIComponent(input.symbol)}/sectors?${parameters.toString()}`,
+      input.ifNoneMatch,
+      internalEquitySectorPageSchema,
+    ).then((response) =>
+      response.status === 304
+        ? response
+        : { ...response, body: publicEquitySectorPage(response.body) },
+    );
+  }
+
   /** 发起有认证、超时和严格合同校验的只读下游请求。 */
   private async request<T>(
     path: string,
@@ -132,6 +185,53 @@ function publicSectorPage(input: InternalSectorPage): SectorPage {
 /** 去除嵌套内部 UUID，构造公开 K 线页。 */
 function publicSectorBarPage(input: InternalSectorBarPage): SectorBarPage {
   return { ...input, sector: publicSector(input.sector) };
+}
+
+/** 删除内部板块和证券 UUID，构造公开板块到成分观测页。 */
+function publicSectorConstituentPage(input: InternalSectorConstituentPage): SectorConstituentPage {
+  return {
+    sector: {
+      scheme: input.sector.scheme,
+      code: input.sector.code,
+      name: input.sector.name,
+    },
+    release: input.release,
+    snapshotObservedAt: input.snapshotObservedAt,
+    carriedForward: input.carriedForward,
+    items: input.items.map((item) => ({
+      exchange: item.exchange,
+      symbol: item.symbol,
+      name: item.name,
+      listingStatus: item.listingStatus,
+      observedFrom: item.observedFrom,
+      observedTo: item.observedTo,
+    })),
+    nextCursor: input.nextCursor,
+  };
+}
+
+/** 删除内部板块和证券 UUID，构造公开证券到板块观测页。 */
+function publicEquitySectorPage(input: InternalEquitySectorPage): EquitySectorPage {
+  return {
+    equity: {
+      exchange: input.equity.exchange,
+      symbol: input.equity.symbol,
+      name: input.equity.name,
+      listingStatus: input.equity.listingStatus,
+    },
+    scheme: input.scheme,
+    release: input.release,
+    items: input.items.map((item) => ({
+      scheme: item.scheme,
+      code: item.code,
+      name: item.name,
+      observedFrom: item.observedFrom,
+      observedTo: item.observedTo,
+      snapshotObservedAt: item.snapshotObservedAt,
+      carriedForward: item.carriedForward,
+    })),
+    nextCursor: input.nextCursor,
+  };
 }
 
 /** 移除内部稳定 UUID，确保浏览器永远不会依赖同步服务身份主键。 */

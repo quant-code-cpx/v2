@@ -4,6 +4,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 
 import { ListSectorBarsQueryDto } from './dto/list-sector-bars-query.dto.js';
+import { ListSectorMembershipQueryDto } from './dto/list-sector-membership-query.dto.js';
 import { ListSectorsQueryDto } from './dto/list-sectors-query.dto.js';
 import { SectorPathDto } from './dto/sector-path.dto.js';
 import { SectorMarketDataService } from './sector-market-data.service.js';
@@ -36,6 +37,18 @@ export class SectorMarketDataController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<unknown> {
     const result = await this.sectors.listBars(path, query, ifNoneMatch);
+    return writeConditionalResponse(response, result);
+  }
+
+  @Get(':scheme/:sectorCode/constituents')
+  /** 返回固定 release 中一板块的 verified 成分观测，不伪造真实调入调出日期。 */
+  public async listConstituents(
+    @Param() path: SectorPathDto,
+    @Query() query: ListSectorMembershipQueryDto,
+    @Headers('if-none-match') ifNoneMatch: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<unknown> {
+    const result = await this.sectors.listConstituents(path, query, ifNoneMatch);
     return writeConditionalResponse(response, result);
   }
 }

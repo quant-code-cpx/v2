@@ -1,0 +1,710 @@
+openapi: 3.1.1
+info:
+  title: service-data-sync equity instrument internal API
+  version: 1.0.0
+  description: |
+    Proposed service-to-service read contract for published Shanghai, Shenzhen,
+    and Beijing A-share instrument master data. service-data-sync owns canonical
+    identity, bitemporal names and listing lifecycle. Raw evidence, provider
+    fields, PENDING placeholders, quarantined conflicts, and database keys are
+    not exposed. instrumentId is an internal correlation identifier and must be
+    removed by service-api before any public response.
+
+    This contract is the implementation authority for the equity catalog,
+    equity detail, and listing-status history portions that overlap proposed
+    contract 0003. Bars, adjustment factors, corporate actions, and financial
+    data remain governed by contract 0003.
+  x-contract-status: Proposed
+  x-partially-supersedes: 0003-data-sync-equity-internal.openapi.yaml
+servers:
+  - url: http://service-data-sync:8000
+    description: Compose service network
+tags:
+  - name: equity-instruments
+security:
+  - serviceBearer: []
+paths:
+  /internal/v1/equities:
+    get:
+      tags: [equity-instruments]
+      operationId: listInternalEquityInstruments
+      summary: List one immutable published slice of confirmed A-share instruments
+      description: |
+        When exchange is omitted, the page comes only from the last stable
+        three-exchange aggregate publication. A partial exchange refresh never
+        creates a mixed aggregate. asOf selects market effective time; knownAt
+        selects system knowledge time. A cursor binds all filters and dataVersion.
+      parameters:
+        - $ref: '#/components/parameters/ExchangeQuery'
+        - $ref: '#/components/parameters/ListingStatuses'
+        - $ref: '#/components/parameters/Query'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/KnownAt'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize200'
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Page ordered by exchange, symbol, and internal instrumentId.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalEquityPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/SnapshotExpired'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /internal/v1/equities/{exchange}/{symbol}:
+    get:
+      tags: [equity-instruments]
+      operationId: getInternalEquityInstrument
+      summary: Resolve one published A-share instrument at effective and knowledge time
+      description: |
+        exchange and symbol are resolved only against bitemporal identifier
+        history; names and lifecycle states never participate in identity
+        matching. When asOf is omitted, only the unique current-open identifier
+        in the selected publication is eligible. A reused code therefore resolves
+        to its current security; callers must supply asOf to address the former
+        security. No eligible identity is 404. More than one eligible identity is
+        a 409 integrity conflict and is never resolved by arbitrary ordering.
+        PENDING or quarantined identities behave as not found.
+      parameters:
+        - $ref: '#/components/parameters/ExchangePath'
+        - $ref: '#/components/parameters/Symbol'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/KnownAt'
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: One published bitemporal instrument projection.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalEquityDetail'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IdentityResolutionConflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+  /internal/v1/equities/{exchange}/{symbol}/listing-status-history:
+    get:
+      tags: [equity-instruments]
+      operationId: listInternalEquityListingStatusHistory
+      summary: List published listing lifecycle periods for one A-share instrument
+      description: |
+        asOf resolves which security owns the path identifier; effectiveFrom and
+        effectiveTo then filter that security's returned lifecycle periods.
+        Omit asOf to select only the unique current-open identifier. A former
+        security whose code was reused requires asOf. History is ordered by
+        effectiveFrom then knownFrom. knownAt allows a no-look-ahead
+        reconstruction. Ordinary trading suspensions are outside this contract.
+      parameters:
+        - $ref: '#/components/parameters/ExchangePath'
+        - $ref: '#/components/parameters/Symbol'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/EffectiveFrom'
+        - $ref: '#/components/parameters/EffectiveTo'
+        - $ref: '#/components/parameters/KnownAt'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize200'
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Bitemporal listing-status page from one dataVersion.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalListingStatusHistoryPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/HistoryConflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+
+components:
+  securitySchemes:
+    serviceBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: service-credential
+      description: |
+        Dedicated runtime-injected service credential, compared in constant time.
+        It is never logged or returned. Production issuance and rotation remain
+        deployment responsibilities.
+
+  parameters:
+    ExchangeQuery:
+      name: exchange
+      in: query
+      required: false
+      description: Omit to use the last stable three-exchange aggregate publication.
+      schema:
+        $ref: '#/components/schemas/Exchange'
+    ExchangePath:
+      name: exchange
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Exchange'
+    Symbol:
+      name: symbol
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Symbol'
+    ListingStatuses:
+      name: status
+      in: query
+      required: false
+      style: form
+      explode: true
+      description: Repeat to include up to three published lifecycle states.
+      schema:
+        type: array
+        minItems: 1
+        maxItems: 3
+        uniqueItems: true
+        items:
+          $ref: '#/components/schemas/ListingStatus'
+    Query:
+      name: query
+      in: query
+      required: false
+      description: Prefix match over symbol or name valid in the selected time slice.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+    AsOf:
+      name: asOf
+      in: query
+      required: false
+      description: |
+        Market effective date in Asia/Shanghai. On collection reads it defaults
+        to the effective date represented by the selected publication. On keyed
+        detail or history reads, omission accepts only the unique current-open
+        identifier; resolving a former security after code reuse requires asOf.
+      schema:
+        type: string
+        format: date
+    KnownAt:
+      name: knownAt
+      in: query
+      required: false
+      description: |
+        Inclusive system-knowledge instant. Defaults to the publication knowledge
+        cutoff. Future instants are rejected.
+      schema:
+        type: string
+        format: date-time
+    EffectiveFrom:
+      name: effectiveFrom
+      in: query
+      required: false
+      description: Inclusive lower effective-date bound.
+      schema:
+        type: string
+        format: date
+    EffectiveTo:
+      name: effectiveTo
+      in: query
+      required: false
+      description: Exclusive upper effective-date bound; must follow effectiveFrom.
+      schema:
+        type: string
+        format: date
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque authenticated cursor bound to filters, sort keys, and dataVersion.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
+    PageSize200:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 100
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 256
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: Caller correlation identifier; invalid values are replaced, not reflected verbatim.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+
+  headers:
+    ETag:
+      description: Strong tag derived from normalized request projection and dataVersion.
+      schema:
+        type: string
+    PrivateRevalidate:
+      schema:
+        type: string
+        const: private, max-age=0, must-revalidate
+    DataVersion:
+      description: Stable UUID of the selected exchange or aggregate publication.
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    ValidationProblem:
+      description: |
+        Path syntax, query syntax, time range, or cursor is malformed or
+        unsupported. Identity absence and identity ambiguity are not validation
+        failures; they use 404 and 409 respectively.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            invalidAsOf:
+              value:
+                type: /problems/validation-error
+                title: Request validation failed
+                status: 400
+                code: validation-error
+                detail: asOf must be a valid ISO date
+                requestId: req-example
+    Unauthorized:
+      description: Missing or invalid service credential.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: |
+        No confirmed published identity exists in the selected time slice.
+        Without asOf, only a unique current-open identifier is considered; a
+        historical-only identifier therefore returns 404.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    IdentityResolutionConflict:
+      description: |
+        More than one published security matched the identifier and time slice.
+        This indicates canonical-history corruption; the service does not choose
+        by name, lifecycle state, or ordering.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            ambiguousIdentity:
+              value:
+                type: /problems/identity-resolution-conflict
+                title: Instrument identity is ambiguous
+                status: 409
+                code: identity-resolution-conflict
+                detail: The identifier cannot be resolved uniquely for the requested time slice
+                requestId: req-example
+    HistoryConflict:
+      description: |
+        Either identifier history is ambiguous for the selected time slice, or
+        the cursor refers to a superseded dataVersion. The caller must not retry
+        with arbitrary identity selection; restart pagination only for a
+        snapshot-expired problem code.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    SnapshotExpired:
+      description: Cursor refers to a superseded dataVersion; restart from the first page.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    RateLimited:
+      description: Service caller exceeded its approved read budget.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    DependencyUnavailable:
+      description: |
+        Published store is unavailable, or no stable aggregate publication exists.
+        No mixed or unmarked stale result is returned.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    Exchange:
+      type: string
+      enum: [SSE, SZSE, BSE]
+    Symbol:
+      type: string
+      pattern: '^[0-9]{6}$'
+    ListingStatus:
+      type: string
+      enum: [LISTED, SUSPENDED, DELISTED]
+      description: |
+        Listing lifecycle only. SUSPENDED means explicit exchange-level listing
+        suspension, not ordinary intraday or daily trading suspension. PENDING
+        and quarantined states are never published.
+    EffectiveDatePrecision:
+      type: string
+      enum: [OFFICIAL_DATE, OBSERVATION_DATE]
+      description: |
+        OFFICIAL_DATE means an explicit authoritative effective date.
+        OBSERVATION_DATE means the change is only known to have been observed on
+        that date and must not be backdated.
+    NullableDate:
+      type: [string, 'null']
+      format: date
+    NullableDateTime:
+      type: [string, 'null']
+      format: date-time
+
+    TemporalIdentifier:
+      type: object
+      additionalProperties: false
+      required:
+        - exchange
+        - symbol
+        - effectiveFrom
+        - effectiveTo
+        - datePrecision
+        - knownFrom
+        - observedAt
+      properties:
+        exchange:
+          $ref: '#/components/schemas/Exchange'
+        symbol:
+          $ref: '#/components/schemas/Symbol'
+        effectiveFrom:
+          type: string
+          format: date
+        effectiveTo:
+          $ref: '#/components/schemas/NullableDate'
+        datePrecision:
+          $ref: '#/components/schemas/EffectiveDatePrecision'
+        knownFrom:
+          type: string
+          format: date-time
+        observedAt:
+          type: string
+          format: date-time
+
+    TemporalName:
+      type: object
+      additionalProperties: false
+      required:
+        - value
+        - effectiveFrom
+        - effectiveTo
+        - datePrecision
+        - knownFrom
+        - observedAt
+      properties:
+        value:
+          type: string
+          minLength: 1
+          maxLength: 200
+        effectiveFrom:
+          type: string
+          format: date
+        effectiveTo:
+          $ref: '#/components/schemas/NullableDate'
+        datePrecision:
+          $ref: '#/components/schemas/EffectiveDatePrecision'
+        knownFrom:
+          type: string
+          format: date-time
+        observedAt:
+          type: string
+          format: date-time
+
+    TemporalListing:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - listedOn
+        - delistedOn
+        - effectiveFrom
+        - effectiveTo
+        - datePrecision
+        - knownFrom
+        - observedAt
+      properties:
+        status:
+          $ref: '#/components/schemas/ListingStatus'
+        listedOn:
+          $ref: '#/components/schemas/NullableDate'
+        delistedOn:
+          $ref: '#/components/schemas/NullableDate'
+        effectiveFrom:
+          type: string
+          format: date
+        effectiveTo:
+          $ref: '#/components/schemas/NullableDate'
+        datePrecision:
+          $ref: '#/components/schemas/EffectiveDatePrecision'
+        knownFrom:
+          type: string
+          format: date-time
+        observedAt:
+          type: string
+          format: date-time
+
+    InternalEquityItem:
+      type: object
+      additionalProperties: false
+      required: [instrumentId, identifier, name, listing]
+      properties:
+        instrumentId:
+          type: string
+          format: uuid
+          description: Internal correlation identity; service-api must remove it publicly.
+        identifier:
+          $ref: '#/components/schemas/TemporalIdentifier'
+        name:
+          $ref: '#/components/schemas/TemporalName'
+        listing:
+          $ref: '#/components/schemas/TemporalListing'
+
+    InternalEquityPage:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+        - nextCursor
+        - dataVersion
+        - publishedAt
+        - effectiveAsOf
+        - knowledgeCutoff
+        - publicationScope
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/InternalEquityItem'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 1024
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        effectiveAsOf:
+          type: string
+          format: date
+        knowledgeCutoff:
+          type: string
+          format: date-time
+        publicationScope:
+          type: string
+          enum: [SSE, SZSE, BSE, CN_A_STABLE]
+
+    InternalEquityDetail:
+      type: object
+      additionalProperties: false
+      required:
+        - instrumentId
+        - identifier
+        - name
+        - listing
+        - dataVersion
+        - publishedAt
+        - effectiveAsOf
+        - knowledgeCutoff
+      properties:
+        instrumentId:
+          type: string
+          format: uuid
+          description: Internal correlation identity; service-api must remove it publicly.
+        identifier:
+          $ref: '#/components/schemas/TemporalIdentifier'
+        name:
+          $ref: '#/components/schemas/TemporalName'
+        listing:
+          $ref: '#/components/schemas/TemporalListing'
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        effectiveAsOf:
+          type: string
+          format: date
+        knowledgeCutoff:
+          type: string
+          format: date-time
+
+    InternalListingStatusPeriod:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - effectiveFrom
+        - effectiveTo
+        - effectiveDatePrecision
+        - knownFrom
+        - knownTo
+        - observedAt
+      properties:
+        status:
+          $ref: '#/components/schemas/ListingStatus'
+        effectiveFrom:
+          type: string
+          format: date
+        effectiveTo:
+          $ref: '#/components/schemas/NullableDate'
+        effectiveDatePrecision:
+          $ref: '#/components/schemas/EffectiveDatePrecision'
+        knownFrom:
+          type: string
+          format: date-time
+        knownTo:
+          $ref: '#/components/schemas/NullableDateTime'
+        observedAt:
+          type: string
+          format: date-time
+
+    InternalListingStatusHistoryPage:
+      type: object
+      additionalProperties: false
+      required:
+        - instrumentId
+        - exchange
+        - symbol
+        - items
+        - nextCursor
+        - dataVersion
+        - publishedAt
+        - knowledgeCutoff
+      properties:
+        instrumentId:
+          type: string
+          format: uuid
+          description: Internal correlation identity; service-api must remove it publicly.
+        exchange:
+          $ref: '#/components/schemas/Exchange'
+        symbol:
+          $ref: '#/components/schemas/Symbol'
+        items:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/InternalListingStatusPeriod'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 1024
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        knowledgeCutoff:
+          type: string
+          format: date-time
+
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code, requestId]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        code:
+          type: string
+          pattern: '^[a-z][a-z0-9-]{1,63}$'
+        detail:
+          type: string
+          maxLength: 500
+        requestId:
+          type: string
+          maxLength: 128

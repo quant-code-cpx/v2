@@ -1,5 +1,9 @@
 @./.agents/skills/caveman/SKILL.md
 @./.agents/skills/rtk/SKILL.md
+@./.agents/skills/react-best-practices/SKILL.md
+@./.agents/skills/composition-patterns/SKILL.md
+@./.agents/skills/material-ui-styling/SKILL.md
+@./.agents/skills/material-ui-theming/SKILL.md
 
 # AGENTS.md
 
@@ -46,6 +50,24 @@
 - 新增行为必须配套测试；修复缺陷应优先添加回归测试。
 - 修改接口、配置、部署或架构时，同步更新相关文档。
 - 不提交生成物、缓存、本地数据或仅适用于个人机器的配置。
+
+## 测试目录与归属
+
+- 测试文件必须进入最近功能模块的专用测试目录，禁止与被测试源码同层平铺。使用 `.test.*`、
+  `.spec.*`、`test_*.py` 等后缀不能替代目录隔离；禁止出现 `service.ts` 与 `service.spec.ts`
+  位于同一目录的结构。
+- `service-web` 的路由页测试统一放在 `src/views/<PageName>/test/`，覆盖该页面私有组件、Hook、
+  工具函数和页面编排；共享组件、API、Hook、工具或样式测试放在对应功能目录的 `test/`。
+- `service-api` 的每个 Nest module 使用 `src/modules/<ModuleName>/test/`，该 module 的
+  Controller、Service、DTO、Guard 等测试全部集中于此。`platform/` 与 `scripts/` 下的独立功能也在
+  自己目录内建立 `test/`。
+- `service-data-sync` 整体作为独立 Python 功能模块，测试统一进入服务级 `tests/`，并按 `unit/`、
+  `integration/`、`architecture/` 分类；禁止在 `src/service_data_sync/` 的生产源码目录旁散落
+  `test_*.py`。新增更细功能域时，在上述分类下建立同名功能子目录。
+- 只有确实跨越多个功能模块的 E2E、集成、架构或契约测试，才可进入服务级专用测试树；不得借此把普通
+  单元测试重新集中为无归属的平铺目录。
+- 移动测试时必须同步修正 import、fixture、测试发现、覆盖率、静态检查与 Docker 构建路径，并运行
+  对应服务的完整测试命令。
 
 ## 注释与可读性
 
@@ -146,6 +168,36 @@
 - E2E：先 `vp exec playwright install chromium`，再 `vp build && vp run e2e`
 - 容器构建：`docker build --tag quant-v2/service-web:local service-web`
 - 容器健康检查：运行镜像并请求 `GET /healthz`
+
+React 与 MUI 开发规范：
+
+- 当前运行时以 `service-web/package.json` 锁定的 React 19 与 MUI 7 为准。仓库内 MUI 官方 Skill
+  面向更新主版本时，只采用不依赖版本的分层与 Token 原则；组件 API、slot、类型和导入方式必须以
+  当前 MUI 7 类型检查及官方文档为准。
+- 每个路由页必须使用 `src/views/<PageName>/<PageName>.tsx` 独立目录。页面私有组件放在
+  `src/views/<PageName>/components/<ComponentName>.tsx`，页面私有 Hook 放在 `hooks/use*.ts`，纯函数
+  放在 `utils/*.ts`。禁止在 `views/` 根目录平铺页面文件。
+- 只有跨页面复用的组件才能进入 `src/components/<ComponentName>.tsx`。单文件组件不得额外套同名目录；
+  只有组件同时拥有两个及以上强关联文件，例如私有 Hook、类型、样式或子组件时，才建立
+  `components/<ComponentName>/` 功能目录。禁止用 `index.ts` 聚合导出掩盖真实依赖；路由懒加载和组件
+  引用必须直达具体文件，保持 Bundle 路径可静态分析。
+- 路由页只负责信息顺序、页面级状态分支和组件组合。远程状态归 TanStack Query，可分享状态归 URL，
+  局部交互归组件或页面 Hook，高频图表状态归引擎实例。API 调用、表单副作用、复杂派生和可测试纯函数
+  不得混入大块 JSX。
+- 不以行数机械拆分，但生产 UI 组件或 Hook 超过约 200 行时必须检查职责；页面编排超过约 150 行时
+  必须优先拆出私有组件、Hook 或纯函数。配置、契约适配、测试等保持单一职责的文件可例外，并在评审中
+  说明原因。
+- 组件变体优先使用组合与显式命名，禁止持续增加布尔属性制造隐式模式。禁止在组件内部定义 React
+  组件，避免父组件重渲染导致子树卸载重建。
+- 组件拆分必须至少具备一项真实边界：多处复用、独立状态或副作用、明确业务语义、昂贵渲染隔离、
+  独立可测试契约。单次使用、无状态、只有少量 JSX 的片段默认保留在父组件或同一模块内；禁止为了降低
+  文件行数制造转发大量 props 的微型组件。模块级私有辅助组件可以与主组件放在同一文件。
+- MUI 样式按最小作用域选择：单实例使用 `sx`，重复封装使用 `styled()`，全局一致行为进入
+  `theme.components`，HTML 基线才使用 `CssBaseline` 或全局 CSS。超过约 100 行的复杂样式移出组件。
+- 颜色、间距、圆角、阴影、组件几何必须来自 canonical design tokens 或 theme。不得用页面局部常量
+  复制全局设计值；MUI `sx` 使用主题缩写，`styled()` 中显式使用 `theme.spacing()`。
+- 重型图表与路由保持动态加载；避免聚合导入、组件内组件、无必要 Effect 和派生状态回写。拆分后必须
+  保留 loading、empty、error/retry、权限、键盘焦点和 reduced-motion 状态，并补受影响行为测试。
 
 产品范围仅限 PC 桌面浏览器，默认设计与视觉验收视口为 `1440×900`。禁止为移动端、平板、触控设备或
 窄屏窗口设计、实现、生成原型、截图或测试；禁止新增只服务于这些场景的断点、媒体查询、布局重排、

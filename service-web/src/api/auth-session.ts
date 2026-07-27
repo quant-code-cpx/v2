@@ -3,28 +3,28 @@ import { getCurrentUser, loginWithCaptcha, logoutCurrentSession, refreshAccessTo
 import { ApiError, isApiError } from "./http";
 import type { CurrentUser, LoginInput } from "../types/access";
 
-/** Keep current-user state in TanStack Query rather than browser persistence. */
+/** 将当前用户状态保存在 TanStack Query，禁止写入浏览器持久存储。 */
 export const authMeQueryKey = ["auth", "me"] as const;
 
-/** Signal a mounted protected shell that a credential rejection requires an immediate safe redirect. */
+/** 通知已挂载的受保护壳层：凭据已确认失效，需要执行站内安全跳转。 */
 export const authSessionInvalidatedEvent = "apex-auth-session-invalidated";
 
-/** Describe non-secret session state observed by routes and React providers. */
+/** 描述路由与 React Provider 可观察的非敏感会话状态。 */
 export interface AuthSessionSnapshot {
   status: "checking" | "anonymous" | "authenticated";
 }
 
-/** Receive an in-memory session state change. */
+/** 接收一次内存会话状态变更。 */
 type SessionListener = (snapshot: AuthSessionSnapshot) => void;
 
-/** Pause briefly before the contract-defined single refresh retry. */
+/** 在契约规定的单次刷新重试前短暂等待。 */
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, milliseconds);
   });
 }
 
-/** Keep access tokens in memory and coordinate refreshes for routes and UI. */
+/** 在内存保存 access token，并协调路由与 UI 的单飞刷新。 */
 class AuthSession {
   private accessToken: string | undefined;
 
@@ -34,33 +34,33 @@ class AuthSession {
 
   private readonly listeners = new Set<SessionListener>();
 
-  /** Return current non-secret session status. */
+  /** 返回当前非敏感会话状态。 */
   public getSnapshot(): AuthSessionSnapshot {
     return this.snapshot;
   }
 
-  /** Return current identity from the authoritative TanStack Query cache. */
+  /** 从权威 TanStack Query 缓存返回当前身份。 */
   public getCurrentUser(): CurrentUser | undefined {
     return queryClient.getQueryData<CurrentUser>(authMeQueryKey);
   }
 
-  /** Return token for API use without exposing it to React or persistent storage. */
+  /** 返回 API 使用的 token，不向 React 状态或持久存储暴露。 */
   public getAccessToken(): string | undefined {
     return this.accessToken;
   }
 
-  /** Subscribe UI to session transitions and immediately publish current status. */
+  /** 订阅会话变更，并立即发布当前状态。 */
   public subscribe(listener: SessionListener): () => void {
     this.listeners.add(listener);
     listener(this.snapshot);
 
-    /** Remove one observer when its React provider unmounts. */
+    /** React Provider 卸载时移除对应观察者。 */
     return () => {
       this.listeners.delete(listener);
     };
   }
 
-  /** Start or join a single refresh flow when no valid in-memory token exists. */
+  /** 内存没有有效 token 时，启动或加入唯一刷新流程。 */
   public async ensureSession(): Promise<CurrentUser | null> {
     const cachedUser = this.getCurrentUser();
     if (this.snapshot.status === "authenticated" && cachedUser !== undefined) {
@@ -82,7 +82,7 @@ class AuthSession {
     }
   }
 
-  /** Authenticate explicitly, retaining only access token memory and current-user query data. */
+  /** 显式登录，仅保留内存 access token 与当前用户查询数据。 */
   public async login(input: LoginInput): Promise<CurrentUser> {
     this.setSnapshot({ status: "checking" });
 
@@ -95,52 +95,57 @@ class AuthSession {
     }
   }
 
-  /** Execute one protected request and clear in-memory state on a rejected session. */
+  /** 执行受保护请求；access token 失效时单飞刷新并只重放一次原请求。 */
   public async withAccessToken<T>(operation: (accessToken: string) => Promise<T>): Promise<T> {
-    const accessToken = this.accessToken;
-    if (accessToken === undefined) {
-      // A protected request without a process-local token cannot safely retain protected UI state.
-      this.clear(true);
-      throw new ApiError(401, "unauthorized");
-    }
+    const accessToken = await this.accessTokenForRequest();
 
     try {
       return await operation(accessToken);
     } catch (error: unknown) {
-      if (isApiError(error) && error.status === 401) {
-        this.clear(true);
+      if (!isApiError(error) || error.status !== 401) {
+        throw error;
       }
 
-      throw error;
+      const refreshedAccessToken = await this.refreshRejectedAccessToken(accessToken);
+
+      try {
+        return await operation(refreshedAccessToken);
+      } catch (retryError: unknown) {
+        // 新 token 仍被拒绝时禁止继续刷新，避免非幂等请求产生无限重放。
+        if (isApiError(retryError) && retryError.status === 401) {
+          this.clear(true);
+        }
+
+        throw retryError;
+      }
     }
   }
 
-  /** Clear browser-visible session state after an explicit logout attempt. */
+  /** 显式退出后清理浏览器可见会话状态。 */
   public async logout(): Promise<void> {
     try {
       await logoutCurrentSession();
     } catch {
-      // Client state must still clear so browser history cannot restore protected content.
+      // 服务端退出失败也必须清理客户端，避免历史记录恢复受保护内容。
     } finally {
       this.clear();
     }
   }
 
-  /** Drop token and query data, optionally notifying an already-mounted protected shell to redirect. */
+  /** 丢弃 token 与查询数据，并可通知已挂载壳层执行站内跳转。 */
   public clear(notifyProtectedShell = false): void {
     this.accessToken = undefined;
     queryClient.removeQueries({
       predicate: (query) => query.queryKey[0] === "auth" || query.queryKey[0] === "users",
     });
-    // Publish even when already anonymous so mounted protected shells cannot retain stale identity UI.
+    // 即使本来已匿名也强制发布，避免已挂载壳层保留过期身份 UI。
     this.setSnapshot({ status: "anonymous" }, true);
     if (notifyProtectedShell && typeof window !== "undefined") {
       window.dispatchEvent(new Event(authSessionInvalidatedEvent));
-      this.replaceToLogin();
     }
   }
 
-  /** Notify listeners after status transitions, or a forced credential/cache invalidation. */
+  /** 状态变化或强制凭据失效后通知所有观察者。 */
   private setSnapshot(nextSnapshot: AuthSessionSnapshot, forcePublish = false): void {
     if (this.snapshot.status === nextSnapshot.status && !forcePublish) {
       return;
@@ -148,25 +153,56 @@ class AuthSession {
 
     this.snapshot = nextSnapshot;
 
-    /** Publish a safe status-only snapshot to each current observer. */
+    /** 向每个观察者发布仅包含安全状态的快照。 */
     this.listeners.forEach((listener) => {
       listener(this.snapshot);
     });
   }
 
-  /** Replace browser history from a terminal protected-request 401 before restricted UI can persist. */
-  private replaceToLogin(): void {
-    if (import.meta.env.MODE === "test" || window.location.pathname === "/login") {
-      return;
+  /** 为请求取得 access token；冷启动时复用会话恢复，不提前卸载受保护页面。 */
+  private async accessTokenForRequest(): Promise<string> {
+    if (this.accessToken !== undefined) {
+      return this.accessToken;
     }
 
-    const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    window.location.replace(
-      `/login?returnTo=${encodeURIComponent(returnTo)}&reason=session-expired`,
-    );
+    const user = await this.ensureSession();
+    if (user === null || this.accessToken === undefined) {
+      throw new ApiError(401, "unauthorized");
+    }
+
+    return this.accessToken;
   }
 
-  /** Perform refresh once, retaining an established identity unless the server returns 401. */
+  /** 首次业务 401 后刷新；并发请求复用同一 Promise，已更新 token 则直接使用。 */
+  private async refreshRejectedAccessToken(rejectedAccessToken: string): Promise<string> {
+    if (this.accessToken !== undefined && this.accessToken !== rejectedAccessToken) {
+      return this.accessToken;
+    }
+
+    if (this.refreshPromise === undefined) {
+      const previousSnapshot = this.snapshot;
+      const refreshPromise = this.refreshSession(previousSnapshot);
+      this.refreshPromise = refreshPromise;
+
+      try {
+        await refreshPromise;
+      } finally {
+        if (this.refreshPromise === refreshPromise) {
+          this.refreshPromise = undefined;
+        }
+      }
+    } else {
+      await this.refreshPromise;
+    }
+
+    if (this.accessToken === undefined) {
+      throw new ApiError(401, "unauthorized");
+    }
+
+    return this.accessToken;
+  }
+
+  /** 执行一次 refresh；除服务端返回 401 外均保留既有身份。 */
   private async refreshSession(previousSnapshot: AuthSessionSnapshot): Promise<CurrentUser | null> {
     try {
       const response = await refreshAccessToken();
@@ -187,7 +223,7 @@ class AuthSession {
     }
   }
 
-  /** Clear only rejected credentials; keep a prior identity for permission or dependency failures. */
+  /** 仅清理被确认拒绝的凭据；权限或依赖故障保留既有身份。 */
   private handleRefreshFailure(
     error: unknown,
     previousSnapshot: AuthSessionSnapshot,
@@ -197,12 +233,12 @@ class AuthSession {
       return null;
     }
 
-    // A 403 is a permission result, not evidence that the authenticated session is invalid.
+    // 403 是权限结果，不代表已认证会话失效。
     this.setSnapshot(previousSnapshot);
     throw error;
   }
 
-  /** Verify a token with GET /users/me before exposing identity to routes or UI. */
+  /** 通过 GET /users/me 验证 token 后，才向路由或 UI 暴露身份。 */
   private async acceptAccessToken(
     accessToken: string,
     clearOnIdentityFailure = true,
@@ -210,13 +246,13 @@ class AuthSession {
     const previousAccessToken = this.accessToken;
     const previousUser = this.getCurrentUser();
     this.accessToken = accessToken;
-    queryClient.removeQueries({ queryKey: authMeQueryKey, exact: true });
 
     try {
       const user = await queryClient.fetchQuery({
         queryKey: authMeQueryKey,
         queryFn: () => getCurrentUser(accessToken),
-        staleTime: Number.POSITIVE_INFINITY,
+        // 后台刷新期间保留旧身份；本次调用仍强制向服务端验证新 token。
+        staleTime: 0,
       });
       this.setSnapshot({ status: "authenticated" });
       return user;
@@ -224,7 +260,7 @@ class AuthSession {
       if (clearOnIdentityFailure || (isApiError(error) && error.status === 401)) {
         this.clear(!clearOnIdentityFailure);
       } else {
-        // A failed refresh verification must not turn a prior authorized UI into anonymous state.
+        // 刷新验证失败不能把既有已授权 UI 误变成匿名状态。
         this.accessToken = previousAccessToken;
         if (previousUser !== undefined) {
           queryClient.setQueryData(authMeQueryKey, previousUser);
@@ -235,5 +271,5 @@ class AuthSession {
   }
 }
 
-/** Export one process-local session coordinator shared by loaders and React. */
+/** 导出由路由 loader 与 React 共享的进程内会话协调器。 */
 export const authSession = new AuthSession();

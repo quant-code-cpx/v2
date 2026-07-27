@@ -37,6 +37,14 @@ class SectorPeriod(StrEnum):
         }[self]
 
 
+class SectorMembershipResolution(StrEnum):
+    """描述一条来源成分在冻结身份知识视图下的解析结果。"""
+
+    VERIFIED = "VERIFIED"
+    PENDING = "PENDING"
+    QUARANTINED = "QUARANTINED"
+
+
 @dataclass(frozen=True, slots=True)
 class SectorIdentifier:
     """表示一个分类体系内稳定且不可与其他体系混淆的板块代码。"""
@@ -68,6 +76,23 @@ class SectorCatalogEntry:
         """拒绝空白或过长名称，避免未确认目录进入可公开状态。"""
         if self.name != self.name.strip() or not self.name or len(self.name) > 200:
             raise ValueError("sector name must be a trimmed string from 1 to 200 characters")
+
+
+@dataclass(frozen=True, slots=True)
+class SectorMembershipCandidate:
+    """表示来源当前快照中的一条板块成分，不声明真实调入或调出时间。"""
+
+    source_symbol: str
+    source_name: str
+
+    def __post_init__(self) -> None:
+        """限制中立来源标识格式，避免脏行绕过快照质量门。"""
+        if len(self.source_symbol) != 6 or not self.source_symbol.isdigit():
+            raise ValueError("membership source symbol must be six digits")
+        if self.source_name != self.source_name.strip() or not self.source_name:
+            raise ValueError("membership source name must not be blank")
+        if len(self.source_name) > 200:
+            raise ValueError("membership source name must not exceed 200 characters")
 
 
 @dataclass(frozen=True, slots=True)

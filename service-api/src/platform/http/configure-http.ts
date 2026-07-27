@@ -5,7 +5,7 @@ import type { AppConfigService } from '../config/app-config.service.js';
 import { ProblemDetailsFilter } from './problem-details.filter.js';
 import { requestIdMiddleware } from './request-id.middleware.js';
 
-/** Apply shared HTTP trust, CORS, validation, request-id, and error-response policy. */
+/** 配置 REST API 共用的验证、跨域、请求标识与错误响应策略。 */
 export function configureHttp(app: NestExpressApplication, config: AppConfigService): void {
   app.set('trust proxy', config.trustProxy);
   app.setGlobalPrefix(config.apiPrefix, { exclude: ['health', 'ready'] });
@@ -13,8 +13,8 @@ export function configureHttp(app: NestExpressApplication, config: AppConfigServ
     origin: config.corsOrigin,
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-    allowedHeaders: ['Authorization', 'Content-Type', 'If-Match', 'X-Request-Id'],
-    exposedHeaders: ['ETag', 'Location', 'Retry-After', 'X-Request-Id'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'If-Match', 'If-None-Match', 'X-Request-Id'],
+    exposedHeaders: ['ETag', 'Location', 'Retry-After', 'X-Data-Version', 'X-Request-Id'],
   });
   app.use(requestIdMiddleware);
   app.useGlobalPipes(

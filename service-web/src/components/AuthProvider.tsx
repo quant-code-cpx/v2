@@ -13,7 +13,7 @@ import { authMeQueryKey, authSession } from "../api/auth-session";
 import type { AuthSessionSnapshot } from "../api/auth-session";
 import type { CurrentUser, LoginInput, Permission } from "../types/access";
 
-/** Describe non-secret session state and actions consumable by application components. */
+/** 描述应用组件可消费的非敏感会话状态与动作。 */
 interface AuthContextValue {
   status: AuthSessionSnapshot["status"];
   user: CurrentUser | undefined;
@@ -22,20 +22,20 @@ interface AuthContextValue {
   hasPermission: (permission: Permission) => boolean;
 }
 
-/** Keep auth unavailable outside its root provider so protected UI cannot silently degrade. */
+/** Provider 外不提供鉴权上下文，避免受保护 UI 静默降级。 */
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-/** Subscribe React's external-store bridge to safe status-only auth-session transitions. */
+/** 将 React 外部存储桥接到仅含安全状态的会话变化。 */
 function subscribeToAuthSession(listener: () => void): () => void {
   return authSession.subscribe(listener);
 }
 
-/** Read the stable status snapshot held by the single process-local auth-session coordinator. */
+/** 读取进程内唯一会话协调器持有的稳定状态快照。 */
 function readAuthSessionSnapshot(): AuthSessionSnapshot {
   return authSession.getSnapshot();
 }
 
-/** Render session-aware descendants and subscribe them to the in-memory auth coordinator. */
+/** 渲染会话感知的后代，并订阅内存鉴权协调器。 */
 export function AuthProvider({ children }: PropsWithChildren) {
   const snapshot = useSyncExternalStore(
     subscribeToAuthSession,
@@ -56,26 +56,26 @@ export function AuthProvider({ children }: PropsWithChildren) {
     staleTime: Number.POSITIVE_INFINITY,
   });
 
-  /** Start initial refresh once; useSyncExternalStore keeps status current for every later transition. */
+  /** 首次挂载只触发一次恢复，后续状态由 useSyncExternalStore 保持同步。 */
   useEffect(() => {
     void authSession.ensureSession().catch(() => {
-      // Route loaders expose unavailable auth dependencies through their error boundary.
+      // 路由 loader 通过错误边界呈现不可用的鉴权依赖。
     });
   }, []);
 
-  /** Delegate explicit login to the session coordinator. */
+  /** 将显式登录委托给会话协调器。 */
   const login = useCallback(async (input: LoginInput) => authSession.login(input), []);
 
-  /** Delegate explicit logout to the session coordinator. */
+  /** 将显式退出委托给会话协调器。 */
   const logout = useCallback(async () => authSession.logout(), []);
 
-  /** Check server-calculated permissions without inventing client-side authorization. */
+  /** 仅检查服务端计算的权限，不在客户端臆造授权。 */
   const hasPermission = useCallback(
     (permission: Permission) => currentUserQuery.data?.permissions.includes(permission) ?? false,
     [currentUserQuery.data],
   );
 
-  /** Keep context identity stable between session and identity updates. */
+  /** 在会话与身份未变化时保持上下文引用稳定。 */
   const value = useMemo<AuthContextValue>(
     () => ({
       status: snapshot.status,
@@ -90,7 +90,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-/** Read session context and fail loudly if a protected component is mounted without it. */
+/** 读取会话上下文；受保护组件未包裹 Provider 时立即失败。 */
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);
 

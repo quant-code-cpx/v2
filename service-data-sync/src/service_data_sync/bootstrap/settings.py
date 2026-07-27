@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     )
     akshare_enabled: bool = Field(default=False, validation_alias="DATA_SYNC_AKSHARE_ENABLED")
     sector_enabled: bool = Field(default=False, validation_alias="DATA_SYNC_SECTOR_ENABLED")
+    sector_membership_enabled: bool = Field(
+        default=False,
+        validation_alias="DATA_SYNC_SECTOR_MEMBERSHIP_ENABLED",
+    )
     internal_api_bearer_token: SecretStr = Field(
         validation_alias="DATA_SYNC_INTERNAL_API_BEARER_TOKEN"
     )

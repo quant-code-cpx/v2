@@ -11,7 +11,9 @@ from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.messaging.redis_client import RedisClient
 from service_data_sync.infrastructure.object_storage.client import ObjectStorageClient
 from service_data_sync.infrastructure.providers.akshare import (
+    AkshareEastmoneyEquityCatalogAdapter,
     AkshareEastmoneySectorBarsAdapter,
+    AkshareEastmoneySectorMembershipAdapter,
     AkshareTencentDailyBarsAdapter,
 )
 
@@ -43,12 +45,23 @@ def build_container(settings: Settings) -> ServiceContainer:
                 request_timeout_seconds=settings.akshare_request_timeout_seconds
             )
         )
+        registry.register(
+            AkshareEastmoneyEquityCatalogAdapter(
+                request_timeout_seconds=settings.akshare_request_timeout_seconds
+            )
+        )
         if settings.sector_enabled:
             registry.register(
                 AkshareEastmoneySectorBarsAdapter(
                     request_timeout_seconds=settings.akshare_request_timeout_seconds
                 )
             )
+            if settings.sector_membership_enabled:
+                registry.register(
+                    AkshareEastmoneySectorMembershipAdapter(
+                        request_timeout_seconds=settings.akshare_request_timeout_seconds
+                    )
+                )
     return ServiceContainer(
         settings=settings,
         database=DatabaseClient.from_settings(settings),

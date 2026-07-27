@@ -1,0 +1,4 @@
+-- 仅当 202607270001 之后没有新增 source_batch 或主数据发布时可执行。
+-- 常规回滚使用 Alembic downgrade；该脚本仅作为运维审阅入口。
+--
+-- alembic downgrade 202607260002

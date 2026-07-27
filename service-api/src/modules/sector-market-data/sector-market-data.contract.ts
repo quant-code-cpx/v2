@@ -8,6 +8,8 @@ const nonNegativeDecimalString = z.string().regex(/^[0-9]+(\.[0-9]+)?$/);
 
 /** 表示可正可负的不丢失精度十进制 JSON 字符串。 */
 const decimalString = z.string().regex(/^-?[0-9]+(\.[0-9]+)?$/);
+const membershipDateTimeSchema = z.string().datetime({ offset: true });
+const membershipListingStatusSchema = z.enum(['LISTED', 'SUSPENDED', 'DELISTED']);
 
 /** 校验同步服务内部返回的完整板块身份，含仅内部使用的稳定 UUID。 */
 export const internalSectorSchema = z
@@ -97,3 +99,136 @@ export type SectorBarPage = {
   items: SectorBar[];
   nextCursor: string | null;
 };
+
+/** 校验固定 release 的观测语义、覆盖范围和公开质量统计。 */
+const membershipReleaseSchema = z
+  .object({
+    requestedAsOf: membershipDateTimeSchema.nullable(),
+    resolvedAsOf: membershipDateTimeSchema,
+    coverageStart: membershipDateTimeSchema,
+    membershipSemantics: z.literal('observed'),
+    qualityStatus: z.enum(['passed', 'warned']),
+    identityCoveragePercent: z.literal('100'),
+    excludedIdentityCount: z.literal(0),
+    carriedForwardSectorCount: z.number().int().nonnegative(),
+    dataVersion: z.string().uuid(),
+    publishedAt: membershipDateTimeSchema,
+  })
+  .strict();
+
+/** 校验同步服务内部使用的成分板块身份，稳定 UUID 仅用于服务间关联。 */
+const internalMembershipSectorSchema = z
+  .object({
+    sectorId: z.string().uuid(),
+    scheme: z.enum(SECTOR_SCHEMES),
+    code: z.string().min(1).max(64),
+    name: z.string().min(1).max(200),
+  })
+  .strict();
+
+/** 校验同步服务内部返回的 verified 成分，禁止 PENDING 或数据库数值主键。 */
+const internalMembershipConstituentSchema = z
+  .object({
+    instrumentId: z.string().uuid(),
+    exchange: z.enum(['SSE', 'SZSE', 'BSE']),
+    symbol: z.string().regex(/^[0-9]{6}$/),
+    name: z.string().min(1).max(200),
+    listingStatus: membershipListingStatusSchema,
+    observedFrom: membershipDateTimeSchema,
+    observedTo: membershipDateTimeSchema.nullable(),
+  })
+  .strict();
+
+/** 校验同步服务内部反向读取的一条板块观测归属。 */
+const internalEquityMembershipSchema = z
+  .object({
+    sectorId: z.string().uuid(),
+    scheme: z.enum(SECTOR_SCHEMES),
+    code: z.string().min(1).max(64),
+    name: z.string().min(1).max(200),
+    observedFrom: membershipDateTimeSchema,
+    observedTo: membershipDateTimeSchema.nullable(),
+    snapshotObservedAt: membershipDateTimeSchema,
+    carriedForward: z.boolean(),
+  })
+  .strict();
+
+/** 校验内部板块到成分页，所有成分均来自同一不可变 release。 */
+export const internalSectorConstituentPageSchema = z
+  .object({
+    sector: internalMembershipSectorSchema,
+    release: membershipReleaseSchema,
+    snapshotObservedAt: membershipDateTimeSchema,
+    carriedForward: z.boolean(),
+    items: z.array(internalMembershipConstituentSchema).max(500),
+    nextCursor: z.string().max(1024).nullable(),
+  })
+  .strict();
+
+/** 校验内部证券到板块分页，证券 UUID 只允许停留在服务间防腐层。 */
+export const internalEquitySectorPageSchema = z
+  .object({
+    equity: z
+      .object({
+        instrumentId: z.string().uuid(),
+        exchange: z.enum(['SSE', 'SZSE', 'BSE']),
+        symbol: z.string().regex(/^[0-9]{6}$/),
+        name: z.string().min(1).max(200),
+        listingStatus: membershipListingStatusSchema,
+      })
+      .strict(),
+    scheme: z.enum(SECTOR_SCHEMES),
+    release: membershipReleaseSchema,
+    items: z.array(internalEquityMembershipSchema).max(500),
+    nextCursor: z.string().max(1024).nullable(),
+  })
+  .strict();
+
+/** 描述公开板块到成分页，已移除 sectorId 与 instrumentId。 */
+export type SectorConstituentPage = {
+  sector: {
+    scheme: (typeof SECTOR_SCHEMES)[number];
+    code: string;
+    name: string;
+  };
+  release: z.infer<typeof membershipReleaseSchema>;
+  snapshotObservedAt: string;
+  carriedForward: boolean;
+  items: Array<{
+    exchange: 'SSE' | 'SZSE' | 'BSE';
+    symbol: string;
+    name: string;
+    listingStatus: 'LISTED' | 'SUSPENDED' | 'DELISTED';
+    observedFrom: string;
+    observedTo: string | null;
+  }>;
+  nextCursor: string | null;
+};
+
+/** 描述公开证券到板块分页，已移除内部稳定 UUID。 */
+export type EquitySectorPage = {
+  equity: {
+    exchange: 'SSE' | 'SZSE' | 'BSE';
+    symbol: string;
+    name: string;
+    listingStatus: 'LISTED' | 'SUSPENDED' | 'DELISTED';
+  };
+  scheme: (typeof SECTOR_SCHEMES)[number];
+  release: z.infer<typeof membershipReleaseSchema>;
+  items: Array<{
+    scheme: (typeof SECTOR_SCHEMES)[number];
+    code: string;
+    name: string;
+    observedFrom: string;
+    observedTo: string | null;
+    snapshotObservedAt: string;
+    carriedForward: boolean;
+  }>;
+  nextCursor: string | null;
+};
+
+/** 描述内部板块到成分页，供防腐 client 严格校验。 */
+export type InternalSectorConstituentPage = z.infer<typeof internalSectorConstituentPageSchema>;
+
+/** 描述内部证券到板块分页，供防腐 client 严格校验。 */
+export type InternalEquitySectorPage = z.infer<typeof internalEquitySectorPageSchema>;

@@ -1,0 +1,1261 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="沪深京 A 股证券主数据、名称修订、上市生命周期、同步恢复、PostgreSQL 表与 API 边界的可执行技术方案">
+  <title>A 股证券主数据与上市生命周期｜技术方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #182230;
+      --muted: #5f6b7a;
+      --line: #d8dee8;
+      --surface: #f6f8fb;
+      --accent: #2557a7;
+      --accent-soft: #edf3fc;
+      --success: #176b4d;
+      --warning: #8a4b08;
+      --danger: #a0322b;
+      --radius: 12px;
+      --shadow: 0 10px 26px rgb(24 34 48 / 7%);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 16px;
+      line-height: 1.72;
+    }
+    a { color: var(--accent); text-underline-offset: .2em; }
+    a:focus-visible {
+      outline: 3px solid rgb(37 87 167 / 28%);
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
+    code {
+      padding: .08em .28em;
+      border-radius: 4px;
+      background: #eef1f5;
+      font: .9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    p code, li code, td code, dd code {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .shell { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+    header {
+      padding: 54px 0 38px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font-size: .78rem;
+      font-weight: 760;
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3, h4 { line-height: 1.28; letter-spacing: -.018em; }
+    h1 { max-width: 900px; margin: 0; font-size: clamp(2rem, 5vw, 3.6rem); }
+    h2 { margin: 0 0 20px; font-size: clamp(1.42rem, 3vw, 1.95rem); }
+    h3 { margin: 26px 0 9px; font-size: 1.1rem; }
+    h4 { margin: 18px 0 7px; font-size: 1rem; }
+    p { max-width: 82ch; }
+    .lede { max-width: 820px; margin: 16px 0 0; color: var(--muted); font-size: 1.06rem; }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 28px 0 0;
+    }
+    .meta div {
+      padding: 13px 15px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #fff;
+    }
+    .meta dt { color: var(--muted); font-size: .78rem; }
+    .meta dd { margin: 2px 0 0; font-weight: 680; }
+    .status { color: var(--warning); }
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 95%);
+      backdrop-filter: blur(10px);
+    }
+    nav ul {
+      display: flex;
+      gap: 20px;
+      width: max-content;
+      margin: 0;
+      padding: 12px 0;
+      list-style: none;
+    }
+    nav a { color: var(--muted); font-size: .88rem; font-weight: 680; text-decoration: none; }
+    nav a:hover { color: var(--accent); }
+    main { padding: 18px 0 70px; }
+    section {
+      padding: 48px 0;
+      border-bottom: 1px solid var(--line);
+      scroll-margin-top: 56px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 15px;
+    }
+    .grid > * { min-width: 0; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .card {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+    .card h3 { margin-top: 0; }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+    .label {
+      display: inline-block;
+      margin-bottom: 8px;
+      color: var(--accent);
+      font-size: .76rem;
+      font-weight: 760;
+      letter-spacing: .06em;
+    }
+    .tag {
+      display: inline-block;
+      margin-right: 5px;
+      padding: 1px 7px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font-size: .72rem;
+      font-weight: 750;
+    }
+    .fact { color: var(--success); }
+    .decision { color: var(--accent); }
+    .assumption { color: var(--warning); }
+    .pending { color: var(--danger); }
+    .callout {
+      margin-top: 18px;
+      padding: 18px 20px;
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      background: var(--accent-soft);
+    }
+    .callout.warning { border-color: var(--warning); background: #fff7e8; }
+    .callout.danger { border-color: var(--danger); background: #fff0ef; }
+    .callout strong { display: block; margin-bottom: 4px; }
+    pre {
+      overflow-x: auto;
+      padding: 18px;
+      border: 1px solid #253247;
+      border-radius: var(--radius);
+      background: #111827;
+      color: #e5e7eb;
+      font: .86rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    pre code { padding: 0; background: transparent; color: inherit; font: inherit; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    table { width: 100%; min-width: 780px; border-collapse: collapse; }
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: var(--surface); font-size: .83rem; }
+    tr:last-child td { border-bottom: 0; }
+    ul, ol { padding-left: 1.25rem; }
+    li { margin: 5px 0; }
+    .steps li { padding: 3px 0 10px 6px; }
+    .small { color: var(--muted); font-size: .9rem; }
+    .risk { color: var(--warning); }
+    footer { padding: 26px 0 44px; color: var(--muted); font-size: .87rem; }
+    @media (max-width: 800px) {
+      header { padding-top: 38px; }
+      .meta, .grid, .grid.two { grid-template-columns: 1fr; }
+      section { padding: 38px 0; }
+      .shell { width: min(100% - 28px, 1120px); }
+    }
+    @media print {
+      nav { display: none; }
+      header, main, section { padding-top: 18px; }
+      .shell { width: 100%; }
+      .card { box-shadow: none; break-inside: avoid; }
+      .table-wrap, pre { break-inside: avoid; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Service Data Sync · Priority 2</p>
+      <h1>A 股证券主数据与上市生命周期</h1>
+      <p class="lede">
+        为沪、深、北 A 股建立稳定身份、名称与上市状态双时间历史。交易所目录按所独立发布；
+        目录缺失永不推断退市，只有显式退市证据通过质量门才改变生命周期。service-api 仅经内部 HTTP
+        提供目录、详情与历史查询，不复制权威主数据。
+      </p>
+      <dl class="meta">
+        <div><dt>状态</dt><dd class="status">Proposed</dd></div>
+        <div><dt>负责人</dt><dd>service-data-sync / service-api</dd></div>
+        <div><dt>最后修改</dt><dd>2026-07-27</dd></div>
+        <div><dt>关联决策</dt><dd><a href="../../decisions/0013-equity-instrument-identity-lifecycle.md">ADR-0013</a></dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">摘要</a></li>
+        <li><a href="#scope">范围</a></li>
+        <li><a href="#facts">事实</a></li>
+        <li><a href="#ownership">功能边界</a></li>
+        <li><a href="#sync">同步逻辑</a></li>
+        <li><a href="#temporal">时间语义</a></li>
+        <li><a href="#schema">表设计</a></li>
+        <li><a href="#quality">质量</a></li>
+        <li><a href="#api">API</a></li>
+        <li><a href="#operations">运行</a></li>
+        <li><a href="#delivery">实施</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>1. 摘要</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">问题</span>
+          <h3>当前值不能回答历史</h3>
+          <p>
+            P0 <code>equity_instrument</code> 只有当前名称和单值状态；行情可先建
+            <code>PENDING</code>，但没有目录同步、状态证据、有效期或知识时间。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">决策</span>
+          <h3>保留身份锚 + 双时间历史</h3>
+          <p>
+            保留现有 <code>equity_instrument</code> 及其 BIGINT/UUID 身份，
+            标识、名称、上市状态各自追加双时间版本；目录与显式生命周期来源独立取证、校验、发布。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">最大风险</span>
+          <h3 class="risk">来源语义与生产许可未定</h3>
+          <p>
+            AKShare 接口存在超时、TLS、空结构和字段误名。方案可实施，生产 source policy 必须等许可、
+            字段语义与连续稳定性评审。
+          </p>
+        </article>
+      </div>
+      <aside class="callout danger">
+        <strong>不可违反的不变量</strong>
+        上市目录中暂时缺少一只证券，只能形成“缺席观测/质量异常”；不能关闭 <code>LISTED</code>，
+        不能写 <code>DELISTED</code>。退市必须来自显式退市来源，并通过身份、日期、语义和批次完整性质量门。
+      </aside>
+    </section>
+
+    <section id="scope">
+      <h2>2. 目标、非目标与任务定义</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>目标</h3>
+          <ul>
+            <li>覆盖 SSE、SZSE、BSE A 股身份、交易所、六位代码和名称修订。</li>
+            <li>表达 LISTED、SUSPENDED、恢复为 LISTED、DELISTED 及后续更正；未知/未确认仅为内部 PENDING，不对外发布。</li>
+            <li>支持 <code>asOf</code> 市场有效时间与 <code>knownAt</code> 知识时间。</li>
+            <li>为行情、公司行动、财务和板块成份提供唯一内部证券解析。</li>
+            <li>提供可分页、版本绑定的 internal/public API。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>非目标</h3>
+          <ul>
+            <li>不提供分钟行情、实时盘口或普通交易停牌状态。</li>
+            <li>不按名称、代码前缀或行情缺失推断退市。</li>
+            <li>不让 adapter 写 canonical DB，不让 API 直连同步库或供应商。</li>
+            <li>不在 service-api Prisma/Redis 保存权威证券副本。</li>
+            <li>不在本方案批准生产数据许可或最终交易日历。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>依赖与消费者</h3>
+          <ul>
+            <li><strong>上游：</strong>按交易所目录、显式生命周期来源、raw object store。</li>
+            <li><strong>下游：</strong>个股行情、板块成份、公司行动、财务、service-api。</li>
+            <li><strong>时区：</strong><code>Asia/Shanghai</code>；知识时间保存 UTC timestamptz。</li>
+            <li><strong>日历：</strong>权威来源待决；未冻结前不得据日期缺口自动改状态。</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>任务卡</th><th>定义</th></tr></thead>
+          <tbody>
+            <tr><td>Canonical capability</td><td><code>equity.master.exchange.snapshot</code>、<code>equity.lifecycle.explicit</code>、<code>equity.master.cn-a</code></td></tr>
+            <tr><td>市场 / 粒度</td><td>沪深京 A 股；目录为交易所全量快照，生命周期为显式事件/历史全量。</td></tr>
+            <tr><td>分区</td><td><code>exchange + target_date + snapshot_kind</code>；聚合 publication 记录三个 child dataVersion。</td></tr>
+            <tr><td>触发</td><td>首期人工 CLI；scheduler 准入后建议交易日前 06:00 目录、每周生命周期扫描。具体日历与 SLA 待决。</td></tr>
+            <tr><td>新鲜度</td><td>按所版本独立；全市场只读最后一次三所共同通过的稳定版本。</td></tr>
+            <tr><td>容量假设</td><td>约 5,500–6,500 在册证券、每日三份全量快照；以 pilot 实测修正，不作为 SLA。</td></tr>
+            <tr><td>来源权利</td><td><span class="tag pending">待决</span> 研究探针不等于生产授权；频率、缓存、raw 留存均须评审。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="facts">
+      <h2>3. 当前基线与 AKShare 1.18.78 验证</h2>
+      <p>
+        以下探针均在 2026-07-27、仓库 Docker 测试镜像、Python 3.13、AKShare 1.18.78 中执行。
+        成功结果只证明该次返回；失败结果只证明该次故障。候选接口只能存在于 AKShare adapter。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>接口 / 上游</th><th>本次验证事实</th><th>设计处置</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>stock_info_sh_name_code("主板A股")</code> / SSE</td>
+              <td>签名存在；源码目标列含证券代码、简称、全称、公司名、上市日期。本次 50 秒预算内无返回。</td>
+              <td>独立 SSE partition；超时保留旧发布，不产生空快照。</td>
+            </tr>
+            <tr>
+              <td><code>stock_info_sz_name_code("A股列表")</code> / SZSE</td>
+              <td>本次 TLS <code>UNEXPECTED_EOF_WHILE_READING</code>；源码目标列含板块、A股代码/简称/上市日期、股本、行业。</td>
+              <td>TLS/网络错误可重试；绝不把失败转换为空 DataFrame。</td>
+            </tr>
+            <tr>
+              <td><code>stock_info_bj_name_code()</code> / BSE</td>
+              <td>成功 330 行；列为证券代码、证券简称、总/流通股本、上市日期、行业、地区、报告日期。</td>
+              <td>只映射身份、名称、上市日；行业/股本不进入本 capability。</td>
+            </tr>
+            <tr>
+              <td><code>stock_info_a_code_name()</code> / 组合函数</td>
+              <td>源码依次调用深市、沪市主板、科创板、北交所，再合并为 code/name；任一子调用异常会中断整体调用。</td>
+              <td>不采用为权威原子快照；无法满足按所故障隔离。</td>
+            </tr>
+            <tr>
+              <td><code>stock_info_sh_delist("全部")</code> / SSE</td>
+              <td>成功 159 行。源码把上游 <code>DELIST_DATE</code> 重命名为“暂停上市日期”，与“终止上市公司”接口语义冲突。</td>
+              <td>保留 raw 与 schema fingerprint；字段语义核实前隔离，不写 canonical 暂停/退市日期。</td>
+            </tr>
+            <tr>
+              <td><code>stock_info_sz_delist("暂停上市公司")</code> / SZSE</td>
+              <td>成功返回空 DataFrame，且无列。</td>
+              <td>视为不可证明完整；不发布空生命周期事实，不改变状态。</td>
+            </tr>
+            <tr>
+              <td><code>stock_info_sz_delist("终止上市公司")</code> / SZSE</td>
+              <td>成功 208 行；列为证券代码、证券简称、上市日期、终止上市日期。</td>
+              <td>可进入候选批次；仍须许可、身份、日期和完整性质量门。</td>
+            </tr>
+            <tr>
+              <td><code>stock_zh_a_stop_em()</code>、<code>stock_staq_net_stop()</code></td>
+              <td>本次均被远端断开，无返回。</td>
+              <td>不能作为静默 fallback；失败只记来源健康。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid two">
+        <article class="card">
+          <h3>代码基线事实</h3>
+          <p>
+            当前 `StoredEquityInstrument` 含 <code>security_id</code>、<code>instrument_id</code>、
+            `(exchange,symbol)`、可空名称和单值状态。日线仓储按 `(exchange,symbol)` 创建
+            <code>PENDING</code>，保留后续主数据确认空间。
+          </p>
+        </article>
+        <article class="card">
+          <h3>表基线事实</h3>
+          <p>
+            当前物理表名为 <code>equity_instrument</code>，且日线外键引用其
+            <code>security_id</code>。当前 <code>source_batch</code> 对
+            <code>(provider_id, capability, payload_sha256)</code> 唯一，会折叠内容相同但观测时间不同的完整快照。
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section id="ownership">
+      <h2>4. 功能划分与所有权</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">Provider adapter</span>
+          <h3>来源隔离与字段映射</h3>
+          <p><strong>职责：</strong>调用单一上游，保存其接口/字段/错误知识，输出 provider-neutral batch。</p>
+          <p><strong>输入 / 输出：</strong>exchange、snapshot kind、目标日 → raw payload + 标准候选行。</p>
+          <p><strong>状态：</strong>无 canonical 状态；不能写 PostgreSQL。</p>
+          <p><strong>失败边界：</strong>超时、限流、TLS、空响应、schema drift 映射为中立错误。</p>
+        </article>
+        <article class="card">
+          <span class="label">Master application</span>
+          <h3>身份解析、质量与发布</h3>
+          <p><strong>职责：</strong>归档 raw、解析 PENDING、做差异和质量门、追加双时间版本、原子发布。</p>
+          <p><strong>输入 / 输出：</strong>标准候选批次 → exchange/aggregate dataVersion。</p>
+          <p><strong>状态：</strong>run、checkpoint、snapshot、identity、history、quality、publication。</p>
+          <p><strong>失败边界：</strong>分区隔离；不改变上次已发布版本。</p>
+        </article>
+        <article class="card">
+          <span class="label">Internal read API</span>
+          <h3>版本化 canonical 投影</h3>
+          <p><strong>职责：</strong>按 asOf/knownAt 查询已发布身份、名称、状态和历史。</p>
+          <p><strong>输入 / 输出：</strong>服务凭据 + 查询 → ETag/dataVersion/cursor JSON。</p>
+          <p><strong>状态：</strong>只读；不公开 raw、PENDING、quarantine 或 DB 行。</p>
+          <p><strong>失败边界：</strong>无稳定聚合或读库故障返回 503。</p>
+        </article>
+        <article class="card">
+          <span class="label">service-api</span>
+          <h3>用户访问投影</h3>
+          <p><strong>职责：</strong>JWT、授权、DTO、限流、下游 client、Problem Details、字段最小化。</p>
+          <p><strong>输入 / 输出：</strong>公开 exchange+symbol → internal HTTP → 公共 JSON。</p>
+          <p><strong>状态：</strong>无证券权威 Prisma 表；Redis 只可放短期防滥用计数。</p>
+          <p><strong>失败边界：</strong>下游超时/合同漂移统一 503，不泄漏 internal UUID。</p>
+        </article>
+        <article class="card">
+          <span class="label">行情与公司行动</span>
+          <h3>身份消费者</h3>
+          <p><strong>职责：</strong>以 `security_id` 关联，历史数据不因退市删除。</p>
+          <p><strong>输入 / 输出：</strong>exchange+symbol → 已确认或 PENDING identity。</p>
+          <p><strong>状态：</strong>各自数据集；不能反向改主数据状态。</p>
+          <p><strong>失败边界：</strong>未解析身份隔离，不按名称关联。</p>
+        </article>
+        <article class="card">
+          <span class="label">板块成份</span>
+          <h3>发布依赖</h3>
+          <p><strong>职责：</strong>只发布能解析到已确认证券的成份关系。</p>
+          <p><strong>输入 / 输出：</strong>来源成员代码 → master identity。</p>
+          <p><strong>状态：</strong>成份有效期独立；不拥有证券名称或上市状态。</p>
+          <p><strong>失败边界：</strong>PENDING/冲突成员进入隔离，不创建公开幽灵证券。</p>
+        </article>
+      </div>
+
+      <pre aria-label="模块依赖图">external exchange sources
+          │ vendor SDK / HTTP only inside adapters
+          ▼
+provider-neutral EquityMasterSource / EquityLifecycleSource
+          │ RawPayload + MasterCandidateBatch
+          ▼
+service-data-sync application ──▶ raw object store
+          │ quality / identity / bitemporal publish
+          ▼
+service-data-sync PostgreSQL ──▶ internal v1 HTTP
+                                      │ dedicated service credential
+                                      ▼
+                              service-api EquityInstrumentModule
+                                      │ authenticated public v1
+                                      ▼
+                                  consumers
+
+禁止：adapter → canonical DB
+禁止：service-api → sync PostgreSQL / S3 / AKShare
+禁止：name / missing catalog row → identity or DELISTED inference</pre>
+    </section>
+
+    <section id="sync">
+      <h2>5. 同步、幂等、恢复与修订</h2>
+
+      <h3>5.1 Provider-neutral port</h3>
+      <pre><code>EquityMasterSource.fetch_catalog(
+  exchange,
+  target_date,
+  request_context
+) -&gt; MasterSnapshotBatch
+
+EquityLifecycleSource.fetch_explicit_lifecycle(
+  exchange,
+  window,
+  request_context
+) -&gt; LifecycleEvidenceBatch
+
+MasterSnapshotBatch:
+  raw_payload
+  upstream_source_id
+  adapter_version
+  schema_fingerprint
+  observed_at
+  rows[exchange, symbol, name, listed_on, candidate_status?, effective_date?]</code></pre>
+      <p class="small">
+        AKShare 函数名、URL、中文源字段和异常类型只在 adapter。application 只理解标准 exchange、symbol、
+        name、日期、证据类型和完整性；provider-neutral 不抹除 upstream source 与 adapter version 血缘。
+      </p>
+
+      <h3>5.2 正常全量目录流程</h3>
+      <ol class="steps">
+        <li>CLI/调度创建 <code>sync_run</code>，为 SSE、SZSE、BSE 建三个 partition；每个分区单独领取 15 分钟 lease，30 秒心跳。</li>
+        <li>adapter 获取完整响应。每次网络观测都创建独立 <code>source_batch</code>；即使 payload hash 相同也不折叠观测。</li>
+        <li>先把原始字节写对象存储；对象内容可按 SHA-256 去重，但多个 batch 可以引用同一 raw URI。</li>
+        <li>标准候选行写 snapshot staging；保存 schema fingerprint、adapter version、upstream source、observed_at、行数。</li>
+        <li>执行 schema、代码、唯一性、数量变化、身份冲突、日期和来源完整性质量门。</li>
+        <li>在分区事务与 advisory lock 内按事实日期解析标识：已有 PENDING 保留 security_id，关闭其占位知识版本并追加主数据已确认版本；新证券建立 UUID；代码复用绝不按名称合并；名称/状态只追加变化版本。</li>
+        <li>写 exchange publication 与 checkpoint 后提交。相同业务哈希不新增事实版本，但仍保留本次 source batch 观测。</li>
+        <li>协调器确认三所同一 target run 全部成功后，写 child version manifest 并原子推进 <code>equity.master.cn-a</code>。</li>
+      </ol>
+
+      <h3>5.3 差集与状态转换</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>输入情形</th><th>允许动作</th><th>禁止动作</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>完整目录出现新代码</td>
+              <td>新建或确认 PENDING；可靠在册/上市证据通过后写标识、名称和 LISTED 版本。</td>
+              <td>按名称合并另一证券。</td>
+            </tr>
+            <tr>
+              <td>同代码名称变化</td>
+              <td>有官方生效日则用官方日；否则从观测日开始且标 <code>OBSERVATION_DATE</code>。</td>
+              <td>回写覆盖旧名称；猜测历史生效日。</td>
+            </tr>
+            <tr>
+              <td>历史代码被新证券复用</td>
+              <td>关闭旧证券标识有效期，以明确生效日为新证券追加标识版本；标识历史排斥约束决定唯一身份。</td>
+              <td>按相同代码或相似名称合并证券；从 <code>equity_instrument</code> 当前列直接取第一行。</td>
+            </tr>
+            <tr>
+              <td>上次存在、本次目录缺失</td>
+              <td>递增 missing observation、告警、等待显式生命周期证据。</td>
+              <td>关闭 LISTED、写 DELISTED、删除证券或行情。</td>
+            </tr>
+            <tr>
+              <td>显式暂停上市证据</td>
+              <td>字段语义确认、身份唯一、有效日有效后追加 SUSPENDED。</td>
+              <td>把普通交易停牌映射为暂停上市。</td>
+            </tr>
+            <tr>
+              <td>显式恢复上市证据</td>
+              <td>关闭暂停区间并追加 LISTED。</td>
+              <td>从重新出现于目录自动推断历史恢复日。</td>
+            </tr>
+            <tr>
+              <td>显式退市证据</td>
+              <td>四道门通过后追加 DELISTED；历史行情继续保留。</td>
+              <td>从名称含“退”、发现源或目录差集推断。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>5.4 分区、幂等、锁与 checkpoint</h3>
+      <ul>
+        <li><strong>请求幂等键：</strong><code>capability:exchange:snapshot_kind:target_date:mode:request_revision</code>；
+          重复提交复用 run 结果，显式 <code>--revision</code> 才创建新请求。</li>
+        <li><strong>观测身份：</strong><code>source_batch_id</code> 每次获取唯一；不能用 payload hash 当观测幂等键。</li>
+        <li><strong>事实幂等：</strong>标准业务内容 SHA-256 相同则不追加 identity/name/status version，也不推进该分区 dataVersion。</li>
+        <li><strong>并发：</strong>同 capability+exchange+target 只有一个有效 lease；发布事务再用 PostgreSQL advisory xact lock 防双提交。</li>
+        <li><strong>checkpoint：</strong>记录最后成功 target、publication UUID、lifecycle watermark、schema fingerprint；
+          仅与 publication 同事务推进。下载成功但发布失败不能越过 checkpoint。</li>
+        <li><strong>超时与取消：</strong>worker 软超时 10 分钟、硬超时 12 分钟为首期运行默认值；平台评审可调整。
+          取消只停止未提交分区；已提交 publication 不回滚。</li>
+      </ul>
+
+      <h3>5.5 重试、失败与恢复</h3>
+      <div class="grid">
+        <article class="card">
+          <h3>可重试</h3>
+          <p>连接、TLS、读取超时、429、5xx：最多 3 次，指数退避 2/8/30 秒加全抖动；尊重 Retry-After。</p>
+        </article>
+        <article class="card">
+          <h3>终止 / 隔离</h3>
+          <p>鉴权、非法参数、字段缺失、schema drift、重复身份、语义冲突：不盲重试，partition 标 failed/quarantined。</p>
+        </article>
+        <article class="card">
+          <h3>恢复</h3>
+          <p><code>repair --run-id --partition --reason</code> 从最后未提交 checkpoint 重跑；复用已归档 raw 时创建新的 repair batch 关联原对象。</p>
+        </article>
+      </div>
+      <ul>
+        <li>状态：<code>queued → running → succeeded | partial | failed | cancelled</code>；quarantine 是质量处置，不伪装成功。</li>
+        <li>DB 失败：事务全回滚，source batch/raw 保留，checkpoint 不动；重跑可从 raw 标准化，无需再次请求供应商。</li>
+        <li>schema drift：保存 raw、fingerprint 和最小样本，阻断 publication；adapter fixture 更新并评审后 repair。</li>
+        <li>部分失败：成功交易所可推进自身版本；全市场 aggregate 保持上一稳定 child version 集合。首次无稳定集合返回 503。</li>
+        <li>回补：按 exchange + lifecycle 年份/窗口从近到远；历史更正追加新的 knowledge version，不覆盖旧行。</li>
+      </ul>
+    </section>
+
+    <section id="temporal">
+      <h2>6. 身份、状态机与双时间语义</h2>
+      <div class="grid two">
+        <article class="card">
+          <h3>市场有效时间</h3>
+          <p>
+            <code>effective_from</code> 包含、<code>effective_to</code> 不包含。官方明确日期使用
+            <code>OFFICIAL_DATE</code>；只有首次观测日时使用 <code>OBSERVATION_DATE</code>，禁止回填猜测。
+          </p>
+        </article>
+        <article class="card">
+          <h3>系统知识时间</h3>
+          <p>
+            <code>known_from</code> 包含、<code>known_to</code> 不包含；修订到来时关闭旧知识版本并追加后继。
+            <code>observed_at</code> 保留来源观测时刻，不等于生效日或发布时间。
+          </p>
+        </article>
+      </div>
+      <pre aria-label="上市生命周期状态机">PENDING（内部占位，不发布）
+   └─ 明确在册/上市证据 ▶ LISTED
+
+LISTED ── 明确暂停上市 ─▶ SUSPENDED
+SUSPENDED ── 明确恢复 ─▶ LISTED
+LISTED / SUSPENDED ── 明确终止上市 ─▶ DELISTED
+
+DELISTED 为市场事实终态；只有官方更正 + 人工审批可产生新的知识版本。
+普通停牌、目录缺席、行情缺席、名称文本均不触发任何箭头。</pre>
+      <p class="small">
+        当前没有通过验证的预上市权威来源，因此不新增 <code>PRELISTED</code>。本方案的
+        <code>SUSPENDED</code> 严格表示交易所明确的暂停上市，不表示普通停牌。
+      </p>
+
+      <h3>查询语义</h3>
+      <ul>
+        <li><code>asOf=D</code>：选择 effective range 包含 D 的标识、名称和状态。</li>
+        <li><code>knownAt=T</code>：只选择 knowledge range 包含 T 的版本，避免回测看到后来修订。</li>
+        <li>列表未传 <code>asOf</code> 时使用所选 publication 的 effective date；未传 <code>knownAt</code> 时使用其
+          knowledge cutoff，不使用 API 进程当前时间拼接。键式接口的 <code>asOf</code> 缺省规则见下一条。</li>
+        <li>键式详情/历史未传 <code>asOf</code> 时，只解析当前知识下 <code>effective_to/known_to</code> 均为空的唯一开放标识；
+          没有开放标识返回 404。代码已被复用时，该规则返回当前证券；读取旧证券必须显式传 <code>asOf</code>。</li>
+        <li>传入 <code>asOf</code> 后没有匹配身份返回 404；底层历史若异常地解析出多只证券则返回 409 并阻断发布，
+          不按名称、状态或任意排序挑选一只。</li>
+        <li>列表 cursor 绑定 filters、asOf、knownAt、sort key 与 dataVersion；版本失效返回 409，不跨版本续页。</li>
+      </ul>
+
+      <h3>标识解析器与写入纪律</h3>
+      <ul>
+        <li>新增 provider-neutral <code>EquityIdentityResolver.resolve(exchange, symbol, factDate, knownAt)</code>；
+          只查询 <code>equity_identifier_version</code> 的双时间范围，结果严格为 resolved、not_found 或 conflict。</li>
+        <li>日线以 <code>trade_date</code>，周线/月线以各自上游事实的 <code>period_end</code> 解析
+          <code>security_id</code>；公司行动、财务、板块成员及其他写入者也必须传自身事实日期。
+          禁止再以 <code>equity_instrument.exchange/symbol</code> 直接 <code>get_or_create</code>。</li>
+        <li>只有明确的当前快照读取可调用 <code>resolveCurrentOpen</code>；历史写入不得用“当前开放标识”替代事实日期。
+          not_found 时，行情只能经专用 PENDING 保留流程创建候选；conflict 必须隔离并使该分区失败。</li>
+        <li>PENDING 保留流程在 exchange+symbol advisory lock 内运行：首次未知代码建立 PENDING anchor 与
+          <code>identity_state=PENDING</code> 的占位标识版本；重复事实复用该 security_id。主数据确认时关闭占位
+          knowledge range，并以主数据 batch 追加 CONFIRMED 版本。publication 始终过滤 PENDING。</li>
+        <li>若事实日期解析到已退市证券，且行情日期晚于明确退市日，解析器返回
+          <code>possible_code_reuse</code> 冲突并隔离，不能把新行情绑到旧 security_id，也不能仅凭行情创建新证券；
+          必须等待主数据证据关闭旧标识并建立新身份。</li>
+        <li>代码复用从不依据名称判断是否同一证券。最终身份唯一性由标识历史的双时间排斥约束保证；
+          生命周期状态只描述证券状态，不参与标识唯一性。</li>
+      </ul>
+      <pre><code>-- 所有历史写入必须提供 fact_date；known_at 使用该任务冻结的知识截止时间。
+SELECT security_id, identity_state
+FROM equity_identifier_version
+WHERE exchange = :exchange
+  AND symbol = :symbol
+  AND effective_range @&gt; :fact_date
+  AND knowledge_range @&gt; :known_at;
+
+-- 0 行：进入受控 PENDING/隔离决策；1 行：使用该 security_id；&gt;1 行：conflict，禁止写事实。</code></pre>
+    </section>
+
+    <section id="schema">
+      <h2>7. PostgreSQL 表、约束、索引与事务</h2>
+      <p>
+        PostgreSQL 为唯一 canonical store；raw bytes 归对象存储。迁移启用 <code>btree_gist</code>，
+        用双 range 排斥约束阻止同一知识时刻的有效期重叠。所有结束时间采用不包含端。
+      </p>
+
+      <h3>7.1 业务表</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>表</th><th>字段</th><th>约束 / 索引</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>equity_instrument</code>（保留并 expand）</td>
+              <td>现有 security_id、instrument_id、exchange、symbol、name、listing_status、created/updated_at；新增 master_confirmed_at、current_master_version</td>
+              <td>始终保留 PK security_id、UNIQUE instrument_id；旧 UNIQUE(exchange,symbol) 只在 expand 窗口保留，所有读写切换后于 Contract C1 删除。状态沿用 PENDING/LISTED/SUSPENDED/DELISTED；当前列仅作展示兼容投影，不是历史或当前身份权威。</td>
+            </tr>
+            <tr>
+              <td><code>equity_identifier_version</code></td>
+              <td>version_id、security_id、exchange、symbol、identity_state、effective_from/to、known_from/to、precision、source_batch_id、content_sha256</td>
+              <td>identity_state=PENDING/CONFIRMED；双时间排斥；同 exchange+symbol 在相交双时间内唯一；current/asOf covering index。publication 只选择 CONFIRMED。</td>
+            </tr>
+            <tr>
+              <td><code>equity_name_version</code></td>
+              <td>version_id、security_id、name、effective_from/to、known_from/to、precision、source_batch_id、content_sha256</td>
+              <td>同 security 双时间不重叠；name trim 后 1–200；名称检索 index 使用 lower(name) text_pattern_ops。</td>
+            </tr>
+            <tr>
+              <td><code>equity_listing_status_version</code></td>
+              <td>version_id、security_id、status、listed_on、delisted_on、effective_from/to、known_from/to、precision、evidence_kind、correction_approval_reference、source_batch_id、content_sha256</td>
+              <td>同 security 双时间不重叠；状态 CHECK；退市日不得早于上市日；DELISTED 必须 explicit evidence；OFFICIAL_CORRECTION 必须保存人工审批引用。</td>
+            </tr>
+            <tr>
+              <td><code>equity_master_snapshot</code></td>
+              <td>snapshot_id、exchange、kind、target_date、source_batch_id、observed_at、row_count、schema_fingerprint、completeness、quality_status</td>
+              <td>source_batch UNIQUE；exchange/kind/observed_at index；空/partial 不能发布。</td>
+            </tr>
+            <tr>
+              <td><code>equity_master_snapshot_member</code></td>
+              <td>snapshot_id、row_ordinal、exchange、symbol、name、listed_on、candidate_status/date、precision、security_id、resolution_status、content_sha256</td>
+              <td>PK(snapshot_id,row_ordinal)；UNIQUE(snapshot_id,exchange,symbol)；只存 provider-neutral 字段。</td>
+            </tr>
+            <tr>
+              <td><code>equity_presence_anomaly</code></td>
+              <td>security_id、exchange、symbol、first/last_missing_snapshot_id、consecutive_count、status、resolved_at</td>
+              <td>一个未解决缺席异常 partial unique；只告警，不驱动 lifecycle。</td>
+            </tr>
+            <tr>
+              <td><code>equity_identity_quarantine</code></td>
+              <td>issue_id、snapshot_id、row_ordinal、conflict_code、candidate_json、related_security_ids、status、reviewed_by/at、resolution</td>
+              <td>open issue index；candidate_json 只含标准候选，不含 raw provider 行。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>7.2 核心 DDL</h3>
+      <pre><code>CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+ALTER TABLE equity_instrument
+  ADD COLUMN master_confirmed_at timestamptz,
+  ADD COLUMN current_master_version uuid;
+
+CREATE TABLE equity_identifier_version (
+  version_id               uuid        PRIMARY KEY,
+  security_id              bigint      NOT NULL REFERENCES equity_instrument(security_id),
+  exchange                 varchar(4)  NOT NULL CHECK (exchange IN ('SSE','SZSE','BSE')),
+  symbol                   char(6)     NOT NULL CHECK (symbol ~ '^[0-9]{6}$'),
+  identity_state           varchar(16) NOT NULL CHECK (
+    identity_state IN ('PENDING','CONFIRMED')
+  ),
+  effective_from           date        NOT NULL,
+  effective_to             date,
+  known_from               timestamptz NOT NULL,
+  known_to                 timestamptz,
+  effective_date_precision varchar(24) NOT NULL CHECK (
+    effective_date_precision IN ('OFFICIAL_DATE','OBSERVATION_DATE')
+  ),
+  source_batch_id          uuid        NOT NULL REFERENCES source_batch(source_batch_id),
+  content_sha256           bytea       NOT NULL,
+  effective_range          daterange GENERATED ALWAYS AS
+                             (daterange(effective_from,effective_to,'[)')) STORED,
+  knowledge_range          tstzrange GENERATED ALWAYS AS
+                             (tstzrange(known_from,known_to,'[)')) STORED,
+  CHECK (effective_to IS NULL OR effective_to &gt; effective_from),
+  CHECK (known_to IS NULL OR known_to &gt; known_from),
+  EXCLUDE USING gist (
+    security_id WITH =, effective_range WITH &amp;&amp;, knowledge_range WITH &amp;&amp;
+  ),
+  EXCLUDE USING gist (
+    exchange WITH =, symbol WITH =,
+    effective_range WITH &amp;&amp;, knowledge_range WITH &amp;&amp;
+  )
+);
+
+CREATE INDEX ix_equity_identifier_asof
+  ON equity_identifier_version (exchange, symbol, effective_from DESC, known_from DESC)
+  INCLUDE (security_id, effective_to, known_to);
+
+CREATE UNIQUE INDEX uq_equity_identifier_current_open
+  ON equity_identifier_version (exchange, symbol)
+  WHERE effective_to IS NULL AND known_to IS NULL;
+
+CREATE TABLE equity_listing_status_version (
+  version_id               uuid        PRIMARY KEY,
+  security_id              bigint      NOT NULL REFERENCES equity_instrument(security_id),
+  status                   varchar(24) NOT NULL CHECK (
+    status IN ('LISTED','SUSPENDED','DELISTED')
+  ),
+  listed_on                date,
+  delisted_on              date,
+  effective_from           date        NOT NULL,
+  effective_to             date,
+  known_from               timestamptz NOT NULL,
+  known_to                 timestamptz,
+  effective_date_precision varchar(24) NOT NULL CHECK (
+    effective_date_precision IN ('OFFICIAL_DATE','OBSERVATION_DATE')
+  ),
+  evidence_kind            varchar(24) NOT NULL CHECK (
+    evidence_kind IN ('CATALOG','EXPLICIT_LISTING','EXPLICIT_SUSPENSION',
+                      'EXPLICIT_RESUMPTION','EXPLICIT_DELISTING','OFFICIAL_CORRECTION')
+  ),
+  correction_approval_reference varchar(128),
+  source_batch_id          uuid        NOT NULL REFERENCES source_batch(source_batch_id),
+  content_sha256           bytea       NOT NULL,
+  effective_range          daterange GENERATED ALWAYS AS
+                             (daterange(effective_from,effective_to,'[)')) STORED,
+  knowledge_range          tstzrange GENERATED ALWAYS AS
+                             (tstzrange(known_from,known_to,'[)')) STORED,
+  CHECK (effective_to IS NULL OR effective_to &gt; effective_from),
+  CHECK (known_to IS NULL OR known_to &gt; known_from),
+  CHECK (delisted_on IS NULL OR listed_on IS NULL OR delisted_on &gt;= listed_on),
+  CHECK (status != 'DELISTED' OR
+         evidence_kind IN ('EXPLICIT_DELISTING','OFFICIAL_CORRECTION')),
+  CHECK (evidence_kind != 'OFFICIAL_CORRECTION'
+         OR correction_approval_reference IS NOT NULL),
+  EXCLUDE USING gist (
+    security_id WITH =, effective_range WITH &amp;&amp;, knowledge_range WITH &amp;&amp;
+  )
+);</code></pre>
+      <p class="small">
+        <code>equity_name_version</code> 使用与 status 相同的双 range 约束。排斥约束防止“同一知识时刻存在两个有效名称/状态”；
+        业务状态转换仍由 application 校验，数据库负责最后不变量。
+      </p>
+
+      <h3>7.3 运维、观测与发布表</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>表</th><th>关键字段 / 迁移</th><th>约束</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>sync_run</code></td>
+              <td>run_id、capability、mode、request_key、target_date、status、requested/started/finished_at、计数</td>
+              <td>UNIQUE(request_key)；状态 CHECK；capability+requested_at index。</td>
+            </tr>
+            <tr>
+              <td><code>sync_partition</code></td>
+              <td>run_id、partition_key、status、attempt、lease_owner/until、heartbeat_at、next_retry_at、checkpoint_json、error_code</td>
+              <td>PK(run_id,partition_key)；可领取 partial index；lease 到期可回收。</td>
+            </tr>
+            <tr>
+              <td><code>source_batch</code></td>
+              <td>新增 run_id、partition_key、observation_seq、upstream_source、adapter_version、schema_fingerprint；保留 provider_id、capability、hash、raw_uri、observed_at。</td>
+              <td>UNIQUE(run_id,partition_key,observation_seq)；payload hash 仅普通索引，不能唯一。</td>
+            </tr>
+            <tr>
+              <td><code>dataset_publication</code></td>
+              <td>沿用 dataset、partition_key、data_version、quality_status、published_at、superseded_at。</td>
+              <td>每分区一个 current partial unique；只在业务视图变化时换版。</td>
+            </tr>
+            <tr>
+              <td><code>dataset_publication_component</code></td>
+              <td>aggregate_publication_id、component_partition_key、component_data_version</td>
+              <td>PK(aggregate_publication_id,component_partition_key)；全市场必须恰有 SSE/SZSE/BSE 三项。</td>
+            </tr>
+            <tr>
+              <td><code>data_quality_issue</code></td>
+              <td>run/partition/source_batch/snapshot、rule_code、severity、sample_json、status、resolved_at</td>
+              <td>未解决 issue 索引；sample 脱敏且限长。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout">
+        <strong>source_batch 观测语义修正</strong>
+        现有唯一键 <code>(provider_id, capability, payload_sha256)</code> 必须在 expand migration 中删除。
+        完整快照内容连续两天相同仍是两次独立观测，须有不同 batch、observed_at、run/partition 关联。
+        对象存储可按 hash 去重字节；数据库观测不能按 hash 去重。
+      </aside>
+      <pre><code>-- 先创建并回填 sync_run / sync_partition，再执行约束切换。
+ALTER TABLE source_batch
+  ADD COLUMN run_id uuid,
+  ADD COLUMN partition_key text,
+  ADD COLUMN observation_seq integer,
+  ADD COLUMN upstream_source varchar(100),
+  ADD COLUMN adapter_version varchar(64),
+  ADD COLUMN schema_fingerprint char(64);
+
+ALTER TABLE source_batch
+  DROP CONSTRAINT source_batch_provider_id_capability_payload_sha256_key;
+
+CREATE INDEX ix_source_batch_payload_lookup
+  ON source_batch (provider_id, capability, payload_sha256);
+
+-- synthetic legacy run 回填且新仓储已部署后再收紧。
+ALTER TABLE source_batch
+  ALTER COLUMN run_id SET NOT NULL,
+  ALTER COLUMN partition_key SET NOT NULL,
+  ALTER COLUMN observation_seq SET NOT NULL,
+  ALTER COLUMN upstream_source SET NOT NULL,
+  ALTER COLUMN adapter_version SET NOT NULL,
+  ALTER COLUMN schema_fingerprint SET NOT NULL,
+  ADD CONSTRAINT fk_source_batch_run
+    FOREIGN KEY (run_id) REFERENCES sync_run(run_id),
+  ADD CONSTRAINT uq_source_batch_observation
+    UNIQUE (run_id, partition_key, observation_seq),
+  ADD CONSTRAINT ck_source_batch_observation_seq
+    CHECK (observation_seq &gt; 0);</code></pre>
+
+      <h3>7.4 发布事务</h3>
+      <pre aria-label="发布事务边界">事务外：fetch → raw object durable put → source_batch/snapshot staging
+
+SERIALIZABLE transaction + pg_advisory_xact_lock(capability, exchange):
+  1. 再读当前 publication / checkpoint
+  2. 校验 lease、snapshot COMPLETE、quality PASSED
+  3. SELECT identity/current versions FOR UPDATE
+  4. 解析 PENDING；关闭旧 known_to；插入新 identifier/name/status version
+  5. 写 presence anomaly / quarantine
+  6. 内容变化时关闭旧 publication，写新 dataVersion
+  7. 更新 checkpoint 与 partition succeeded
+COMMIT
+
+聚合事务：
+  锁 equity.master.cn-a → 验证同 target 的三所 child passed
+  → 写 3 条 publication_component → 原子切换 aggregate publication</pre>
+      <p>
+        任一步失败整体回滚 canonical、publication、checkpoint；raw/source batch/snapshot 证据保留。
+        事务不包含外部请求，避免长时间持锁。
+      </p>
+    </section>
+
+    <section id="quality">
+      <h2>8. 数据质量、冲突与退市证据门</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>规则</th><th>阈值 / 判定</th><th>处置</th></tr></thead>
+          <tbody>
+            <tr><td>响应与 schema</td><td>非空；必需列齐全；fingerprint 在允许集合；日期/编码无损解析。</td><td>失败：snapshot REJECTED，保留 raw，阻断发布。</td></tr>
+            <tr><td>代码唯一</td><td>同 snapshot `(exchange,symbol)` 唯一，symbol 六位数字。</td><td>重复/非法：quarantine，分区失败。</td></tr>
+            <tr><td>数量完整性</td><td>相对上次稳定目录下降 &gt;1% 为硬门；新增/减少绝对量同时记录。阈值须以 pilot 校准。</td><td>下降异常：不发布；无论阈值内外，单只缺席都不改状态。</td></tr>
+            <tr><td>名称</td><td>trim 后 1–200；同一代码多个名称须有可解释版本顺序。</td><td>空/冲突隔离；禁止按名称合并身份。</td></tr>
+            <tr><td>标识冲突</td><td>同双时间 `(exchange,symbol)` 不能映射多个 security；一个 security 不能有重叠标识。</td><td>整条身份隔离；已有 publication 保持。</td></tr>
+            <tr><td>状态转换</td><td>必须符合状态机；DELISTED 必须 explicit evidence；普通停牌不接受。</td><td>非法转换硬失败；证据样本进入 issue。</td></tr>
+            <tr><td>日期</td><td>effective_to&gt;from；delisted_on≥listed_on；未来官方日不能直接当已生效。</td><td>隔离；未知日使用 observation precision，不猜。</td></tr>
+            <tr><td>SSE DELIST_DATE</td><td>AKShare 重命名与接口语义冲突；未完成交易所字段验证。</td><td>只存 raw，quality issue 标 <code>FIELD_SEMANTICS_UNVERIFIED</code>。</td></tr>
+            <tr><td>跨所聚合</td><td>同 target run 的 SSE/SZSE/BSE 三分区均 PASSED，child versions 唯一。</td><td>否则不推进 aggregate；保留上一稳定版。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>退市四道门</h3>
+      <ol>
+        <li><strong>来源门：</strong>明确标识为交易所终止上市/退市来源；发现、行情、名称和目录差集不合格。</li>
+        <li><strong>语义门：</strong>源字段含义、日期口径和接口集合经 fixture/官方字段说明确认；SSE 当前未过。</li>
+        <li><strong>身份门：</strong>exchange+symbol 在相关有效期只解析一只 security；未知/复用冲突进入 quarantine。</li>
+        <li><strong>批次门：</strong>响应非空、schema 通过、完整性合理、日期合法；随后才允许 append DELISTED。</li>
+      </ol>
+
+      <h3>质量结果</h3>
+      <ul>
+        <li><strong>reject：</strong>payload 无法解析、必需列丢失、身份/日期硬冲突；整分区不发布。</li>
+        <li><strong>quarantine：</strong>少量未知代码或语义待审；若影响身份唯一/退市则阻断，否则可在明确阈值内 partial，但 aggregate 不接收 partial。</li>
+        <li><strong>warn：</strong>发现源差异、名称观察日精度、单只缺席；发布可继续，告警与 issue 必须可追踪。</li>
+        <li><strong>publish：</strong>完整快照、全部硬门通过、无未解决 blocking issue。</li>
+      </ul>
+    </section>
+
+    <section id="api">
+      <h2>9. Internal 与公开 API 设计</h2>
+      <p>机器可读合同：</p>
+      <ul>
+        <li><a href="../../contracts/0009-data-sync-equity-instrument-internal.openapi.yaml">0009：service-data-sync 证券主数据内部 OpenAPI</a></li>
+        <li><a href="../../contracts/0010-service-api-equity-instrument.openapi.yaml">0010：service-api 证券主数据公开 OpenAPI</a></li>
+      </ul>
+      <aside class="callout">
+        <strong>局部契约替代</strong>
+        0009/0010 是后续实现证券目录、详情、上市状态历史的唯一权威，按重叠路径局部取代 Proposed
+        0003/0004。原 UUID 主数据路径尚未实现，不建立双路由；任何基于旧 Proposed schema 的消费者须在实现前迁移。
+        原契约中的行情、复权、公司行动、财务部分继续有效。
+      </aside>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>公开接口</th><th>输入</th><th>成功</th><th>失败 / 缓存</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>GET /api/v1/equities</code></td>
+              <td>exchange/status/query/asOf/knownAt/cursor/limit≤100；exchange 可省略。</td>
+              <td>exchange+symbol 目录页、dataVersion、publishedAt、knowledgeCutoff。</td>
+              <td>400/401/403/409/429/503；ETag/304。</td>
+            </tr>
+            <tr>
+              <td><code>GET /api/v1/equities/{exchange}/{symbol}</code></td>
+              <td>公开身份 + asOf/knownAt。</td>
+              <td>名称、上市状态、有效期、观测/知识时间；无 internal UUID。</td>
+              <td>400/401/403/404/409/429/503；ETag/304。</td>
+            </tr>
+            <tr>
+              <td><code>GET /api/v1/equities/{exchange}/{symbol}/listing-status-history</code></td>
+              <td>asOf（选择代码所属证券）、effectiveFrom/to、knownAt、cursor、limit≤100。</td>
+              <td>按 effectiveFrom/knownFrom 排序的双时间状态页。</td>
+              <td>400/401/403/404/409/429/503；ETag/304。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>响应示例</h3>
+      <p>
+        <code>identifier</code>、<code>name</code>、<code>listing</code> 来自三条可独立修订的版本记录，
+        因而各自携带 effective range、日期精度、knownFrom 和 observedAt。不能用一个共享时间字段代表三组血缘。
+      </p>
+      <pre><code>{
+  "identifier": {
+    "exchange": "SSE",
+    "symbol": "600519",
+    "effectiveFrom": "2001-08-27",
+    "effectiveTo": null,
+    "datePrecision": "OFFICIAL_DATE",
+    "knownFrom": "2026-07-27T00:18:31Z",
+    "observedAt": "2026-07-27T00:17:54Z"
+  },
+  "name": {
+    "value": "贵州茅台",
+    "effectiveFrom": "2001-08-27",
+    "effectiveTo": null,
+    "datePrecision": "OBSERVATION_DATE",
+    "knownFrom": "2026-07-27T00:18:31Z",
+    "observedAt": "2026-07-27T00:17:54Z"
+  },
+  "listing": {
+    "status": "LISTED",
+    "listedOn": "2001-08-27",
+    "delistedOn": null,
+    "effectiveFrom": "2001-08-27",
+    "effectiveTo": null,
+    "datePrecision": "OFFICIAL_DATE",
+    "knownFrom": "2026-07-27T00:18:31Z",
+    "observedAt": "2026-07-27T00:17:54Z"
+  },
+  "dataVersion": "&lt;publication-uuid&gt;",
+  "publishedAt": "2026-07-27T00:19:02Z",
+  "effectiveAsOf": "2026-07-27",
+  "knowledgeCutoff": "2026-07-27T00:19:02Z"
+}</code></pre>
+
+      <h3>service-api 模块与安全</h3>
+      <ul>
+        <li>新增 <code>EquityInstrumentModule</code>，只依赖配置、全局 Auth Guard、Problem Details 和专用 DataSync client；禁止 <code>forwardRef()</code>。</li>
+        <li>现有 ACTIVE USER/ADMIN/SUPER_ADMIN 可读是首期提案，最终 permission 是发布门；controller 不得标记 Public。</li>
+        <li>client 只调用 0009 internal HTTP，使用运行时 service Bearer；响应先做严格 schema 校验，再投影公开 schema。</li>
+        <li>必须删除 <code>instrumentId</code>、任何 securityId、raw URI、provider、batch、quality detail；公开身份只用 exchange+symbol。</li>
+        <li>GET 仅在请求尚未收到响应头的连接错误上安全重试一次；超时、5xx、合同漂移、断路器打开统一映射 503。</li>
+        <li>401/403 不暴露账号、角色或资源存在性；Problem Details 不返回下游 body、URL、token、SQL 或 stack。</li>
+        <li>Bearer header API 不依赖 cookie，因此本能力无额外 CSRF 状态；沿用全局 CORS/proxy trust。限流具体额度待流量测量。</li>
+      </ul>
+
+      <h3>分页、缓存与兼容</h3>
+      <ul>
+        <li>cursor 为服务端签名的 opaque token，绑定规范化 filters、asOf、knownAt、最后 sort key 和 dataVersion；篡改 400，版本过期 409。</li>
+        <li>ETag 是 request projection + dataVersion 的强校验；返回 <code>private, max-age=0, must-revalidate</code>。</li>
+        <li>v1 只允许新增 optional 字段；改变状态枚举、双时间语义、公开身份或 cursor 规则需 v2。</li>
+        <li>不使用 offset；公开页最大 100、internal 最大 200，避免深分页扫描与 payload 放大。</li>
+        <li>若 internal 无首次稳定全市场版本，service-api 返回 503；不拼接各所“最新”值。</li>
+      </ul>
+    </section>
+
+    <section id="operations">
+      <h2>10. 容量、运行、安全与可观测性</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">容量</span>
+          <h3>小主表、频繁全量证据</h3>
+          <p>规划假设 6,500 在册、历史身份/名称/状态总量 &lt;50 万；snapshot member 每日约 6,500 行。超过 500 万历史成员或单表 20GB 时评估按 observed month 分区。</p>
+        </article>
+        <article class="card">
+          <span class="label">查询预算</span>
+          <h3>键集分页</h3>
+          <p>目录走 exchange/symbol/有效时间 covering index；历史走 security+effective/known。p95、RPS、连接池和 freshness SLO 待压测，不把假设写成承诺。</p>
+        </article>
+        <article class="card">
+          <span class="label">保留</span>
+          <h3>Canonical 不覆写</h3>
+          <p>身份/状态知识版本长期保留；snapshot member 与 raw 保留期取决于许可、审计和成本评审。未冻结前不得自动删除 raw。</p>
+        </article>
+      </div>
+
+      <h3>日志、指标、trace 与告警</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>类型</th><th>字段 / 指标</th><th>告警候选</th></tr></thead>
+          <tbody>
+            <tr><td>结构化日志</td><td>run_id、partition、source_batch_id、snapshot_id、provider_id、adapter_version、dataVersion、quality_status、duration、retry_count</td><td>不记录 token、raw payload、完整名称列表或连接串。</td></tr>
+            <tr><td>同步指标</td><td><code>master_rows</code>、row_delta_ratio、missing_count、identity_conflicts、schema_drift、source_latency、partition_age</td><td>目录下降&gt;1%、blocking conflict&gt;0、schema drift&gt;0、单所超过目标 freshness。</td></tr>
+            <tr><td>生命周期指标</td><td>status_transition_total、delist_candidate/rejected、unverified_semantics、correction_count</td><td>任何自动 DELISTED 无 explicit evidence 为 P0 告警。</td></tr>
+            <tr><td>API 指标</td><td>route/status/duration、downstream_duration、retry、circuit_state、cursor_409、etag_304、schema_validation_failure</td><td>5 分钟 503&gt;5% 或 internal schema failure&gt;0；阈值须结合真实基线。</td></tr>
+            <tr><td>Trace</td><td>request_id → API span → internal span → publication lookup；sync run → adapter → raw put → DB publish</td><td>高基数 symbol 不作 metric label，只进采样日志/trace。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>运行与安全</h3>
+      <ul>
+        <li>凭据只经环境变量/secret 注入；生产服务凭据轮换方式待平台评审，不复用用户 JWT。</li>
+        <li>adapter egress allowlist 只开放获准上游；每上游独立并发/速率桶，初始并发 1。</li>
+        <li>raw bucket 与同步 PostgreSQL 只授予 service-data-sync；API 无凭据。</li>
+        <li>内部 API 仅服务网络可达；静态 Bearer 使用常量时间比较。后续 mTLS 需单独决策。</li>
+        <li><code>/health</code> 表示进程；<code>/ready</code> 检查服务自身必需依赖。单个来源故障通过 partition/API 503 与告警表达，不触发重启风暴。</li>
+        <li>运行手册入口须覆盖：来源超时、schema drift、目录下降、身份冲突、错误退市候选、aggregate stale、checkpoint repair。</li>
+      </ul>
+    </section>
+
+    <section id="delivery">
+      <h2>11. 迁移、发布、回滚与验收</h2>
+
+      <h3>11.1 保留 equity_instrument 的兼容 expand</h3>
+      <p>
+        当前 <code>equity_instrument</code> 已同时提供内部 BIGINT 与稳定 UUID，且行情外键已引用
+        <code>security_id</code>。没有已决跨资产统一身份需求，拆成两表只会增加 FK、双写与回滚成本。
+        因此保留该表为身份锚，新增历史和快照；当前列在兼容窗口内作为事务内维护的 current projection。
+        该投影在 Contract C1 后允许因历史代码复用而出现相同 exchange+symbol，任何身份解析不得读取它。
+      </p>
+      <ol class="steps">
+        <li>
+          <strong>Expand E1：</strong>向 <code>equity_instrument</code> 增加 nullable
+          <code>master_confirmed_at/current_master_version</code>；创建 identifier/name/status version、
+          snapshot、anomaly、quarantine 和 publication component 表。现有行情 FK 不变。
+        </li>
+        <li>
+          <strong>历史种子：</strong><code>PENDING</code> 只写内部 PENDING 标识占位，不写已发布名称/状态历史；
+          非 PENDING 行分别建立 CONFIRMED 标识、名称和状态三条种子版本。
+          每组只有官方生效日时才用 <code>OFFICIAL_DATE</code>；没有权威日期时以迁移观测日为
+          <code>OBSERVATION_DATE</code>，各组独立保存，绝不把 <code>created_at</code> 伪装成真实生效日。
+        </li>
+        <li>
+          <strong>Deploy D1：</strong>部署日期感知标识解析器；主数据仓储在一个事务中追加三类版本，并更新
+          <code>equity_instrument.exchange/symbol/name/listing_status</code> current projection。日线、周线、月线及
+          所有公司行动、财务、板块成员写入者先按事实日期解析 <code>security_id</code>；删除直接查询当前列的
+          <code>get_or_create(exchange,symbol)</code>。行情先到时仍可走专用 PENDING 流程，但不得与历史证券按名称合并。
+        </li>
+        <li>
+          <strong>回填校验：</strong>security_id/UUID 数量必须不变；每个非 PENDING 当前投影恰有一组可解析的
+          current identifier/name/status；所有行情外键仍有效；双时间排斥约束无冲突。
+        </li>
+        <li>
+          <strong>读切换：</strong>新 internal API 从 version 表按 asOf/knownAt 查询；无 asOf 的键式读取只走开放标识索引。
+          旧仓储在兼容窗口仅可把 current projection 用于展示，不得据此解析身份。contract test、shadow 比对与
+          “禁止当前列解析”架构测试通过后才开放 public route。
+        </li>
+        <li>
+          <strong>Contract C1：</strong>确认日/周/月线和所有其他消费者、写入者均使用日期感知解析器，
+          开放标识唯一索引已验证且线上遥测无旧查询后，删除
+          <code>equity_instrument_exchange_symbol_key</code>（即旧绝对 <code>UNIQUE(exchange,symbol)</code>），
+          再允许代码复用事实发布。保留 current projection 列和大表 FK；不得用
+          <code>listing_status</code> partial unique 代替标识约束，因为生命周期与代码有效期是不同维度。
+        </li>
+      </ol>
+      <pre><code>-- 仅在 Contract C1 全部切换门通过后执行；迁移先断言约束名和开放标识唯一索引均存在。
+ALTER TABLE equity_instrument
+  DROP CONSTRAINT equity_instrument_exchange_symbol_key;</code></pre>
+
+      <h3>11.2 source_batch expand 与不可恢复边界</h3>
+      <ol class="steps">
+        <li>新增 nullable <code>run_id</code>、partition_key、observation_seq、upstream_source、adapter_version、schema_fingerprint。</li>
+        <li>为每条历史 source_batch 建 synthetic legacy run/partition 并回填；既往已被唯一键折叠的观测次数无法重建，必须在迁移报告声明。</li>
+        <li>删除 <code>UNIQUE(provider_id,capability,payload_sha256)</code>，改为普通查重索引；新增 <code>UNIQUE(run_id,partition_key,observation_seq)</code>。</li>
+        <li>部署新 insert-only 仓储：每次 fetch 新建 batch，不再 <code>ON CONFLICT ... DO UPDATE</code>；raw store 仍可按 hash 返回既有对象 URI。</li>
+        <li>完成新行非空验证后收紧新增列；migration downgrade 只允许在新语义 batch 尚未产生时执行。</li>
+      </ol>
+
+      <h3>11.3 分阶段发布</h3>
+      <ol class="steps">
+        <li><strong>阶段 0 — 门槛：</strong>评审 ADR-0013、0009/0010；确认来源许可路径、SSE 字段语义负责人、日历负责人和 API 权限候选。</li>
+        <li><strong>阶段 1 — 存储：</strong>执行 expand、PENDING/CONFIRMED 历史种子与 current projection 校验；实现 raw observation 修复与 provider-neutral ports。</li>
+        <li><strong>阶段 2 — 解析器切换：</strong>先切日/周/月线，再切公司行动、财务、板块成员和其他调用点；开启旧 current-column 查询告警与架构测试。</li>
+        <li><strong>阶段 3 — 单所 pilot：</strong>先 BSE，再 SZSE/SSE；只运行 shadow publication，验证 10 个连续计划批次和失败恢复，次数是验收候选而非生产 SLA。</li>
+        <li><strong>阶段 4 — 生命周期：</strong>显式来源、状态机、SSE 语义隔离、退市四道门、代码复用隔离、历史回补与修订测试。</li>
+        <li><strong>阶段 5 — API：</strong>先 internal，再 service-api client/public；验证字段剥离、ETag、cursor/identity 409、503、权限与 schema drift。</li>
+        <li><strong>阶段 6 — Contract C1：</strong>全部切换证据满足后删除旧绝对 exchange+symbol unique；在此之前禁止发布代码复用。</li>
+        <li><strong>阶段 7 — 启用：</strong>生产许可和连续验收均通过后才打开 source policy；最后建立 scheduler。</li>
+      </ol>
+
+      <h3>11.4 回滚</h3>
+      <ul>
+        <li><strong>应用回滚：</strong>关闭新同步任务与公开路由，回滚 API/worker；保留的
+          <code>equity_instrument</code> current projection 只可展示；不得回滚到按当前列解析身份的旧日线写法。</li>
+        <li><strong>数据回滚：</strong>已发布的 identity/history 不做 destructive downgrade；将错误 publication 标记 superseded，
+          用已审计 repair batch 追加官方更正并推进新版本。</li>
+        <li><strong>迁移回滚：</strong>只有尚未产生新 canonical/history/source batch 时才允许 drop expand 表并恢复旧 unique；
+          产生代码复用行后不得恢复绝对 exchange+symbol unique，只能 roll forward 修复解析器；产生新观测后禁止恢复
+          hash unique，否则会再次折叠证据。</li>
+        <li><strong>API 回滚：</strong>internal v1 在兼容窗口保留；public route 可关闭但不能让 service-api 转而直连 DB。</li>
+        <li><strong>错误退市：</strong>禁止直接 UPDATE 回 LISTED；必须保留错误知识版本，追加 OFFICIAL_CORRECTION，
+          记录 operator、reason、evidence 和受影响 publication。</li>
+      </ul>
+
+      <h3>11.5 验收标准</h3>
+      <div class="grid two">
+        <article class="card">
+          <h3>功能 / 数据</h3>
+          <ul>
+            <li>三所目录分别成功/失败可独立重放；失败所保留上一版本。</li>
+            <li>同一 snapshot 重跑不新增事实版本；每次 fetch 都有独立 source batch。</li>
+            <li>目录缺席、空响应、SSE 误名字段均不能产生 DELISTED。</li>
+            <li>PENDING 原地确认并保留 security_id/UUID；身份冲突隔离。</li>
+            <li>退市后出现的新行情进入 possible_code_reuse 隔离，主数据关闭旧标识前不能误绑或擅自建新证券。</li>
+            <li>日/周/月线均按事实日期解析；历史代码复用不会按名称合并或误绑，所有旧 current-column get_or_create 均被架构测试阻断。</li>
+            <li>asOf/knownAt 能重建名称和状态修订，无重叠双时间行。</li>
+            <li>全市场响应只含一个稳定三所 child-version 集合。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>API / 运行</h3>
+          <ul>
+            <li>公开响应无 instrumentId/securityId/raw/provider/batch 字段。</li>
+            <li>无 asOf 的当前开放解析、历史代码复用必须 asOf、无匹配 404、冲突 409，以及 401/403/429/503、ETag/304、cursor 篡改均有测试。</li>
+            <li>下游超时、schema drift、DB 失败、lease 过期、checkpoint 恢复可注入。</li>
+            <li>0009/0010 可机器解析；internal/public contract test 通过。</li>
+            <li>迁移 upgrade、双写回填、FK validate、允许条件下 rollback 演练通过。</li>
+            <li>Docker 格式、静态检查、测试、架构测试、镜像与 health/ready 通过。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3>计划验收命令（本方案只交付文档，未运行实现测试）</h3>
+      <pre><code># service-data-sync
+docker build --target test --tag quant-v2/service-data-sync:test service-data-sync
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff format --check .
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff check .
+docker run --rm quant-v2/service-data-sync:test pyright
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test pytest -m "not integration"
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test \
+  pytest tests/architecture --no-cov
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra --profile data-sync-test run --rm data-sync-test
+docker build --tag quant-v2/service-data-sync:local service-data-sync
+
+# service-api
+docker build --target test --tag quant-v2/service-api:test service-api
+docker run --rm quant-v2/service-api:test pnpm format:check
+docker run --rm quant-v2/service-api:test pnpm lint
+docker run --rm quant-v2/service-api:test pnpm typecheck
+docker run --rm quant-v2/service-api:test pnpm test
+docker run --rm quant-v2/service-api:test pnpm build
+docker build --tag quant-v2/service-api:local service-api
+
+# migration / contract / runtime
+alembic upgrade head
+alembic downgrade &lt;previous-revision&gt;  # 仅空新数据条件
+pnpm prisma:deploy                         # 应为 no-op：本能力不新增 Prisma 业务表
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile api up --build
+curl -fsS http://127.0.0.1:13000/health
+curl -fsS http://127.0.0.1:13000/ready</code></pre>
+
+      <h3>11.6 待决问题</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>问题</th><th>负责人 / 触发条件</th><th>未决前约束</th></tr></thead>
+          <tbody>
+            <tr><td>三所目录、暂停/退市来源的生产许可、频率和 raw 留存</td><td>合规/数据负责人；source policy 评审</td><td>只允许 local/research，生产开关关闭。</td></tr>
+            <tr><td>SSE <code>DELIST_DATE</code> 的官方语义</td><td>数据负责人；交易所字段说明/样本人工核验</td><td>raw + quarantine，不写 canonical。</td></tr>
+            <tr><td>BSE 明确退市/暂停上市权威来源</td><td>数据负责人；接口研究与许可</td><td>目录缺席不改变 BSE 状态。</td></tr>
+            <tr><td>权威交易日历与 scheduler</td><td>平台/数据负责人；日历连续覆盖验收</td><td>人工触发；不按日期缺口推断状态。</td></tr>
+            <tr><td>最终 public market-data permission、限流、p95/RPS/SLO</td><td>产品/安全/SRE；真实流量压测</td><td>保持认证、有限分页；不宣称 SLA。</td></tr>
+            <tr><td>snapshot/raw 保留期与容量阈值</td><td>合规/SRE；许可与 pilot 行宽测量</td><td>不自动清理证据。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      A 股证券主数据与上市生命周期 · Proposed · 变更摘要：新增同步、双时间表、source batch 观测修复、
+      退市证据门、internal/public API 与兼容迁移设计。
+    </div>
+  </footer>
+</body>
+</html>

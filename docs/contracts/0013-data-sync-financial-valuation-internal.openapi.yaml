@@ -1,0 +1,1115 @@
+openapi: 3.1.1
+info:
+  title: service-data-sync financial statement and valuation internal API
+  version: 1.0.0
+  description: |
+    Proposed service-to-service read contract for published A-share financial
+    statements, governed financial metrics, and valuation observations.
+    service-data-sync owns canonical revisions and point-in-time semantics.
+
+    This contract replaces the financial-report and financial-metric paths in
+    proposed contract 0003 with exchange-plus-symbol identities and adds the
+    valuation path. Equity catalog, bars, adjustment factors, profiles, and
+    corporate actions remain governed by their existing or more specific
+    contracts. Raw object URIs, provider payloads, quarantined fields, and
+    database keys are not exposed.
+  x-contract-status: Proposed
+  x-partially-supersedes: 0003-data-sync-equity-internal.openapi.yaml
+  x-replaces-paths:
+    - /internal/v1/equities/{instrumentId}/financial-reports
+    - /internal/v1/equities/{instrumentId}/financial-reports/{reportId}
+    - /internal/v1/equities/{instrumentId}/financial-metrics
+servers:
+  - url: http://service-data-sync:8000
+    description: Compose service network
+tags:
+  - name: internal-financial-reports
+  - name: internal-financial-metrics
+  - name: internal-valuations
+security:
+  - serviceBearer: []
+paths:
+  /internal/v1/equities/{exchange}/{symbol}/financial-reports:
+    get:
+      tags: [internal-financial-reports]
+      operationId: listInternalFinancialReports
+      summary: List published statement revisions visible at effective and knowledge time
+      description: |
+        reportPeriod is an accounting period and never implies availability.
+        asOf selects the business-effective view; knownAt limits the result to
+        versions the platform knew by that instant. methodologyCode and
+        methodologyVersion are mandatory, so one page maps to one publication.
+        Both time values, all filters, sort keys, and dataVersion are bound into
+        any cursor.
+      parameters:
+        - $ref: '#/components/parameters/ExchangePath'
+        - $ref: '#/components/parameters/Symbol'
+        - $ref: '#/components/parameters/StatementTypes'
+        - $ref: '#/components/parameters/PeriodBases'
+        - $ref: '#/components/parameters/StatementScope'
+        - $ref: '#/components/parameters/MethodologyCode'
+        - $ref: '#/components/parameters/MethodologyVersion'
+        - $ref: '#/components/parameters/ReportPeriodFrom'
+        - $ref: '#/components/parameters/ReportPeriodTo'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/KnownAt'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit50'
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Page ordered by reportPeriod descending, statementType, and reportRef.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalFinancialReportPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/CursorMismatch'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/NoPublication'
+
+  /internal/v1/equities/{exchange}/{symbol}/financial-reports/{reportRef}:
+    get:
+      tags: [internal-financial-reports]
+      operationId: getInternalFinancialReport
+      summary: Read a governed page of line items from one published statement
+      description: |
+        reportRef is a public-safe opaque identity, not a database key. Omit
+        metric to page through all governed line items; unknown or quarantined
+        provider fields are never returned.
+      parameters:
+        - $ref: '#/components/parameters/ExchangePath'
+        - $ref: '#/components/parameters/Symbol'
+        - $ref: '#/components/parameters/ReportRef'
+        - $ref: '#/components/parameters/MetricCodes100Optional'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/KnownAt'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit200'
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: One statement header and one deterministic line-item page.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalFinancialReportDetail'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/CursorMismatch'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/NoPublication'
+
+  /internal/v1/equities/{exchange}/{symbol}/financial-metrics:
+    get:
+      tags: [internal-financial-metrics]
+      operationId: listInternalFinancialMetrics
+      summary: Read provider-reported or platform-derived metrics without mixing origins
+      description: |
+        origin, methodologyCode, methodologyVersion, and metric are mandatory.
+        A provider metric and a derived metric with the same display label are
+        distinct series. One page never combines methodologies or versions.
+      parameters:
+        - $ref: '#/components/parameters/ExchangePath'
+        - $ref: '#/components/parameters/Symbol'
+        - $ref: '#/components/parameters/MetricOrigin'
+        - $ref: '#/components/parameters/MethodologyCode'
+        - $ref: '#/components/parameters/MethodologyVersion'
+        - $ref: '#/components/parameters/MetricCodes50'
+        - $ref: '#/components/parameters/PeriodBases'
+        - $ref: '#/components/parameters/ReportPeriodFrom'
+        - $ref: '#/components/parameters/ReportPeriodTo'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/KnownAt'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit500'
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Page ordered by reportPeriod ascending, metricCode, and methodologyVersion.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalFinancialMetricPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/CursorMismatch'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/NoPublication'
+
+  /internal/v1/equities/{exchange}/{symbol}/valuations:
+    get:
+      tags: [internal-valuations]
+      operationId: listInternalValuationObservations
+      summary: Read one explicit valuation methodology series
+      description: |
+        methodologyCode and methodologyVersion are mandatory. Results never
+        combine sources or methodology versions. A date is an upstream
+        observation key, not an exchange-final assertion. start and end are
+        inclusive and may span at most 3660 days.
+      parameters:
+        - $ref: '#/components/parameters/ExchangePath'
+        - $ref: '#/components/parameters/Symbol'
+        - $ref: '#/components/parameters/MethodologyCode'
+        - $ref: '#/components/parameters/MethodologyVersion'
+        - $ref: '#/components/parameters/ValuationMetrics'
+        - $ref: '#/components/parameters/StartDate'
+        - $ref: '#/components/parameters/EndDate'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/KnownAt'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit1000'
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Page ordered by observationDate ascending and metricCode.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalValuationPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/CursorMismatch'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/NoPublication'
+
+components:
+  securitySchemes:
+    serviceBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: service-credential
+      description: Dedicated runtime-injected service credential compared in constant time.
+
+  parameters:
+    ExchangePath:
+      name: exchange
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Exchange'
+    Symbol:
+      name: symbol
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Symbol'
+    ReportRef:
+      name: reportRef
+      in: path
+      required: true
+      description: Stable public-safe report identity; never a database key.
+      schema:
+        type: string
+        format: uuid
+    StatementTypes:
+      name: statementType
+      in: query
+      required: false
+      style: form
+      explode: true
+      schema:
+        type: array
+        minItems: 1
+        maxItems: 3
+        uniqueItems: true
+        items:
+          $ref: '#/components/schemas/StatementType'
+    PeriodBases:
+      name: basis
+      in: query
+      required: false
+      style: form
+      explode: true
+      schema:
+        type: array
+        minItems: 1
+        maxItems: 4
+        uniqueItems: true
+        items:
+          $ref: '#/components/schemas/PeriodBasis'
+    StatementScope:
+      name: scope
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/StatementScope'
+    MetricOrigin:
+      name: origin
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/MetricOrigin'
+    MetricCodes50:
+      name: metric
+      in: query
+      required: true
+      style: form
+      explode: true
+      schema:
+        type: array
+        minItems: 1
+        maxItems: 50
+        uniqueItems: true
+        items:
+          $ref: '#/components/schemas/MetricCode'
+    MetricCodes100Optional:
+      name: metric
+      in: query
+      required: false
+      style: form
+      explode: true
+      schema:
+        type: array
+        minItems: 1
+        maxItems: 100
+        uniqueItems: true
+        items:
+          $ref: '#/components/schemas/MetricCode'
+    MethodologyCode:
+      name: methodologyCode
+      in: query
+      required: true
+      description: Selects exactly one approved methodology; never an implicit active default.
+      schema:
+        type: string
+        pattern: '^[a-z][a-z0-9_.-]{2,79}$'
+    MethodologyVersion:
+      name: methodologyVersion
+      in: query
+      required: true
+      description: Selects one immutable methodology version and its publication.
+      schema:
+        type: integer
+        minimum: 1
+    ValuationMetrics:
+      name: metric
+      in: query
+      required: true
+      style: form
+      explode: true
+      schema:
+        type: array
+        minItems: 1
+        maxItems: 5
+        uniqueItems: true
+        items:
+          $ref: '#/components/schemas/ValuationMetricCode'
+    ReportPeriodFrom:
+      name: reportPeriodFrom
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+    ReportPeriodTo:
+      name: reportPeriodTo
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+    StartDate:
+      name: start
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+    EndDate:
+      name: end
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+    AsOf:
+      name: asOf
+      in: query
+      required: false
+      description: |
+        Inclusive market-effective date in Asia/Shanghai. Defaults to the
+        publication effective cutoff. It is independent from reportPeriod.
+      schema:
+        type: string
+        format: date
+    KnownAt:
+      name: knownAt
+      in: query
+      required: false
+      description: |
+        Inclusive system-knowledge instant. Defaults to the publication
+        knowledge cutoff. A future instant is rejected.
+      schema:
+        type: string
+        format: date-time
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque authenticated cursor bound to filters, time cutoffs, and dataVersion.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
+    Limit50:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 20
+    Limit200:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 100
+    Limit500:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 200
+    Limit1000:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 500
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 256
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+
+  headers:
+    ETag:
+      description: Strong tag derived from normalized query and dataVersion.
+      schema:
+        type: string
+    PrivateRevalidate:
+      schema:
+        type: string
+        const: private, max-age=0, must-revalidate
+    DataVersion:
+      description: Stable UUID of the selected immutable publication.
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    ValidationProblem:
+      description: Path, filter, date range, metric selection, or time cutoff is invalid.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing or invalid service credential.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Published instrument, report, metric, methodology, or exact series does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    CursorMismatch:
+      description: Cursor does not match filters or its dataVersion is no longer selectable.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    RateLimited:
+      description: Service caller exceeded the approved read budget.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NoPublication:
+      description: |
+        No production-approved publication satisfies the request, or canonical
+        storage is unavailable. Research and quarantined data are never returned.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    Exchange:
+      type: string
+      enum: [SSE, SZSE, BSE]
+    Symbol:
+      type: string
+      pattern: '^[0-9]{6}$'
+    StatementType:
+      type: string
+      enum: [BALANCE_SHEET, INCOME_STATEMENT, CASH_FLOW_STATEMENT]
+    PeriodBasis:
+      type: string
+      enum: [POINT_IN_TIME, YEAR_TO_DATE, SINGLE_QUARTER, TTM]
+    StatementScope:
+      type: string
+      enum: [CONSOLIDATED, PARENT, UNKNOWN]
+    MetricOrigin:
+      type: string
+      enum: [PROVIDER_REPORTED, PLATFORM_DERIVED]
+    KnowledgeBasis:
+      type: string
+      enum: [OFFICIAL_ANNOUNCEMENT, PROVIDER_UPDATE, OBSERVED_AT]
+    KnowledgeConfidence:
+      type: string
+      enum: [HIGH, MEDIUM, CONSERVATIVE]
+    AuditStatus:
+      type: string
+      enum: [AUDITED, UNAUDITED, UNKNOWN]
+    QualityStatus:
+      type: string
+      enum: [PASSED, WARNED]
+    ValuationMetricCode:
+      type: string
+      enum: [market_cap, pe_ttm, pe_static, pb, pcf]
+    MetricCode:
+      type: string
+      pattern: '^[a-z][a-z0-9_.-]{1,79}$'
+    DecimalString:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+      description: Exact decimal serialized as a string; never a JSON floating-point number.
+    NullableDecimalString:
+      oneOf:
+        - $ref: '#/components/schemas/DecimalString'
+        - type: 'null'
+    PositiveDecimalString:
+      type: string
+      pattern: '^[0-9]+(\.[0-9]+)?$'
+    FactNullReason:
+      type: string
+      enum: [NOT_REPORTED, NOT_APPLICABLE, UPSTREAM_NULL]
+    NullableFactNullReason:
+      oneOf:
+        - $ref: '#/components/schemas/FactNullReason'
+        - type: 'null'
+    CurrencyNullReason:
+      type: string
+      enum: [NOT_APPLICABLE, UNKNOWN_SOURCE, MIXED_CURRENCIES]
+    NullableCurrencyNullReason:
+      oneOf:
+        - $ref: '#/components/schemas/CurrencyNullReason'
+        - type: 'null'
+    NullableDate:
+      type: [string, 'null']
+      format: date
+    NullableDateTime:
+      type: [string, 'null']
+      format: date-time
+    NullableString:
+      type: [string, 'null']
+
+    InternalReportHeader:
+      type: object
+      additionalProperties: false
+      required:
+        - instrumentId
+        - reportRef
+        - exchange
+        - symbol
+        - statementType
+        - reportPeriod
+        - periodBasis
+        - statementScope
+        - currency
+        - currencyNullReason
+        - reportType
+        - auditStatus
+        - announcementDate
+        - providerUpdateDate
+        - effectiveFrom
+        - effectiveTo
+        - knownFrom
+        - knownTo
+        - knowledgeBasis
+        - knowledgeConfidence
+        - observedAt
+        - revision
+        - methodologyCode
+        - methodologyVersion
+        - sourceCode
+        - qualityStatus
+      properties:
+        instrumentId:
+          type: string
+          format: uuid
+          description: Internal correlation identity; service-api must remove it.
+        reportRef:
+          type: string
+          format: uuid
+        exchange:
+          $ref: '#/components/schemas/Exchange'
+        symbol:
+          $ref: '#/components/schemas/Symbol'
+        statementType:
+          $ref: '#/components/schemas/StatementType'
+        reportPeriod:
+          type: string
+          format: date
+        periodBasis:
+          $ref: '#/components/schemas/PeriodBasis'
+        statementScope:
+          $ref: '#/components/schemas/StatementScope'
+        currency:
+          type: [string, 'null']
+          pattern: '^[A-Z]{3}$'
+          description: ISO 4217 reporting currency when known; null is never encoded as a synthetic code.
+        currencyNullReason:
+          $ref: '#/components/schemas/NullableCurrencyNullReason'
+          description: |
+            Exactly one of currency and currencyNullReason is non-null. Header
+            null commonly means unknown or mixed currencies, never zero value.
+        reportType:
+          type: string
+          minLength: 1
+          maxLength: 64
+        auditStatus:
+          $ref: '#/components/schemas/AuditStatus'
+        announcementDate:
+          $ref: '#/components/schemas/NullableDate'
+        providerUpdateDate:
+          $ref: '#/components/schemas/NullableDateTime'
+        effectiveFrom:
+          type: string
+          format: date
+        effectiveTo:
+          $ref: '#/components/schemas/NullableDate'
+        knownFrom:
+          type: string
+          format: date-time
+        knownTo:
+          $ref: '#/components/schemas/NullableDateTime'
+        knowledgeBasis:
+          $ref: '#/components/schemas/KnowledgeBasis'
+        knowledgeConfidence:
+          $ref: '#/components/schemas/KnowledgeConfidence'
+        observedAt:
+          type: string
+          format: date-time
+        revision:
+          type: integer
+          minimum: 1
+        methodologyCode:
+          type: string
+          pattern: '^[a-z][a-z0-9_.-]{2,79}$'
+        methodologyVersion:
+          type: integer
+          minimum: 1
+        sourceCode:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: Governed upstream source identity; never a raw URI.
+        qualityStatus:
+          $ref: '#/components/schemas/QualityStatus'
+
+    FinancialStatementItem:
+      type: object
+      additionalProperties: false
+      required:
+        - metricCode
+        - label
+        - value
+        - nullReason
+        - currency
+        - currencyNullReason
+        - originalUnit
+        - canonicalUnit
+        - scaleFactor
+        - signConvention
+      properties:
+        metricCode:
+          $ref: '#/components/schemas/MetricCode'
+        label:
+          type: string
+          minLength: 1
+          maxLength: 160
+        value:
+          $ref: '#/components/schemas/NullableDecimalString'
+          description: Exactly one of value and nullReason is non-null.
+        nullReason:
+          $ref: '#/components/schemas/NullableFactNullReason'
+        currency:
+          type: [string, 'null']
+          pattern: '^[A-Z]{3}$'
+        currencyNullReason:
+          $ref: '#/components/schemas/NullableCurrencyNullReason'
+          description: |
+            Exactly one of currency and currencyNullReason is non-null.
+            Non-monetary metrics use NOT_APPLICABLE; unknown source currency is explicit.
+        originalUnit:
+          type: string
+          minLength: 1
+          maxLength: 32
+        canonicalUnit:
+          type: string
+          minLength: 1
+          maxLength: 32
+        scaleFactor:
+          $ref: '#/components/schemas/PositiveDecimalString'
+        signConvention:
+          type: string
+          enum: [AS_REPORTED, CANONICAL_POSITIVE, CANONICAL_NEGATIVE]
+
+    InternalFinancialReportPage:
+      type: object
+      additionalProperties: false
+      required:
+        - instrumentId
+        - exchange
+        - symbol
+        - items
+        - nextCursor
+        - methodologyCode
+        - methodologyVersion
+        - dataVersion
+        - publishedAt
+        - effectiveAsOf
+        - knowledgeCutoff
+      properties:
+        instrumentId:
+          type: string
+          format: uuid
+        exchange:
+          $ref: '#/components/schemas/Exchange'
+        symbol:
+          $ref: '#/components/schemas/Symbol'
+        methodologyCode:
+          type: string
+          pattern: '^[a-z][a-z0-9_.-]{2,79}$'
+        methodologyVersion:
+          type: integer
+          minimum: 1
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/InternalReportHeader'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 1024
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        effectiveAsOf:
+          type: string
+          format: date
+        knowledgeCutoff:
+          type: string
+          format: date-time
+
+    InternalFinancialReportDetail:
+      type: object
+      additionalProperties: false
+      required:
+        - report
+        - items
+        - nextCursor
+        - dataVersion
+        - publishedAt
+        - effectiveAsOf
+        - knowledgeCutoff
+      properties:
+        report:
+          $ref: '#/components/schemas/InternalReportHeader'
+        items:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/FinancialStatementItem'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 1024
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        effectiveAsOf:
+          type: string
+          format: date
+        knowledgeCutoff:
+          type: string
+          format: date-time
+
+    InternalFinancialMetric:
+      type: object
+      additionalProperties: false
+      required:
+        - metricCode
+        - label
+        - origin
+        - reportPeriod
+        - periodBasis
+        - statementScope
+        - value
+        - unit
+        - currency
+        - currencyNullReason
+        - methodologyCode
+        - methodologyVersion
+        - formulaVersion
+        - effectiveFrom
+        - knownFrom
+        - knowledgeBasis
+        - knowledgeConfidence
+        - observedAt
+        - revision
+      properties:
+        metricCode:
+          $ref: '#/components/schemas/MetricCode'
+        label:
+          type: string
+          minLength: 1
+          maxLength: 160
+        origin:
+          $ref: '#/components/schemas/MetricOrigin'
+        reportPeriod:
+          type: string
+          format: date
+        periodBasis:
+          $ref: '#/components/schemas/PeriodBasis'
+        statementScope:
+          $ref: '#/components/schemas/StatementScope'
+        value:
+          $ref: '#/components/schemas/DecimalString'
+        unit:
+          type: string
+          minLength: 1
+          maxLength: 32
+        currency:
+          type: [string, 'null']
+          pattern: '^[A-Z]{3}$'
+        currencyNullReason:
+          $ref: '#/components/schemas/NullableCurrencyNullReason'
+          description: Exactly one of currency and currencyNullReason is non-null.
+        methodologyCode:
+          type: string
+          pattern: '^[a-z][a-z0-9_.-]{2,79}$'
+        methodologyVersion:
+          type: integer
+          minimum: 1
+        formulaVersion:
+          type: [integer, 'null']
+          minimum: 1
+        effectiveFrom:
+          type: string
+          format: date
+        knownFrom:
+          type: string
+          format: date-time
+        knowledgeBasis:
+          $ref: '#/components/schemas/KnowledgeBasis'
+        knowledgeConfidence:
+          $ref: '#/components/schemas/KnowledgeConfidence'
+        observedAt:
+          type: string
+          format: date-time
+        revision:
+          type: integer
+          minimum: 1
+
+    InternalFinancialMetricPage:
+      type: object
+      additionalProperties: false
+      required:
+        - instrumentId
+        - exchange
+        - symbol
+        - origin
+        - methodologyCode
+        - methodologyVersion
+        - items
+        - nextCursor
+        - dataVersion
+        - publishedAt
+        - effectiveAsOf
+        - knowledgeCutoff
+      properties:
+        instrumentId:
+          type: string
+          format: uuid
+        exchange:
+          $ref: '#/components/schemas/Exchange'
+        symbol:
+          $ref: '#/components/schemas/Symbol'
+        origin:
+          $ref: '#/components/schemas/MetricOrigin'
+        methodologyCode:
+          type: string
+          pattern: '^[a-z][a-z0-9_.-]{2,79}$'
+        methodologyVersion:
+          type: integer
+          minimum: 1
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/InternalFinancialMetric'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 1024
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        effectiveAsOf:
+          type: string
+          format: date
+        knowledgeCutoff:
+          type: string
+          format: date-time
+
+    InternalValuationObservation:
+      type: object
+      additionalProperties: false
+      required:
+        - observationDate
+        - metricCode
+        - value
+        - unit
+        - currency
+        - currencyNullReason
+        - methodologyCode
+        - methodologyVersion
+        - finality
+        - effectiveFrom
+        - knownFrom
+        - knowledgeBasis
+        - knowledgeConfidence
+        - observedAt
+        - revision
+      properties:
+        observationDate:
+          type: string
+          format: date
+        metricCode:
+          $ref: '#/components/schemas/ValuationMetricCode'
+        value:
+          $ref: '#/components/schemas/DecimalString'
+        unit:
+          type: string
+          minLength: 1
+          maxLength: 32
+        currency:
+          type: [string, 'null']
+          pattern: '^[A-Z]{3}$'
+        currencyNullReason:
+          $ref: '#/components/schemas/NullableCurrencyNullReason'
+          description: Exactly one of currency and currencyNullReason is non-null.
+        methodologyCode:
+          type: string
+          pattern: '^[a-z][a-z0-9_.-]{2,79}$'
+        methodologyVersion:
+          type: integer
+          minimum: 1
+        finality:
+          type: string
+          const: PROVIDER_OBSERVATION
+          description: Not an exchange or provider official-final assertion.
+        effectiveFrom:
+          type: string
+          format: date
+        knownFrom:
+          type: string
+          format: date-time
+        knowledgeBasis:
+          $ref: '#/components/schemas/KnowledgeBasis'
+        knowledgeConfidence:
+          $ref: '#/components/schemas/KnowledgeConfidence'
+        observedAt:
+          type: string
+          format: date-time
+        revision:
+          type: integer
+          minimum: 1
+
+    InternalValuationPage:
+      type: object
+      additionalProperties: false
+      required:
+        - instrumentId
+        - exchange
+        - symbol
+        - methodologyCode
+        - methodologyVersion
+        - items
+        - nextCursor
+        - dataVersion
+        - publishedAt
+        - effectiveAsOf
+        - knowledgeCutoff
+      properties:
+        instrumentId:
+          type: string
+          format: uuid
+        exchange:
+          $ref: '#/components/schemas/Exchange'
+        symbol:
+          $ref: '#/components/schemas/Symbol'
+        methodologyCode:
+          type: string
+          pattern: '^[a-z][a-z0-9_.-]{2,79}$'
+        methodologyVersion:
+          type: integer
+          minimum: 1
+        items:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/InternalValuationObservation'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 1024
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        effectiveAsOf:
+          type: string
+          format: date
+        knowledgeCutoff:
+          type: string
+          format: date-time
+
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code, requestId]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        code:
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'
+        detail:
+          type: string
+          maxLength: 500
+        requestId:
+          type: string
+          maxLength: 128

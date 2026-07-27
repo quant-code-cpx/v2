@@ -1,4 +1,4 @@
-"""供受信任服务读取已发布板块目录和三周期行情的内部 HTTP 接口。"""
+"""供受信任服务读取已发布板块行情与证券主数据的内部 HTTP 应用。"""
 
 from __future__ import annotations
 
@@ -15,16 +15,24 @@ from fastapi import Depends, FastAPI, Header, Path, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 
+from service_data_sync.application.ports.equity_master_read import EquityMasterReadRepository
 from service_data_sync.application.ports.sector_market_data import (
     DatasetPublication,
     SectorMarketDataRepository,
     StoredSector,
 )
+from service_data_sync.application.ports.sector_membership import SectorMembershipRepository
 from service_data_sync.bootstrap.container import ServiceContainer, build_container
 from service_data_sync.bootstrap.settings import Settings, load_settings
 from service_data_sync.domain.sector import SectorBar, SectorIdentifier, SectorPeriod, SectorScheme
+from service_data_sync.infrastructure.persistence.equity_master_read_repository import (
+    SqlAlchemyEquityMasterReadRepository,
+)
 from service_data_sync.infrastructure.persistence.sector_market_data_repository import (
     SqlAlchemySectorMarketDataRepository,
+)
+from service_data_sync.infrastructure.persistence.sector_membership_repository import (
+    SqlAlchemySectorMembershipRepository,
 )
 
 _CATALOG_DATASET = "sector.catalog.raw"
@@ -46,13 +54,19 @@ def create_app(
     *,
     settings: Settings | None = None,
     repository: SectorMarketDataRepository | None = None,
+    equity_repository: EquityMasterReadRepository | None = None,
+    membership_repository: SectorMembershipRepository | None = None,
 ) -> FastAPI:
-    """构造只读内部应用；运行时由此边界独占数据库读取和服务凭据校验。"""
+    """构造共享只读内部应用；运行时独占 canonical 数据读取与服务凭据校验。"""
     resolved_settings = settings or load_settings()
     container: ServiceContainer | None = None
     if repository is None:
         container = build_container(resolved_settings)
         repository = SqlAlchemySectorMarketDataRepository(container.database)
+        if equity_repository is None:
+            equity_repository = SqlAlchemyEquityMasterReadRepository(container.database)
+        if membership_repository is None:
+            membership_repository = SqlAlchemySectorMembershipRepository(container.database)
     credential = resolved_settings.internal_api_bearer_token.get_secret_value()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -60,6 +74,10 @@ def create_app(
     async def render_internal_problem(request: Request, error: InternalProblem) -> JSONResponse:
         """将预期业务失败投影为不泄漏配置、SQL 或供应商细节的问题响应。"""
         request_id = _request_id(request)
+        headers = {"X-Request-Id": request_id, "Cache-Control": "no-store"}
+        # 依赖故障必须提供有界退避提示，避免内部调用方立即形成重试风暴。
+        if error.status == 503:
+            headers["Retry-After"] = "5"
         return JSONResponse(
             status_code=error.status,
             content=_problem_payload(
@@ -69,7 +87,7 @@ def create_app(
                 request_id=request_id,
             ),
             media_type="application/problem+json",
-            headers={"X-Request-Id": request_id, "Cache-Control": "no-store"},
+            headers=headers,
         )
 
     @app.exception_handler(RequestValidationError)
@@ -104,6 +122,29 @@ def create_app(
     def health() -> dict[str, str]:
         """返回进程存活状态；该探针仅位于内部网络且不读取业务数据。"""
         return {"status": "ok"}
+
+    if equity_repository is not None:
+        # 延迟导入避免证券路由模块在应用工厂完成定义前反向加载本模块。
+        from service_data_sync.interfaces.internal_equity_api import register_equity_routes
+
+        register_equity_routes(
+            app,
+            repository=equity_repository,
+            require_service_bearer=require_service_bearer,
+            cursor_secret=credential.encode(),
+        )
+
+    if membership_repository is not None:
+        # 成分路由独立注册，避免原板块目录/K 线端口依赖成分实现细节。
+        from service_data_sync.interfaces.internal_sector_membership_api import (
+            register_sector_membership_routes,
+        )
+
+        register_sector_membership_routes(
+            app,
+            repository=membership_repository,
+            require_service_bearer=require_service_bearer,
+        )
 
     @app.get("/internal/v1/sectors", dependencies=[Depends(require_service_bearer)])
     def list_sectors(

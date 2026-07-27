@@ -1,0 +1,1004 @@
+"""使用 SQLAlchemy Core 发布证券目录快照和双时间主数据版本。"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Mapping
+from datetime import UTC, date, datetime
+from typing import Any
+from uuid import UUID, uuid4
+
+from sqlalchemy import Connection, Engine, text
+
+from service_data_sync.application.ports.equity_master import (
+    EquityMasterRepository,
+    PublishedCnAAggregate,
+    PublishedEquityCatalog,
+)
+from service_data_sync.domain.equity import Exchange
+from service_data_sync.domain.equity_master import (
+    EquityCatalogCompletenessError,
+    EquityCatalogEntry,
+)
+from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
+
+_DATASET = "equity.master.catalog"
+_CN_A_DATASET = "equity.master.cn-a"
+_CN_A_PARTITION = "CN_A_STABLE"
+
+
+class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
+    """发布完整目录快照，并维护仅供兼容展示的身份锚 current projection。"""
+
+    def __init__(self, database: DatabaseClient) -> None:
+        """使用服务自有数据库引擎，避免应用层接触 SQLAlchemy 细节。"""
+        self._engine: Engine = database.engine
+
+    def publish_catalog(
+        self,
+        *,
+        exchange: Exchange,
+        target_date: date,
+        entries: tuple[EquityCatalogEntry, ...],
+        provider_id: str,
+        source_payload_sha256: str,
+        raw_uri: str,
+        observed_at: datetime,
+        upstream_source: str | None,
+        adapter_version: str,
+        schema_fingerprint: str,
+    ) -> PublishedEquityCatalog:
+        """在单一事务中保存完整快照、确认占位身份并推进交易所版本。"""
+        if not entries:
+            raise ValueError("catalog entries must not be empty")
+        if any(entry.identifier.exchange is not exchange for entry in entries):
+            raise ValueError("catalog entry exchange must match publication exchange")
+        now = datetime.now(UTC)
+        business_hash = _catalog_business_hash(entries)
+        with self._engine.begin() as connection:
+            previous_catalog = self._latest_catalog(connection, exchange)
+            previous_hash = (
+                None if previous_catalog is None else bytes(previous_catalog["business_sha256"])
+            )
+            self._validate_catalog_completeness(previous_catalog, current_count=len(entries))
+            source_batch_id = record_source_observation(
+                connection,
+                provider_id=provider_id,
+                capability=_DATASET,
+                source_payload_sha256=source_payload_sha256,
+                raw_uri=raw_uri,
+                observed_at=observed_at,
+                created_at=now,
+                upstream_source=upstream_source,
+                adapter_version=adapter_version,
+                schema_fingerprint=schema_fingerprint,
+            )
+            snapshot_id = uuid4()
+            self._insert_snapshot(
+                connection,
+                snapshot_id=snapshot_id,
+                exchange=exchange,
+                target_date=target_date,
+                source_batch_id=source_batch_id,
+                observed_at=observed_at,
+                row_count=len(entries),
+                schema_fingerprint=schema_fingerprint,
+                business_hash=business_hash,
+            )
+            inserted_count = 0
+            unchanged_count = 0
+            for ordinal, entry in enumerate(entries, start=1):
+                changed, security_id = self._publish_entry(
+                    connection,
+                    entry=entry,
+                    target_date=target_date,
+                    source_batch_id=source_batch_id,
+                    now=now,
+                )
+                self._insert_snapshot_member(
+                    connection,
+                    snapshot_id=snapshot_id,
+                    ordinal=ordinal,
+                    entry=entry,
+                    target_date=target_date,
+                    security_id=security_id,
+                )
+                if changed:
+                    inserted_count += 1
+                else:
+                    unchanged_count += 1
+            data_version = self._publish(
+                connection,
+                exchange=exchange,
+                business_changed=previous_hash != business_hash,
+                effective_as_of=target_date,
+                published_at=now,
+            )
+            self._reconcile_presence_anomalies(
+                connection,
+                exchange=exchange,
+                snapshot_id=snapshot_id,
+                target_date=target_date,
+                now=now,
+            )
+        return PublishedEquityCatalog(
+            snapshot_id=snapshot_id,
+            data_version=data_version,
+            inserted_count=inserted_count,
+            unchanged_count=unchanged_count,
+        )
+
+    def publish_cn_a_aggregate(self) -> PublishedCnAAggregate:
+        """以当前三所交易所 child version 原子构成稳定全市场发布。"""
+        published_at = datetime.now(UTC)
+        with self._engine.begin() as connection:
+            rows = (
+                connection.execute(
+                    text(
+                        """
+                        SELECT partition_key, data_version, effective_as_of, knowledge_cutoff
+                        FROM dataset_publication
+                        WHERE dataset = :dataset
+                          AND partition_key IN ('SSE', 'SZSE', 'BSE')
+                          AND superseded_at IS NULL
+                        ORDER BY partition_key
+                        """
+                    ),
+                    {"dataset": _DATASET},
+                )
+                .mappings()
+                .all()
+            )
+            if {str(row["partition_key"]) for row in rows} != {
+                exchange.value for exchange in Exchange
+            }:
+                raise ValueError("all exchange catalog publications are required")
+            if len({row["effective_as_of"] for row in rows}) != 1:
+                raise ValueError("all exchange catalog publications must share a target date")
+            components = tuple(
+                (str(row["partition_key"]), UUID(str(row["data_version"]))) for row in rows
+            )
+            current_components = (
+                connection.execute(
+                    text(
+                        """
+                        SELECT component_partition_key, component_data_version
+                        FROM dataset_publication AS publication
+                        INNER JOIN dataset_publication_component AS component
+                          ON component.aggregate_publication_id = publication.publication_id
+                        WHERE publication.dataset = :dataset
+                          AND publication.partition_key = :partition_key
+                          AND publication.superseded_at IS NULL
+                        ORDER BY component_partition_key
+                        """
+                    ),
+                    {"dataset": _CN_A_DATASET, "partition_key": _CN_A_PARTITION},
+                )
+                .mappings()
+                .all()
+            )
+            current = tuple(
+                (str(row["component_partition_key"]), UUID(str(row["component_data_version"])))
+                for row in current_components
+            )
+            if current == components:
+                existing = (
+                    connection.execute(
+                        text(
+                            """
+                            SELECT data_version, published_at
+                            FROM dataset_publication
+                            WHERE dataset = :dataset
+                              AND partition_key = :partition_key
+                              AND superseded_at IS NULL
+                            """
+                        ),
+                        {"dataset": _CN_A_DATASET, "partition_key": _CN_A_PARTITION},
+                    )
+                    .mappings()
+                    .one()
+                )
+                return PublishedCnAAggregate(
+                    data_version=UUID(str(existing["data_version"])),
+                    published_at=existing["published_at"],
+                )
+            effective_as_of = min(row["effective_as_of"] for row in rows)
+            knowledge_cutoff = max(row["knowledge_cutoff"] for row in rows)
+            connection.execute(
+                text(
+                    """
+                    UPDATE dataset_publication
+                    SET superseded_at = :published_at
+                    WHERE dataset = :dataset
+                      AND partition_key = :partition_key
+                      AND superseded_at IS NULL
+                    """
+                ),
+                {
+                    "published_at": published_at,
+                    "dataset": _CN_A_DATASET,
+                    "partition_key": _CN_A_PARTITION,
+                },
+            )
+            publication_id = uuid4()
+            data_version = uuid4()
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO dataset_publication (
+                      publication_id, dataset, partition_key, data_version, quality_status,
+                      effective_as_of, knowledge_cutoff, published_at, superseded_at
+                    ) VALUES (
+                      :publication_id, :dataset, :partition_key, :data_version, 'passed',
+                      :effective_as_of, :knowledge_cutoff, :published_at, NULL
+                    )
+                    """
+                ),
+                {
+                    "publication_id": publication_id,
+                    "dataset": _CN_A_DATASET,
+                    "partition_key": _CN_A_PARTITION,
+                    "data_version": data_version,
+                    "effective_as_of": effective_as_of,
+                    "knowledge_cutoff": knowledge_cutoff,
+                    "published_at": published_at,
+                },
+            )
+            for partition_key, component_data_version in components:
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO dataset_publication_component (
+                          aggregate_publication_id, component_partition_key, component_data_version
+                        ) VALUES (
+                          :aggregate_publication_id, :component_partition_key,
+                          :component_data_version
+                        )
+                        """
+                    ),
+                    {
+                        "aggregate_publication_id": publication_id,
+                        "component_partition_key": partition_key,
+                        "component_data_version": component_data_version,
+                    },
+                )
+        return PublishedCnAAggregate(data_version=data_version, published_at=published_at)
+
+    def _latest_catalog(
+        self, connection: Connection, exchange: Exchange
+    ) -> Mapping[Any, Any] | None:
+        """读取上一份稳定目录的哈希和行数，供版本与完整性门共用。"""
+        row = (
+            connection.execute(
+                text(
+                    """
+                    SELECT business_sha256, row_count
+                    FROM equity_master_snapshot
+                    WHERE exchange = :exchange
+                      AND snapshot_kind = 'CATALOG'
+                      AND quality_status = 'passed'
+                    ORDER BY observed_at DESC, snapshot_id DESC
+                    LIMIT 1
+                    """
+                ),
+                {"exchange": exchange.value},
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return row
+
+    def _validate_catalog_completeness(
+        self,
+        previous_catalog: Mapping[Any, Any] | None,
+        *,
+        current_count: int,
+    ) -> None:
+        """阻断相对稳定基线缩减超过百分之一的伪完整目录。"""
+        if previous_catalog is None or previous_catalog.get("row_count") is None:
+            return
+        previous_count = int(previous_catalog["row_count"])
+        # 用整数比较避免浮点误差：恰好下降 1% 可观察但不触发“超过 1%”硬门。
+        if current_count * 100 < previous_count * 99:
+            raise EquityCatalogCompletenessError(
+                "equity catalog row count decreased by more than one percent "
+                f"({previous_count} -> {current_count})"
+            )
+
+    def _reconcile_presence_anomalies(
+        self,
+        connection: Connection,
+        *,
+        exchange: Exchange,
+        snapshot_id: UUID,
+        target_date: date,
+        now: datetime,
+    ) -> None:
+        """记录目录缺席观测并关闭恢复条目，生命周期状态始终由显式证据维护。"""
+        connection.execute(
+            text(
+                """
+                INSERT INTO equity_presence_anomaly (
+                  anomaly_id, security_id, exchange, symbol,
+                  first_missing_snapshot_id, last_missing_snapshot_id,
+                  consecutive_count, status, resolved_at
+                )
+                SELECT
+                  :anomaly_id, identifier.security_id, identifier.exchange, identifier.symbol,
+                  :snapshot_id, :snapshot_id, 1, 'open', NULL
+                FROM equity_identifier_version AS identifier
+                INNER JOIN equity_listing_status_version AS listing
+                  ON listing.security_id = identifier.security_id
+                WHERE identifier.exchange = :exchange
+                  AND identifier.identity_state = 'CONFIRMED'
+                  AND identifier.effective_range @> :target_date
+                  AND identifier.knowledge_range @> :now
+                  AND listing.status = 'LISTED'
+                  AND listing.effective_range @> :target_date
+                  AND listing.knowledge_range @> :now
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM equity_master_snapshot_member AS member
+                    WHERE member.snapshot_id = :snapshot_id
+                      AND member.security_id = identifier.security_id
+                  )
+                ON CONFLICT (security_id) WHERE status = 'open'
+                DO UPDATE SET
+                  last_missing_snapshot_id = EXCLUDED.last_missing_snapshot_id,
+                  consecutive_count = CASE
+                    WHEN (
+                      SELECT prior_snapshot.target_date
+                      FROM equity_master_snapshot AS prior_snapshot
+                      WHERE prior_snapshot.snapshot_id =
+                        equity_presence_anomaly.last_missing_snapshot_id
+                    ) = :target_date
+                    THEN equity_presence_anomaly.consecutive_count
+                    ELSE equity_presence_anomaly.consecutive_count + 1
+                  END
+                """
+            ),
+            {
+                "anomaly_id": uuid4(),
+                "exchange": exchange.value,
+                "snapshot_id": snapshot_id,
+                "target_date": target_date,
+                "now": now,
+            },
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE equity_presence_anomaly AS anomaly
+                SET status = 'resolved', resolved_at = :now
+                FROM equity_master_snapshot_member AS member
+                WHERE member.snapshot_id = :snapshot_id
+                  AND member.security_id = anomaly.security_id
+                  AND anomaly.exchange = :exchange
+                  AND anomaly.status = 'open'
+                """
+            ),
+            {"exchange": exchange.value, "snapshot_id": snapshot_id, "now": now},
+        )
+
+    def _insert_snapshot(
+        self,
+        connection: Connection,
+        *,
+        snapshot_id: UUID,
+        exchange: Exchange,
+        target_date: date,
+        source_batch_id: UUID,
+        observed_at: datetime,
+        row_count: int,
+        schema_fingerprint: str,
+        business_hash: bytes,
+    ) -> None:
+        """写入一次完整且已通过结构门的目录快照外壳。"""
+        connection.execute(
+            text(
+                """
+                INSERT INTO equity_master_snapshot (
+                  snapshot_id, exchange, snapshot_kind, target_date, source_batch_id,
+                  observed_at, row_count, schema_fingerprint, completeness, quality_status,
+                  business_sha256
+                ) VALUES (
+                  :snapshot_id, :exchange, 'CATALOG', :target_date, :source_batch_id,
+                  :observed_at, :row_count, :schema_fingerprint, 'COMPLETE', 'passed',
+                  :business_sha256
+                )
+                """
+            ),
+            {
+                "snapshot_id": snapshot_id,
+                "exchange": exchange.value,
+                "target_date": target_date,
+                "source_batch_id": source_batch_id,
+                "observed_at": observed_at,
+                "row_count": row_count,
+                "schema_fingerprint": schema_fingerprint,
+                "business_sha256": business_hash,
+            },
+        )
+
+    def _publish_entry(
+        self,
+        connection: Connection,
+        *,
+        entry: EquityCatalogEntry,
+        target_date: date,
+        source_batch_id: UUID,
+        now: datetime,
+    ) -> tuple[bool, int]:
+        """确认一条目录身份，并只为身份或名称实际变化追加版本。"""
+        current = self._current_identifier(connection, entry)
+        if current is None:
+            security_id = self._create_confirmed_instrument(
+                connection,
+                entry=entry,
+                target_date=target_date,
+                source_batch_id=source_batch_id,
+                now=now,
+            )
+            return True, security_id
+        security_id = int(current["security_id"])
+        if str(current["identity_state"]) == "PENDING":
+            self._confirm_pending_identifier(
+                connection,
+                security_id=security_id,
+                entry=entry,
+                target_date=target_date,
+                source_batch_id=source_batch_id,
+                now=now,
+            )
+            return True, security_id
+        changed = self._append_name_if_changed(
+            connection,
+            security_id=security_id,
+            entry=entry,
+            target_date=target_date,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        if changed:
+            connection.execute(
+                text(
+                    """
+                    UPDATE equity_instrument
+                    SET name = :name, updated_at = :updated_at
+                    WHERE security_id = :security_id
+                    """
+                ),
+                {"security_id": security_id, "name": entry.name, "updated_at": now},
+            )
+        return changed, security_id
+
+    def _current_identifier(
+        self, connection: Connection, entry: EquityCatalogEntry
+    ) -> Mapping[Any, Any] | None:
+        """读取当前知识下的开放标识；PENDING 也是可被目录确认的稳定锚。"""
+        return (
+            connection.execute(
+                text(
+                    """
+                    SELECT security_id, identity_state
+                    FROM equity_identifier_version
+                    WHERE exchange = :exchange
+                      AND symbol = :symbol
+                      AND effective_to IS NULL
+                      AND known_to IS NULL
+                    """
+                ),
+                {
+                    "exchange": entry.identifier.exchange.value,
+                    "symbol": entry.identifier.symbol,
+                },
+            )
+            .mappings()
+            .one_or_none()
+        )
+
+    def _create_confirmed_instrument(
+        self,
+        connection: Connection,
+        *,
+        entry: EquityCatalogEntry,
+        target_date: date,
+        source_batch_id: UUID,
+        now: datetime,
+    ) -> int:
+        """为目录首次发现代码创建确认身份、名称与 LISTED 生命周期事实。"""
+        instrument_id = uuid4()
+        row = (
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO equity_instrument (
+                      instrument_id, exchange, symbol, name, listing_status,
+                      master_confirmed_at, current_master_version, created_at, updated_at
+                    ) VALUES (
+                      :instrument_id, :exchange, :symbol, :name, 'LISTED',
+                      :master_confirmed_at, :current_master_version, :created_at, :updated_at
+                    )
+                    RETURNING security_id
+                    """
+                ),
+                {
+                    "instrument_id": instrument_id,
+                    "exchange": entry.identifier.exchange.value,
+                    "symbol": entry.identifier.symbol,
+                    "name": entry.name,
+                    "master_confirmed_at": now,
+                    "current_master_version": uuid4(),
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+            .mappings()
+            .one()
+        )
+        security_id = int(row["security_id"])
+        identifier_version_id = uuid4()
+        self._insert_confirmed_identity(
+            connection,
+            version_id=identifier_version_id,
+            security_id=security_id,
+            entry=entry,
+            target_date=target_date,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        self._insert_name_version(
+            connection,
+            security_id=security_id,
+            entry=entry,
+            target_date=target_date,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        self._insert_listed_status(
+            connection,
+            security_id=security_id,
+            entry=entry,
+            target_date=target_date,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE equity_instrument
+                SET current_master_version = :version_id
+                WHERE security_id = :security_id
+                """
+            ),
+            {"security_id": security_id, "version_id": identifier_version_id},
+        )
+        return security_id
+
+    def _confirm_pending_identifier(
+        self,
+        connection: Connection,
+        *,
+        security_id: int,
+        entry: EquityCatalogEntry,
+        target_date: date,
+        source_batch_id: UUID,
+        now: datetime,
+    ) -> None:
+        """关闭 PENDING 知识版本并追加可发布的确认身份与初始目录事实。"""
+        connection.execute(
+            text(
+                """
+                UPDATE equity_identifier_version
+                SET known_to = :known_to
+                WHERE security_id = :security_id
+                  AND identity_state = 'PENDING'
+                  AND known_to IS NULL
+                """
+            ),
+            {"security_id": security_id, "known_to": now},
+        )
+        version_id = uuid4()
+        self._insert_confirmed_identity(
+            connection,
+            version_id=version_id,
+            security_id=security_id,
+            entry=entry,
+            target_date=target_date,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        self._insert_name_version(
+            connection,
+            security_id=security_id,
+            entry=entry,
+            target_date=target_date,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        self._insert_listed_status(
+            connection,
+            security_id=security_id,
+            entry=entry,
+            target_date=target_date,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE equity_instrument
+                SET name = :name, listing_status = 'LISTED', master_confirmed_at = :confirmed_at,
+                    current_master_version = :version_id, updated_at = :updated_at
+                WHERE security_id = :security_id
+                """
+            ),
+            {
+                "security_id": security_id,
+                "name": entry.name,
+                "confirmed_at": now,
+                "version_id": version_id,
+                "updated_at": now,
+            },
+        )
+
+    def _append_name_if_changed(
+        self,
+        connection: Connection,
+        *,
+        security_id: int,
+        entry: EquityCatalogEntry,
+        target_date: date,
+        source_batch_id: UUID,
+        now: datetime,
+    ) -> bool:
+        """名称变化以观测日生效；相同名称只保留新快照证据而不制造历史版本。"""
+        current = (
+            connection.execute(
+                text(
+                    """
+                    SELECT version_id, name, effective_from
+                    FROM equity_name_version
+                    WHERE security_id = :security_id
+                      AND effective_to IS NULL
+                      AND known_to IS NULL
+                    """
+                ),
+                {"security_id": security_id},
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if current is not None and str(current["name"]) == entry.name:
+            return False
+        if current is not None:
+            # 同日更正关闭知识时间；跨日改名关闭市场有效期，避免回写旧名称。
+            if current["effective_from"] == target_date:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE equity_name_version
+                        SET known_to = :known_to
+                        WHERE version_id = :version_id
+                        """
+                    ),
+                    {"known_to": now, "version_id": current["version_id"]},
+                )
+            else:
+                if current["effective_from"] > target_date:
+                    raise ValueError("catalog target date predates current name fact")
+                connection.execute(
+                    text(
+                        """
+                        UPDATE equity_name_version
+                        SET effective_to = :effective_to
+                        WHERE version_id = :version_id
+                        """
+                    ),
+                    {"effective_to": target_date, "version_id": current["version_id"]},
+                )
+        self._insert_name_version(
+            connection,
+            security_id=security_id,
+            entry=entry,
+            target_date=target_date,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        return True
+
+    def _insert_confirmed_identity(
+        self,
+        connection: Connection,
+        *,
+        version_id: UUID,
+        security_id: int,
+        entry: EquityCatalogEntry,
+        target_date: date,
+        source_batch_id: UUID,
+        now: datetime,
+    ) -> None:
+        """追加可发布的确认标识版本，使用可靠上市日或观测日而不猜测历史。"""
+        effective_from, precision = _effective_date(entry, target_date)
+        connection.execute(
+            text(
+                """
+                INSERT INTO equity_identifier_version (
+                  version_id, security_id, exchange, symbol, identity_state,
+                  effective_from, effective_to, known_from, known_to,
+                  effective_date_precision, source_batch_id, content_sha256
+                ) VALUES (
+                  :version_id, :security_id, :exchange, :symbol, 'CONFIRMED',
+                  :effective_from, NULL, :known_from, NULL,
+                  :precision, :source_batch_id, :content_sha256
+                )
+                """
+            ),
+            {
+                "version_id": version_id,
+                "security_id": security_id,
+                "exchange": entry.identifier.exchange.value,
+                "symbol": entry.identifier.symbol,
+                "effective_from": effective_from,
+                "known_from": now,
+                "precision": precision,
+                "source_batch_id": source_batch_id,
+                "content_sha256": _identity_hash(entry, effective_from, "CONFIRMED"),
+            },
+        )
+
+    def _insert_name_version(
+        self,
+        connection: Connection,
+        *,
+        security_id: int,
+        entry: EquityCatalogEntry,
+        target_date: date,
+        source_batch_id: UUID,
+        now: datetime,
+    ) -> None:
+        """追加独立可修订的名称事实，名称日期不能冒充官方上市日期。"""
+        effective_from, precision = _effective_date(entry, target_date)
+        connection.execute(
+            text(
+                """
+                INSERT INTO equity_name_version (
+                  version_id, security_id, name, effective_from, effective_to,
+                  known_from, known_to, effective_date_precision, source_batch_id,
+                  content_sha256
+                ) VALUES (
+                  :version_id, :security_id, :name, :effective_from, NULL,
+                  :known_from, NULL, :precision, :source_batch_id, :content_sha256
+                )
+                """
+            ),
+            {
+                "version_id": uuid4(),
+                "security_id": security_id,
+                "name": entry.name,
+                "effective_from": effective_from,
+                "known_from": now,
+                "precision": precision,
+                "source_batch_id": source_batch_id,
+                "content_sha256": _name_hash(entry, effective_from),
+            },
+        )
+
+    def _insert_listed_status(
+        self,
+        connection: Connection,
+        *,
+        security_id: int,
+        entry: EquityCatalogEntry,
+        target_date: date,
+        source_batch_id: UUID,
+        now: datetime,
+    ) -> None:
+        """首次确认时写入 LISTED；目录缺席和普通停牌绝不自动转换生命周期。"""
+        effective_from, precision = _effective_date(entry, target_date)
+        connection.execute(
+            text(
+                """
+                INSERT INTO equity_listing_status_version (
+                  version_id, security_id, status, listed_on, delisted_on,
+                  effective_from, effective_to, known_from, known_to,
+                  effective_date_precision, evidence_kind, source_batch_id, content_sha256
+                ) VALUES (
+                  :version_id, :security_id, 'LISTED', :listed_on, NULL,
+                  :effective_from, NULL, :known_from, NULL,
+                  :precision, 'CATALOG', :source_batch_id, :content_sha256
+                )
+                """
+            ),
+            {
+                "version_id": uuid4(),
+                "security_id": security_id,
+                "listed_on": entry.listed_on,
+                "effective_from": effective_from,
+                "known_from": now,
+                "precision": precision,
+                "source_batch_id": source_batch_id,
+                "content_sha256": _listing_hash(entry, effective_from),
+            },
+        )
+
+    def _insert_snapshot_member(
+        self,
+        connection: Connection,
+        *,
+        snapshot_id: UUID,
+        ordinal: int,
+        entry: EquityCatalogEntry,
+        target_date: date,
+        security_id: int,
+    ) -> None:
+        """记录完整快照中的解析结果，供差集、质量告警和审计回放读取。"""
+        _, precision = _effective_date(entry, target_date)
+        connection.execute(
+            text(
+                """
+                INSERT INTO equity_master_snapshot_member (
+                  snapshot_id, row_ordinal, exchange, symbol, name, listed_on,
+                  candidate_status, candidate_status_date, effective_date_precision,
+                  security_id, resolution_status, content_sha256
+                ) VALUES (
+                  :snapshot_id, :row_ordinal, :exchange, :symbol, :name, :listed_on,
+                  'LISTED', :listed_on, :precision,
+                  :security_id, 'resolved', :content_sha256
+                )
+                """
+            ),
+            {
+                "snapshot_id": snapshot_id,
+                "row_ordinal": ordinal,
+                "exchange": entry.identifier.exchange.value,
+                "symbol": entry.identifier.symbol,
+                "name": entry.name,
+                "listed_on": entry.listed_on,
+                "precision": precision,
+                "security_id": security_id,
+                "content_sha256": _entry_hash(entry),
+            },
+        )
+
+    def _publish(
+        self,
+        connection: Connection,
+        *,
+        exchange: Exchange,
+        business_changed: bool,
+        effective_as_of: date,
+        published_at: datetime,
+    ) -> UUID:
+        """仅在目录业务内容变化时推进单交易所发布版本。"""
+        partition_key = exchange.value
+        if not business_changed:
+            current = (
+                connection.execute(
+                    text(
+                        """
+                        SELECT data_version
+                        FROM dataset_publication
+                        WHERE dataset = :dataset
+                          AND partition_key = :partition_key
+                          AND superseded_at IS NULL
+                        """
+                    ),
+                    {"dataset": _DATASET, "partition_key": partition_key},
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if current is not None:
+                return UUID(str(current["data_version"]))
+        connection.execute(
+            text(
+                """
+                UPDATE dataset_publication
+                SET superseded_at = :published_at
+                WHERE dataset = :dataset
+                  AND partition_key = :partition_key
+                  AND superseded_at IS NULL
+                """
+            ),
+            {"dataset": _DATASET, "partition_key": partition_key, "published_at": published_at},
+        )
+        data_version = uuid4()
+        connection.execute(
+            text(
+                """
+                INSERT INTO dataset_publication (
+                  publication_id, dataset, partition_key, data_version, quality_status,
+                  effective_as_of, knowledge_cutoff, published_at, superseded_at
+                ) VALUES (
+                  :publication_id, :dataset, :partition_key, :data_version, 'passed',
+                  :effective_as_of, :knowledge_cutoff, :published_at, NULL
+                )
+                """
+            ),
+            {
+                "publication_id": uuid4(),
+                "dataset": _DATASET,
+                "partition_key": partition_key,
+                "data_version": data_version,
+                "effective_as_of": effective_as_of,
+                "knowledge_cutoff": published_at,
+                "published_at": published_at,
+            },
+        )
+        return data_version
+
+
+def _effective_date(entry: EquityCatalogEntry, target_date: date) -> tuple[date, str]:
+    """将已知上市日与仅观察到的目录日期区分为不同时间精度。"""
+    if entry.listed_on is not None:
+        return entry.listed_on, "OFFICIAL_DATE"
+    return target_date, "OBSERVATION_DATE"
+
+
+def _catalog_business_hash(entries: tuple[EquityCatalogEntry, ...]) -> bytes:
+    """对排序后的标准目录业务字段哈希，排除每次均变化的来源观测元数据。"""
+    return hashlib.sha256(
+        json.dumps(
+            [
+                {
+                    "exchange": entry.identifier.exchange.value,
+                    "symbol": entry.identifier.symbol,
+                    "name": entry.name,
+                    "listedOn": None if entry.listed_on is None else entry.listed_on.isoformat(),
+                }
+                for entry in entries
+            ],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+    ).digest()
+
+
+def _identity_hash(entry: EquityCatalogEntry, effective_from: date, state: str) -> bytes:
+    """生成标识版本的业务哈希，明确身份状态和市场有效日期。"""
+    return _hash_json(
+        {
+            "exchange": entry.identifier.exchange.value,
+            "symbol": entry.identifier.symbol,
+            "effectiveFrom": effective_from.isoformat(),
+            "state": state,
+        }
+    )
+
+
+def _name_hash(entry: EquityCatalogEntry, effective_from: date) -> bytes:
+    """生成名称版本的业务哈希，避免快照重放产生伪修订。"""
+    return _hash_json({"name": entry.name, "effectiveFrom": effective_from.isoformat()})
+
+
+def _listing_hash(entry: EquityCatalogEntry, effective_from: date) -> bytes:
+    """生成初始 LISTED 生命周期事实的业务哈希。"""
+    return _hash_json(
+        {
+            "status": "LISTED",
+            "listedOn": None if entry.listed_on is None else entry.listed_on.isoformat(),
+            "effectiveFrom": effective_from.isoformat(),
+        }
+    )
+
+
+def _entry_hash(entry: EquityCatalogEntry) -> bytes:
+    """生成快照成员业务哈希，供审计比较而不是身份推断。"""
+    return _hash_json(
+        {
+            "exchange": entry.identifier.exchange.value,
+            "symbol": entry.identifier.symbol,
+            "name": entry.name,
+            "listedOn": None if entry.listed_on is None else entry.listed_on.isoformat(),
+        }
+    )
+
+
+def _hash_json(value: dict[str, object]) -> bytes:
+    """以稳定 UTF-8 JSON 序列化标准业务值并返回 SHA-256 原始字节。"""
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
+    ).digest()

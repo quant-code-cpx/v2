@@ -286,6 +286,13 @@
         P0：分类清单、当前成份、日/周/月三套上游周期行情和收盘后横截面快照；P1：申万层级与估值；
         P2：资金流独立方法论序列。周/月线不从日线计算。任何分时接口均不进入实现。
       </aside>
+      <aside class="callout">
+        <strong>后续细化</strong>
+        成分观测历史以 <a href="../0013-sector-membership-history/index.html">0013</a> 为实施权威，
+        收盘后横截面与排行以 <a href="../0015-sector-eod-snapshot-ranking/index.html">0015</a> 为实施权威，
+        日频资金流以 <a href="../0017-daily-money-flow/index.html">0017</a> 为实施权威。
+        三份方案继承本文的 scheme、独立周期与无分时边界，并细化同步、表结构和双层 API。
+      </aside>
       <aside class="callout warning">
         <strong>评审状态</strong>
         本文给出完整目标设计，不代表全部来源已获生产批准。资金流因连续探针失败和方法论未知，

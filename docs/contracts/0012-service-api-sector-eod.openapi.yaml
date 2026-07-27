@@ -1,0 +1,499 @@
+openapi: 3.1.1
+info:
+  title: service-api sector EOD snapshot API
+  version: 1.0.0
+  description: |
+    Proposed additive extension to contract 0006. It exposes authenticated,
+    published post-close sector observations and deterministic rankings.
+    service-api owns the public projection but reads canonical data only through
+    contract 0011; it never queries service-data-sync storage or a provider.
+  x-contract-status: Proposed
+servers:
+  - url: /api/v1
+tags:
+  - name: market-sector-eod-snapshots
+security:
+  - userBearer: []
+paths:
+  /market/sectors/eod-snapshots:
+    get:
+      tags: [market-sector-eod-snapshots]
+      operationId: listMarketSectorEodSnapshots
+      summary: Rank one published post-close sector snapshot
+      description: |
+        Without asOf, selects the latest published trade date for scheme. With
+        asOf, requires that exact published trade date. Null values are always
+        last. Equal non-null values share a competition rank; position is made
+        unique by code using C collation and then the hidden internal sector ID.
+      parameters:
+        - $ref: '#/components/parameters/Scheme'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: One cursor page from one immutable published snapshot.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SectorEodPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/SnapshotExpired'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DataSyncUnavailable'
+
+  /market/sectors/{scheme}/{sectorCode}/eod-snapshot:
+    get:
+      tags: [market-sector-eod-snapshots]
+      operationId: getMarketSectorEodSnapshot
+      summary: Read one sector from a published post-close snapshot
+      description: |
+        Without asOf, selects the latest published trade date for scheme. With
+        asOf, reads only that exact date. This route has no rank because ranking
+        requires an explicit sort and order over a complete snapshot.
+      parameters:
+        - $ref: '#/components/parameters/SchemePath'
+        - $ref: '#/components/parameters/SectorCode'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: One sector observation from one published snapshot.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SectorEodResource'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DataSyncUnavailable'
+components:
+  securitySchemes:
+    userBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Existing authenticated service-api session and authorization policy.
+  parameters:
+    Scheme:
+      name: scheme
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/SectorScheme'
+    SchemePath:
+      name: scheme
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/SectorScheme'
+    SectorCode:
+      name: sectorCode
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+    AsOf:
+      name: asOf
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+      description: Exact requested trade date. Omit for latest published trade date.
+    Sort:
+      name: sort
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/SectorEodSort'
+        default: changePercent
+    Order:
+      name: order
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/SortOrder'
+        default: desc
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
+      description: Opaque cursor bound to filters, resolved trade date, and dataVersion.
+    PageSize:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 256
+  headers:
+    ETag:
+      schema:
+        type: string
+      description: Strong representation tag derived from dataVersion and request projection.
+    PrivateRevalidate:
+      schema:
+        type: string
+        example: private, max-age=0, must-revalidate
+  responses:
+    ValidationProblem:
+      description: Path, query, date, sort, order, or cursor is invalid.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing or invalid authenticated session.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: Authenticated actor lacks market-data read permission.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Exact trade date, active sector, or sector observation is not published.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    SnapshotExpired:
+      description: Cursor points to a superseded revision; restart from page one.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    RateLimited:
+      description: Caller exceeded the market-data read budget.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    DataSyncUnavailable:
+      description: |
+        Canonical downstream read is unavailable, or no publishable latest
+        snapshot exists. service-api returns no unmarked stale projection.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    SectorScheme:
+      type: string
+      enum: [eastmoney.industry, eastmoney.concept]
+    SectorEodSort:
+      type: string
+      enum:
+        - changePercent
+        - turnoverPercent
+        - marketValue
+        - latestValue
+        - advancers
+        - decliners
+        - leaderChangePercent
+        - code
+    SortOrder:
+      type: string
+      enum: [asc, desc]
+    ObservationFinality:
+      type: string
+      const: post_close_observation
+      description: |
+        Captured after the internal policy cutoff; not an exchange or provider
+        official-final assertion.
+    QualityStatus:
+      type: string
+      enum: [passed, warned]
+    DecimalString:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    NonNegativeDecimalString:
+      type: string
+      pattern: '^[0-9]+(\.[0-9]+)?$'
+    NullableDecimalString:
+      oneOf:
+        - $ref: '#/components/schemas/DecimalString'
+        - type: 'null'
+    NullableNonNegativeDecimalString:
+      oneOf:
+        - $ref: '#/components/schemas/NonNegativeDecimalString'
+        - type: 'null'
+    NullableCount:
+      oneOf:
+        - type: integer
+          minimum: 0
+        - type: 'null'
+    SectorEodItem:
+      type: object
+      required:
+        - scheme
+        - code
+        - name
+        - latestValue
+        - latestValueUnit
+        - changeValue
+        - changePercent
+        - marketValue
+        - marketValueUnit
+        - turnoverPercent
+        - advancers
+        - decliners
+        - leaderName
+        - leaderChangePercent
+        - rank
+        - position
+      additionalProperties: false
+      properties:
+        scheme:
+          $ref: '#/components/schemas/SectorScheme'
+        code:
+          type: string
+          minLength: 1
+          maxLength: 64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Name observed in this immutable snapshot.
+        latestValue:
+          $ref: '#/components/schemas/NullableNonNegativeDecimalString'
+        latestValueUnit:
+          type: string
+          const: provider_native
+        changeValue:
+          $ref: '#/components/schemas/NullableDecimalString'
+        changePercent:
+          $ref: '#/components/schemas/NullableDecimalString'
+        marketValue:
+          $ref: '#/components/schemas/NullableNonNegativeDecimalString'
+        marketValueUnit:
+          type: string
+          const: provider_native
+          description: Currency and scaling remain pending source verification.
+        turnoverPercent:
+          $ref: '#/components/schemas/NullableNonNegativeDecimalString'
+        advancers:
+          $ref: '#/components/schemas/NullableCount'
+        decliners:
+          $ref: '#/components/schemas/NullableCount'
+        leaderName:
+          type: [string, 'null']
+          maxLength: 200
+          description: Upstream supplies a display name but no reliable stable security code.
+        leaderChangePercent:
+          $ref: '#/components/schemas/NullableDecimalString'
+        rank:
+          type: [integer, 'null']
+          minimum: 1
+          description: Competition rank among non-null values; null sort values have no rank.
+        position:
+          type: integer
+          minimum: 1
+          description: Unique deterministic page position after stable tie-breaking.
+    SectorEodPage:
+      type: object
+      required:
+        - scheme
+        - tradeDate
+        - sourceCutoffAt
+        - observedAt
+        - finality
+        - qualityStatus
+        - dataVersion
+        - publishedAt
+        - sort
+        - order
+        - items
+        - nextCursor
+      additionalProperties: false
+      properties:
+        scheme:
+          $ref: '#/components/schemas/SectorScheme'
+        tradeDate:
+          type: string
+          format: date
+        sourceCutoffAt:
+          type: string
+          format: date-time
+        observedAt:
+          type: string
+          format: date-time
+        finality:
+          $ref: '#/components/schemas/ObservationFinality'
+        qualityStatus:
+          $ref: '#/components/schemas/QualityStatus'
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        sort:
+          $ref: '#/components/schemas/SectorEodSort'
+        order:
+          $ref: '#/components/schemas/SortOrder'
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/SectorEodItem'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 1024
+    SectorEodResource:
+      type: object
+      required:
+        - scheme
+        - code
+        - name
+        - tradeDate
+        - sourceCutoffAt
+        - observedAt
+        - finality
+        - qualityStatus
+        - dataVersion
+        - publishedAt
+        - latestValue
+        - latestValueUnit
+        - changeValue
+        - changePercent
+        - marketValue
+        - marketValueUnit
+        - turnoverPercent
+        - advancers
+        - decliners
+        - leaderName
+        - leaderChangePercent
+      additionalProperties: false
+      properties:
+        scheme:
+          $ref: '#/components/schemas/SectorScheme'
+        code:
+          type: string
+          minLength: 1
+          maxLength: 64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        tradeDate:
+          type: string
+          format: date
+        sourceCutoffAt:
+          type: string
+          format: date-time
+        observedAt:
+          type: string
+          format: date-time
+        finality:
+          $ref: '#/components/schemas/ObservationFinality'
+        qualityStatus:
+          $ref: '#/components/schemas/QualityStatus'
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        latestValue:
+          $ref: '#/components/schemas/NullableNonNegativeDecimalString'
+        latestValueUnit:
+          type: string
+          const: provider_native
+        changeValue:
+          $ref: '#/components/schemas/NullableDecimalString'
+        changePercent:
+          $ref: '#/components/schemas/NullableDecimalString'
+        marketValue:
+          $ref: '#/components/schemas/NullableNonNegativeDecimalString'
+        marketValueUnit:
+          type: string
+          const: provider_native
+        turnoverPercent:
+          $ref: '#/components/schemas/NullableNonNegativeDecimalString'
+        advancers:
+          $ref: '#/components/schemas/NullableCount'
+        decliners:
+          $ref: '#/components/schemas/NullableCount'
+        leaderName:
+          type: [string, 'null']
+          maxLength: 200
+        leaderChangePercent:
+          $ref: '#/components/schemas/NullableDecimalString'
+    Problem:
+      type: object
+      required: [type, title, status, code, requestId]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        detail:
+          type: string
+        requestId:
+          type: string

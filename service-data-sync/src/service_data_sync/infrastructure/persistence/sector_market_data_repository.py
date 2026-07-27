@@ -29,6 +29,7 @@ from service_data_sync.domain.sector import (
     SectorScheme,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 
 _TABLE_BY_PERIOD = {
     SectorPeriod.DAY_1: "sector_daily_bar",
@@ -443,38 +444,16 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
         observed_at: datetime,
         created_at: datetime,
     ) -> UUID:
-        """按周期能力和原始摘要去重来源批次，并保留证据 URI。"""
-        source_batch_id = uuid4()
-        row = (
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO source_batch (
-                      source_batch_id, provider_id, capability, payload_sha256,
-                      raw_uri, observed_at, created_at
-                    ) VALUES (
-                      :source_batch_id, :provider_id, :capability, :payload_sha256,
-                      :raw_uri, :observed_at, :created_at
-                    )
-                    ON CONFLICT (provider_id, capability, payload_sha256)
-                    DO UPDATE SET raw_uri = EXCLUDED.raw_uri
-                    RETURNING source_batch_id
-                    """
-                ),
-                {
-                    "source_batch_id": source_batch_id,
-                    "provider_id": provider_id,
-                    "capability": capability,
-                    "payload_sha256": source_payload_sha256,
-                    "raw_uri": raw_uri,
-                    "observed_at": observed_at,
-                    "created_at": created_at,
-                },
-            )
-            .mappings()
-            .one()
+        """登记独立外部观测；同内容重抓仍保留完整血缘。"""
+        return record_source_observation(
+            connection,
+            provider_id=provider_id,
+            capability=capability,
+            source_payload_sha256=source_payload_sha256,
+            raw_uri=raw_uri,
+            observed_at=observed_at,
+            created_at=created_at,
         )
-        return UUID(str(row["source_batch_id"]))
 
     def _write_revisions(
         self,

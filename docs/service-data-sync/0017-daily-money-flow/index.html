@@ -1,0 +1,892 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="日频资金流同步、方法学治理、PostgreSQL 版本模型及 service-api 读取接口的可执行技术方案。">
+  <title>日频资金流同步与 API｜技术方案</title>
+  <style>
+    :root { color-scheme:light; --ink:#172033; --muted:#667085; --line:#dfe4ec; --surface:#f6f8fb; --accent:#3157d5; --accent-soft:#eef2ff; --success:#176b4d; --warning:#8a4b08; --danger:#a52d3a; --radius:14px; --shadow:0 12px 30px rgb(23 32 51 / 7%); }
+    * { box-sizing:border-box; } html { scroll-behavior:smooth; }
+    body { margin:0; color:var(--ink); background:#fff; font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif; }
+    a { color:var(--accent); text-underline-offset:.2em; }
+    a:focus-visible { outline:3px solid rgb(49 87 213 / 28%); outline-offset:3px; border-radius:3px; }
+    code { padding:.08em .35em; border-radius:4px; background:#eef1f6; font:.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    .shell { width:min(1120px,calc(100% - 40px)); margin:0 auto; }
+    header { padding:58px 0 38px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,var(--surface),#fff); }
+    .eyebrow { margin:0 0 10px; color:var(--accent); font-size:.78rem; font-weight:750; letter-spacing:.12em; text-transform:uppercase; }
+    h1,h2,h3,h4 { line-height:1.25; letter-spacing:-.02em; }
+    h1 { max-width:860px; margin:0; font-size:clamp(2rem,5.6vw,3.7rem); }
+    h2 { margin:0 0 20px; font-size:clamp(1.45rem,3vw,2rem); }
+    h3 { margin:0 0 8px; font-size:1.08rem; } h4 { margin:20px 0 6px; font-size:1rem; }
+    p { max-width:82ch; } .lede { max-width:800px; margin:18px 0 0; color:var(--muted); font-size:1.08rem; }
+    .meta { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:30px 0 0; }
+    .meta div { padding:14px 16px; border:1px solid var(--line); border-radius:10px; background:rgb(255 255 255 / 80%); }
+    .meta dt { color:var(--muted); font-size:.78rem; } .meta dd { margin:3px 0 0; font-weight:650; } .status { color:var(--warning); }
+    nav { position:sticky; top:0; z-index:10; overflow-x:auto; border-bottom:1px solid var(--line); background:rgb(255 255 255 / 94%); backdrop-filter:blur(12px); }
+    nav ul { display:flex; gap:20px; width:max-content; margin:0; padding:13px 0; list-style:none; }
+    nav a { color:var(--muted); font-size:.88rem; font-weight:650; text-decoration:none; } nav a:hover { color:var(--accent); }
+    main { padding:22px 0 72px; } section { padding:50px 0; border-bottom:1px solid var(--line); scroll-margin-top:58px; }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; } .grid.two { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .card { padding:21px; border:1px solid var(--line); border-radius:var(--radius); background:#fff; box-shadow:var(--shadow); }
+    .card p:last-child,.card ul:last-child { margin-bottom:0; }
+    .label { display:inline-block; margin-bottom:9px; color:var(--accent); font-size:.76rem; font-weight:750; letter-spacing:.06em; }
+    .callout { margin:20px 0; padding:18px 21px; border-left:4px solid var(--accent); border-radius:0 var(--radius) var(--radius) 0; background:var(--accent-soft); }
+    .callout strong { display:block; margin-bottom:4px; } .warning { border-left-color:var(--warning); background:#fff6e9; } .danger { border-left-color:var(--danger); background:#fff0f2; }
+    .risk { color:var(--warning); font-weight:700; }
+    .tag { display:inline-block; padding:2px 8px; border-radius:999px; font-size:.75rem; font-weight:750; white-space:nowrap; }
+    .fact { color:#2753bd; background:#edf2ff; } .decision { color:#176b4d; background:#eaf7f1; } .unknown { color:#8a4b08; background:#fff4e5; } .blocked { color:#a52d3a; background:#fff0f2; }
+    .table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); }
+    table { width:100%; min-width:820px; border-collapse:collapse; } th,td { padding:12px 14px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { background:var(--surface); font-size:.82rem; white-space:nowrap; } tr:last-child td { border-bottom:0; }
+    pre { overflow-x:auto; padding:19px; border:1px solid var(--line); border-radius:var(--radius); background:#111827; color:#e5e7eb; font:.88rem/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    .steps { padding-left:1.25rem; } .steps li { padding:4px 0 12px 8px; } .compact li { margin:4px 0; } .small { color:var(--muted); font-size:.9rem; }
+    footer { padding:28px 0 48px; color:var(--muted); font-size:.88rem; }
+    @media (max-width:800px) { header { padding-top:42px; } .meta,.grid,.grid.two { grid-template-columns:1fr; } section { padding:38px 0; } }
+    @media print { nav { display:none; } header,main,section { padding-top:18px; } .shell { width:100%; } .card { box-shadow:none; break-inside:avoid; } .table-wrap { border:0; } a { color:inherit; text-decoration:none; } pre { color:#111; background:#fff; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Technical solution · 0017</p>
+      <h1>日频资金流同步与 API</h1>
+      <p class="lede">
+        将供应商派生资金流按来源与方法学版本独立保存；逐日历史和供应商滚动排行绝不混算。
+        当前先交付可实施的数据、任务和契约设计，所有生产来源默认关闭。
+      </p>
+      <dl class="meta">
+        <div><dt>状态</dt><dd class="status">Proposed</dd></div>
+        <div><dt>负责人</dt><dd>data-sync / API 团队</dd></div>
+        <div><dt>最后修改</dt><dd>2026-07-27</dd></div>
+        <div><dt>关联决策</dt><dd><a href="../../decisions/0016-money-flow-methodology-boundary.md">ADR-0016</a></dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">摘要</a></li>
+        <li><a href="#scope">任务边界</a></li>
+        <li><a href="#evidence">来源证据</a></li>
+        <li><a href="#semantics">口径模型</a></li>
+        <li><a href="#components">功能划分</a></li>
+        <li><a href="#sync">同步逻辑</a></li>
+        <li><a href="#data">表设计</a></li>
+        <li><a href="#quality">质量与恢复</a></li>
+        <li><a href="#api">API</a></li>
+        <li><a href="#operations">运行</a></li>
+        <li><a href="#delivery">实施验收</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>1. 摘要</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">问题</span>
+          <h3>同名资金流不等价</h3>
+          <p>
+            “主力”“大单”“净流入”是供应商算法产物。算法、阈值、样本池和分母未知时，
+            自动 fallback 或拼字段会得到不可解释序列。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">决策</span>
+          <h3>强方法学身份，两类数据分离</h3>
+          <p>
+            daily source observation 与 supplier rolling ranking snapshot 分表、分发布、分 API。
+            每次查询必须显式选择方法学、版本、scope、bucket 和窗口。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">最大风险</span>
+          <h3 class="risk">没有生产来源批准</h3>
+          <p>
+            东方财富探针连续失败；同花顺依赖 HTTP 页面和 JS 令牌。许可、单位、算法、最终态及
+            全市场调用预算均未通过门禁，公开 API 必须 fail closed。
+          </p>
+        </article>
+      </div>
+      <aside class="callout danger">
+        <strong>硬边界</strong>
+        完全排除分钟、分时、盘中轮询、实时推送和 WebSocket。任务在每个目标交易日最多执行一次计划抓取；
+        有界失败重试不构成盘中采样。没有通过 source approval 时不产生公开 publication。
+      </aside>
+      <div class="grid">
+        <article class="card">
+          <span class="tag fact">事实</span>
+          <h3>固定版本形态已核对</h3>
+          <p>仓库测试镜像锁定 <code>akshare==1.18.78</code>；函数签名与源码字段映射已核对。</p>
+        </article>
+        <article class="card">
+          <span class="tag decision">决策</span>
+          <h3>缺失保持缺失</h3>
+          <p>源端不提供 gross inflow/outflow 时恒为 <code>null</code>，禁止通过净额反推。</p>
+        </article>
+        <article class="card">
+          <span class="tag blocked">阻塞</span>
+          <h3>production flag 默认 false</h3>
+          <p>许可、连续稳定性、口径和预算全部通过前，仅允许有界 research/shadow。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="scope">
+      <h2>2. 任务定义与边界</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>项目</th><th>决策</th><th>可验证条件</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>业务目的</td>
+              <td>为研究、筛选和详情页提供可解释的供应商派生日频资金流。</td>
+              <td>消费者可看到来源、方法学、窗口、bucket、分母、单位和最终态。</td>
+            </tr>
+            <tr>
+              <td>数据集</td>
+              <td><code>money-flow.daily-series</code> 与 <code>money-flow.supplier-ranking</code>。</td>
+              <td>两类表、publication、checkpoint 和 API 不互相回填。</td>
+            </tr>
+            <tr>
+              <td>市场 / 时区</td>
+              <td>中国 A 股；业务日历为待准入权威日历；调度时区 <code>Asia/Shanghai</code>，存储 UTC。</td>
+              <td>日历未知时不推断休市、不推进目标日。</td>
+            </tr>
+            <tr>
+              <td>粒度</td>
+              <td>交易日日频来源事实；供应商 day/3/5/10/20 日排行快照。</td>
+              <td>不存在分钟表、分钟 checkpoint 或盘中触发器。</td>
+            </tr>
+            <tr>
+              <td>scope</td>
+              <td>equity、sector、market；每条 series 只绑定一种稳定身份。</td>
+              <td>跨 scope 不加总；行业/概念不由成份股计算。</td>
+            </tr>
+            <tr>
+              <td>新鲜度</td>
+              <td>shadow 候选：目标交易日 18:00 后一次；生产截点待连续样本批准。</td>
+              <td>响应携带 observedAt/finality；不承诺实时。</td>
+            </tr>
+            <tr>
+              <td>历史深度</td>
+              <td>只保存上游当前可见窗口并持续采集；不虚构首次采集前历史。</td>
+              <td>接口窗口消失后缺口可见；回补 knownFrom 不回写历史。</td>
+            </tr>
+            <tr>
+              <td>消费者</td>
+              <td><code>service-api</code> 的只读 <code>MoneyFlowModule</code>。</td>
+              <td>只经内部 HTTP；无 DB/S3/provider 直连。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="grid">
+        <article class="card">
+          <h3>目标</h3>
+          <ul class="compact">
+            <li>可重复、可恢复、raw-first 的同步闭环。</li>
+            <li>修订和 point-in-time 查询不产生未来信息。</li>
+            <li>PostgreSQL 约束阻止跨方法学混写。</li>
+            <li>内部与公开契约可直接驱动实现。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>非目标</h3>
+          <ul class="compact">
+            <li>不解释供应商秘密算法。</li>
+            <li>不计算“真正市场现金流”。</li>
+            <li>不接互联互通、融资融券或持仓变化。</li>
+            <li>不提供跨来源综合排名。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>依赖</h3>
+          <ul class="compact">
+            <li><a href="../0014-equity-instrument-master/index.html">0014 证券主数据</a>：时点身份解析。</li>
+            <li><a href="../0013-sector-membership-history/index.html">0013 成份历史</a>：只解释 universe/覆盖。</li>
+            <li>0014 的共享 <code>source_batch</code> expand。</li>
+            <li>权威交易日历：生产门禁，尚未冻结。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="evidence">
+      <h2>3. AKShare 1.18.78 候选与返回事实</h2>
+      <p>
+        下表来自锁定版本源码、官方字段说明和
+        <a href="../0008-akshare-b06-initial-research/index.html">B06 两轮隔离探针</a>。
+        “接口存在”不是生产批准；金额单位空白处按未知处理。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>来源 / 精确签名</th><th>返回形态</th><th>单位与语义</th><th>结论</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>stock_individual_fund_flow(stock="600094", market="sh")</code></td>
+              <td>近约 100 日；日期、收盘价、涨跌幅，以及主力/超大/大/中/小单净额、净占比，共 13 列。</td>
+              <td>涨跌幅/净占比为百分数；官方未注明净额单位；没有 gross in/out。</td>
+              <td><span class="tag blocked">两轮 RemoteDisconnected</span> 单证券调用，生产预算未证明。</td>
+            </tr>
+            <tr>
+              <td><code>stock_individual_fund_flow_rank(indicator="5日")</code><br>选择：今日、3日、5日、10日</td>
+              <td>全证券排行；代码、名称、最新价、窗口涨跌幅及五个 bucket 的净额/净占比。</td>
+              <td>供应商窗口快照，无可靠 source trade date；无 gross。</td>
+              <td>只进入 supplier ranking；不回补 daily series。</td>
+            </tr>
+            <tr>
+              <td><code>stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")</code></td>
+              <td>今日/5日/10日 × 行业/概念/地域；名称、涨跌幅、五个 bucket 净额/净占比、最大流入股。</td>
+              <td>最终 DataFrame 没有稳定板块代码；金额单位未注明。</td>
+              <td><span class="tag blocked">JSON/timeout</span> 必须按同源目录时点映射，歧义即隔离。</td>
+            </tr>
+            <tr>
+              <td><code>stock_sector_fund_flow_hist(symbol="汽车服务")</code></td>
+              <td>单行业近期日序列；日期和五个 bucket 净额/净占比，共 11 列。</td>
+              <td>只有行业名称入参；无 gross；金额单位未注明。</td>
+              <td><span class="tag blocked">两轮 ReadTimeout</span> 不支持概念等价推断。</td>
+            </tr>
+            <tr>
+              <td><code>stock_market_fund_flow()</code></td>
+              <td>近期日序列；日期、沪深指数收盘/涨跌幅和五个 bucket 净额/净占比，共 15 列。</td>
+              <td>市场 scope 由源端定义；不是证券求和；金额单位未注明。</td>
+              <td><span class="tag blocked">两轮 RemoteDisconnected</span></td>
+            </tr>
+            <tr>
+              <td><code>stock_fund_flow_individual(symbol="即时")</code><br>选择：即时、3/5/10/20 日排行</td>
+              <td>即时 10 列：代码、价格、涨跌/换手、流入、流出、净额、成交额；滚动 7 列，仅资金流入净额。</td>
+              <td>文档称金额“元”，实际为带万/亿后缀字符串；须保留 raw 后按版本化规则解析。</td>
+              <td>同花顺独立方法学；滚动行不是日历史。</td>
+            </tr>
+            <tr>
+              <td><code>stock_fund_flow_industry(symbol="即时")</code><br><code>stock_fund_flow_concept(symbol="即时")</code></td>
+              <td>即时 11 列；滚动 8 列；均含流入、流出、净额，另有行业指数/公司数等展示字段。</td>
+              <td>文档金额单位为亿，百分数带 %；分类名称不能与东财 scheme 自动合并。</td>
+              <td>HTTP 页面 + <code>py_mini_racer</code>/JS 令牌；稳定和合规门禁未过。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <aside class="callout warning">
+        <strong>生产准入门</strong>
+        商业许可/保存/再分发、至少 5 日且优先 30 日连续稳定性、字段单位和方向、算法/分桶阈值、
+        占比分母、交易日归属、最终态、调用预算必须全部通过。任何一项未知，source policy 保持关闭。
+      </aside>
+    </section>
+
+    <section id="semantics">
+      <h2>4. 方法学与可比性模型</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">语义族</span>
+          <h3><code>trade_direction_flow</code></h3>
+          <p>按主动买卖方向估算的流入、流出和净额。必须绑定方向判定、数据截点和 universe。</p>
+        </article>
+        <article class="card">
+          <span class="label">语义族</span>
+          <h3><code>order_size_flow</code></h3>
+          <p>主力、超大、大、中、小单。必须绑定供应商阈值、主力定义、bucket 和算法版本。</p>
+        </article>
+        <article class="card">
+          <span class="label">不在本方案</span>
+          <h3>reported / financing / position</h3>
+          <p>官方互联互通、融资融券和持仓变化另建 capability，不能叫普通资金流。</p>
+        </article>
+      </div>
+      <h3>强身份字段</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>维度</th><th>必填身份</th><th>变化规则</th></tr></thead>
+          <tbody>
+            <tr><td>来源</td><td>adapter provider、upstream source、source dataset</td><td>换来源必须新 methodology version/series。</td></tr>
+            <tr><td>算法</td><td>semantic family、methodology id/version/status</td><td>未知标 <code>unknown</code>，不假装等价。</td></tr>
+            <tr><td>范围</td><td>scope type/id、universe id/version</td><td>身份或样本池变化产生新 series。</td></tr>
+            <tr><td>窗口</td><td>window type/size、as-of cutoff、finality</td><td>supplier rolling 与 daily source 永不共用 series。</td></tr>
+            <tr><td>指标</td><td>bucket、supported measures、ratio denominator、direction</td><td>不支持的 measure 恒 null；支持但单点缺失触发 DQ。</td></tr>
+            <tr><td>单位</td><td>currency、raw unit、standard unit、conversion version</td><td>未知时不可冒充 CNY；换算规则变化新版本。</td></tr>
+            <tr><td>时间</td><td>trade date、observedAt、knownFrom/To</td><td>回补不回写历史知识时间。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <aside class="callout">
+        <strong>supportedMeasures 解决两种 null</strong>
+        方法学目录显式列出 <code>gross_inflow</code>、<code>gross_outflow</code>、
+        <code>net_amount</code>、<code>net_ratio</code> 中哪些由源端提供。
+        不支持的字段每点恒 null；已声明支持却单点 null 属数据缺失，按质量规则处置。
+      </aside>
+      <h3>允许比较或计算的全部前提</h3>
+      <p>
+        只有来源、方法学版本、semantic family、scope/universe、交易日历、窗口、截点、最终态、币种、
+        单位、bucket、分母、方向、缺失和修订规则全部一致，才允许同序列内比较。当前没有跨供应商等价证据，
+        所以 fallback、拼接、合并排行和跨源算占比全部禁止。
+      </p>
+    </section>
+
+    <section id="components">
+      <h2>5. 功能划分与所有权</h2>
+      <pre aria-label="组件与服务边界">scheduler / manual shadow trigger
+       │ target trade date + methodology policy
+       ▼
+[Money-flow use case] ──▶ [provider-neutral DataSourcePort]
+       │                             │
+       │                    [AKShare adapter only]
+       │                             │
+       ├── raw-first ───────────────▶ S3 / MinIO
+       ├── normalize + temporal identity + DQ
+       ▼
+PostgreSQL revision + dataset_publication
+       │
+       ▼ internal contract 0015 + service bearer
+[service-api MoneyFlowModule / HTTP client]
+       │ JWT + ACTIVE role + public projection
+       ▼
+public contract 0016</pre>
+      <div class="grid">
+        <article class="card">
+          <span class="label">Source policy &amp; adapter</span>
+          <h3>外部形态隔离</h3>
+          <p><strong>输入：</strong>中立 capability、scope、窗口。</p>
+          <p><strong>输出：</strong>标准 batch + 不可变 raw。</p>
+          <p><strong>状态：</strong>无 canonical 状态。</p>
+          <p><strong>失败：</strong>映射为中立 unavailable/rate/schema/auth；不写 DB。</p>
+        </article>
+        <article class="card">
+          <span class="label">Daily series pipeline</span>
+          <h3>日序列修订</h3>
+          <p><strong>输入：</strong>源端带日期的历史窗口。</p>
+          <p><strong>输出：</strong>一 scope/bucket 的 point-in-time revision。</p>
+          <p><strong>状态：</strong>series、observation、checkpoint、publication。</p>
+          <p><strong>失败：</strong>只阻断当前 partition，保留上一发布。</p>
+        </article>
+        <article class="card">
+          <span class="label">Ranking pipeline</span>
+          <h3>供应商快照</h3>
+          <p><strong>输入：</strong>一次 SDK 合并排行观测；完整性证据单独判定。</p>
+          <p><strong>输出：</strong>header/items/metrics/merged-observation evidence manifest。</p>
+          <p><strong>状态：</strong>不可变 snapshot revision。</p>
+          <p><strong>失败：</strong>SDK 错误、身份未解析或生产完整性无证据时整份不发布。</p>
+        </article>
+        <article class="card">
+          <span class="label">Identity &amp; methodology gate</span>
+          <h3>阻止伪等价</h3>
+          <p><strong>依赖：</strong>0014 时点证券 resolver、稳定 sector identity。</p>
+          <p><strong>状态：</strong>methodology/universe/bucket 受控版本。</p>
+          <p><strong>失败：</strong>代码复用、多解、名称歧义进入 quarantine。</p>
+        </article>
+        <article class="card">
+          <span class="label">Publication &amp; read model</span>
+          <h3>版本化可见性</h3>
+          <p><strong>职责：</strong>原子推进 current publication，生成 ETag/cursor。</p>
+          <p><strong>依赖：</strong>PostgreSQL；不读 provider。</p>
+          <p><strong>失败：</strong>事务回滚，不暴露 candidate。</p>
+        </article>
+        <article class="card">
+          <span class="label">service-api</span>
+          <h3>只读防腐层</h3>
+          <p><strong>职责：</strong>鉴权、DTO 校验、内部 client、公开字段裁剪。</p>
+          <p><strong>状态：</strong>无 Prisma canonical copy，无 Redis 权威缓存。</p>
+          <p><strong>失败：</strong>下游错误统一映射 Problem Details 503。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="sync">
+      <h2>6. 同步逻辑</h2>
+      <h3>任务与分区</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>任务</th><th>逻辑分区</th><th>cadence / 调用形态</th><th>checkpoint</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>money-flow-daily-equity</code></td>
+              <td>methodology version + canonical security + target cycle</td>
+              <td>每选中证券每交易日最多一次；接口回拉当前约 100 日接受修订。</td>
+              <td>最后 accepted source window、publication、business hash。</td>
+            </tr>
+            <tr>
+              <td><code>money-flow-daily-sector</code></td>
+              <td>methodology version + sector key + target cycle</td>
+              <td>单行业调用；有界 universe 分片，概念不得冒用行业接口。</td>
+              <td>最后窗口、源目录版本和 sector identity。</td>
+            </tr>
+            <tr>
+              <td><code>money-flow-daily-market</code></td>
+              <td>methodology version + market code</td>
+              <td>每交易日一次；历史窗口整体重拉。</td>
+              <td>最后窗口和 publication。</td>
+            </tr>
+            <tr>
+              <td><code>money-flow-supplier-ranking</code></td>
+              <td>methodology + universe + scope + window + target date</td>
+              <td>每个已批准窗口一次合并观测；现有 SDK 形态只可 research，失败重试但不轮询。</td>
+              <td>最后完整 snapshot/dataVersion。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">
+        shadow 候选时间为 18:00 后。production cadence、并发、速率和截点必须由连续探针冻结；
+        未获批准前最大生产调用预算为 0。全市场约 5,500 次单证券请求/日的可行性是上线硬阻塞。
+      </p>
+      <h3>正常路径</h3>
+      <ol class="steps">
+        <li>调度器从已批准交易日历解析目标日；读取 production-disabled source policy 和 methodology version。</li>
+        <li>dispatcher 创建 0014 统一的 <code>sync_run</code>/<code>sync_partition</code>，按 partition key 获取租约和 fencing token。</li>
+        <li>adapter 经 provider-neutral port 获取；每次外部观测登记独立 observation sequence。</li>
+        <li>raw bytes 先写 S3，再登记 0014 权威 expand 后的 <code>source_batch</code>；canonical 失败可离线重放。</li>
+        <li>adapter 只做供应商字段解析与标准 DTO；application 校验 methodology、窗口、单位和最终态。</li>
+        <li>
+          个股每条 observation 按其 <code>trade_date</code> 调用 0014 date-aware identity resolver。
+          禁止按 current <code>(exchange,symbol)</code> get-or-create；历史代码复用、多解或单批跨身份均 quarantine。
+        </li>
+        <li>行业排行仅按目标日同源 sector catalog 解析；名称零解/多解不发布，不做模糊匹配。</li>
+        <li>质量通过后计算 canonical business hash。相同内容只记录 source observation，canonical/publication no-op。</li>
+        <li>内容变化在一个事务中追加 revision、关闭旧 current、写质量结果、推进 publication/checkpoint。</li>
+      </ol>
+      <h3>并发、重试与恢复</h3>
+      <div class="grid two">
+        <article class="card">
+          <h3>锁与 fencing</h3>
+          <ul class="compact">
+            <li>同 partition 仅一个 lease owner；租约 15 分钟，30 秒 heartbeat 为 shadow 初值。</li>
+            <li>每次续租递增 fencing token；旧 owner 不能提交 publication。</li>
+            <li>reaper 只回收过期 running partition，不修改已提交 revision。</li>
+            <li>取消停止未提交工作；已发布事务不反向撤销。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>错误分类</h3>
+          <ul class="compact">
+            <li>连接、429、可重试 5xx：最多 2 次指数退避 + jitter。</li>
+            <li>schema、单位、身份、许可、方法学不一致：terminal quarantine。</li>
+            <li>数据库失败：从 raw 重放，不再次访问上游。</li>
+            <li>重试计数属于 <code>sync_partition.attempt</code>，不进入 source-batch 身份。</li>
+          </ul>
+        </article>
+      </div>
+      <h3>回补、修订与 late data</h3>
+      <ul class="compact">
+        <li>历史接口可见窗口全量重拉；旧日期变化追加 knowledge revision，<code>known_from=实际发布时间</code>。</li>
+        <li>回补只能覆盖源端仍可见区间；超出窗口标记 unrecoverable gap，不用排行反推。</li>
+        <li>排行同日重抓内容变化时追加 snapshot revision；旧 cursor 失效并返回 409。</li>
+        <li>repair 优先选择 source batch/raw URI；仅 raw 丢失且策略允许时才重新抓取。</li>
+        <li>provider failure、空响应或页面不全不推进 checkpoint，不把无数据解释为休市。</li>
+      </ul>
+    </section>
+
+    <section id="data">
+      <h2>7. PostgreSQL 详细设计</h2>
+      <p>
+        PostgreSQL 是 canonical、knowledge revision、checkpoint 和 publication 的唯一权威；S3/MinIO 保存 raw。
+        金额使用精确 <code>NUMERIC</code>，不进入 binary float。业务事实禁止落入未治理 JSON/EAV。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>表</th><th>核心字段</th><th>约束 / 索引 / 语义</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>money_flow_methodology</code></td>
+              <td><code>methodology_id UUID PK</code>、<code>public_key VARCHAR(100)</code>、semantic_family、owner、created_at</td>
+              <td><code>UNIQUE(public_key)</code>；稳定身份不随算法版本变化。</td>
+            </tr>
+            <tr>
+              <td><code>money_flow_methodology_version</code></td>
+              <td>version_id、methodology_id、version、status、adapter_provider、upstream_source、source_dataset、direction、ratio_denominator、finality、currency/raw/standard unit、conversion_version、四个 supports_* boolean、production_enabled、effective/retired_at</td>
+              <td><code>UNIQUE(methodology_id,version)</code>；production 需 status=validated；四个 supports 至少一个 true；单位未知时 standard unit/currency 可空。</td>
+            </tr>
+            <tr>
+              <td><code>money_flow_methodology_scope</code></td>
+              <td>version_id、scope_type、universe_id</td>
+              <td>PK 三列；scope_type check equity/sector/market；不以数组隐藏适用范围。</td>
+            </tr>
+            <tr>
+              <td><code>money_flow_methodology_window</code></td>
+              <td>version_id、window_type、window_size、source_label</td>
+              <td>PK(version_id,window_type,window_size)；daily_source 固定 size=1。</td>
+            </tr>
+            <tr>
+              <td><code>money_flow_bucket_definition</code></td>
+              <td>bucket_id UUID、version_id、bucket_code、label、definition_status、threshold_min/max/unit</td>
+              <td><code>UNIQUE(version_id,bucket_code)</code>；未知阈值为 null + status=unknown，不推测。</td>
+            </tr>
+            <tr>
+              <td><code>money_flow_universe_version</code></td>
+              <td>universe_version_id、universe_code、scope_type、identity_data_version、membership_release_id、effective_from/to、member_count、content_sha256</td>
+              <td>引用 0014/0013 的已发布版本；半开区间；供应商未知 universe 明示 unknown，不假造成员。</td>
+            </tr>
+            <tr>
+              <td><code>money_flow_series</code></td>
+              <td>series_id、version_id、scope_type、security_id/sector_key/market_code、universe_version_id、bucket_id、window_type/size、created/retired_at</td>
+              <td><code>CHECK(num_nonnulls(security_id,sector_key,market_code)=1)</code>；FK equity_instrument/sector_entity；强唯一覆盖所有身份维度。</td>
+            </tr>
+            <tr>
+              <td><code>money_flow_daily_observation</code></td>
+              <td>trade_date、observation_id、series_id、revision、gross_inflow/outflow <code>NUMERIC(30,6)</code> nullable、net_amount <code>NUMERIC(30,6)</code> nullable、net_ratio <code>NUMERIC(20,8)</code> nullable、source_batch_id、observed_at、known_from/to、content_sha256、quality_status</td>
+              <td>按 trade_date 月分区；PK(trade_date,observation_id)；UNIQUE(series_id,trade_date,revision)；current partial unique(series_id,trade_date) WHERE known_to IS NULL；gross 非负。</td>
+            </tr>
+            <tr>
+              <td><code>money_flow_ranking_snapshot</code></td>
+              <td>target_trade_date、snapshot_id、version_id、scope_type、universe_version_id、window、ranking_bucket_id、ranking_basis、source_cutoff_at、observed_at、revision、row_count、business_hash、quality/status</td>
+              <td>按 target_trade_date 月分区；PK 与 current partial unique 均含 target_trade_date；一个不可变快照 revision。</td>
+            </tr>
+            <tr>
+              <td><code>money_flow_ranking_item</code></td>
+              <td>target_trade_date、snapshot_id、supplier_position、scope_type、security_id/sector_key、scope_name_at_snapshot</td>
+              <td>复合 FK 到 snapshot；PK(date,snapshot,position)；scope 身份二选一；UNIQUE(date,snapshot,canonical scope)。</td>
+            </tr>
+            <tr>
+              <td><code>money_flow_ranking_metric</code></td>
+              <td>date、snapshot_id、supplier_position、bucket_id、gross_inflow/outflow、net_amount、net_ratio</td>
+              <td>固定四个 measure 列；PK(date,snapshot,position,bucket_id)；不存在任意 key/value fact。</td>
+            </tr>
+            <tr>
+              <td><code>money_flow_ranking_manifest</code></td>
+              <td>target_trade_date、snapshot_id、source_batch_id、source_row_count、upstream_total nullable、completeness_basis、is_complete</td>
+              <td>PK(date,snapshot,source_batch)；UNIQUE(date,source_batch)。现有 SDK 仅能记 <code>sdk_returned</code>，不能单独满足生产完整性；只有 page-aware adapter 验证 total 后可记 <code>upstream_total_verified</code>/complete。</td>
+            </tr>
+            <tr>
+              <td><code>money_flow_quality_result</code></td>
+              <td>result_id、dataset_kind、partition_key、rule_code、severity、status、actual/threshold <code>NUMERIC</code>、affected_count、sample_raw_uri、created_at</td>
+              <td>索引(partition_key,created_at DESC)；诊断样本指向 raw，不承载业务值 JSON。</td>
+            </tr>
+            <tr>
+              <td>共享表</td>
+              <td><code>source_batch</code>、<code>sync_run</code>、<code>sync_partition</code>、<code>dataset_publication</code></td>
+              <td>0014 权威 expand；publication current partial unique；资金流不重复定义 batch 身份。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>series 强唯一键</h3>
+      <pre>UNIQUE (
+  methodology_version_id,
+  scope_type,
+  COALESCE(security_id, 0),
+  COALESCE(sector_key, 0),
+  COALESCE(market_code, ''),
+  universe_version_id,
+  bucket_id,
+  window_type,
+  window_size
+)</pre>
+      <p class="small">
+        实现时优先使用三种 scope 的部分唯一索引，避免 PostgreSQL 对表达式唯一键与 FK 的维护成本。
+        <code>source_batch</code> 唯一键固定为
+        <code>(run_id, partition_key, observation_seq)</code>；payload hash 只建非唯一查重索引。
+      </p>
+      <h3>publication 与事务</h3>
+      <ul class="compact">
+        <li>daily partition key：<code>methodology/version/series</code>；publication 覆盖该 series 当前知识视图。</li>
+        <li>ranking partition key：<code>methodology/version/universe/window/bucket/trade_date</code>。</li>
+        <li>事务锁定 current publication；插 revision、quality、关闭旧 current、插新 publication、推进 checkpoint 一次提交。</li>
+        <li><code>quality_status=partial</code> 或 quarantine 不进入消费者 publication。</li>
+        <li>API cursor 绑定 dataVersion、所有过滤条件、canonical security identity 和最后稳定位置。</li>
+      </ul>
+      <h3>容量与保留</h3>
+      <p>
+        假设 5,500 只证券、5 个 bucket、252 交易日，current daily observation 约 693 万行/年；
+        修订系数 1.2 时约 832 万行/年。全量 supplier ranking 在多窗口下数量级相近。
+        因此日事实和排行 header/items 按月分区，读索引只覆盖 current revision；旧分区可转冷存。
+        raw 可能达数十 GB/年，实际保留期必须先由许可和合规决定，未决前禁止自动清理。
+      </p>
+    </section>
+
+    <section id="quality">
+      <h2>8. 数据质量、失败与恢复</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>规则</th><th>阈值</th><th>处置</th></tr></thead>
+          <tbody>
+            <tr><td>schema fingerprint</td><td>与 adapter fixture 100% 匹配；未知列/缺列 0</td><td>保存 raw，terminal quarantine，不推进 publication。</td></tr>
+            <tr><td>身份解析</td><td>所有已发布行 100% 唯一解析；重复 0</td><td>零解/多解/current get-or-create 均拒绝。</td></tr>
+            <tr><td>历史代码边界</td><td>单 batch/单 API range 只能对应一 canonical security</td><td>同步 quarantine；API 返回 409 和拆分边界。</td></tr>
+            <tr><td>日期</td><td>日期合法、唯一、递增，且在已批准交易日历</td><td>未知日期或缺少目标日不推断休市；当前分区不发布。</td></tr>
+            <tr><td>完整性证据</td><td>当前 AKShare 只返回合并 DataFrame，无法证明页号连续或可靠 supplier total</td><td><code>sdk_returned</code> 仅供 research；production 必须由新 page-aware adapter 验证 total 后发布。</td></tr>
+            <tr><td>supported measure</td><td>未支持 measure 恒 null；支持 measure 的必填率按方法学门禁</td><td>语义违例 quarantine；偶发缺失按阈值 warn/reject。</td></tr>
+            <tr><td>gross 符号</td><td>已支持 gross 值必须 ≥ 0</td><td>负值 reject；先排查方向/单位。</td></tr>
+            <tr><td>净额恒等式</td><td>仅三项均由同源提供时，net≈in−out；容差按 raw 舍入</td><td>超容差 quarantine；缺 gross 时不执行。</td></tr>
+            <tr><td>bucket 合计</td><td>只有上游文档证明层级时才校验</td><td>当前不假设“主力=超大+大”。</td></tr>
+            <tr><td>单位/分母</td><td>生产必须 documented/validated；运行中不可突变</td><td>未知或突变阻断；不自动乘倍率。</td></tr>
+            <tr><td>异常波动</td><td>方法学版本的滚动分位阈值；仅告警，不跨源裁剪</td><td>warn + 样本；人工确认是否上游修订。</td></tr>
+            <tr><td>排行基数</td><td>已验证 upstream total 时必须相等；否则只与历史基线比较</td><td>total 不符 reject；无 total 时禁止生产，基线偏差仅用于 research 告警。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>关键失败路径</h3>
+      <div class="grid">
+        <article class="card"><h3>provider failure</h3><p>保留上一发布，记录缺口；绝不改路由到另一供应商。</p></article>
+        <article class="card"><h3>schema drift</h3><p>raw + fingerprint + 最小样本入隔离；更新 fixture、评审方法学后新版本。</p></article>
+        <article class="card"><h3>raw 成功 / DB 失败</h3><p>checkpoint 不推进；由 run/source batch 从 raw 重放，避免重复外部调用。</p></article>
+        <article class="card"><h3>publication 事务失败</h3><p>全部回滚，旧 current 保持；fencing 防止僵尸 owner 补提交。</p></article>
+        <article class="card"><h3>identity conflict</h3><p>记录 tradeDate、候选身份和 0014 dataVersion；人工修复身份后 replay。</p></article>
+        <article class="card"><h3>late revision</h3><p>追加 knowledge revision；旧 knownAt 查询仍读旧值，当前查询读新 publication。</p></article>
+      </div>
+    </section>
+
+    <section id="api">
+      <h2>9. 内部与公开 API 设计</h2>
+      <p>
+        机器可读合同：
+        <a href="../../contracts/0015-data-sync-daily-money-flow-internal.openapi.yaml">0015 内部 OpenAPI</a>、
+        <a href="../../contracts/0016-service-api-daily-money-flow.openapi.yaml">0016 公开 OpenAPI</a>。
+        两份均为 Proposed；实现必须 contract-first。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>能力</th><th>内部路径</th><th>公开路径</th><th>关键语义</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>方法学目录</td>
+              <td><code>GET /internal/v1/money-flow/methodologies</code></td>
+              <td><code>GET /api/v1/market/money-flow/methodologies</code></td>
+              <td>先发现再查询；公开只投影 productionEnabled=true 的已发布 validated 方法。</td>
+            </tr>
+            <tr>
+              <td>个股日序列</td>
+              <td><code>.../{methodologyId}/daily-series/equities/{exchange}/{symbol}</code></td>
+              <td>同结构位于 <code>/api/v1/market</code></td>
+              <td>version、bucket、start/end 必填；knownAt 可选；范围跨 identity boundary 返回 409。</td>
+            </tr>
+            <tr>
+              <td>板块日序列</td>
+              <td><code>.../daily-series/sectors/{scheme}/{sectorCode}</code></td>
+              <td>同结构位于 <code>/api/v1/market</code></td>
+              <td>读取供应商 sector series，不读成份聚合。</td>
+            </tr>
+            <tr>
+              <td>市场日序列</td>
+              <td><code>.../daily-series/markets/{marketCode}</code></td>
+              <td>同结构位于 <code>/api/v1/market</code></td>
+              <td>市场 scope 由 source dataset 定义。</td>
+            </tr>
+            <tr>
+              <td>供应商排行</td>
+              <td><code>.../{methodologyId}/supplier-rankings</code></td>
+              <td>同结构位于 <code>/api/v1/market</code></td>
+              <td>version、scopeType、universe、windowType/size、bucket 必填；tradeDate 省略=latest，传入=exact。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>响应与分页</h3>
+      <ul class="compact">
+        <li>金额和比率用十进制字符串；page 必须返回 <code>supportedMeasures</code>、口径、单位和最终态。</li>
+        <li>daily range 最长 366 自然日，page 最多 500；ranking 最多 500；catalog 最多 100。</li>
+        <li>cursor 绑定完整规范化查询、dataVersion 和 canonical identity；任何不匹配或 revision 替换返回 409。</li>
+        <li>ETag 绑定 dataVersion + 投影；<code>If-None-Match</code> 命中返回 304。</li>
+        <li>精确 methodology/scope/date 不存在返回 404；尚无任一可发布版本返回 503。</li>
+        <li>错误统一 <code>application/problem+json</code>，含 type/title/status/code/requestId，不泄露内部异常。</li>
+      </ul>
+      <h3>service-api 模块边界</h3>
+      <pre>MoneyFlowController
+  └─ MoneyFlowService
+       └─ DataSyncMoneyFlowClient
+            └─ service-data-sync contract 0015
+
+禁止：
+  Prisma → data-sync tables
+  Redis  → authoritative money-flow cache
+  module → AKShare / provider URL / S3</pre>
+      <ul class="compact">
+        <li>所有 ACTIVE 已认证角色可按市场数据权限读取；匿名请求 401，权限不足 403。</li>
+        <li>内部使用独立 service bearer + 服务网络；不得复用用户 JWT 或数据库凭据。</li>
+        <li>安全 GET 只在未开始响应、连接类可重试错误下重试一次；无跨来源 fallback。</li>
+        <li>下游 timeout、5xx、schema validation failure、circuit open 统一映射受控 503。</li>
+        <li>公开剥离 methodology UUID、series/snapshot UUID、securityId、instrumentId、sectorId、adapter id、raw URI 和 source batch。</li>
+        <li>公开仍保留 upstream source、source dataset、方法学、window、bucket、supported measures、denominator、direction、finality、currency、unit、quality。</li>
+      </ul>
+      <aside class="callout">
+        <strong>契约关系</strong>
+        0015/0016 是独立日频资金流增量能力。不修改 0003/0004 的行情、复权、公司行动和财务，
+        不修改 0005/0006 的板块目录与 K 线，也不修改 EOD 快照或成份合同；路径无重叠，无局部替代。
+      </aside>
+    </section>
+
+    <section id="operations">
+      <h2>10. 部署、监控与安全</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>部署</h3>
+          <ul class="compact">
+            <li>复用 worker、PostgreSQL、S3/MinIO、internal FastAPI。</li>
+            <li>migration 由独立 job 执行；应用启动不迁移。</li>
+            <li>AKShare 版本固定；升级重跑 fixture/单位/失败注入。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>配置与 egress</h3>
+          <ul class="compact">
+            <li>source policy、预算、并发、截点通过环境变量/受控配置。</li>
+            <li>production flag 初始 false；无真实 token 写仓库。</li>
+            <li>egress 只允许批准的上游域名；同花顺 HTTP 风险未批前禁用。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>资源</h3>
+          <ul class="compact">
+            <li>每来源配置独立并发上限、调用预算和 circuit。</li>
+            <li>合并观测先写 raw，限制单 batch bytes/rows。</li>
+            <li>DB connection 与查询 page 上限固定，避免大范围扫描。</li>
+          </ul>
+        </article>
+      </div>
+      <h3>日志、指标与告警</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>类别</th><th>字段 / 指标</th><th>告警</th></tr></thead>
+          <tbody>
+            <tr><td>关联日志</td><td>run_id、partition_key、fencing_token、methodology/version、scope、source_batch_id、data_version</td><td>禁止记录 raw payload、凭据和完整供应商 URL query。</td></tr>
+            <tr><td>provider</td><td>requests、latency、retry、429、5xx、schema failures、bytes</td><td>任一生产分区连续 2 次失败或当日成功率 &lt;99% 告警。</td></tr>
+            <tr><td>同步</td><td>rows observed/accepted/revised/no-op/quarantined、checkpoint lag</td><td>目标日截止后仍无 publication；identity conflict &gt;0 立即告警。</td></tr>
+            <tr><td>质量</td><td>supported-measure missing、unit drift、coverage、duplicate、date gap</td><td>blocking rule 必须 fail closed；warn 进入 dashboard。</td></tr>
+            <tr><td>API</td><td>p50/p95 latency、200/304/409/429/503、downstream timeout、circuit state</td><td>5 分钟 503 比例 &gt;5% 或契约校验错误 &gt;0 告警。</td></tr>
+            <tr><td>存储</td><td>partition size、raw bytes、revision factor、index hit、vacuum lag</td><td>分区增长偏离预算 2 倍或默认分区出现数据告警。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>运行手册入口</h3>
+      <ol class="steps">
+        <li>按 request/run id 定位 partition、source policy、lease owner 和 source batch。</li>
+        <li>先判断 provider、schema、identity、DQ、raw storage 或 DB transaction 层级。</li>
+        <li>provider 故障保持上一 publication，不开备用来源；schema/identity 故障进入 quarantine。</li>
+        <li>raw 完整时执行指定 batch replay；修复后比较 business hash 和 dataVersion。</li>
+        <li>确认 API 409/503 恢复、checkpoint 推进且没有跨方法学污染后关闭事件。</li>
+      </ol>
+    </section>
+
+    <section id="delivery">
+      <h2>11. 实施、迁移与验收</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>阶段</th><th>交付</th><th>退出条件</th><th>回滚</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0. 决策门</td>
+              <td>评审 ADR-0016、source entitlement、日历和调用预算。</td>
+              <td>未批准时只继续 research；production=false。</td>
+              <td>无运行变更。</td>
+            </tr>
+            <tr>
+              <td>1. 共享 expand</td>
+              <td>先落 0014 的 source_batch run/partition/observation_seq 兼容迁移。</td>
+              <td>旧 writer 与新 schema 双兼容；payload hash 非唯一。</td>
+              <td>由 0014 管理；0017 不降级共享表。</td>
+            </tr>
+            <tr>
+              <td>2. 数据骨架</td>
+              <td>方法学、series、daily、ranking、quality 表和 migration/rollback。</td>
+              <td>约束、分区、修订、事务、raw replay 集成测试通过。</td>
+              <td>关闭 writer；无 publication/依赖数据时才 drop 新表。</td>
+            </tr>
+            <tr>
+              <td>3. adapters + shadow</td>
+              <td>固定 1.18.78 fixture、research policy、有界证券/行业/市场样本。</td>
+              <td>至少 5 日，优先 30 日；单位、方向、分母、最终态和预算报告通过。</td>
+              <td>关 capability，保留 raw/revision 审计。</td>
+            </tr>
+            <tr>
+              <td>4. internal API</td>
+              <td>读 port、FastAPI、contract 0015、service bearer、ETag/cursor。</td>
+              <td>point-in-time、identity boundary 409、无发布 503 测试通过。</td>
+              <td>关内部 route/publication，不回滚数据。</td>
+            </tr>
+            <tr>
+              <td>5. public API</td>
+              <td>MoneyFlowModule/client/DTO，contract 0016，公开字段裁剪。</td>
+              <td>只见 production-approved 方法；鉴权、限额和依赖失败通过。</td>
+              <td>关 route；不引入 Prisma/Redis 清理。</td>
+            </tr>
+            <tr>
+              <td>6. 受控生产</td>
+              <td>单方法学、单有界 universe 灰度；扩容需单独批准预算。</td>
+              <td>SLO、DQ、许可和 on-call 签字；无跨源 fallback。</td>
+              <td>source flag false，指针切回上一 publication。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>测试矩阵</h3>
+      <ul class="compact">
+        <li>adapter fixture：七类候选签名、字段、万/亿后缀、空值、合并返回漂移、HTTP/JS 失败。</li>
+        <li>领域：methodology identity、supported measures、窗口隔离、单位、gross null、不允许跨源比较。</li>
+        <li>身份：历史代码复用、逐 tradeDate resolver、一个 range 跨 security 返回 409、sector 名称歧义。</li>
+        <li>仓储：月分区、部分唯一、no-op、revision、knownAt、fencing、publication 原子性。</li>
+        <li>失败注入：timeout、429、schema drift、raw 成功/DB 失败、事务失败、僵尸 worker、无法验证 upstream total。</li>
+        <li>契约：YAML parse/$ref、DTO strict validation、internal→public 裁剪、cursor mismatch、ETag/304。</li>
+        <li>架构：adapter 外禁止 AKShare/URL/中文字段；service-api 无同步库/S3/provider import。</li>
+      </ul>
+      <h3>实现后验收命令（当前仅规划，未运行）</h3>
+      <pre># service-data-sync：仅 Docker
+docker build --target test --tag quant-v2/service-data-sync:test service-data-sync
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff format --check .
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff check .
+docker run --rm quant-v2/service-data-sync:test pyright
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test pytest -m "not integration"
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test pytest tests/architecture --no-cov
+
+# 基础设施、migration、集成
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra up -d
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra --profile data-sync-test run --rm data-sync-test
+
+# service-api
+corepack pnpm@11.17.0 install
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build</pre>
+      <div class="grid">
+        <article class="card">
+          <h3>功能验收</h3>
+          <ul class="compact">
+            <li>两次相同 partition 运行 canonical no-op。</li>
+            <li>中断后 checkpoint 恢复，无重复 revision。</li>
+            <li>daily/ranking 无任何相互派生。</li>
+            <li>公开页可完整解释口径和 null。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>安全验收</h3>
+          <ul class="compact">
+            <li>内部 service bearer，公开 JWT/ACTIVE role。</li>
+            <li>公开无 internal UUID/raw/provider secret。</li>
+            <li>无 Prisma canonical copy 或 Redis 业务权威。</li>
+            <li>日志无 payload/credential 泄露。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>阻塞 / 待决</h3>
+          <ul class="compact">
+            <li>来源商业许可与再分发。</li>
+            <li>东财金额单位、算法/阈值、分母。</li>
+            <li>同花顺 HTTP + JS 运行风险。</li>
+            <li>全市场调用预算与目标 universe。</li>
+            <li>日历、截点、raw/revision 保留期。</li>
+          </ul>
+        </article>
+      </div>
+      <aside class="callout">
+        <strong>评审结论</strong>
+        数据模型、同步恢复和 API 契约可开始实现骨架；provider 生产 writer、公开 publication 和全市场覆盖
+        必须等待上述门禁。通过设计完成，不代表数据来源已批准上线。
+      </aside>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      0017 · 日频资金流同步与 API · 变更摘要：新增可执行同步、表、质量、迁移、运维及跨服务契约设计。
+    </div>
+  </footer>
+</body>
+</html>

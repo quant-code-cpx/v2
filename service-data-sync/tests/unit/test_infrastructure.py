@@ -144,6 +144,7 @@ def test_container_registers_sector_adapter_only_when_both_source_policies_are_e
     container.close()
 
     assert container.source_registry.provider_ids() == {
+        "akshare-eastmoney-equity-catalog",
         "akshare-eastmoney-sector",
         "akshare-tencent",
     }

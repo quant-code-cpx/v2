@@ -1,0 +1,432 @@
+openapi: 3.1.1
+info:
+  title: service-api sector membership API
+  version: 1.0.0
+  description: |
+    Implemented additive companion to 0006-service-api-sector.openapi.yaml.
+    It adds authenticated observed-membership reads only; catalog and bar operations
+    remain owned by 0006. service-api obtains data exclusively through contract 0007.
+    PENDING and quarantined instrument identities are never returned.
+  x-contract-status: Implemented
+servers:
+  - url: /api/v1
+tags:
+  - name: market-sector-membership
+security:
+  - userBearer: []
+paths:
+  /market/sectors/{scheme}/{sectorCode}/constituents:
+    get:
+      tags: [market-sector-membership]
+      operationId: listMarketSectorConstituents
+      summary: List verified constituents observed for one sector
+      description: |
+        asOf selects the latest published observation release no later than the
+        requested instant. observedFrom and observedTo are collection boundaries,
+        not true inclusion or removal dates.
+      parameters:
+        - $ref: '#/components/parameters/SchemePath'
+        - $ref: '#/components/parameters/SectorCode'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Page ordered by exchange and symbol.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SectorConstituentPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/SnapshotExpired'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DataSyncUnavailable'
+
+  /market/equities/{exchange}/{symbol}/sectors:
+    get:
+      tags: [market-sector-membership]
+      operationId: listMarketEquitySectors
+      summary: List sectors observed to contain one verified equity
+      description: |
+        scheme is required so the page is bound to one immutable release and
+        dataVersion. A known equity with no membership returns an empty items array.
+      parameters:
+        - $ref: '#/components/parameters/Exchange'
+        - $ref: '#/components/parameters/Symbol'
+        - $ref: '#/components/parameters/SchemeQuery'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Page ordered by sector code.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquitySectorPage'
+        '304':
+          description: Representation matches If-None-Match.
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/SnapshotExpired'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/DataSyncUnavailable'
+components:
+  securitySchemes:
+    userBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Existing authenticated service-api session; no endpoint is public.
+  parameters:
+    SchemePath:
+      name: scheme
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/SectorScheme'
+    SchemeQuery:
+      name: scheme
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/SectorScheme'
+    SectorCode:
+      name: sectorCode
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+    Exchange:
+      name: exchange
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Exchange'
+    Symbol:
+      name: symbol
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9]{6}$'
+    AsOf:
+      name: asOf
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+      description: RFC 3339 instant with offset; defaults to the current release.
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
+      description: Opaque cursor bound to filters and dataVersion.
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 200
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 256
+  headers:
+    ETag:
+      schema:
+        type: string
+      description: Strong representation tag bound to route, filters, and dataVersion.
+    PrivateRevalidate:
+      schema:
+        type: string
+        const: private, max-age=0, must-revalidate
+  responses:
+    ValidationProblem:
+      description: Path, query, timestamp, limit, or cursor is invalid.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing, expired, or invalid user session.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: Authenticated actor lacks market-data read permission.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Sector, verified equity, release, or requested history coverage is absent.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    SnapshotExpired:
+      description: Cursor points to a superseded dataVersion; restart from the first page.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    RateLimited:
+      description: Caller exceeded the market-data read budget.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    DataSyncUnavailable:
+      description: Canonical downstream is unavailable or violated contract 0007.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    SectorScheme:
+      type: string
+      enum: [eastmoney.industry, eastmoney.concept]
+    Exchange:
+      type: string
+      enum: [SSE, SZSE, BSE]
+    ListingStatus:
+      type: string
+      enum: [LISTED, SUSPENDED, DELISTED]
+    Sector:
+      type: object
+      additionalProperties: false
+      required: [scheme, code, name]
+      properties:
+        scheme:
+          $ref: '#/components/schemas/SectorScheme'
+        code:
+          type: string
+          maxLength: 64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+    Equity:
+      type: object
+      additionalProperties: false
+      required: [exchange, symbol, name, listingStatus]
+      properties:
+        exchange:
+          $ref: '#/components/schemas/Exchange'
+        symbol:
+          type: string
+          pattern: '^[0-9]{6}$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        listingStatus:
+          $ref: '#/components/schemas/ListingStatus'
+    ReleaseContext:
+      type: object
+      additionalProperties: false
+      required:
+        - requestedAsOf
+        - resolvedAsOf
+        - coverageStart
+        - membershipSemantics
+        - qualityStatus
+        - identityCoveragePercent
+        - excludedIdentityCount
+        - carriedForwardSectorCount
+        - dataVersion
+        - publishedAt
+      properties:
+        requestedAsOf:
+          type: [string, 'null']
+          format: date-time
+        resolvedAsOf:
+          type: string
+          format: date-time
+        coverageStart:
+          type: string
+          format: date-time
+        membershipSemantics:
+          type: string
+          const: observed
+        qualityStatus:
+          type: string
+          enum: [passed, warned]
+        identityCoveragePercent:
+          type: string
+          const: '100'
+          description: Public releases contain only fully resolved snapshots.
+        excludedIdentityCount:
+          type: integer
+          const: 0
+          description: Published snapshots require 100% canonical identity resolution.
+        carriedForwardSectorCount:
+          type: integer
+          minimum: 0
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+    Constituent:
+      type: object
+      additionalProperties: false
+      required: [exchange, symbol, name, listingStatus, observedFrom, observedTo]
+      properties:
+        exchange:
+          $ref: '#/components/schemas/Exchange'
+        symbol:
+          type: string
+          pattern: '^[0-9]{6}$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        listingStatus:
+          $ref: '#/components/schemas/ListingStatus'
+        observedFrom:
+          type: string
+          format: date-time
+        observedTo:
+          type: [string, 'null']
+          format: date-time
+          description: First later complete observation where the relationship was absent.
+    SectorMembership:
+      type: object
+      additionalProperties: false
+      required:
+        [scheme, code, name, observedFrom, observedTo, snapshotObservedAt, carriedForward]
+      properties:
+        scheme:
+          $ref: '#/components/schemas/SectorScheme'
+        code:
+          type: string
+          maxLength: 64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        observedFrom:
+          type: string
+          format: date-time
+        observedTo:
+          type: [string, 'null']
+          format: date-time
+        snapshotObservedAt:
+          type: string
+          format: date-time
+        carriedForward:
+          type: boolean
+    SectorConstituentPage:
+      type: object
+      additionalProperties: false
+      required: [sector, release, snapshotObservedAt, carriedForward, items, nextCursor]
+      properties:
+        sector:
+          $ref: '#/components/schemas/Sector'
+        release:
+          $ref: '#/components/schemas/ReleaseContext'
+        snapshotObservedAt:
+          type: string
+          format: date-time
+        carriedForward:
+          type: boolean
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/Constituent'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 1024
+    EquitySectorPage:
+      type: object
+      additionalProperties: false
+      required: [equity, scheme, release, items, nextCursor]
+      properties:
+        equity:
+          $ref: '#/components/schemas/Equity'
+        scheme:
+          $ref: '#/components/schemas/SectorScheme'
+        release:
+          $ref: '#/components/schemas/ReleaseContext'
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/SectorMembership'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 1024
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code, requestId]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        detail:
+          type: string
+        requestId:
+          type: string

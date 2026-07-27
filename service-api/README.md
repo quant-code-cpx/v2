@@ -11,13 +11,29 @@ NestJS 11 单进程 API。当前包含 `UserModule`、`AuthModule`、`SectorMark
 - `AuthModule`：登录、JWT、Refresh Session、退出、Guard、Redis 安全限流。
 - PostgreSQL：用户、凭证、会话、审计的唯一权威存储。
 - Redis：登录/刷新限流、失败锁定、重放标记；不保存权威业务状态。
-- `SectorMarketDataModule`：仅经 `service-data-sync` 内部 HTTP 契约读取已发布行业/概念目录与日、周、月原生 K 线；不直连同步数据库、不写 Redis 权威缓存、不接入分钟数据。
+- `SectorMarketDataModule`：仅经 `service-data-sync` 内部 HTTP 契约读取已发布行业/概念目录、日/周/月原生 K 线和固定 release 的板块成分观测；公开提供板块→成分及证券→板块查询，不直连同步数据库、不写 Redis 权威缓存、不接入分钟数据。
 - 不含 Worker、Scheduler、队列、实时通信或其他业务模块。
 
 Prisma schema 位于 `prisma/`，入口文件只定义 generator 与 datasource；数据模型按领域放在
 `prisma/models/`。模型文件仍组成同一逻辑 schema，共用 Prisma Client 与 migration 历史。
 
 `AuthModule → UserModule` 单向依赖。禁用、改密或角色变更递增 `securityVersion`，使旧 access token 与 refresh session 立即失效。
+
+## 测试归属
+
+每个 Nest module 自建 `test/`，Controller、Service、DTO、Guard 等测试集中到 module 内部：
+
+```text
+src/modules/auth/
+├── auth.controller.ts
+├── auth.service.ts
+└── test/
+    ├── auth.controller.spec.ts
+    └── auth.service.spec.ts
+```
+
+`platform/` 与 `scripts/` 下的独立功能同样使用自身 `test/`。禁止把 `service.ts` 与
+`service.spec.ts` 或 `service.test.ts` 放在同一目录；跨 module 集成测试才可进入服务级专用测试树。
 
 ## 本地运行
 

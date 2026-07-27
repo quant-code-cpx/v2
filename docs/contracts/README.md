@@ -12,3 +12,18 @@
 - [0004：service-api 个股公开 OpenAPI](0004-service-api-equity.openapi.yaml) — Proposed
 - [0005：service-data-sync 板块内部 OpenAPI](0005-data-sync-sector-internal.openapi.yaml) — Implemented
 - [0006：service-api 板块公开 OpenAPI](0006-service-api-sector.openapi.yaml) — Implemented
+- [0007：service-data-sync 板块成分内部 OpenAPI](0007-data-sync-sector-membership-internal.openapi.yaml) — Proposed
+- [0008：service-api 板块成分公开 OpenAPI](0008-service-api-sector-membership.openapi.yaml) — Proposed
+- [0009：service-data-sync 证券主数据内部 OpenAPI](0009-data-sync-equity-instrument-internal.openapi.yaml) — Proposed
+- [0010：service-api 证券主数据公开 OpenAPI](0010-service-api-equity-instrument.openapi.yaml) — Proposed
+- [0011：service-data-sync 板块 EOD 内部 OpenAPI](0011-data-sync-sector-eod-internal.openapi.yaml) — Proposed
+- [0012：service-api 板块 EOD 公开 OpenAPI](0012-service-api-sector-eod.openapi.yaml) — Proposed
+- [0013：service-data-sync 财务与估值内部 OpenAPI](0013-data-sync-financial-valuation-internal.openapi.yaml) — Proposed
+- [0014：service-api 财务与估值公开 OpenAPI](0014-service-api-financial-valuation.openapi.yaml) — Proposed
+- [0015：service-data-sync 日频资金流内部 OpenAPI](0015-data-sync-daily-money-flow-internal.openapi.yaml) — Proposed
+- [0016：service-api 日频资金流公开 OpenAPI](0016-service-api-daily-money-flow.openapi.yaml) — Proposed
+
+0007/0008、0011/0012、0015/0016 是对应既有市场数据契约的增量能力。0009/0010 对
+0003/0004 中证券目录、详情和上市状态相关路径具有局部权威性；0013/0014 取代其中基于
+`instrumentId` 的财务报表与财务指标路径，并新增估值路径。0003/0004 的行情、复权、公司行动等
+未重叠能力继续有效。
