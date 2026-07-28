@@ -17,7 +17,7 @@ export interface LoginFormModel {
   isCaptchaLoading: boolean;
   isSubmitting: boolean;
   isPasswordVisible: boolean;
-  sessionExpired: boolean;
+  sessionNotice: string | null;
   errorMessage: string | null;
   handleAccountChange: (event: ChangeEvent<HTMLInputElement>) => void;
   handlePasswordChange: (event: ChangeEvent<HTMLInputElement>) => void;
@@ -33,7 +33,7 @@ export function useLoginForm(): LoginFormModel {
   const { login } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const sessionExpired = new URLSearchParams(location.search).get("reason") === "session-expired";
+  const sessionNotice = loginReasonNotice(new URLSearchParams(location.search).get("reason"));
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
   const [captchaAnswer, setCaptchaAnswer] = useState("");
@@ -149,7 +149,7 @@ export function useLoginForm(): LoginFormModel {
     isCaptchaLoading,
     isSubmitting,
     isPasswordVisible,
-    sessionExpired,
+    sessionNotice,
     errorMessage,
     handleAccountChange,
     handlePasswordChange,
@@ -159,6 +159,21 @@ export function useLoginForm(): LoginFormModel {
     handleFormBlur,
     handleSubmit,
   };
+}
+
+/** 将允许公开展示的退出原因转换为登录提示，不回显未知查询参数。 */
+function loginReasonNotice(reason: string | null): string | null {
+  if (reason === "session-expired") {
+    return "登录状态已失效，请重新登录。验证后将返回原页面。";
+  }
+  if (reason === "password-changed") {
+    return "密码已修改，请使用新密码重新登录。";
+  }
+  if (reason === "session-revoked") {
+    return "当前会话已退出，请重新登录。";
+  }
+
+  return null;
 }
 
 /** 将稳定 API 状态转换为不泄露账号存在性的登录反馈。 */

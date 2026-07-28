@@ -1,0 +1,974 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Apex 个人中心、安全审计与非行情平台工作台 PC 桌面 Web 技术方案"
+    />
+    <title>个人中心、安全审计与平台工作台｜service-web 技术方案</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #1c252e;
+        --muted: #637381;
+        --line: rgb(145 158 171 / 24%);
+        --surface: #f4f6f8;
+        --subtle: #f9fafb;
+        --accent: #6d5ce7;
+        --accent-dark: #4f46b8;
+        --accent-soft: #f0eeff;
+        --success: #16803d;
+        --warning: #845406;
+        --danger: #b52e13;
+        --radius: 16px;
+        --shadow: 0 0 2px rgb(145 158 171 / 20%), 0 12px 24px -4px rgb(145 158 171 / 12%);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        min-width: 1200px;
+        margin: 0;
+        color: var(--ink);
+        background: #fff;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+          sans-serif;
+        font-size: 16px;
+        line-height: 1.7;
+      }
+      a {
+        color: var(--accent-dark);
+        text-underline-offset: 0.2em;
+      }
+      a:focus-visible {
+        outline: 3px solid rgb(109 92 231 / 28%);
+        outline-offset: 3px;
+      }
+      code {
+        padding: 0.1em 0.34em;
+        border-radius: 5px;
+        background: var(--subtle);
+        color: #332d7a;
+        font:
+          0.91em ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+      }
+      .shell {
+        width: 1120px;
+        margin: 0 auto;
+      }
+      header.hero {
+        padding: 54px 0 38px;
+        border-bottom: 1px solid var(--line);
+        background: var(--subtle);
+      }
+      .eyebrow {
+        margin: 0 0 10px;
+        color: var(--accent-dark);
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.3;
+        letter-spacing: -0.02em;
+      }
+      h1 {
+        max-width: 900px;
+        margin: 0;
+        font-size: 48px;
+      }
+      h2 {
+        margin: 0 0 20px;
+        font-size: 30px;
+      }
+      h3 {
+        margin: 0 0 8px;
+        font-size: 17px;
+      }
+      p {
+        max-width: 78ch;
+      }
+      .lede {
+        max-width: 850px;
+        margin: 17px 0 0;
+        color: var(--muted);
+        font-size: 18px;
+      }
+      .summary,
+      .meta,
+      .grid {
+        display: grid;
+        gap: 16px;
+      }
+      .summary {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-top: 28px;
+      }
+      .summary article,
+      .meta div {
+        padding: 15px 16px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+      }
+      .summary strong {
+        color: var(--accent-dark);
+        font-size: 12px;
+        letter-spacing: 0.05em;
+      }
+      .summary p {
+        margin: 5px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+      .meta {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-top: 16px;
+      }
+      .meta dt {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .meta dd {
+        margin: 3px 0 0;
+        font-weight: 700;
+      }
+      .status {
+        color: var(--success);
+      }
+      nav.toc {
+        position: sticky;
+        top: 0;
+        z-index: 8;
+        border-bottom: 1px solid var(--line);
+        background: rgb(255 255 255 / 94%);
+        backdrop-filter: blur(12px);
+      }
+      nav.toc ul {
+        display: flex;
+        gap: 22px;
+        margin: 0;
+        padding: 13px 0;
+        list-style: none;
+      }
+      nav.toc a {
+        color: var(--muted);
+        font-size: 14px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+      main {
+        padding: 20px 0 72px;
+      }
+      section {
+        padding: 48px 0;
+        border-bottom: 1px solid var(--line);
+        scroll-margin-top: 58px;
+      }
+      .grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .card {
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+        box-shadow: var(--shadow);
+      }
+      .card p:last-child,
+      .card ul:last-child {
+        margin-bottom: 0;
+      }
+      .marker {
+        display: inline-block;
+        margin-bottom: 9px;
+        padding: 2px 7px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .fact {
+        background: rgb(0 143 179 / 9%);
+        color: #006e89;
+      }
+      .decision {
+        background: var(--accent-soft);
+        color: var(--accent-dark);
+      }
+      .pending {
+        background: rgb(255 86 48 / 9%);
+        color: var(--danger);
+      }
+      .risk {
+        color: var(--warning);
+      }
+      .callout {
+        margin-top: 20px;
+        padding: 18px 20px;
+        border-left: 4px solid var(--accent);
+        border-radius: 0 var(--radius) var(--radius) 0;
+        background: var(--accent-soft);
+      }
+      .callout strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+      }
+      table {
+        width: 100%;
+        min-width: 780px;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 13px 15px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: var(--surface);
+        color: var(--muted);
+        font-size: 13px;
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      pre {
+        overflow-x: auto;
+        padding: 20px;
+        border-radius: var(--radius);
+        background: #141a21;
+        color: #e9edf2;
+        font:
+          14px/1.68 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+      }
+      .mt {
+        margin-top: 24px;
+      }
+      .route-list {
+        display: grid;
+        gap: 10px;
+      }
+      .route {
+        display: grid;
+        grid-template-columns: 210px 1fr;
+        gap: 16px;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+      .prototype-links {
+        display: flex;
+        gap: 10px;
+        margin: 18px 0;
+      }
+      .prototype-links a {
+        padding: 8px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        font-weight: 700;
+        text-decoration: none;
+      }
+      .shots {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+      figure.shot {
+        margin: 0;
+        padding: 15px;
+        border: 1px dashed var(--line);
+        border-radius: 12px;
+        background: var(--subtle);
+      }
+      figure.shot img {
+        display: block;
+        width: 100%;
+        margin-bottom: 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+      }
+      figure.shot strong,
+      figure.shot span {
+        display: block;
+      }
+      figure.shot span {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .steps {
+        padding-left: 1.25rem;
+      }
+      .steps li {
+        padding: 3px 0 13px 8px;
+      }
+      .checklist {
+        columns: 2;
+        column-gap: 36px;
+      }
+      .checklist li {
+        break-inside: avoid;
+        margin-bottom: 7px;
+      }
+      footer {
+        padding: 28px 0 48px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      @media print {
+        body {
+          min-width: 0;
+        }
+        nav.toc {
+          display: none;
+        }
+        .shell {
+          width: 100%;
+        }
+        header.hero,
+        main,
+        section {
+          padding-top: 18px;
+        }
+        .card,
+        figure.shot {
+          box-shadow: none;
+          break-inside: avoid;
+        }
+        a {
+          color: inherit;
+          text-decoration: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <div class="shell">
+        <p class="eyebrow">Apex · service-web · Technical solution · 0005</p>
+        <h1>个人中心、安全审计与平台工作台</h1>
+        <p class="lede">
+          用三个 PC 桌面页面闭环本人资料、改密、会话处置、超级管理员审计和角色范围运营概览。
+          真实远程状态来自 Contract 0002/0017；工作台按权限并行组合小型查询，不伪造行情或设备数据。
+        </p>
+        <div class="summary" aria-label="方案一屏摘要">
+          <article>
+            <strong>问题</strong>
+            <p>本人能力无 UI，审计不可见，登录首页仍是占位。</p>
+          </article>
+          <article>
+            <strong>选择</strong>
+            <p>
+              <code>/account</code>、<code>/security/audit</code> 与角色适配的
+              <code>/</code> 工作台。
+            </p>
+          </article>
+          <article>
+            <strong>理由</strong>
+            <p>复用 AppShell、MUI tokens、权限 Guard 和 TanStack Query；模块可独立失败。</p>
+          </article>
+          <article>
+            <strong>主要风险</strong>
+            <p>Contract 0017 已实施；页面必须保持严格响应校验、权限裁剪和区块级失败隔离。</p>
+          </article>
+        </div>
+        <dl class="meta">
+          <div>
+            <dt>状态</dt>
+            <dd class="status">Implemented</dd>
+          </div>
+          <div>
+            <dt>负责人</dt>
+            <dd>service-web</dd>
+          </div>
+          <div>
+            <dt>最后修改</dt>
+            <dd>2026-07-28</dd>
+          </div>
+          <div>
+            <dt>关联决策</dt>
+            <dd>
+              <a href="../../decisions/0019-account-security-audit-and-workspace-boundary.md"
+                >ADR-0019</a
+              >
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </header>
+
+    <nav class="toc" aria-label="页面目录">
+      <div class="shell">
+        <ul>
+          <li><a href="#understanding">业务理解</a></li>
+          <li><a href="#prototype">原型</a></li>
+          <li><a href="#routes">页面架构</a></li>
+          <li><a href="#state">状态与契约</a></li>
+          <li><a href="#flows">流程</a></li>
+          <li><a href="#quality">质量</a></li>
+          <li><a href="#delivery">交付</a></li>
+        </ul>
+      </div>
+    </nav>
+
+    <main class="shell">
+      <section id="understanding">
+        <h2>业务理解与页面分类</h2>
+        <div class="grid">
+          <article class="card">
+            <span class="marker decision">Actor / entry</span>
+            <h3>所有登录用户与超级管理员</h3>
+            <p>
+              所有角色从头部账号菜单或侧栏进入个人中心。SUPER_ADMIN 从“系统管理”进入安全审计。
+              登录后默认进入平台工作台。
+            </p>
+          </article>
+          <article class="card">
+            <span class="marker decision">Primary question</span>
+            <h3>账户是否安全，平台需要处理什么</h3>
+            <p>
+              个人中心回答“资料、密码和会话是否需要处理”；审计回答“发生了什么关键操作”；
+              工作台回答“当前权限范围内有哪些待关注状态”。
+            </p>
+          </article>
+          <article class="card">
+            <span class="marker decision">Success / failure</span>
+            <h3>动作闭环，局部可恢复</h3>
+            <p>
+              资料与会话操作立即刷新权威 Query；改密返回登录页；审计筛选可重访。
+              一个管理区块失败不能让身份和其他区块消失。
+            </p>
+          </article>
+        </div>
+
+        <div class="table-wrap mt">
+          <table>
+            <thead>
+              <tr>
+                <th>页面</th>
+                <th>分类</th>
+                <th>首要任务与信息顺序</th>
+                <th>权限与敏感性</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>/account</code></td>
+                <td><strong>新页面</strong></td>
+                <td>资料表单 → 账户安全摘要 → 活动会话 → 安全动作</td>
+                <td>所有登录用户；只显示本人；密码只在 Dialog 内存</td>
+              </tr>
+              <tr>
+                <td><code>/security/audit</code></td>
+                <td><strong>新页面</strong></td>
+                <td>时间/分类筛选 → 事件表格 → Drawer 脱敏详情</td>
+                <td>SUPER_ADMIN + audit:read；ADMIN/USER 不发请求</td>
+              </tr>
+              <tr>
+                <td><code>/</code></td>
+                <td><strong>重大新信息架构</strong></td>
+                <td>账户/会话/可管理用户/重要审计 → 状态分布 → 快捷任务</td>
+                <td>按 permission 渐进展示；不显示个人资产或虚构行情</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <aside class="callout">
+          <strong>数据与范围</strong>
+          CurrentUser 与资料写路径来自已实施 Contract 0002。Session、审计和用户统计来自已实施
+          <a href="../../contracts/0017-service-api-account-security-operations.openapi.yaml"
+            >Contract 0017</a
+          >。 本方案不包含 data-sync、行情、全局搜索、通知、帮助中心、批量操作、导入导出或移动端。
+        </aside>
+      </section>
+
+      <section id="prototype">
+        <h2>高保真原型与视觉门禁</h2>
+        <p>
+          <a href="prototype.html?view=workspace">prototype.html</a> 是可编辑离线源，复用仓库白色
+          AppShell、 300px sidebar、72px appbar、4/8px spacing、8px control radius、16px Card/Dialog
+          和紫晶主色。 查询参数只切换静态视图：
+        </p>
+        <div class="prototype-links">
+          <a href="prototype.html?view=workspace">平台工作台</a>
+          <a href="prototype.html?view=account">我的账户</a>
+          <a href="prototype.html?view=audit">安全审计</a>
+          <a href="prototype.html?view=states">状态与交互</a>
+        </div>
+
+        <div class="shots" aria-label="原型截图">
+          <figure class="shot">
+            <a href="assets/prototype-workspace-desktop.png"
+              ><img src="assets/prototype-workspace-desktop.png" alt="平台工作台 1440×900 桌面原型"
+            /></a>
+            <strong>平台工作台</strong>
+            <span
+              >SUPER_ADMIN 最大权限视图；四个概览指标、可管理用户状态、重要审计和快捷任务。</span
+            >
+          </figure>
+          <figure class="shot">
+            <a href="assets/prototype-account-desktop.png"
+              ><img src="assets/prototype-account-desktop.png" alt="我的账户 1440×900 桌面原型"
+            /></a>
+            <strong>我的账户</strong>
+            <span
+              >资料表单、账户安全摘要和本人活动 Session family；明确不展示 IP、设备或位置。</span
+            >
+          </figure>
+          <figure class="shot">
+            <a href="assets/prototype-audit-desktop.png"
+              ><img src="assets/prototype-audit-desktop.png" alt="安全审计 1440×900 桌面原型"
+            /></a>
+            <strong>安全审计</strong>
+            <span>7 天默认范围、分类/Actor/目标筛选、脱敏摘要、稳定 action 和 cursor 分页。</span>
+          </figure>
+          <figure class="shot">
+            <a href="assets/prototype-states.png"
+              ><img src="assets/prototype-states.png" alt="页面状态与安全交互 1440×900 桌面原型"
+            /></a>
+            <strong>状态与安全交互</strong>
+            <span
+              >partial/loading/empty/error/403/success，以及改密 Dialog 与审计详情 Drawer。</span
+            >
+          </figure>
+        </div>
+
+        <aside class="callout">
+          <strong>原型 v1.0 视觉自审：通过</strong>
+          2026-07-28 使用 Playwright Chromium 在固定 <code>1440×900</code> PC 视口渲染并逐张目检。
+          三个页面无页面级横向溢出、遮挡或低对比；账户会话表在首屏展示核心列并允许正常纵向继续浏览；
+          审计表内容密度、状态文字、Dialog 和 Drawer
+          焦点区域清楚。原型未生成移动、平板、触控或窄屏变体。
+        </aside>
+      </section>
+
+      <section id="routes">
+        <h2>路由、导航与组件边界</h2>
+        <div class="route-list">
+          <div class="route">
+            <code>/</code>
+            <div>
+              <strong>Protected index。</strong>所有角色可访问；使用现有 CurrentUser，按 permissions
+              启用 Sessions、User statistics、Audit queries。未来真实“今日市场”
+              上线时置于本页首屏，本方案工作台区块下移复用。
+            </div>
+          </div>
+          <div class="route">
+            <code>/account</code>
+            <div>
+              <strong>Protected self-service。</strong>侧栏“个人”分组和头部 账号菜单均可进入。<code
+                >?dialog=change-password</code
+              >
+              与 <code>?dialog=revoke-session&amp;familyId=…</code> 支持浏览器返回关闭聚焦任务。
+            </div>
+          </div>
+          <div class="route">
+            <code>/security/audit</code>
+            <div>
+              <strong>Protected + <code>audit:read</code>。</strong
+              >category、range、actorId、targetId、includeRoutine、cursor 写入 URL；
+              <code>eventId</code> 打开详情 Drawer。
+            </div>
+          </div>
+          <div class="route">
+            <code>403 / error</code>
+            <div>
+              <strong>壳层内失败边界。</strong>路由 loader 在加载 chunk 与发起 Query 前检查权限；403
+              不渲染或预取审计数据。领域 Query 失败使用 Card 内 retry。
+            </div>
+          </div>
+        </div>
+
+        <pre class="mt" aria-label="页面与组件目录">
+src/views/
+├── WorkspaceView/
+│   ├── WorkspaceView.tsx
+│   ├── components/
+│   │   ├── AccountStatusCard.tsx
+│   │   ├── UserStatisticsCard.tsx
+│   │   ├── RecentAuditEventsCard.tsx
+│   │   └── WorkspaceQuickActions.tsx
+│   ├── hooks/useWorkspace.ts
+│   └── test/
+├── AccountView/
+│   ├── AccountView.tsx
+│   ├── components/
+│   │   ├── ProfileForm.tsx
+│   │   ├── AccountSecurityCard.tsx
+│   │   ├── SessionFamilyTable.tsx
+│   │   ├── ChangePasswordDialog.tsx
+│   │   └── RevokeSessionDialog.tsx
+│   ├── hooks/useAccount.ts
+│   └── test/
+└── AuditEventsView/
+    ├── AuditEventsView.tsx
+    ├── components/
+    │   ├── AuditFilters.tsx
+    │   ├── AuditEventTable.tsx
+    │   └── AuditEventDrawer.tsx
+    ├── hooks/useAuditEvents.ts
+    ├── utils/audit-event-url.ts
+    └── test/
+
+src/api/
+├── account-security.ts
+├── audit-events.ts
+└── users.ts                  # 增加 statistics；不新建 workspace API</pre>
+
+        <div class="grid mt">
+          <article class="card">
+            <span class="marker decision">页面职责</span>
+            <h3>只组合信息顺序与状态分支</h3>
+            <p>
+              路由页不直接调用 API，不持有表单副作用。Query、mutation、URL 和冲突恢复进入页面 Hook；
+              action/category 显示映射为纯函数并有测试。
+            </p>
+          </article>
+          <article class="card">
+            <span class="marker decision">复用边界</span>
+            <h3>先保持页面私有</h3>
+            <p>
+              状态 Card、审计表格、Session
+              表格具有不同业务契约，先放页面目录。只有确认跨两个页面复用的 PageHeading
+              或反馈模式才提升为共享组件，不用 barrel。
+            </p>
+          </article>
+          <article class="card">
+            <span class="marker decision">导航权限</span>
+            <h3>NavigationItem 接受完整 Permission</h3>
+            <p>
+              现有 <code>requiredPermission</code> 从单一 <code>users:read</code> 字面量扩为
+              <code>Permission</code>；审计入口要求
+              <code>audit:read</code>，我的账户不需要额外入口权限。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="state">
+        <h2>状态所有权、Query 与契约消费</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>状态</th>
+                <th>Owner / key</th>
+                <th>刷新、失效与错误</th>
+                <th>页面</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>当前身份</td>
+                <td>现有 <code>["auth","me"]</code> + AuthSession memory token</td>
+                <td>401 single-flight refresh；403 保持身份</td>
+                <td>全部</td>
+              </tr>
+              <tr>
+                <td>资料 + ETag</td>
+                <td><code>["account","profile"]</code>，响应包含 user/etag</td>
+                <td>保存成功同步 auth/me；412 保留草稿并要求 reload</td>
+                <td>Account</td>
+              </tr>
+              <tr>
+                <td>Session families</td>
+                <td><code>["auth","session-families", filters]</code></td>
+                <td>staleTime 30s；撤销后 invalidate；当前 family 撤销后清会话</td>
+                <td>Account / Workspace</td>
+              </tr>
+              <tr>
+                <td>用户统计</td>
+                <td><code>["users","statistics"]</code></td>
+                <td>staleTime 60s；用户写 mutation 成功后 invalidate</td>
+                <td>Workspace</td>
+              </tr>
+              <tr>
+                <td>审计列表</td>
+                <td><code>["audit-events","list", canonicalFilters]</code>；filters 在 URL</td>
+                <td>staleTime 15s；keep previous；失败保留表格和 URL</td>
+                <td>Audit / Workspace recent</td>
+              </tr>
+              <tr>
+                <td>审计详情</td>
+                <td><code>["audit-events","detail", eventId]</code></td>
+                <td>Drawer 打开才 enabled；关闭恢复触发按钮焦点</td>
+                <td>Audit</td>
+              </tr>
+              <tr>
+                <td>Dialog/Drawer</td>
+                <td>URL 表达选中任务；字段、提交态留组件内存</td>
+                <td>成功后清 URL；密码永不进入 Query、URL、storage 或日志</td>
+                <td>Account / Audit</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid mt">
+          <article class="card">
+            <h3>个人资料并发</h3>
+            <p>
+              Account client 使用 <code>requestJsonWithMetadata</code> 读取 <code>ETag</code>。
+              保存携带 <code>If-Match</code>；412 时不自动覆盖，显示“资料已变化”，用户 reload
+              后再确认提交。
+            </p>
+          </article>
+          <article class="card">
+            <h3>工作台权限组合</h3>
+            <p>
+              所有角色请求 Session summary；拥有 <code>users:read</code> 才请求统计；拥有
+              <code>audit:read</code> 才请求近期审计。没有 permission 时不创建 Query observer。
+            </p>
+          </article>
+          <article class="card">
+            <h3>Contract 状态</h3>
+            <p>
+              Contract 0017 已实施并接入真实运行时。生产页面使用严格 Zod 响应校验；fixture/MSW
+              仅用于测试状态，不得覆盖或猜测额外字段。Contract 0002 的 Permission enum 与 Web
+              权限类型已同步扩展。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="flows">
+        <h2>核心业务流程</h2>
+        <div class="grid two">
+          <article class="card">
+            <span class="marker decision">修改资料 / 改密</span>
+            <pre>
+打开 /account
+  → profile Query 取得 User + ETag
+  → 修改显示名称
+  → POST /users/me/update + If-Match
+  → 成功：同步 account/profile 与 auth/me
+  → 412：保留草稿，reload 后再提交
+
+修改密码 Dialog
+  → POST /users/me/password
+  → 成功：服务端撤销全部 Session
+  → Web 清 token/query → /login?reason=password-changed</pre>
+          </article>
+          <article class="card">
+            <span class="marker decision">会话 / 审计</span>
+            <pre>
+退出其他会话
+  → 明确保留当前 family
+  → POST /auth/sessions/revoke-others
+  → invalidate sessions/workspace
+  → live region 报告撤销数量
+
+打开审计详情
+  → URL 写 eventId
+  → detail Query enabled
+  → Drawer 显示 allowlisted details
+  → Esc/关闭移除 eventId 并恢复表格行焦点</pre>
+          </article>
+        </div>
+        <aside class="callout">
+          <strong>危险动作</strong>
+          单个其他 Session 与“退出其他会话”均需要确认对象和影响范围；当前 Session
+          行不显示通用撤销按钮，
+          退出当前会话继续使用头部“退出登录”。改密明确说明全部会话失效，成功后不得停留在受保护页面。
+        </aside>
+      </section>
+
+      <section id="quality">
+        <h2>桌面状态、无障碍与性能</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>主题</th>
+                <th>设计</th>
+                <th>验证</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Loading</td>
+                <td>资料、指标、Session 行、统计条和审计表分别使用接近最终几何的 Skeleton</td>
+                <td>慢网 E2E，无权限数据闪现</td>
+              </tr>
+              <tr>
+                <td>Empty / partial</td>
+                <td>只有当前会话、无审计结果给下一动作；工作台单 Card 失败不替换整页</td>
+                <td>Mock 每个 Query 独立失败</td>
+              </tr>
+              <tr>
+                <td>Stale / refresh</td>
+                <td>显示更新时间和刷新动作；背景刷新保留现有结果，不闪回 Skeleton</td>
+                <td>Query fake timer 与浏览器测试</td>
+              </tr>
+              <tr>
+                <td>Forbidden</td>
+                <td>loader 默认拒绝；审计 chunk/Query 不加载；文案不透露事件数量</td>
+                <td>USER、ADMIN、SUPER_ADMIN 路由矩阵</td>
+              </tr>
+              <tr>
+                <td>键盘与语义</td>
+                <td>表格 th/scope、按钮可见名称、Dialog trap、Drawer Esc/焦点恢复、live region</td>
+                <td>Playwright keyboard + axe/WCAG 2.2 AA 检查</td>
+              </tr>
+              <tr>
+                <td>视觉</td>
+                <td>1440×900 固定 PC；Card 16px、control 8px、表头 56px；状态颜色配文字/图标</td>
+                <td>截图回归；无页面级横向溢出</td>
+              </tr>
+              <tr>
+                <td>性能</td>
+                <td>
+                  三个路由独立 lazy chunk；无 KLineChart/ECharts；并行 Query ≤ 4；列表 payload 有界
+                </td>
+                <td>route-specific gzip 增量目标每页 ≤ 35 KiB，实施 PR 记录 build 基线</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          动画仅限既有 MUI 反馈；<code>prefers-reduced-motion</code> 下关闭非必要过渡。
+          本方案不设计、实现、截图或测试移动端、平板、触控、窄屏和响应式重排。
+        </p>
+      </section>
+
+      <section id="delivery">
+        <h2>实施、发布、回滚与验收</h2>
+        <ol class="steps">
+          <li>
+            <strong>阶段 0｜评审：</strong>ADR-0019、API 0004、Contract 0017 和原型已完成并标记
+            Implemented；审计在线保留 90 天、不归档，索引使用百万行发布门禁。
+          </li>
+          <li>
+            <strong>阶段 1｜前端基础：</strong>Permission 类型、导航、Query option、页面 Hook、
+            状态测试与 E2E 已完成。
+          </li>
+          <li>
+            <strong>阶段 2｜个人中心：</strong>Contract 0002 资料/改密与 Contract 0017 Session
+            区块均已接入真实 API。
+          </li>
+          <li>
+            <strong>阶段 3｜管理能力：</strong>用户统计和审计已接入；SUPER_ADMIN 权限、脱敏和 ADMIN
+            禁止访问已完成联调验证。
+          </li>
+          <li>
+            <strong>阶段 4｜工作台：</strong>首页占位已替换；role/permission 区块、partial
+            状态和真实数据组合已完成。
+          </li>
+        </ol>
+
+        <div class="grid">
+          <article class="card">
+            <span class="marker decision">Rollout</span>
+            <h3>API 先就绪，Web 后启用</h3>
+            <p>
+              Contract 0017 runtime 与权限已部署；真实导航按 permission 展示，审计入口和路由只对
+              SUPER_ADMIN 开放。
+            </p>
+          </article>
+          <article class="card">
+            <span class="marker decision">Rollback</span>
+            <h3>隐藏入口并回滚 Web</h3>
+            <p>
+              关闭 feature flag，恢复首页占位和旧账号菜单；API additive 路由可继续存在。 已撤销
+              Session、资料/密码修改和审计事件不反转。
+            </p>
+          </article>
+          <article class="card">
+            <span class="marker decision">已冻结</span>
+            <h3>审计运维口径</h3>
+            <p>
+              在线保留 90 天且不归档；每日独立分批清理。少于 100 万行走普通 Prisma migration，
+              达到时阻断并改走受控并发建索引。页面已接入真实 API。
+            </p>
+          </article>
+        </div>
+
+        <h3 class="mt">验收清单</h3>
+        <ul class="checklist">
+          <li>所有角色可查看/修改本人显示名称，账号与角色只读。</li>
+          <li>资料保存携带 ETag；412 保留草稿，不静默覆盖。</li>
+          <li>改密成功清全部本地敏感状态并返回登录页。</li>
+          <li>Session 只显示 family 标识、活动和过期时间，不显示 IP/UA/设备/位置。</li>
+          <li>单个/全部其他会话确认范围清楚；当前 Session 不被误撤销。</li>
+          <li>USER/ADMIN 不加载审计 chunk、Query 或受限数据。</li>
+          <li>审计 URL 筛选、cursor、Drawer 可重访和返回。</li>
+          <li>原始 metadata、密码、token、Cookie 不进入 UI、日志或埋点。</li>
+          <li>工作台按 permission 组合，任一管理 Query 失败只影响对应 Card。</li>
+          <li>三个路由动态加载，不引入图表引擎。</li>
+          <li>1440×900 无页面级横向溢出，键盘、焦点、ARIA、对比度和 reduced-motion 通过。</li>
+        </ul>
+
+        <h3 class="mt">实现验收命令</h3>
+        <pre>
+cd service-web
+vp install --frozen-lockfile
+vp check
+vp test
+vp build
+vp run e2e
+
+cd ..
+docker build --tag quant-v2/service-web:local service-web
+docker run --rm -p 15173:8080 quant-v2/service-web:local
+curl --fail http://127.0.0.1:15173/healthz</pre>
+
+        <div class="grid two mt">
+          <article class="card">
+            <h3>实现验证</h3>
+            <ul>
+              <li>prototype.html 离线加载，四个视图均由固定 URL 切换。</li>
+              <li>四张 1440×900 Chromium 截图已生成并逐张目检。</li>
+              <li>生产页使用仓库 tokens 和现有 AppShell/Page/Table/Dialog/Drawer 模式。</li>
+              <li>vp check、34 项单元测试、生产 build、8 项 E2E 与容器健康检查通过。</li>
+              <li>真实 API 下完成资料保存、会话、统计、审计筛选/详情和 1440×900 视觉验收。</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>后续触发项</h3>
+            <ul>
+              <li>实施 PR 的真实 route-specific gzip 基线。</li>
+              <li>未来真实“今日市场”上线时，工作台区块的最终下移顺序。</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="shell">
+        个人中心、安全审计与平台工作台 · 变更摘要：三个 PC 桌面页面与 POST-only Contract 0017
+        已实施并完成真实联调；冻结审计保留与索引门禁；排除 data-sync、行情与 P3。
+      </div>
+    </footer>
+  </body>
+</html>

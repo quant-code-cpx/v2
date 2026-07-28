@@ -1,7 +1,7 @@
 openapi: 3.1.1
 info:
   title: service-api equity instrument API
-  version: 1.0.0
+  version: 2.0.0
   description: |
     Proposed authenticated public API for published Shanghai, Shenzhen, and
     Beijing A-share instrument catalogs and listing lifecycle history.
@@ -17,6 +17,7 @@ info:
     endpoints remain governed by contract 0004.
   x-contract-status: Proposed
   x-partially-supersedes: 0004-service-api-equity.openapi.yaml
+x-http-method-policy: post-only
 servers:
   - url: /api/v1
 tags:
@@ -25,7 +26,7 @@ security:
   - userBearer: []
 paths:
   /equities:
-    get:
+    post:
       tags: [equity-instruments]
       operationId: listEquityInstruments
       summary: List confirmed A-share instruments at effective and knowledge time
@@ -58,8 +59,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EquityPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -74,7 +75,7 @@ paths:
           $ref: '#/components/responses/DataSyncUnavailable'
 
   /equities/{exchange}/{symbol}:
-    get:
+    post:
       tags: [equity-instruments]
       operationId: getEquityInstrument
       summary: Get one A-share instrument by public exchange and symbol identity
@@ -108,8 +109,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EquityDetail'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -126,7 +127,7 @@ paths:
           $ref: '#/components/responses/DataSyncUnavailable'
 
   /equities/{exchange}/{symbol}/listing-status-history:
-    get:
+    post:
       tags: [equity-instruments]
       operationId: listEquityListingStatusHistory
       summary: List listing lifecycle periods for one A-share instrument
@@ -162,8 +163,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListingStatusHistoryPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':

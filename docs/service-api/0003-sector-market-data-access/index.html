@@ -114,7 +114,7 @@
       <dl class="meta">
         <div><dt>状态</dt><dd class="status">Implemented</dd></div>
         <div><dt>负责人</dt><dd>service-api / service-data-sync</dd></div>
-        <div><dt>最后修改</dt><dd>2026-07-26</dd></div>
+        <div><dt>最后修改</dt><dd>2026-07-28</dd></div>
         <div><dt>关联决策</dt><dd><a href="../../decisions/0011-sector-market-data-api-boundary.md">ADR-0011</a></dd></div>
       </dl>
     </div>
@@ -223,10 +223,10 @@
       <pre class="flow" aria-label="模块依赖图">service-web / partner
         │ authenticated public HTTP
         ▼
-service-api: SectorMarketDataModule
+service-api: IndustryModule + DataSyncModule
   ├─ Auth / final market-read policy
   ├─ DTO validation / rate limit / Problem Details
-  └─ DataSyncSectorClient  ── service credential ──▶ service-data-sync internal v1
+  └─ SectorMarketDataClient  ── service credential ──▶ service-data-sync internal v1
                                                         │
                                                         ▼
                                               published canonical sector data
@@ -236,7 +236,7 @@ service-api: SectorMarketDataModule
 
     <section id="flow">
       <h2>4. 核心流程</h2>
-      <pre class="flow" aria-label="正常读取流程">1. 用户请求 GET /api/v1/market/sectors/{scheme}/{code}/bars
+      <pre class="flow" aria-label="正常读取流程">1. 用户请求 POST /api/v1/market/sectors/{scheme}/{code}/bars
 2. service-api 全局 Guard 验证 Session；最终 market-read policy 通过
 3. DTO 校验 scheme、code、period、包含端 start/end、limit/cursor、If-None-Match
 4. DataSyncSectorClient 转发 requestId、ETag 与专用服务凭据
@@ -267,16 +267,16 @@ service-api: SectorMarketDataModule
           <thead><tr><th>接口</th><th>身份 / 输入</th><th>成功结果</th><th>错误与缓存</th></tr></thead>
           <tbody>
             <tr>
-              <td><code>GET /api/v1/market/sectors</code></td>
+              <td><code>POST /api/v1/market/sectors</code></td>
               <td>认证用户；必填 <code>scheme</code>，可选前缀 <code>query</code>、cursor、limit≤100。</td>
               <td>ACTIVE 板块目录页、dataVersion、publishedAt。</td>
-              <td>400/401/403/429/503；支持 ETag/304。</td>
+              <td>400/401/403/429/503；ETag 命中返回 204。</td>
             </tr>
             <tr>
-              <td><code>GET /api/v1/market/sectors/{scheme}/{sectorCode}/bars</code></td>
+              <td><code>POST /api/v1/market/sectors/{scheme}/{sectorCode}/bars</code></td>
               <td>认证用户；必填 <code>period</code>、<code>start</code>、<code>end</code>；limit≤1000。</td>
               <td>一个周期、一个 sector、一个 dataVersion 的 periodEnd 升序页。</td>
-              <td>400/401/403/404/409/429/503；支持 ETag/304。</td>
+              <td>400/401/403/404/409/429/503；ETag 命中返回 204。</td>
             </tr>
           </tbody>
         </table>
@@ -368,7 +368,7 @@ service-api: SectorMarketDataModule
       <ol class="steps">
         <li><strong>阶段 0 — 合同评审：</strong>评审 ADR-0011，冻结用户权限、服务凭据、网络边界、timeout/rate limit 和 p95/SLO；未通过不建公开路由。</li>
         <li><strong>阶段 1 — 同步服务读层：</strong>实现 internal FastAPI 路由、ACTIVE catalog read port、scheme+code 查找、版本绑定 cursor、ETag、服务鉴权与 contract test。</li>
-        <li><strong>阶段 2 — API 投影：</strong>实现 SectorMarketDataModule、DTO、client、Problem Details、授权策略、OpenAPI contract test、日志/指标；不改 Prisma 业务表。</li>
+        <li><strong>阶段 2 — API 投影：</strong>实现 IndustryModule、DataSyncModule、DTO、client、Problem Details、授权策略、OpenAPI contract test、日志/指标；不改 Prisma 业务表。</li>
         <li><strong>阶段 3 — 受控发布：</strong>先内部调用和 shadow metrics，再开放 public route；验证 401/403、cursor 409、下游 503 和 dataVersion 一致性。</li>
       </ol>
       <div class="grid two">
@@ -378,7 +378,7 @@ service-api: SectorMarketDataModule
             <li>API 不导入同步数据库 schema、SDK 或 adapter。</li>
             <li>同一 response/page 只含一个 period/dataVersion；周/月不读日线。</li>
             <li>unknown scheme、超界日期、篡改 cursor、PENDING sector 均不泄漏数据。</li>
-            <li>401/403/404/409/429/503 和 ETag/304 有自动测试。</li>
+            <li>401/403/404/409/429/503 和 ETag/204 有自动测试。</li>
             <li>internal/public OpenAPI 可解析，双向 contract test 与 Docker health 通过。</li>
           </ul>
         </article>
@@ -407,7 +407,8 @@ docker compose -f ../compose.yaml -f ../compose.dev.yaml --env-file ../.env.exam
   </main>
 
   <footer>
-    <div class="shell">板块行情 API 访问 · Implemented：跨服务读取边界、internal/public OpenAPI 和 API 实施路径。</div>
+    <div class="shell">板块行情 API 访问 · 2026-07-28 变更摘要：公开路由统一为 POST-only，
+      条件读取命中由内部 304 映射为公开 204；跨服务读取边界保持不变。</div>
   </footer>
 </body>
 </html>

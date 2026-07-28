@@ -1,20 +1,23 @@
+/// 定义服务端分层授权角色。
 enum Role {
   USER
   ADMIN
   SUPER_ADMIN
 }
 
+/// 定义用户账号生命周期状态。
 enum UserStatus {
   ACTIVE
   DISABLED
   DELETED
 }
 
+/// 保存用户身份、授权和安全版本权威状态。
 model User {
   id                String      @id @default(uuid()) @db.Uuid
   normalizedAccount String      @unique @map("normalized_account")
   account           String
-  // Retained only for pre-Apex data compatibility. It is never an authentication identifier or API field.
+  // 仅保留旧数据兼容；不得作为认证标识或 API 字段。
   normalizedEmail   String?     @unique @map("normalized_email")
   email             String?
   displayName       String      @map("display_name")
@@ -31,10 +34,12 @@ model User {
   auditLogs         AuditLog[]  @relation("actor_audit_logs")
 
   @@index([status, role, createdAt, id])
+  @@index([role, status, lastLoginAt])
 
   @@map("users")
 }
 
+/// 保存用户密码摘要，不保存或返回明文凭据。
 model Credential {
   userId            String   @id @map("user_id") @db.Uuid
   passwordHash      String   @map("password_hash")

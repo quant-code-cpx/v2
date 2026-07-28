@@ -71,6 +71,10 @@ class FakeRawPayloadStore:
         self.payloads.append(payload)
         return f"s3://test/{payload.object_key}"
 
+    def get(self, uri: str) -> bytes:
+        """旧日线用例不执行 replay；若意外读取则立刻暴露错误路径。"""
+        raise AssertionError(f"unexpected raw replay read: {uri}")
+
 
 class FakeRepository:
     """捕获标准写入输入，并返回发布形状的响应。"""

@@ -72,7 +72,7 @@
 ### 服务边界
 
 - `service-data-sync` 独占 raw evidence、快照、观测区间、release manifest、迁移和内部读取。
-- `service-api` 仅扩展现有 `SectorMarketDataModule`，通过内部 HTTP 读取、校验并投影公开响应；
+- `service-api` 仅扩展现有 `IndustryModule`，通过内部 HTTP 读取、校验并投影公开响应；
   不新增 Prisma 行情表，不把 Redis 作为成分权威存储。
 - `0007` 是 `0005` 板块内部契约的增量扩展，`0008` 是 `0006` 公开契约的增量扩展；
   它们只增加“板块到成分”和“证券到板块”查询，不复制、不替代目录或 K 线接口。

@@ -24,7 +24,9 @@
     "prisma:deploy": "prisma migrate deploy",
     "bootstrap:admin": "prisma generate && nest build && node dist/scripts/bootstrap-admin.js",
     "prepare:legacy-accounts": "prisma generate && nest build && node dist/scripts/prepare-legacy-accounts.js",
-    "promote:super-admin": "prisma generate && nest build && node dist/scripts/promote-existing-admin.js"
+    "promote:super-admin": "prisma generate && nest build && node dist/scripts/promote-existing-admin.js",
+    "audit:index-gate": "prisma generate && nest build && node dist/scripts/check-audit-index-migration.js",
+    "audit:retention": "prisma generate && nest build && node dist/scripts/prune-audit-logs.js"
   },
   "dependencies": {
     "@nestjs/common": "11.1.28",

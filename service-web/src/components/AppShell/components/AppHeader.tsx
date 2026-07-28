@@ -3,6 +3,7 @@ import {
   KeyboardArrowDownOutlined as KeyboardArrowDownOutlinedIcon,
   LogoutOutlined as LogoutOutlinedIcon,
   NotificationsNoneOutlined as NotificationsNoneOutlinedIcon,
+  PersonOutlineOutlined as PersonOutlineOutlinedIcon,
   SearchOutlined as SearchOutlinedIcon,
 } from "@mui/icons-material";
 import {
@@ -129,6 +130,12 @@ export function AppHeader({ user }: AppHeaderProps) {
         onClose={actions.handleAccountMenuClose}
         slotProps={{ list: { "aria-label": "用户操作" } }}
       >
+        <MenuItem onClick={actions.handleAccount}>
+          <ListItemIcon>
+            <PersonOutlineOutlinedIcon fontSize="small" />
+          </ListItemIcon>
+          我的账户
+        </MenuItem>
         <MenuItem onClick={actions.handleLogout}>
           <ListItemIcon>
             <LogoutOutlinedIcon fontSize="small" />

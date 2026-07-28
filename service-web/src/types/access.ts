@@ -1,20 +1,22 @@
-/** Enumerate fixed roles returned by User/Auth Contract 0002. */
+/** 枚举用户与鉴权合同返回的固定角色。 */
 export const userRoles = ["USER", "ADMIN", "SUPER_ADMIN"] as const;
 
-/** Represent one fixed server-enforced role. */
+/** 表示一个由服务端强制执行的固定角色。 */
 export type UserRole = (typeof userRoles)[number];
 
-/** Enumerate lifecycle states exposed by User/Auth Contract 0002. */
+/** 枚举用户与鉴权合同公开的生命周期状态。 */
 export const userStatuses = ["ACTIVE", "DISABLED", "DELETED"] as const;
 
-/** Represent one server-enforced user lifecycle state. */
+/** 表示一个由服务端强制执行的用户生命周期状态。 */
 export type UserStatus = (typeof userStatuses)[number];
 
-/** Enumerate capability strings used for Web visibility and route checks. */
+/** 枚举用于 Web 可见性与路由检查的服务端能力字符串。 */
 export const permissions = [
   "profile:read",
   "profile:update",
   "password:change",
+  "sessions:read",
+  "sessions:revoke",
   "users:read",
   "users:create",
   "users:update",
@@ -22,12 +24,13 @@ export const permissions = [
   "users:reset-password",
   "admins:create",
   "admins:manage",
+  "audit:read",
 ] as const;
 
-/** Represent a capability calculated and returned by service-api. */
+/** 表示由 `service-api` 计算并返回的能力。 */
 export type Permission = (typeof permissions)[number];
 
-/** Describe a non-sensitive user resource returned by service-api. */
+/** 描述 `service-api` 返回的非敏感用户资源。 */
 export interface User {
   id: string;
   account: string;
@@ -41,26 +44,26 @@ export interface User {
   updatedAt: string;
 }
 
-/** Describe current session identity with effective permissions. */
+/** 描述当前会话身份及其有效权限。 */
 export interface CurrentUser extends User {
   permissions: Permission[];
 }
 
-/** Describe backend-rendered, single-use PNG CAPTCHA state. */
+/** 描述后端渲染的一次性 PNG 验证码状态。 */
 export interface CaptchaChallenge {
   challengeId: string;
   imageDataUrl: string;
   expiresAt: string;
 }
 
-/** Describe short-lived access token response paired with a refresh cookie. */
+/** 描述与 refresh cookie 配对的短期 access token 响应。 */
 export interface AccessTokenResponse {
   accessToken: string;
   accessTokenExpiresIn: number;
   user: CurrentUser;
 }
 
-/** Describe a cursor page of user resources. */
+/** 描述用户资源的游标分页。 */
 export interface UserPage {
   items: User[];
   page: {
@@ -68,7 +71,7 @@ export interface UserPage {
   };
 }
 
-/** Describe validated list filters represented in the browser URL. */
+/** 描述浏览器 URL 表达的已校验用户列表筛选。 */
 export interface UserListFilters {
   q?: string;
   role?: Extract<UserRole, "USER" | "ADMIN">;
@@ -79,7 +82,7 @@ export interface UserListFilters {
   pageSize: number;
 }
 
-/** Describe credentials accepted only by the anonymous login endpoint. */
+/** 描述仅匿名登录端点接受的凭据。 */
 export interface LoginInput {
   account: string;
   password: string;
@@ -87,7 +90,7 @@ export interface LoginInput {
   captchaAnswer: string;
 }
 
-/** Describe administrator-supplied initial user fields. */
+/** 描述管理员提供的初始用户字段。 */
 export interface CreateUserInput {
   account: string;
   displayName: string;
@@ -96,7 +99,7 @@ export interface CreateUserInput {
   status: Extract<UserStatus, "ACTIVE" | "DISABLED">;
 }
 
-/** Describe mutable administrator-controlled user fields. */
+/** 描述管理员可修改的用户字段。 */
 export interface UpdateUserInput {
   displayName: string;
   role: Extract<UserRole, "USER" | "ADMIN">;

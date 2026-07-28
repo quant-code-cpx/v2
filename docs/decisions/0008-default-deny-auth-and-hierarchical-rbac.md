@@ -2,6 +2,7 @@
 
 - 状态：Implemented
 - 日期：2026-07-26
+- 最后修改：2026-07-28
 - 决策者：项目维护者
 - 关联方案：[用户访问管理与登录安全方案](../service-api/0002-user-access-management/index.html)
 - 关联契约：[User/Auth 已实施契约](../contracts/0002-user-access-management.openapi.yaml)
@@ -92,11 +93,11 @@
 
 ### 生命周期、安全版本与审计
 
-- `DELETE /api/v1/users/{id}` 执行软删除：设置 `status=DELETED` 与 `deletedAt`，保留用户、凭证关联和
+- `POST /api/v1/users/{id}/delete` 执行软删除：设置 `status=DELETED` 与 `deletedAt`，保留用户、凭证关联和
   审计链；规范化账号不复用。列表默认排除已删除用户；只有 `SUPER_ADMIN` 可显式筛选 `DELETED`，
-  已删除详情对 GET/PATCH/reset 返回 404。
+  已删除详情对读取、更新和 password-reset 动作返回 404。
 - 管理员修改和删除使用 ETag/`If-Match`；版本不一致返回 `412 Precondition Failed`，避免覆盖并发修改。
-  对已处于 `DELETED` 且仍在 Actor scope 内的目标，终态优先于旧 ETag，重复 DELETE 返回 204。
+  对已处于 `DELETED` 且仍在 Actor scope 内的目标，终态优先于旧 ETag，重复删除请求返回 204。
 - 禁用、重新启用、角色变化、本人改密、管理员重置密码和软删除递增 `securityVersion`；资料字段修改只
   递增资源 `version`。
 - 管理员在创建或重置请求中经 TLS 直接设置密码；用户收到后可立即登录，自主决定是否通过本人改密功能

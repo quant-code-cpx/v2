@@ -169,7 +169,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "node -e \"fetch('http://127.0.0.1:3000/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\"",
+          "node -e \"fetch('http://127.0.0.1:3000/health',{method:'POST'}).then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\"",
         ]
       interval: 10s
       timeout: 3s
@@ -356,6 +356,10 @@ services:
       DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS: ${DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS:-10}
       DATA_SYNC_AKSHARE_ENABLED: ${DATA_SYNC_AKSHARE_ENABLED:-false}
       DATA_SYNC_SECTOR_ENABLED: ${DATA_SYNC_SECTOR_ENABLED:-false}
+      DATA_SYNC_SECTOR_EOD_ENABLED: ${DATA_SYNC_SECTOR_EOD_ENABLED:-false}
+      DATA_SYNC_SECTOR_EOD_PUBLISH_ENABLED: ${DATA_SYNC_SECTOR_EOD_PUBLISH_ENABLED:-false}
+      DATA_SYNC_SECTOR_EOD_SCHEDULER_ENABLED: ${DATA_SYNC_SECTOR_EOD_SCHEDULER_ENABLED:-false}
+      DATA_SYNC_TRADING_CALENDAR_ENABLED: ${DATA_SYNC_TRADING_CALENDAR_ENABLED:-false}
       DATA_SYNC_INTERNAL_API_BEARER_TOKEN: ${DATA_SYNC_INTERNAL_API_BEARER_TOKEN:?set DATA_SYNC_INTERNAL_API_BEARER_TOKEN}
       DATA_SYNC_AKSHARE_REQUEST_TIMEOUT_SECONDS: ${DATA_SYNC_AKSHARE_REQUEST_TIMEOUT_SECONDS:-30}
     healthcheck:
@@ -373,6 +377,11 @@ services:
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
+
+  data-sync-scheduler:
+    extends:
+      service: data-sync-worker
+    command: ["data-sync-scheduler"]
 
 networks:
   service-api-internal:

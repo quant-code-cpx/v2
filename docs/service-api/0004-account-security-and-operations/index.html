@@ -1,0 +1,963 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Apex 个人资料闭环、本人会话管理、超级管理员审计读取与角色范围用户统计技术方案"
+    />
+    <title>账户安全与运营查询｜service-api 技术方案</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #172033;
+        --muted: #667085;
+        --line: #dfe4ec;
+        --surface: #f6f8fb;
+        --accent: #3157d5;
+        --accent-soft: #eef2ff;
+        --success: #176b4d;
+        --warning: #8a4b08;
+        --danger: #a02b2b;
+        --radius: 14px;
+        --shadow: 0 12px 30px rgb(23 32 51 / 7%);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: #fff;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+          sans-serif;
+        font-size: 16px;
+        line-height: 1.7;
+      }
+      a {
+        color: var(--accent);
+        text-underline-offset: 0.2em;
+      }
+      a:focus-visible {
+        outline: 3px solid rgb(49 87 213 / 28%);
+        outline-offset: 3px;
+      }
+      code {
+        padding: 0.1em 0.32em;
+        border-radius: 4px;
+        background: var(--surface);
+        font:
+          0.92em ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+      }
+      .shell {
+        width: min(1120px, calc(100% - 40px));
+        margin: 0 auto;
+      }
+      header {
+        padding: 54px 0 38px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+      }
+      .eyebrow {
+        margin: 0 0 10px;
+        color: var(--accent);
+        font-size: 0.78rem;
+        font-weight: 750;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.28;
+        letter-spacing: -0.02em;
+      }
+      h1 {
+        max-width: 860px;
+        margin: 0;
+        font-size: clamp(2rem, 5vw, 3.5rem);
+      }
+      h2 {
+        margin: 0 0 20px;
+        font-size: clamp(1.45rem, 3vw, 2rem);
+      }
+      h3 {
+        margin: 0 0 8px;
+        font-size: 1.06rem;
+      }
+      p {
+        max-width: 78ch;
+      }
+      .lede {
+        max-width: 840px;
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 1.08rem;
+      }
+      .summary,
+      .meta,
+      .grid {
+        display: grid;
+        gap: 16px;
+      }
+      .summary {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-top: 28px;
+      }
+      .summary article,
+      .meta div {
+        padding: 15px 16px;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        background: #fff;
+      }
+      .summary strong {
+        display: block;
+        color: var(--accent);
+        font-size: 0.78rem;
+      }
+      .summary p {
+        margin: 5px 0 0;
+        color: var(--muted);
+        font-size: 0.9rem;
+        line-height: 1.55;
+      }
+      .meta {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-top: 16px;
+      }
+      .meta dt {
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+      .meta dd {
+        margin: 3px 0 0;
+        font-weight: 700;
+      }
+      .status {
+        color: var(--success);
+      }
+      nav {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        overflow-x: hidden;
+        border-bottom: 1px solid var(--line);
+        background: rgb(255 255 255 / 94%);
+        backdrop-filter: blur(12px);
+      }
+      nav .shell {
+        overflow-x: auto;
+      }
+      nav ul {
+        display: flex;
+        gap: 22px;
+        width: max-content;
+        margin: 0;
+        padding: 13px 0;
+        list-style: none;
+      }
+      nav a {
+        color: var(--muted);
+        font-size: 0.88rem;
+        font-weight: 700;
+        text-decoration: none;
+      }
+      main {
+        padding: 20px 0 72px;
+      }
+      section {
+        padding: 48px 0;
+        border-bottom: 1px solid var(--line);
+        scroll-margin-top: 58px;
+      }
+      .grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .grid > * {
+        min-width: 0;
+      }
+      .card {
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+        box-shadow: var(--shadow);
+      }
+      .card p:last-child,
+      .card ul:last-child {
+        margin-bottom: 0;
+      }
+      .label {
+        display: inline-block;
+        margin-bottom: 9px;
+        color: var(--accent);
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+      }
+      .fact {
+        color: var(--success);
+      }
+      .risk {
+        color: var(--warning);
+      }
+      .danger {
+        color: var(--danger);
+      }
+      .callout {
+        margin-top: 20px;
+        padding: 18px 21px;
+        border-left: 4px solid var(--accent);
+        border-radius: 0 var(--radius) var(--radius) 0;
+        background: var(--accent-soft);
+      }
+      .callout strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+      pre {
+        overflow-x: auto;
+        padding: 20px;
+        border-radius: var(--radius);
+        background: #111827;
+        color: #e5e7eb;
+        font:
+          0.88rem/1.65 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+      }
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+      }
+      table {
+        width: 100%;
+        min-width: 760px;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 13px 15px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: var(--surface);
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      .mt {
+        margin-top: 24px;
+      }
+      .steps {
+        padding-left: 1.25rem;
+      }
+      .steps li {
+        padding: 3px 0 13px 8px;
+      }
+      footer {
+        padding: 28px 0 48px;
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+      @media (max-width: 820px) {
+        .summary,
+        .meta,
+        .grid,
+        .grid.two {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media print {
+        nav {
+          display: none;
+        }
+        header,
+        main,
+        section {
+          padding-top: 18px;
+        }
+        .shell {
+          width: 100%;
+        }
+        .card {
+          box-shadow: none;
+          break-inside: avoid;
+        }
+        pre,
+        .table-wrap {
+          break-inside: avoid;
+        }
+        a {
+          color: inherit;
+          text-decoration: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="shell">
+        <p class="eyebrow">Apex · service-api · Technical solution · 0004</p>
+        <h1>账户安全与运营查询</h1>
+        <p class="lede">
+          在已实施 User/Auth 基线上增加本人 Session family 管理、SUPER_ADMIN
+          审计读取和角色范围用户统计； 复用 PostgreSQL 权威状态，不保存设备指纹，不新增大而不稳定的
+          Workspace 聚合接口。
+        </p>
+        <div class="summary" aria-label="方案一屏摘要">
+          <article>
+            <strong>问题</strong>
+            <p>资料与改密已有 API，但会话不可见、审计只写不可读，首页缺少非行情运营数据。</p>
+          </article>
+          <article>
+            <strong>选择</strong>
+            <p>Auth 管本人会话，Audit 管脱敏审计，User 管可管理目标统计；Web 并行组合。</p>
+          </article>
+          <article>
+            <strong>理由</strong>
+            <p>模块所有权清楚，权限最小，不复制状态；未来行情首页上线时仍可复用。</p>
+          </article>
+          <article>
+            <strong>主要风险</strong>
+            <p>审计表增长可能拖慢查询；90 天分批清理和百万行索引门禁控制发布风险。</p>
+          </article>
+        </div>
+        <dl class="meta">
+          <div>
+            <dt>状态</dt>
+            <dd class="status">Implemented</dd>
+          </div>
+          <div>
+            <dt>负责人</dt>
+            <dd>service-api</dd>
+          </div>
+          <div>
+            <dt>最后修改</dt>
+            <dd>2026-07-28</dd>
+          </div>
+          <div>
+            <dt>关联决策</dt>
+            <dd>
+              <a href="../../decisions/0019-account-security-audit-and-workspace-boundary.md"
+                >ADR-0019</a
+              >
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </header>
+
+    <nav aria-label="页面目录">
+      <div class="shell">
+        <ul>
+          <li><a href="#facts">现状</a></li>
+          <li><a href="#scope">能力与边界</a></li>
+          <li><a href="#architecture">模块</a></li>
+          <li><a href="#flows">流程</a></li>
+          <li><a href="#contract">接口</a></li>
+          <li><a href="#data">数据</a></li>
+          <li><a href="#security">安全与可靠性</a></li>
+          <li><a href="#delivery">实施与验收</a></li>
+        </ul>
+      </div>
+    </nav>
+
+    <main class="shell">
+      <section id="facts">
+        <h2>现状事实与约束</h2>
+        <div class="grid">
+          <article class="card">
+            <span class="label fact">事实</span>
+            <h3>资料与密码写路径已完整</h3>
+            <p>
+              <code>POST /api/v1/users/me</code>、<code>/me/update</code> 和
+              <code>/me/password</code>
+              已实现 ETag、当前密码校验、<code>securityVersion</code>、Session 全撤销和事务审计。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label fact">事实</span>
+            <h3>Session family 可直接复用</h3>
+            <p>
+              Session 已含
+              <code>familyId</code>、<code>absoluteExpiresAt</code>、轮换时间与前序关系；
+              每次受保护请求同时校验 Session 和 User，无需 Redis 权威状态。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label fact">事实</span>
+            <h3>审计证据已持续追加</h3>
+            <p>
+              登录、退出、刷新轮换、重放、资料、密码与管理员动作均写入 <code>AuditLog</code>。
+              当前已实现读取 Controller、稳定 action registry、全局时间索引和独立分批清理任务；在线
+              保留 90 天且不归档。
+            </p>
+          </article>
+        </div>
+        <aside class="callout">
+          <strong>固定约束</strong>
+          所有新增 Controller operation 仅用 <code>@Post()</code>；AuthModule 继续只单向依赖
+          UserModule； PostgreSQL 保存用户、凭证、Session 和审计权威状态，Redis
+          仅保存短期安全状态；本方案不调用 <code>service-data-sync</code>。
+        </aside>
+      </section>
+
+      <section id="scope">
+        <h2>目标、非目标与能力卡</h2>
+        <div class="grid">
+          <article class="card">
+            <h3>目标</h3>
+            <ul>
+              <li>所有角色查看、撤销自己的其他 Session family。</li>
+              <li>SUPER_ADMIN 查询和查看脱敏审计证据。</li>
+              <li>ADMIN/SUPER_ADMIN 获取其可管理目标统计。</li>
+              <li>为个人中心、安全审计和平台工作台提供冻结契约。</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>非目标</h3>
+            <ul>
+              <li>管理员查看或撤销他人单个会话。</li>
+              <li>保存 IP、User-Agent、设备指纹或地理位置。</li>
+              <li>MFA、SSO、可信设备、异常登录推断或失败登录审计查询。</li>
+              <li>行情、同步、搜索、通知、批量用户操作和导入导出。</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>规划预算</h3>
+            <ul>
+              <li>列表 body ≤ 16 KiB；Session ≤ 50 条；审计 ≤ 100 条。</li>
+              <li>审计默认 7 天、单次最大 90 天。</li>
+              <li>规划目标：统计 p95 ≤ 300 ms，审计查询 p95 ≤ 500 ms。</li>
+              <li>延迟仍是验收目标，不作已达事实；实施 PR 必须记录真实容量与 query plan。</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="table-wrap mt">
+          <table>
+            <thead>
+              <tr>
+                <th>Actor / 权限</th>
+                <th>用例与成功结果</th>
+                <th>Owner / Consumer</th>
+                <th>一致性、SLO、兼容</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>所有认证角色：<code>sessions:read</code>、<code>sessions:revoke</code></td>
+                <td>列出本人活动 family；撤销一个或全部其他 family</td>
+                <td>AuthModule / account page</td>
+                <td>强一致；撤销后下一次鉴权立即拒绝；v1 additive</td>
+              </tr>
+              <tr>
+                <td>SUPER_ADMIN：<code>audit:read</code></td>
+                <td>按时间、分类、actor、target 查询；查看脱敏详情</td>
+                <td>AuditModule / audit page</td>
+                <td>不可变读取；p95 目标 500 ms；无 ADMIN 兼容暴露</td>
+              </tr>
+              <tr>
+                <td>ADMIN / SUPER_ADMIN：<code>users:read</code></td>
+                <td>读取严格限定到可管理角色的聚合计数</td>
+                <td>UserModule / workspace</td>
+                <td>请求时快照；p95 目标 300 ms；不返回个体记录</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <h2>模块所有权与依赖方向</h2>
+        <pre aria-label="模块依赖图">
+service-web
+  ├─ /account ───────────────▶ UserModule + AuthModule
+  ├─ /security/audit ────────▶ AuditModule
+  └─ / platform workspace ───▶ UserModule + AuthModule + AuditModule
+
+HTTP Foundation
+  ├─ Global Auth Guard / Permission Guard / POST-only policy
+  ├─ RequestId / Validation / Problem Details / CORS
+  └─ AuthContext { userId, sessionId, role, securityVersion }
+
+AuthModule ───────────────▶ UserModule
+  │ Session family              │ User / Credential / Role policy / statistics
+  └──────────────┬──────────────┘
+                 ▼
+            PostgreSQL
+                 ▲
+                 │
+             AuditModule
+        sanitized append-only reads
+
+禁止 UserModule → AuthModule；AuditModule 不修改 User/Session；无 WorkspaceModule。</pre>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>能力模块</th>
+                <th>职责与输入/输出</th>
+                <th>状态与依赖</th>
+                <th>失败边界</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Auth Session Management</td>
+                <td>AuthContext + cursor/familyId → 本人活动 family 或撤销结果</td>
+                <td>拥有 Session 用例；依赖 PostgreSQL、审计写入</td>
+                <td>所有权不匹配返回 404；审计失败时撤销事务回滚</td>
+              </tr>
+              <tr>
+                <td>AuditModule</td>
+                <td>SUPER_ADMIN filters/eventId → 脱敏列表与详情</td>
+                <td>只读 AuditLog 与 actor relation；服务端 action registry 映射</td>
+                <td>未知 action 给通用摘要与空详情；绝不透传 metadata</td>
+              </tr>
+              <tr>
+                <td>User Statistics</td>
+                <td>AuthContext → 可管理角色范围的状态与近 30 天登录计数</td>
+                <td>复用 UserModule 目标角色策略和 PostgreSQL</td>
+                <td>统计失败只影响工作台管理区块；不扩大授权范围</td>
+              </tr>
+              <tr>
+                <td>Permission Registry</td>
+                <td>Role → 固定权限数组</td>
+                <td>USER/ADMIN/SUPER_ADMIN 均获 session 权限；仅 SUPER_ADMIN 获 audit:read</td>
+                <td>新增权限必须同步 API/Web 类型、契约和角色矩阵测试</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="flows">
+        <h2>核心流程与失败路径</h2>
+        <div class="grid two">
+          <article class="card">
+            <span class="label">会话撤销</span>
+            <h3>本人 family 强一致撤销</h3>
+            <pre>
+Bearer token
+  → Global Guard 解析 sessionId
+  → AuthModule 查当前 family
+  → 校验目标 family.userId
+  → transaction:
+      updateMany active family rows
+      append sanitized audit
+  → 204 / revokedFamilyCount
+  → 当前 family：Web 清会话</pre>
+            <p>已撤销终态返回稳定成功；未知或他人 family 返回 404，避免资源枚举。</p>
+          </article>
+          <article class="card">
+            <span class="label">审计读取</span>
+            <h3>过滤、游标与脱敏映射</h3>
+            <pre>
+SUPER_ADMIN + filters
+  → validate 7d default / 90d max
+  → bind signed cursor to filter hash
+  → indexed AuditLog query + 1 row
+  → action registry:
+      category / severity / summary
+      allowlisted detail fields
+  → page + nextCursor + appliedWindow</pre>
+            <p>伪造 cursor、反向时间范围或超 90 天返回 400；数据库失败返回 503。</p>
+          </article>
+        </div>
+        <aside class="callout">
+          <strong>工作台 partial 失败</strong>
+          API 不提供大聚合端点。Web 仅在获得对应 permission
+          时并行请求领域查询；Session、统计或审计任一失败， 只让对应区块进入 error/retry。<code
+            >/users/me</code
+          >
+          的 401 仍由现有 AuthSession 统一清理。
+        </aside>
+      </section>
+
+      <section id="contract">
+        <h2>公开契约与错误语义</h2>
+        <p>
+          拟议机器合同：
+          <a href="../../contracts/0017-service-api-account-security-operations.openapi.yaml"
+            >Contract 0017</a
+          >。 已实施资料与改密路径继续以
+          <a href="../../contracts/0002-user-access-management.openapi.yaml">Contract 0002</a>
+          为准。
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>POST path</th>
+                <th>权限</th>
+                <th>成功</th>
+                <th>校验、幂等与失败</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>/api/v1/auth/sessions/list</code></td>
+                <td><code>sessions:read</code></td>
+                <td>200，活动 family cursor page</td>
+                <td>pageSize 1–50；cursor 与 actor/filters 绑定；401/403/429/503</td>
+              </tr>
+              <tr>
+                <td><code>/api/v1/auth/sessions/{familyId}/revoke</code></td>
+                <td><code>sessions:revoke</code></td>
+                <td>204</td>
+                <td>终态幂等；外部目标 404；当前 family 成功后调用方会话失效</td>
+              </tr>
+              <tr>
+                <td><code>/api/v1/auth/sessions/revoke-others</code></td>
+                <td><code>sessions:revoke</code></td>
+                <td>200 + revokedFamilyCount</td>
+                <td>保留当前 family；重复调用返回 0；不改 securityVersion</td>
+              </tr>
+              <tr>
+                <td><code>/api/v1/audit-events/list</code></td>
+                <td><code>audit:read</code></td>
+                <td>200，脱敏 cursor page</td>
+                <td>默认 7 天、最大 90 天、最多 100；例行 refresh 默认排除</td>
+              </tr>
+              <tr>
+                <td><code>/api/v1/audit-events/{id}</code></td>
+                <td><code>audit:read</code></td>
+                <td>200，脱敏详情</td>
+                <td>不可变无 ETag；不存在 404；无 raw metadata fallback</td>
+              </tr>
+              <tr>
+                <td><code>/api/v1/users/statistics</code></td>
+                <td><code>users:read</code></td>
+                <td>200，角色范围计数</td>
+                <td>ADMIN 只含 USER；SUPER_ADMIN 含 USER/ADMIN；actor 与 SUPER_ADMIN 排除</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid mt">
+          <article class="card">
+            <h3>输入与分页</h3>
+            <p>
+              全局 ValidationPipe 拒绝未知字段。时间为带 offset 的 RFC 3339；排序固定
+              <code>occurredAt desc, id desc</code> 或 <code>createdAt desc, id desc</code>。 opaque
+              cursor HMAC 包含 actor、最后键和筛选指纹。
+            </p>
+          </article>
+          <article class="card">
+            <h3>Problem Details</h3>
+            <p>
+              沿用稳定 <code>application/problem+json</code>。新增问题码只在必要时使用：
+              <code>invalid-time-window</code>、<code>invalid-cursor</code>。不返回
+              SQL、metadata、token 或 cookie。
+            </p>
+          </article>
+          <article class="card">
+            <h3>缓存</h3>
+            <p>
+              Session 与审计响应使用 <code>Cache-Control: no-store</code>。用户统计可由 Web Query
+              缓存 60 秒，但 HTTP 层不配置共享缓存。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="data">
+        <h2>数据模型、索引与事务</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>模型</th>
+                <th>变化</th>
+                <th>查询与索引</th>
+                <th>事务/迁移/回滚</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>Session</code></td>
+                <td>无新字段；复用 familyId、createdAt、absoluteExpiresAt、revokedAt</td>
+                <td>新增 <code>(userId, revokedAt, createdAt, id)</code>，活动 family 分页</td>
+                <td>撤销与审计同事务；索引可独立删除，无 backfill</td>
+              </tr>
+              <tr>
+                <td><code>AuditLog</code></td>
+                <td>保持 append-only String action + Json metadata；响应由 registry 映射</td>
+                <td>新增 <code>(occurredAt, id)</code>、<code>(action, occurredAt, id)</code></td>
+                <td>无数据重写；达到百万行改用受控并发建索引，失败不启用读取路由</td>
+              </tr>
+              <tr>
+                <td><code>User</code></td>
+                <td>无字段变化</td>
+                <td>新增 <code>(role, status, lastLoginAt)</code> 支持范围统计</td>
+                <td>只读 groupBy/count；索引回滚不改变业务数据</td>
+              </tr>
+              <tr>
+                <td>Redis</td>
+                <td>不新增权威数据；可加读取/撤销限流 key，必须有 TTL</td>
+                <td>key 仅含 actor/family 摘要，不含原始 token</td>
+                <td>限流状态可丢失；关键 DB 读写不以 Redis 为数据源</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          migration 只做 expand 索引。<code>audit_logs</code> 少于 100 万行时，由独立 Prisma
+          migration job 在维护窗口创建；达到 100 万行时，发布门禁阻断普通 migration，改用单独评审的
+          <code>CREATE INDEX CONCURRENTLY</code> 任务。生产应用启动不执行 migration。
+        </p>
+        <p>
+          <code>AuditLog</code> 在线保留 90 天，首期不归档。部署编排每日触发独立维护任务， 在
+          PostgreSQL advisory lock 下每批最多删除 5,000 行，直至没有过期数据。任务可重试、
+          可重复执行，只记录数量、耗时和失败原因；不为清理动作再写审计事件，也不进入 API 应用进程。
+        </p>
+      </section>
+
+      <section id="security">
+        <h2>安全、可靠性与可观测性</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>风险/故障</th>
+                <th>控制</th>
+                <th>信号与验证</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>横向会话枚举</td>
+                <td>查询固定 actor.userId；foreign/unknown 均 404；familyId 为随机 UUID</td>
+                <td>USER×foreign family 表驱动测试；403/404 指标不含目标</td>
+              </tr>
+              <tr>
+                <td>管理员读取越权审计</td>
+                <td>仅 SUPER_ADMIN 有 audit:read；Controller 与 service 双层判定</td>
+                <td>USER/ADMIN/SUPER_ADMIN 契约与集成矩阵</td>
+              </tr>
+              <tr>
+                <td>metadata 泄漏秘密</td>
+                <td>action registry allowlist；未知 action 空 details；禁止 spread metadata</td>
+                <td>每种 action 快照测试；password/token/cookie/IP/UA 扫描</td>
+              </tr>
+              <tr>
+                <td>撤销与审计不一致</td>
+                <td>Session updateMany 与 AuditLog.create 同 PostgreSQL 事务</td>
+                <td>审计写失败注入；事务必须不产生部分撤销</td>
+              </tr>
+              <tr>
+                <td>审计慢查询</td>
+                <td>90 天保留、默认/最大时间窗、固定排序、payload 上限、复合索引、无 count(*)</td>
+                <td>p95、rows scanned、DB timeout、503、连接池和清理积压告警</td>
+              </tr>
+              <tr>
+                <td>工作台局部依赖失败</td>
+                <td>领域端点独立；无服务端 fan-out；Web partial retry</td>
+                <td>operationId 级错误率和延迟，不用一个 workspace 指标掩盖根因</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="grid mt">
+          <article class="card">
+            <h3>结构化日志</h3>
+            <p>
+              记录 requestId、actorId、operationId、result、duration、pageSize、timeWindowDays；
+              familyId、targetId 只记录 HMAC 摘要。不记录响应详情、metadata、密码、token、Cookie。
+            </p>
+          </article>
+          <article class="card">
+            <h3>指标与告警</h3>
+            <p>
+              session families listed/revoked、audit query latency/rows、statistics latency、 audit
+              retention deleted/duration/failure、400/401/403/404/429/503、审计映射
+              unknown_action。p95 连续 15 分钟超预算或清理连续失败时告警。
+            </p>
+          </article>
+          <article class="card">
+            <h3>健康与恢复</h3>
+            <p>
+              <code>POST /health</code> 不变；<code>POST /ready</code> 继续检查 PostgreSQL/Redis。
+              读取能力失败不降级为未授权数据；恢复依赖 DB 与索引，不使用缓存副本。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="delivery">
+        <h2>实施、发布、回滚与验收</h2>
+        <ol class="steps">
+          <li>
+            <strong>阶段 0｜合同冻结：</strong>ADR-0019、Contract 0017、90
+            天保留、百万行索引门禁与权限矩阵已完成并标记 Implemented。
+          </li>
+          <li>
+            <strong>阶段 1｜Expand：</strong>独立 migration 已添加查询索引与百万行门禁；旧 API
+            保持兼容。
+          </li>
+          <li>
+            <strong>阶段 2｜API 实施：</strong>DTO、Auth session 用例、AuditModule、User
+            statistics、permissions、保留任务和 contract tests 已完成。
+          </li>
+          <li>
+            <strong>阶段 3｜Web 协同：</strong>支持 404/403/partial 的 Web 已接入真实 API；
+            SUPER_ADMIN 审计路由由服务端权限和前端 Guard 双重限制。
+          </li>
+          <li>
+            <strong>阶段 4｜联调验收：</strong>真实 PostgreSQL 迁移、角色权限、脱敏、幂等会话撤销、
+            1440×900 页面和容器健康检查已通过。
+          </li>
+        </ol>
+
+        <div class="grid">
+          <article class="card">
+            <span class="label">回滚</span>
+            <h3>先关路由，再回滚代码</h3>
+            <p>
+              隐藏 Web 导航并回滚应用镜像。新增索引可保留；若确认无依赖再单独删除。 Session
+              撤销与审计事件不反转。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label">兼容</span>
+            <h3>受控消费者下 additive v1</h3>
+            <p>
+              不改变 Contract 0002 成功或错误结构；Contract 0017 已实施并同步扩展 Permission enum。
+              当前已知消费者只有协同发布的 service-web，且必须忽略未知
+              permission；若发现独立严格枚举消费者， permission 扩展改走
+              <code>/api/v2</code>，不能破坏旧客户端。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label">运维口径</span>
+            <h3>90 天保留与百万行门禁</h3>
+            <p>
+              负责人：API/运维。在线保留 90 天且不归档；每日独立分批清理。少于 100 万行走普通 Prisma
+              migration，达到时阻断并改走并发建索引。
+            </p>
+          </article>
+        </div>
+
+        <h3 class="mt">验收矩阵</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>类别</th>
+                <th>必须验证</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>架构</td>
+                <td>
+                  Auth → User 单向；Audit 不修改 User/Session；无 forwardRef；全部新增路由为 POST。
+                </td>
+              </tr>
+              <tr>
+                <td>会话</td>
+                <td>
+                  本人列表、cursor、单个/全部其他撤销、当前 family、终态幂等、foreign
+                  404、审计失败回滚。
+                </td>
+              </tr>
+              <tr>
+                <td>审计</td>
+                <td>
+                  角色矩阵、时间窗、cursor 指纹、例行过滤、未知 action、metadata
+                  allowlist、敏感字段扫描。
+                </td>
+              </tr>
+              <tr>
+                <td>统计</td>
+                <td>
+                  ADMIN 仅 USER；SUPER_ADMIN 仅 USER/ADMIN；self/SUPER_ADMIN 排除；空库和大数计数。
+                </td>
+              </tr>
+              <tr>
+                <td>可靠性</td>
+                <td>
+                  DB timeout/恢复、Redis 限流失败策略、query plan、payload 上限、p95 预算与告警。
+                </td>
+              </tr>
+              <tr>
+                <td>合同</td>
+                <td>
+                  OpenAPI 3.1 解析；operation/DTO/status/permission 一致；POST-only guard 通过。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="mt">实现验收命令</h3>
+        <pre>
+cd service-api
+corepack pnpm@11.17.0 install
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm prisma:deploy
+
+cd ..
+node .github/scripts/check-service-api-contract-methods.mjs
+docker build --target test --tag quant-v2/service-api:test service-api
+docker build --tag quant-v2/service-api:local service-api
+curl -fsS -X POST http://127.0.0.1:13000/health
+curl -fsS -X POST http://127.0.0.1:13000/ready</pre>
+
+        <div class="grid two mt">
+          <article class="card">
+            <h3>实现验证</h3>
+            <ul>
+              <li>Node.js 24 容器内 format、lint、typecheck 与 28 个测试文件、108 项测试通过。</li>
+              <li>Contract 0017 YAML 解析、POST-only 守卫、严格 JSON 类型和路径唯一性通过。</li>
+              <li>真实 PostgreSQL 完成四段迁移、索引检查、保留任务和前后端接口联调。</li>
+              <li>生产 API 镜像构建，POST health/ready 检查通过。</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>后续触发项</h3>
+            <ul>
+              <li>实施 PR 记录真实表容量、索引耗时、query plan 和最终 p95 基线。</li>
+              <li>是否需要后续可信设备名称；首期明确不保存 IP/UA/指纹。</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="shell">
+        账户安全与运营查询 · 变更摘要：新增本人 Session family、脱敏审计读取和角色范围用户统计
+        Implemented；已交付 90 天保留、索引发布门禁与真实 Web 联调；不含 data-sync、行情或 P3 能力。
+      </div>
+    </footer>
+  </body>
+</html>

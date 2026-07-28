@@ -39,3 +39,6 @@ NNNN-short-title.md
 - [0014：板块 EOD 横截面快照、修订与排行定义](0014-sector-eod-snapshot-definition.md) — Proposed
 - [0015：财务 point-in-time 与估值边界](0015-financial-point-in-time-and-valuation.md) — Proposed
 - [0016：日频资金流方法学与数据边界](0016-money-flow-methodology-boundary.md) — Proposed
+- [0017：同步服务采用 SQLAlchemy Declarative ORM 作为持久化模型](0017-service-data-sync-declarative-orm.md) — Accepted（阶段 0–2 实施中）
+- [0018：service-api 入站路由仅允许 POST](0018-service-api-post-only-http-method.md) — Implemented
+- [0019：账户安全、审计读取与平台工作台边界](0019-account-security-audit-and-workspace-boundary.md) — Implemented

@@ -70,6 +70,10 @@ class FakeRawPayloadStore:
         self.payloads.append(payload)
         return f"s3://test/{payload.object_key}"
 
+    def get(self, uri: str) -> bytes:
+        """主数据目录同步不读取历史 raw；意外调用必须中断测试。"""
+        raise AssertionError(f"unexpected raw replay read: {uri}")
+
 
 class FakeRepository:
     """记录用例交给主数据仓储的标准目录事实。"""

@@ -1,7 +1,7 @@
 openapi: 3.1.1
 info:
   title: service-api financial statement and valuation API
-  version: 1.0.0
+  version: 2.0.0
   description: |
     Proposed authenticated public API for published A-share financial
     statements, governed financial metrics, and explicit valuation methodology
@@ -19,6 +19,7 @@ info:
     - /equities/{instrumentId}/financial-reports
     - /equities/{instrumentId}/financial-reports/{reportId}
     - /equities/{instrumentId}/financial-metrics
+x-http-method-policy: post-only
 servers:
   - url: /api/v1
 tags:
@@ -29,7 +30,7 @@ security:
   - userBearer: []
 paths:
   /equities/{exchange}/{symbol}/financial-reports:
-    get:
+    post:
       tags: [equity-financial-reports]
       operationId: listEquityFinancialReportsV2
       summary: List published financial statements without look-ahead
@@ -69,8 +70,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FinancialReportPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -87,7 +88,7 @@ paths:
           $ref: '#/components/responses/DataSyncUnavailable'
 
   /equities/{exchange}/{symbol}/financial-reports/{reportRef}:
-    get:
+    post:
       tags: [equity-financial-reports]
       operationId: getEquityFinancialReportV2
       summary: Read one governed page of a published financial statement
@@ -120,8 +121,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FinancialReportDetail'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -138,7 +139,7 @@ paths:
           $ref: '#/components/responses/DataSyncUnavailable'
 
   /equities/{exchange}/{symbol}/financial-metrics:
-    get:
+    post:
       tags: [equity-financial-metrics]
       operationId: listEquityFinancialMetricsV2
       summary: Read one explicit provider or derived metric family
@@ -176,8 +177,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FinancialMetricPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -194,7 +195,7 @@ paths:
           $ref: '#/components/responses/DataSyncUnavailable'
 
   /equities/{exchange}/{symbol}/valuations:
-    get:
+    post:
       tags: [equity-valuations]
       operationId: listEquityValuationObservations
       summary: Read one explicit valuation methodology series
@@ -231,8 +232,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ValuationPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':

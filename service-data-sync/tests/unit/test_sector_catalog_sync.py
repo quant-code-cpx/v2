@@ -56,6 +56,10 @@ class FakeRawPayloadStore:
         self.payloads.append(payload)
         return f"s3://test/{payload.object_key}"
 
+    def get(self, uri: str) -> bytes:
+        """目录同步用例不应重读 raw evidence；调用即为流程回归。"""
+        raise AssertionError(f"unexpected raw replay read: {uri}")
+
 
 class FakeRepository:
     """断言目录发布发生在原始归档之后的仓储替身。"""

@@ -24,6 +24,7 @@
 ## 数据与契约
 
 - 仅调用冻结的 service-api 契约。
+- service-api 调用全部经共享传输层发送 `POST`，业务 API 调用方不能选择或覆盖 method。
 - 未冻结能力使用 fixture/MSW，并清楚标注，不猜 endpoint。
 - Query key、缓存、失效、刷新、并发请求和错误策略明确。
 - 权限、敏感数据隐藏、时间/时区和金融精度语义明确。

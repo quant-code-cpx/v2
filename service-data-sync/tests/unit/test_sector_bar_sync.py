@@ -78,6 +78,10 @@ class FakeRawPayloadStore:
         self.payloads.append(payload)
         return f"s3://test/{payload.object_key}"
 
+    def get(self, uri: str) -> bytes:
+        """板块 K 线同步不支持从该替身 replay，调用表示测试流程错误。"""
+        raise AssertionError(f"unexpected raw replay read: {uri}")
+
 
 class FakeRepository:
     """捕获标准写入输入并返回最小发布结果。"""

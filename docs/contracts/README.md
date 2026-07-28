@@ -4,6 +4,10 @@
 
 技术选型完成后，在此提交 OpenAPI、AsyncAPI 或 schema 文件；接口兼容性、版本策略和破坏性变更须记录 ADR。
 
+所有 `service-api` 公开及运维 OpenAPI operation 必须是 `POST`，并声明
+`x-http-method-policy: post-only`；禁止新增其他 method。内部 `service-data-sync` 合同不受此规则约束。
+详见 [ADR-0018](../decisions/0018-service-api-post-only-http-method.md)。
+
 ## 契约索引
 
 - [0001：service-api User/Auth OpenAPI](0001-service-api-user-auth.openapi.yaml) — Superseded（仅历史 schema/migration 参考）
@@ -22,6 +26,7 @@
 - [0014：service-api 财务与估值公开 OpenAPI](0014-service-api-financial-valuation.openapi.yaml) — Proposed
 - [0015：service-data-sync 日频资金流内部 OpenAPI](0015-data-sync-daily-money-flow-internal.openapi.yaml) — Proposed
 - [0016：service-api 日频资金流公开 OpenAPI](0016-service-api-daily-money-flow.openapi.yaml) — Proposed
+- [0017：service-api 账户安全与运营查询 OpenAPI](0017-service-api-account-security-operations.openapi.yaml) — Implemented
 
 0007/0008、0011/0012、0015/0016 是对应既有市场数据契约的增量能力。0009/0010 对
 0003/0004 中证券目录、详情和上市状态相关路径具有局部权威性；0013/0014 取代其中基于

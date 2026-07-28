@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from botocore.exceptions import ClientError
 from redis.exceptions import RedisError
+from sqlalchemy import create_engine, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from service_data_sync.bootstrap import container as container_module
@@ -36,6 +37,17 @@ def test_database_client_builds_pings_and_closes(
     engine.connect.side_effect = SQLAlchemyError("offline")
     with pytest.raises(DependencyUnavailable, match="postgres unavailable"):
         client.ping()
+
+
+def test_database_client_creates_short_lived_transactional_sessions() -> None:
+    """Session 必须关闭 autoflush，并在事务结束后可安全地关闭连接。"""
+    client = database_module.DatabaseClient(create_engine("sqlite+pysqlite://"))
+
+    with client.transaction() as session:
+        assert session.autoflush is False
+        assert session.execute(select(1)).scalar_one() == 1
+
+    client.close()
 
 
 def test_redis_client_builds_pings_and_closes(

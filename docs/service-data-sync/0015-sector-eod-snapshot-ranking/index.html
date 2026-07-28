@@ -223,11 +223,18 @@
         不是盘中、分时或 K 线派生数据，也不宣称上游官方终态。
       </p>
       <dl class="meta">
-        <div><dt>状态</dt><dd class="status">Proposed</dd></div>
+        <div><dt>状态</dt><dd class="status">Accepted（核心实现、2026 日历与容器验证已完成；生产启用待决）</dd></div>
         <div><dt>负责人</dt><dd>service-data-sync / service-api</dd></div>
         <div><dt>最后修改</dt><dd>2026-07-27</dd></div>
+        <div><dt>变更摘要</dt><dd>补记 2026 沪深官方日历适配器、任务结构化日志与容器验收；未知年份继续安全阻断。</dd></div>
         <div><dt>关联决策</dt><dd><a href="../../decisions/0014-sector-eod-snapshot-definition.md">ADR-0014</a></dd></div>
       </dl>
+      <p class="lede">
+        实现已覆盖 EOD adapter、raw/replay、candidate shadow、原子 publication、质量门、内部/公开读取、
+        Celery 16:20 调度、租约恢复、publication rollback，以及经沪深公告交叉核验的 2026 年日历。
+        来源许可、连续探针与生产观测验收尚未完成；未选择或引入任何监控平台。指标导出、dashboard 和告警路由只作为
+        production 启用条件，所有生产相关开关保持关闭。
+      </p>
     </div>
   </header>
 
@@ -321,7 +328,7 @@
           <ul>
             <li>来源商业使用、保存、频率和再分发许可待决。</li>
             <li>最新值、涨跌额、总市值单位与缩放待独立对账。</li>
-            <li>权威 A 股交易日历必须先发布。</li>
+            <li>2027 及以后权威 A 股交易日历必须在年度公告后更新并重新核验。</li>
             <li>连续探针与阈值校准完成前仅 local/research/shadow。</li>
           </ul>
         </article>
@@ -336,7 +343,7 @@
             <tr><th>原始 capability</th><td><code>sector.quote.eod.snapshot.raw</code></td></tr>
             <tr><th>canonical dataset</th><td><code>sector.quote.eod.snapshot</code></td></tr>
             <tr><th>scheme / 市场</th><td><code>eastmoney.industry</code>、<code>eastmoney.concept</code>；中国 A 股板块</td></tr>
-            <tr><th>时区 / 日历</th><td><code>Asia/Shanghai</code>；已发布权威中国 A 股交易日历</td></tr>
+            <tr><th>时区 / 日历</th><td><code>Asia/Shanghai</code>；2026 年采用<a href="https://www.sse.com.cn/disclosure/dealinstruc/closed/">上交所</a>与<a href="https://www.szse.cn/disclosure/notice/t20251222_618087.html">深交所</a>已发布公告；其他年份未知</td></tr>
             <tr><th>分区</th><td><code>scheme + trade_date</code>；每分区一次完整批量候选</td></tr>
             <tr><th>初始 shadow cadence</th><td>交易日 16:20；内部发布截点 16:15；生产值待连续探针批准</td></tr>
             <tr><th>最终态</th><td><code>post_close_observation</code>，不是官方 final</td></tr>
@@ -455,7 +462,7 @@
         </article>
         <article class="card">
           <span class="label">Public projection</span>
-          <h3>service-api SectorMarketDataModule</h3>
+          <h3>service-api IndustryModule</h3>
           <p><strong>职责：</strong>JWT/授权、DTO、Zod 下游校验、剥离内部 UUID、Problem Details。</p>
           <p><strong>输入 / 输出：</strong>公开 v1 GET → 最小市场字段。</p>
           <p><strong>状态：</strong>无 Prisma 表、无 Redis 权威缓存。</p>
@@ -813,7 +820,7 @@ LIMIT :limit_plus_one;</code></pre>
         </table>
       </div>
       <p>
-        service-api 扩展现有 <code>SectorMarketDataModule</code> 的 Controller、DTO、Service、
+        service-api 扩展现有 <code>IndustryModule</code> 的 Controller、DTO、Service、
         HTTP Client 和 Zod contract。依赖方向保持单向；只执行安全 GET，使用现有内部 base URL、
         Bearer 和有界 timeout。内部 404/409/429 映射冻结公开状态；网络失败、5xx 或 schema drift 统一 503。
         不新增 Prisma model，不把 snapshot 放进 Redis，不修改 <code>securityVersion</code> 规则。
@@ -908,11 +915,11 @@ LIMIT :limit_plus_one;</code></pre>
           <thead><tr><th>阶段</th><th>交付</th><th>退出条件</th><th>回滚</th></tr></thead>
           <tbody>
             <tr><td>0. 来源认证</td><td>1.18.78 fixtures、连续探针、单位/许可记录、schema fingerprint。</td><td>至少 5 个交易日基础成功率 ≥99%；许可与频率批准。</td><td>source policy 保持 false。</td></tr>
-            <tr><td>1. 共享前置</td><td>先完成 0014 拥有的 source_batch expand；本方案只创建 checkpoint、snapshot、quote、quality 表。</td><td>0014 迁移与旧 writer 兼容测试通过；共享契约可用。</td><td>本方案不回滚 0014 的共享迁移；失败时保持 EOD writer 关闭。</td></tr>
-            <tr><td>2. 同步闭环</td><td>domain、port、adapter、application、repository、CLI、raw replay。</td><td>正常/重复/修订/迟到/故障/崩溃测试通过。</td><td>关 EOD policy；保留 raw 与表。</td></tr>
-            <tr><td>3. 内部 API</td><td>latest/exact、动态 rank、cursor/ETag、服务 Bearer、contract tests。</td><td>null/tie/方向/409/503 全通过。</td><td>停止暴露新 route；0005 路由不变。</td></tr>
-            <tr><td>4. service-api</td><td>DTO、client、Zod、public projection、JWT/Problem Details。</td><td>0011/0012 consumer-driven contracts 与镜像构建通过。</td><td>移除公开 route；无业务数据迁移。</td></tr>
-            <tr><td>5. Shadow/启用</td><td>16:20 调度、dashboard、告警、runbook。</td><td>至少 7 个交易日无 blocking error；恢复演练成功。</td><td>停 scheduler，上一 publications 仍可读。</td></tr>
+            <tr><td>1. 共享前置</td><td>0014 source_batch expand 与 EOD checkpoint、snapshot、quote、quality 表已落地。</td><td>迁移、旧 writer 回归和 EOD PostgreSQL 集成测试通过。</td><td>本方案不回滚 0014 的共享迁移；失败时保持 EOD writer 关闭。</td></tr>
+            <tr><td>2. 同步闭环</td><td>domain、port、adapter、application、repository、CLI、raw replay、candidate shadow、reaper 与 rollback 已实现。</td><td>正常、重复、修订、阻断质量、raw replay、fencing、租约回收和 rollback 自动测试通过。</td><td>关闭 EOD source/scheduler/publish 开关；保留 raw 与表。</td></tr>
+            <tr><td>3. 内部 API</td><td>latest/exact、动态 rank、cursor/ETag 与服务 Bearer 已实现。</td><td>内部 HTTP 行为测试通过；candidate/quarantine 不暴露给消费者。</td><td>停止暴露新 route；既有 0005 路由不变。</td></tr>
+            <tr><td>4. service-api</td><td>DTO、client、公开 projection 已实现。</td><td>本轮仅完成定向格式、lint、类型与 client 测试；需在 service-api 架构调整稳定后重跑全量镜像验收。</td><td>移除公开 route；无业务数据迁移。</td></tr>
+            <tr><td>5. Shadow/启用</td><td>16:20 scheduler、5 分钟 reaper、受控 rollback、2026 沪深公告日历与结构化任务日志已实现；默认都关闭。</td><td>尚缺 5+ 交易日 probe、许可证与生产观测验收（指标导出、dashboard、告警路由）；未选择具体平台，不能启用；下一年度公告前日历也保持未知。</td><td>停 scheduler；上一 publications 仍可读。</td></tr>
           </tbody>
         </table>
       </div>
@@ -926,7 +933,7 @@ LIMIT :limit_plus_one;</code></pre>
         <li>回滚 publication 时，在事务中把分区 current 指回上一 passed revision；不删除错误 revision 或 raw。</li>
       </ol>
 
-      <h3>实现验收命令（计划，本文未执行实现测试）</h3>
+      <h3>实现验收命令</h3>
       <pre><code># service-data-sync：Docker-only
 docker build --target test --tag quant-v2/service-data-sync:test service-data-sync
 docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff format --check .
@@ -967,6 +974,11 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
         <li>service-api Bearer、Zod schema drift、UUID 剥离、401/403/404/409/429/503。</li>
         <li>迁移 upgrade/downgrade/upgrade、旧目录/K 线回归与 publication rollback。</li>
       </ul>
+      <p>
+        <strong>本次验证事实：</strong>Docker EOD 定向单测、仓储集成、迁移升级、格式、lint、pyright、架构测试和
+        service-api 定向 consumer 测试均已执行。完整 service-api 镜像验收需要等待当前服务重构工作树稳定；
+        无法替代来源许可、连续 shadow probe 与运维告警的生产准入。
+      </p>
     </section>
 
     <section id="open">
@@ -978,7 +990,7 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
             <tr><td>商业使用、保存、频率、再分发许可</td><td>项目维护者 / 合规</td><td>production source policy 评审</td><td>仅 local/research/shadow；生产 false。</td></tr>
             <tr><td>最新值/涨跌额单位</td><td>数据工程</td><td>页面与独立样本对账</td><td><code>provider_native</code>，只做同快照排序。</td></tr>
             <tr><td>总市值币种与缩放</td><td>数据工程 / 数据产品</td><td>上游说明或可审计对账</td><td>不称 CNY、不跨 scheme 加总。</td></tr>
-            <tr><td>cutoff、schedule、异常阈值</td><td>数据工程 / 运维</td><td>≥5 个交易日连续 probe</td><td>使用 shadow 初值，不声明 SLA。</td></tr>
+            <tr><td>下一年度交易日历、cutoff、schedule、异常阈值</td><td>数据工程 / 运维</td><td>年度沪深公告与 ≥5 个交易日连续 probe</td><td>未发布年份一律未知；使用 shadow 初值，不声明 SLA。</td></tr>
             <tr><td>raw/revision retention</td><td>合规 / 运维</td><td>许可与容量报告</td><td>不自动删除。</td></tr>
           </tbody>
         </table>

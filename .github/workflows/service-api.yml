@@ -1,0 +1,51 @@
+name: service-api
+
+on:
+  pull_request:
+    paths:
+      - "service-api/**"
+      - "service-web/src/api/**"
+      - "docs/contracts/**"
+      - "compose.yaml"
+      - "compose.dev.yaml"
+      - "compose.prod.yaml"
+      - ".env.example"
+      - ".github/scripts/check-service-api-contract-methods.mjs"
+      - ".github/workflows/service-api.yml"
+  push:
+    branches: [main]
+    paths:
+      - "service-api/**"
+      - "service-web/src/api/**"
+      - "docs/contracts/**"
+      - "compose.yaml"
+      - "compose.dev.yaml"
+      - "compose.prod.yaml"
+      - ".env.example"
+      - ".github/scripts/check-service-api-contract-methods.mjs"
+      - ".github/workflows/service-api.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.13.1"
+      - run: node .github/scripts/check-service-api-contract-methods.mjs
+      - run: docker build --target test --tag quant-v2/service-api:test service-api
+      - run: docker run --rm quant-v2/service-api:test corepack pnpm@11.17.0 format:check
+      - run: docker run --rm quant-v2/service-api:test corepack pnpm@11.17.0 lint
+      - run: docker run --rm -e DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build quant-v2/service-api:test corepack pnpm@11.17.0 typecheck
+      - run: docker run --rm quant-v2/service-api:test corepack pnpm@11.17.0 test
+      - run: docker run --rm -e DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build quant-v2/service-api:test corepack pnpm@11.17.0 build
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag quant-v2/service-api:ci service-api

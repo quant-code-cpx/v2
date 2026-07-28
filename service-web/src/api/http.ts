@@ -1,8 +1,8 @@
 import { environment } from "../config/env";
 
-/** Carry safe HTTP failure metadata without retaining a server Problem detail. */
+/** 携带安全 HTTP 失败元数据，不保留服务端 Problem detail。 */
 export class ApiError extends Error {
-  /** Construct an error limited to status, stable code, and optional retry timing. */
+  /** 构造只包含状态、稳定 code 与可选重试时间的错误。 */
   public constructor(
     public readonly status: number,
     public readonly code?: string,
@@ -13,7 +13,7 @@ export class ApiError extends Error {
   }
 }
 
-/** Recognize safe API failure metadata even when production chunks hold separate class copies. */
+/** 即使生产 chunk 持有不同类副本，也能识别安全 API 失败元数据。 */
 export function isApiError(error: unknown): error is ApiError {
   if (error instanceof ApiError) {
     return true;
@@ -27,37 +27,36 @@ export function isApiError(error: unknown): error is ApiError {
   );
 }
 
-/** Describe JSON-only request data sent through the service-api boundary. */
+/** 描述通过 `service-api` 边界发送的 JSON 请求数据；方法由传输层固定为 POST。 */
 export interface JsonRequestOptions {
-  method: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
   headers?: HeadersInit;
   signal?: AbortSignal;
 }
 
-/** Describe transport input so unit tests can provide contract-shaped responses. */
+/** 描述传输输入，使单元测试可提供符合合同的响应。 */
 export interface HttpTransportRequest {
   url: string;
   init: RequestInit;
 }
 
-/** Abstract browser transport exclusively for deterministic unit tests. */
+/** 抽象浏览器传输，仅供确定性单元测试替换。 */
 export type HttpTransport = (request: HttpTransportRequest) => Promise<Response>;
 
-/** Use browser fetch for every production request. */
+/** 所有生产请求使用浏览器 fetch。 */
 const browserTransport: HttpTransport = async ({ url, init }) => fetch(url, init);
 
-/** Hold the active transport; production always keeps the browser implementation. */
+/** 保存当前传输；生产环境始终使用浏览器实现。 */
 let activeTransport: HttpTransport = browserTransport;
 
-/** Build a versioned service-api URL from the public build-time API origin. */
+/** 使用公开构建期 API origin 构造版本化 `service-api` URL。 */
 export function apiUrl(path: string): string {
   const configuredBaseUrl = environment.VITE_API_BASE_URL;
 
   return configuredBaseUrl === undefined ? path : new URL(path, configuredBaseUrl).toString();
 }
 
-/** Install a transient transport only when Vitest is executing. */
+/** 仅在 Vitest 执行时安装临时传输。 */
 export function setHttpTransportForTests(transport?: HttpTransport): void {
   if (import.meta.env.MODE !== "test") {
     throw new Error("Test transport is unavailable outside Vitest.");
@@ -66,7 +65,7 @@ export function setHttpTransportForTests(transport?: HttpTransport): void {
   activeTransport = transport ?? browserTransport;
 }
 
-/** Read a stable error code from a Problem response without exposing its detail text. */
+/** 从 Problem 响应读取稳定错误 code，不公开 detail 文本。 */
 function readProblemCode(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null || !("code" in value)) {
     return undefined;
@@ -76,7 +75,7 @@ function readProblemCode(value: unknown): string | undefined {
   return typeof code === "string" ? code : undefined;
 }
 
-/** Parse an optional Retry-After header as bounded positive seconds. */
+/** 将可选 Retry-After header 解析为有界正秒数。 */
 function readRetryAfterSeconds(headers: Headers): number | undefined {
   const rawValue = headers.get("Retry-After");
   if (rawValue === null) {
@@ -87,7 +86,7 @@ function readRetryAfterSeconds(headers: Headers): number | undefined {
   return Number.isSafeInteger(parsedValue) && parsedValue > 0 ? parsedValue : undefined;
 }
 
-/** Decode JSON only when the endpoint returned an entity body. */
+/** 仅在端点返回实体 Body 时解析 JSON。 */
 async function readJsonBody(response: Response): Promise<unknown> {
   if (response.status === 204 || response.headers.get("content-length") === "0") {
     return undefined;
@@ -97,7 +96,7 @@ async function readJsonBody(response: Response): Promise<unknown> {
   return contentType.includes("json") ? response.json() : undefined;
 }
 
-/** Send one JSON request with cookies included and return payload plus response metadata. */
+/** 发送携带 cookie 的 POST JSON 请求，并返回载荷及响应元数据。 */
 export async function requestJsonWithMetadata<T>(
   path: string,
   options: JsonRequestOptions,
@@ -106,7 +105,7 @@ export async function requestJsonWithMetadata<T>(
   headers.set("Accept", "application/json");
 
   const init: RequestInit = {
-    method: options.method,
+    method: "POST",
     headers,
     credentials: "include",
     signal: options.signal,
@@ -131,7 +130,7 @@ export async function requestJsonWithMetadata<T>(
   return { data: payload as T, headers: response.headers };
 }
 
-/** Send one JSON request and return only its success payload. */
+/** 发送一个 POST JSON 请求，并仅返回成功载荷。 */
 export async function requestJson<T>(path: string, options: JsonRequestOptions): Promise<T> {
   const response = await requestJsonWithMetadata<T>(path, options);
   return response.data;

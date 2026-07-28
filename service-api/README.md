@@ -1,17 +1,25 @@
 # service-api
 
-NestJS 11 单进程 API。当前包含 `UserModule`、`AuthModule`、`SectorMarketDataModule`、`RedisModule` 和 PostgreSQL 持久化。
+NestJS 11 单进程 API。当前包含 `UserModule`、`AuthModule`、`AuditModule`、`StockModule`、
+`IndustryModule`、`DataSyncModule`、Redis 和 PostgreSQL 持久化。
 
 技术方案：[API 服务基础架构与技术方案](../docs/service-api/0001-service-api-foundation/index.html)。
 决策记录：[ADR-0005](../docs/decisions/0005-service-api-runtime-and-architecture.md)。
 
 ## 边界
 
-- `UserModule`：用户资料、角色、状态、密码凭证、`securityVersion`。
-- `AuthModule`：登录、JWT、Refresh Session、退出、Guard、Redis 安全限流。
+- 所有公开业务路由和 `/health`、`/ready` 运维路由仅使用 `POST`。禁止在 Controller 中声明其他
+  HTTP method；CORS preflight 由框架处理，调用 `service-data-sync` 的出站 method 不受此限制。
+- `UserModule`：用户资料、角色、状态、密码凭证、`securityVersion` 和角色范围统计。
+- `AuthModule`：登录、JWT、Refresh Session、退出、本人 Session family 管理、Guard、Redis 安全限流。
+- `AuditModule`：仅向 `SUPER_ADMIN` 提供 action registry 驱动的脱敏审计列表与详情。
 - PostgreSQL：用户、凭证、会话、审计的唯一权威存储。
 - Redis：登录/刷新限流、失败锁定、重放标记；不保存权威业务状态。
-- `SectorMarketDataModule`：仅经 `service-data-sync` 内部 HTTP 契约读取已发布行业/概念目录、日/周/月原生 K 线和固定 release 的板块成分观测；公开提供板块→成分及证券→板块查询，不直连同步数据库、不写 Redis 权威缓存、不接入分钟数据。
+- `StockModule`：提供证券目录、详情与上市生命周期查询。
+- `IndustryModule`：提供行业/概念目录、日/周/月原生 K 线、固定 release 的板块成分观测，
+  以及 `post_close_observation` EOD 横截面与排行。
+- `DataSyncModule`：集中装配 `service-data-sync` 内部 HTTP Client 与运行时合同校验；不包含同步任务、
+  供应商 SDK 或权威数据持久化。
 - 不含 Worker、Scheduler、队列、实时通信或其他业务模块。
 
 Prisma schema 位于 `prisma/`，入口文件只定义 generator 与 datasource；数据模型按领域放在
@@ -24,7 +32,7 @@ Prisma schema 位于 `prisma/`，入口文件只定义 generator 与 datasource�
 每个 Nest module 自建 `test/`，Controller、Service、DTO、Guard 等测试集中到 module 内部：
 
 ```text
-src/modules/auth/
+src/apps/auth/
 ├── auth.controller.ts
 ├── auth.service.ts
 └── test/
@@ -32,8 +40,9 @@ src/modules/auth/
     └── auth.service.spec.ts
 ```
 
-`platform/` 与 `scripts/` 下的独立功能同样使用自身 `test/`。禁止把 `service.ts` 与
-`service.spec.ts` 或 `service.test.ts` 放在同一目录；跨 module 集成测试才可进入服务级专用测试树。
+`config/`、`data-sync/`、`lifecycle/`、`shared/` 与 `scripts/` 下的独立功能同样使用自身
+`test/`。禁止把 `service.ts` 与 `service.spec.ts` 或 `service.test.ts` 放在同一目录；跨 module
+集成测试才可进入服务级专用测试树。
 
 ## 本地运行
 
@@ -49,12 +58,18 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env \
 
 服务地址：`http://127.0.0.1:13000`。
 
-- `GET /health`：进程存活。
-- `GET /ready`：PostgreSQL 与 Redis 可用。
+- `POST /health`：进程存活。
+- `POST /ready`：PostgreSQL 与 Redis 可用。
 
-运行时不暴露 Swagger UI 或 OpenAPI JSON，避免绕过默认拒绝鉴权边界；机器可读合同以
+运行时不暴露 Swagger UI 或 OpenAPI JSON，避免绕过默认拒绝鉴权边界；用户访问与账户安全机器合同以
 [`docs/contracts/0002-user-access-management.openapi.yaml`](../docs/contracts/0002-user-access-management.openapi.yaml)
+和
+[`docs/contracts/0017-service-api-account-security-operations.openapi.yaml`](../docs/contracts/0017-service-api-account-security-operations.openapi.yaml)
 为准。
+
+POST-only 方法与动作路径规则见
+[ADR-0018](../docs/decisions/0018-service-api-post-only-http-method.md)。读取类 POST 命中
+`If-None-Match` 时返回 `204`，不会返回仅适用于条件 GET/HEAD 的 `304`。
 
 ### 自动初始化超级管理员
 
@@ -86,9 +101,7 @@ pnpm prisma:deploy && pnpm bootstrap:admin
 `userId` 与 `account` 的 JSON 数组（不提交仓库、不记录到日志）：
 
 ```json
-[
-  { "userId": "00000000-0000-4000-8000-000000000001", "account": "market.admin" }
-]
+[{ "userId": "00000000-0000-4000-8000-000000000001", "account": "market.admin" }]
 ```
 
 先执行准备命令；它在串行化事务中锁定 `users` 表，拒绝缺失、重复、email 字段、格式错误和半完成映射，
@@ -154,6 +167,29 @@ docker compose -f ../compose.yaml -f ../compose.dev.yaml --env-file ../.env \
 根 `.env` 是 Compose 配置源；本目录 `.env` 只供宿主机直接运行 NestJS。两者均禁止提交，
 对应可提交假值分别位于根 `.env.example` 和本目录 `.env.example`。
 
+## 审计保留与索引发布
+
+`AuditLog` 在线保留 90 天，不归档。部署编排每日以独立一次性进程执行以下命令；任务使用 PostgreSQL
+advisory lock、每批最多删除 5,000 行，不写清理动作审计：
+
+```bash
+DATABASE_URL='postgresql://…' pnpm audit:retention
+```
+
+普通 migration 前可显式运行容量门禁。迁移 SQL 自身也会在 `audit_logs` 达到 100 万行且目标索引不存在时
+失败，因此即使编排没有调用预检也不能绕过：
+
+```bash
+DATABASE_URL='postgresql://…' pnpm audit:index-gate
+pnpm prisma:deploy
+```
+
+达到门禁时，在维护窗口逐条、事务外执行
+[并发索引 runbook](prisma/runbooks/account-security-indexes-concurrently.sql)，随后重新执行
+`pnpm prisma:deploy` 登记 migration。回滚使用
+[并发索引回滚 runbook](prisma/runbooks/account-security-indexes-concurrently.rollback.sql)；生产 API
+启动流程不执行 migration 或保留期清理。
+
 ## 验证
 
 ```bash
@@ -168,8 +204,10 @@ docker build --tag quant-v2/service-api:local .
 
 迁移在独立的 `service-api-migrate` 容器中执行，应用启动不会自动修改生产 schema。初始 migration 的人工回滚脚本位于
 [00000 rollback.sql](prisma/migrations/20260726000000_initial_user_auth/rollback.sql)；Apex 用户访问 migration 的人工回滚脚本位于
-[10100 rollback.sql](prisma/migrations/20260726010100_apex_user_access/rollback.sql)。后者仅可在尚未写入 Apex 账号、
-SUPER_ADMIN、软删除或新 Session family 状态时执行；PostgreSQL enum 值不会被破坏性移除。
+[10100 rollback.sql](prisma/migrations/20260726010100_apex_user_access/rollback.sql)；账户安全查询索引回滚位于
+[00000 account security rollback.sql](prisma/migrations/20260728000000_account_security_operations/rollback.sql)。
+用户访问回滚仅可在尚未写入 Apex 账号、SUPER_ADMIN、软删除或新 Session family 状态时执行；
+PostgreSQL enum 值不会被破坏性移除。
 
 生产 Compose 不在主机构建镜像，只接收 `SERVICE_API_IMAGE_REF` 和
 `SERVICE_API_MIGRATION_IMAGE_REF` 两个 immutable digest；完整入口见根

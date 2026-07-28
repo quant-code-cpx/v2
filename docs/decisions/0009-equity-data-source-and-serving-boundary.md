@@ -94,7 +94,7 @@ fallback。任何失败都发布 `partial` 或缺口，不用未认证来源静�
 ### 服务与 API 边界
 
 - `service-data-sync` 新增 FastAPI 内部读/控制接口；仅接受受网络策略保护的服务凭据。
-- `service-api` 新增 `EquityModule`，通过版本化 HTTP client 调用同步服务。不得复用 Prisma 查询同步库。
+- `service-api` 新增 `StockModule`，通过版本化 HTTP client 调用同步服务。不得复用 Prisma 查询同步库。
 - 对外个股业务接口继续使用 `/api/v1`，默认要求有效 Bearer Session；所有当前角色均可读取。
 - 首期 `service-api` 不建立行情读模型、不使用 Redis 缓存业务数据。GET 只在安全重试预算内重试一次；
   下游不可用映射为 503，不返回未标记的陈旧数据。
@@ -120,5 +120,5 @@ fallback。任何失败都发布 `partial` 或缺口，不用未认证来源静�
 
 本决策保留 [ADR-0004](0004-market-data-provider-adapters.md) 的 provider-neutral port、adapter 与 registry
 边界；仅针对本方案个股 capabilities，替代其中“`akshare → tushare` 默认路由”。本方案不使用 Tushare。
-本决策扩展 [ADR-0005](0005-service-api-runtime-and-architecture.md) 的业务范围：新增 `EquityModule`
+本决策扩展 [ADR-0005](0005-service-api-runtime-and-architecture.md) 的业务范围：新增 `StockModule`
 和短期查询防滥用计数，但不改变 User/Auth 单向依赖或 Redis 非权威边界。

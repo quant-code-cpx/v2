@@ -6,6 +6,9 @@ from service_data_sync.infrastructure.providers.akshare.eastmoney_equity_catalog
 from service_data_sync.infrastructure.providers.akshare.eastmoney_sector_bars import (
     AkshareEastmoneySectorBarsAdapter,
 )
+from service_data_sync.infrastructure.providers.akshare.eastmoney_sector_eod import (
+    AkshareEastmoneySectorEodAdapter,
+)
 from service_data_sync.infrastructure.providers.akshare.eastmoney_sector_membership import (
     AkshareEastmoneySectorMembershipAdapter,
 )
@@ -16,6 +19,7 @@ from service_data_sync.infrastructure.providers.akshare.tencent_daily_bars impor
 __all__ = [
     "AkshareEastmoneyEquityCatalogAdapter",
     "AkshareEastmoneySectorBarsAdapter",
+    "AkshareEastmoneySectorEodAdapter",
     "AkshareEastmoneySectorMembershipAdapter",
     "AkshareTencentDailyBarsAdapter",
 ]

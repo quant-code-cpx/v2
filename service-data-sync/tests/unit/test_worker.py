@@ -7,19 +7,26 @@ from service_data_sync.entrypoints import worker
 from service_data_sync.infrastructure.messaging.celery_app import create_worker_app
 
 
-def test_worker_app_has_no_business_tasks(configured_environment: None) -> None:
-    """保证基础 worker 不含未经评审的业务任务注册。"""
+def test_worker_app_registers_only_gated_sector_eod_tasks(configured_environment: None) -> None:
+    """保证 worker 只注册经方案审计的 EOD 任务，默认没有 beat 调度。"""
     app = create_worker_app(load_settings())
     custom_task_names = {
         task_name for task_name in app.tasks if task_name.startswith("service_data_sync.")
     }
 
-    assert custom_task_names == set()
+    assert custom_task_names == {
+        "service_data_sync.sector_eod.dispatch_shadow",
+        "service_data_sync.sector_eod.reap",
+        "service_data_sync.sector_eod.run",
+    }
     assert app.conf.task_ignore_result is True
     assert app.conf.result_backend is None
+    assert app.conf.task_acks_late is True
+    assert app.conf.task_reject_on_worker_lost is True
+    assert app.conf.beat_schedule == {}
 
 
-def test_worker_entrypoint_builds_an_empty_worker(
+def test_worker_entrypoint_builds_a_gated_worker(
     configured_environment: None,
     monkeypatch,
 ) -> None:

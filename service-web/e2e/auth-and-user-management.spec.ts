@@ -1,19 +1,21 @@
 import { expect, test } from "@playwright/test";
 import type { Locator, Page, Route } from "@playwright/test";
 
-/** Use fixed valid UUIDs so URL-owned Dialog state follows target-contract validation. */
+/** 使用固定有效 UUID，确保 URL 所有的 Dialog 状态通过目标合同校验。 */
 const ids = {
   user: "16b6bc36-b3ec-4e8c-b2c8-9f704a83d415",
   admin: "7ce0f18a-9f4d-4b3a-ae69-d0ff1707df91",
   super: "72a4d2a1-3798-4bcf-978f-75c69c6d246b",
   created: "8f401b48-5b0e-4a76-8d85-2c7101a28955",
   deleted: "9eb2c698-6401-4bd5-81b2-f3a7900ea87b",
+  family: "47bd3b4f-316a-4cbb-a35c-1785887e9013",
+  event: "5f1aa8af-f515-4f6b-af1c-b7f00ee436db",
 } as const;
 
-/** Represent test-only role scenarios accepted by the controlled API route handler. */
+/** 表示受控 API 路由处理器接受的测试角色场景。 */
 type Scenario = "user" | "admin" | "super";
 
-/** Represent a non-sensitive user shape used only by strict contract test responses. */
+/** 表示严格合同测试响应使用的非敏感用户形状。 */
 interface MockUser {
   id: string;
   account: string;
@@ -27,7 +29,7 @@ interface MockUser {
   updatedAt: string;
 }
 
-/** Track test backend behavior so a USER 403 test can prove no list was fetched. */
+/** 跟踪测试后端行为，使权限测试能证明受限列表未发起。 */
 interface MockApiState {
   users: MockUser[];
   userListCalls: number;
@@ -35,9 +37,11 @@ interface MockApiState {
   forceRefreshUnauthorized: boolean;
   forceUserListUnauthorized: boolean;
   forceUserListError: boolean;
+  forceProfileConflict: boolean;
+  auditListCalls: number;
 }
 
-/** Return contract-shaped timestamps shared by deterministic E2E response fixtures. */
+/** 返回确定性 E2E 响应 fixture 共享的合同时间。 */
 function timestamps() {
   return {
     lastLoginAt: "2026-07-26T09:20:00.000Z",
@@ -47,7 +51,7 @@ function timestamps() {
   };
 }
 
-/** Build a current identity matching one scenario's server-calculated permissions. */
+/** 构造符合场景服务端权限计算结果的当前身份。 */
 function currentUser(scenario: Scenario) {
   const base = {
     id: scenario === "user" ? ids.user : scenario === "admin" ? ids.admin : ids.super,
@@ -63,10 +67,14 @@ function currentUser(scenario: Scenario) {
     ...base,
     permissions:
       scenario === "user"
-        ? ["profile:read", "profile:update", "password:change"]
+        ? ["profile:read", "profile:update", "password:change", "sessions:read", "sessions:revoke"]
         : scenario === "admin"
           ? [
               "profile:read",
+              "profile:update",
+              "password:change",
+              "sessions:read",
+              "sessions:revoke",
               "users:read",
               "users:create",
               "users:update",
@@ -75,6 +83,10 @@ function currentUser(scenario: Scenario) {
             ]
           : [
               "profile:read",
+              "profile:update",
+              "password:change",
+              "sessions:read",
+              "sessions:revoke",
               "users:read",
               "users:create",
               "users:update",
@@ -82,11 +94,12 @@ function currentUser(scenario: Scenario) {
               "users:reset-password",
               "admins:create",
               "admins:manage",
+              "audit:read",
             ],
   };
 }
 
-/** Read a scenario only from the test access token supplied by the in-memory Web client. */
+/** 只从内存 Web 客户端提供的测试 access token 读取场景。 */
 function scenarioFromRoute(route: Route): Scenario {
   const authorization = route.request().headers().authorization ?? "";
 
@@ -100,7 +113,7 @@ function scenarioFromRoute(route: Route): Scenario {
   return "admin";
 }
 
-/** Recover E2E refresh identity from a test-only HttpOnly-cookie stand-in after page reload. */
+/** 页面刷新后从测试专用 HttpOnly cookie 替身恢复 E2E 身份。 */
 function scenarioFromRefreshCookie(route: Route): Scenario | undefined {
   const cookie = route.request().headers().cookie ?? "";
 
@@ -117,7 +130,7 @@ function scenarioFromRefreshCookie(route: Route): Scenario | undefined {
   return undefined;
 }
 
-/** Fulfil a JSON API response with a no-store-compatible test body. */
+/** 用兼容 no-store 的测试 Body 返回 JSON API 响应。 */
 async function fulfilJson(
   route: Route,
   status: number,
@@ -132,7 +145,7 @@ async function fulfilJson(
   });
 }
 
-/** Fulfil a stable Problem response without furnishing sensitive problem detail. */
+/** 返回不包含敏感 detail 的稳定 Problem 响应。 */
 async function fulfilProblem(route: Route, status: number, code: string) {
   await fulfilJson(route, status, {
     type: `https://apex.local/problems/${code}`,
@@ -145,7 +158,7 @@ async function fulfilProblem(route: Route, status: number, code: string) {
   });
 }
 
-/** Parse a JSON request body used only by the controlled E2E API adapter. */
+/** 解析仅供受控 E2E API 适配器使用的 JSON 请求体。 */
 function requestJson(route: Route): Record<string, unknown> {
   const rawBody = route.request().postData() ?? "{}";
   const parsedBody: unknown = JSON.parse(rawBody);
@@ -155,7 +168,22 @@ function requestJson(route: Route): Record<string, unknown> {
     : {};
 }
 
-/** Install a strict Contract 0002 API adapter for one browser page; production code still uses fetch. */
+/** 构造合同 0017 允许公开的脱敏审计事件。 */
+function auditEvent() {
+  return {
+    id: ids.event,
+    category: "AUTHENTICATION",
+    severity: "WARNING",
+    action: "auth.refresh.replay_detected",
+    summary: "检测到 Refresh 重放",
+    actor: null,
+    target: { type: "SESSION", id: ids.family },
+    requestId: "91e2-e2e-8a40",
+    occurredAt: "2026-07-28T06:21:08.000Z",
+  };
+}
+
+/** 为单个浏览器页面安装严格的合同 0002 API 适配器；生产代码仍使用 fetch。 */
 async function installMockApi(page: Page): Promise<MockApiState> {
   const state: MockApiState = {
     users: [
@@ -193,11 +221,14 @@ async function installMockApi(page: Page): Promise<MockApiState> {
     forceRefreshUnauthorized: false,
     forceUserListUnauthorized: false,
     forceUserListError: false,
+    forceProfileConflict: false,
+    auditListCalls: 0,
   };
 
-  /** Intercept only versioned API calls and return contractual shapes for UI acceptance tests. */
+  /** 仅拦截版本化 API 调用，并为 UI 验收测试返回合同形状。 */
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
+    expect(request.method()).toBe("POST");
     const url = new URL(request.url());
     const path = url.pathname;
     const scenario = scenarioFromRoute(route);
@@ -244,14 +275,119 @@ async function installMockApi(page: Page): Promise<MockApiState> {
       return;
     }
     if (path === "/api/v1/auth/logout" && request.method() === "POST") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "Set-Cookie": "e2e_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax",
+        },
+      });
+      return;
+    }
+    if (path === "/api/v1/users/me" && request.method() === "POST") {
+      await fulfilJson(route, 200, currentUser(scenario), {
+        ETag: `"${currentUser(scenario).id}-v1"`,
+      });
+      return;
+    }
+    if (path === "/api/v1/users/me/update" && request.method() === "POST") {
+      if (state.forceProfileConflict) {
+        state.forceProfileConflict = false;
+        await fulfilProblem(route, 412, "precondition-failed");
+        return;
+      }
+      const input = requestJson(route);
+      const updated = {
+        ...currentUser(scenario),
+        displayName:
+          typeof input.displayName === "string"
+            ? input.displayName
+            : currentUser(scenario).displayName,
+        version: 2,
+      };
+      await fulfilJson(route, 200, updated, { ETag: `"${updated.id}-v2"` });
+      return;
+    }
+    if (path === "/api/v1/users/me/password" && request.method() === "POST") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "Set-Cookie": "e2e_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax",
+        },
+      });
+      return;
+    }
+    if (path === "/api/v1/auth/sessions/list" && request.method() === "POST") {
+      await fulfilJson(route, 200, {
+        items: [
+          {
+            familyId: ids.family,
+            current: true,
+            lastActiveAt: "2026-07-28T06:28:00.000Z",
+            absoluteExpiresAt: "2026-08-04T06:28:00.000Z",
+          },
+          {
+            familyId: ids.admin,
+            current: false,
+            lastActiveAt: "2026-07-28T01:16:00.000Z",
+            absoluteExpiresAt: "2026-08-03T01:16:00.000Z",
+          },
+        ],
+        page: { nextCursor: null },
+        total: 2,
+      });
+      return;
+    }
+    if (path === "/api/v1/auth/sessions/revoke-others" && request.method() === "POST") {
+      await fulfilJson(route, 200, { revokedFamilyCount: 1 });
+      return;
+    }
+    if (/^\/api\/v1\/auth\/sessions\/[0-9a-f-]+\/revoke$/iu.test(path)) {
       await route.fulfill({ status: 204 });
       return;
     }
-    if (path === "/api/v1/users/me" && request.method() === "GET") {
-      await fulfilJson(route, 200, currentUser(scenario));
+    if (path === "/api/v1/users/statistics" && request.method() === "POST") {
+      await fulfilJson(route, 200, {
+        generatedAt: "2026-07-28T06:32:00.000Z",
+        scope: scenario === "super" ? ["USER", "ADMIN"] : ["USER"],
+        total: scenario === "super" ? 126 : 112,
+        active: scenario === "super" ? 118 : 108,
+        disabled: scenario === "super" ? 6 : 3,
+        deleted: scenario === "super" ? 2 : 1,
+        loggedInLast30Days: 92,
+        byRole:
+          scenario === "super"
+            ? [
+                { role: "USER", total: 112, active: 108, disabled: 3, deleted: 1 },
+                { role: "ADMIN", total: 14, active: 10, disabled: 3, deleted: 1 },
+              ]
+            : [{ role: "USER", total: 112, active: 108, disabled: 3, deleted: 1 }],
+      });
       return;
     }
-    if (path === "/api/v1/users" && request.method() === "GET") {
+    if (path === "/api/v1/audit-events/list" && request.method() === "POST") {
+      state.auditListCalls += 1;
+      if (scenario !== "super") {
+        await fulfilProblem(route, 403, "forbidden");
+        return;
+      }
+      await fulfilJson(route, 200, {
+        items: [auditEvent()],
+        page: { nextCursor: null },
+        appliedWindow: {
+          occurredFrom: "2026-07-21T06:32:00.000Z",
+          occurredTo: "2026-07-28T06:32:00.000Z",
+        },
+      });
+      return;
+    }
+    if (path === `/api/v1/audit-events/${ids.event}` && request.method() === "POST") {
+      await fulfilJson(route, 200, {
+        ...auditEvent(),
+        details: { revokedFamilyCount: 1 },
+      });
+      return;
+    }
+    if (path === "/api/v1/users/list" && request.method() === "POST") {
       state.userListCalls += 1;
       if (state.forceUserListUnauthorized) {
         state.unauthorizedUserListCalls += 1;
@@ -324,18 +460,18 @@ async function installMockApi(page: Page): Promise<MockApiState> {
       return;
     }
 
-    const userMatch = path.match(/^\/api\/v1\/users\/([0-9a-f-]+)$/i);
+    const userMatch = path.match(/^\/api\/v1\/users\/([0-9a-f-]+)(?:\/(update|delete))?$/i);
     if (userMatch?.[1] !== undefined) {
       const user = state.users.find((candidate) => candidate.id === userMatch[1]);
       if (user === undefined) {
         await fulfilProblem(route, 404, "not-found");
         return;
       }
-      if (request.method() === "GET") {
+      if (userMatch[2] === undefined) {
         await fulfilJson(route, 200, user, { ETag: `"${user.id}-v${user.version}"` });
         return;
       }
-      if (request.method() === "PATCH") {
+      if (userMatch[2] === "update") {
         const input = requestJson(route);
         const updatedUser: MockUser = {
           ...user,
@@ -363,7 +499,7 @@ async function installMockApi(page: Page): Promise<MockApiState> {
         });
         return;
       }
-      if (request.method() === "DELETE") {
+      if (userMatch[2] === "delete") {
         state.users = state.users.filter((candidate) => candidate.id !== user.id);
         await route.fulfill({ status: 204 });
         return;
@@ -416,6 +552,7 @@ async function expectFloatingLabelTopClearance(dialog: Locator) {
 }
 
 /** 验证匿名访客始终获得浅色、常驻验证码且无冗余辅助文案的登录页。 */
+/** 验证匿名用户只能访问始终启用验证码的登录页。 */
 test("anonymous visitors see only the always-on CAPTCHA login page", async ({ page }) => {
   await installMockApi(page);
 
@@ -443,6 +580,7 @@ test("anonymous visitors see only the always-on CAPTCHA login page", async ({ pa
   await expectDesktopLayout(page);
 });
 
+/** 验证普通用户在受限列表请求发出前看到权限拒绝页。 */
 test("USER direct user-management access renders 403 before any restricted list data", async ({
   page,
 }) => {
@@ -457,6 +595,7 @@ test("USER direct user-management access renders 403 before any restricted list 
   await expectDesktopLayout(page);
 });
 
+/** 验证受保护请求失效后清除业务外壳，并保留安全返回地址。 */
 test("a protected 401 replaces the shell with login while preserving a safe return target", async ({
   page,
 }) => {
@@ -464,9 +603,11 @@ test("a protected 401 replaces the shell with login while preserving a safe retu
 
   await login(page, "admin.demo");
   apiState.forceUserListUnauthorized = true;
+  // 捕获 POST-only 用户列表请求，验证会话失效响应。
   const listResponse = page.waitForResponse(
     (response) =>
-      new URL(response.url()).pathname === "/api/v1/users" && response.request().method() === "GET",
+      new URL(response.url()).pathname === "/api/v1/users/list" &&
+      response.request().method() === "POST",
   );
   await page.goto("/users?status=ACTIVE");
 
@@ -482,6 +623,7 @@ test("a protected 401 replaces the shell with login while preserving a safe retu
   await expectDesktopLayout(page);
 });
 
+/** 验证空态与可恢复错误提供明确动作，且不会丢弃已加载数据。 */
 test("empty and recoverable error states provide clear next actions without discarding loaded rows", async ({
   page,
 }) => {
@@ -508,6 +650,7 @@ test("empty and recoverable error states provide clear next actions without disc
   await expectDesktopLayout(page);
 });
 
+/** 验证管理员通过标准 Dialog 管理普通用户，且密码字段不会残留。 */
 test("ADMIN manages USER targets through 720px Dialogs without retaining password fields", async ({
   page,
 }) => {
@@ -520,7 +663,7 @@ test("ADMIN manages USER targets through 720px Dialogs without retaining passwor
   await expect(primaryNavigation.getByText("系统管理", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "全局搜索功能即将开放" })).toBeVisible();
   await expect(page.getByText("数据分析工作区", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "首页能力建设中" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "平台工作台" })).toBeVisible();
   await page.goto("/users");
 
   await expect(page.getByRole("heading", { name: "用户管理" })).toBeVisible();
@@ -594,6 +737,7 @@ test("ADMIN manages USER targets through 720px Dialogs without retaining passwor
   await expectDesktopLayout(page);
 });
 
+/** 验证超级管理员只读查看已删除用户，并可维护管理员角色。 */
 test("SUPER_ADMIN keeps deleted users read-only and can manage administrator roles", async ({
   page,
 }) => {
@@ -623,5 +767,82 @@ test("SUPER_ADMIN keeps deleted users read-only and can manage administrator rol
   await createDialog.getByRole("button", { name: "取消" }).click();
   await page.getByRole("button", { name: "打开用户菜单" }).click();
   await expect(page.getByRole("menuitem", { name: "退出登录" })).toBeVisible();
+  await expectDesktopLayout(page);
+});
+
+/** 验证个人中心资料、Session 与改密形成真实 API 闭环。 */
+test("all account-security actions stay POST-only and password change clears the session", async ({
+  page,
+}) => {
+  const apiState = await installMockApi(page);
+
+  await login(page, "super.demo");
+  await page.goto("/account");
+  await expect(page.getByRole("heading", { name: "我的账户" })).toBeVisible();
+  await expect(page.getByRole("table", { name: "活动会话" })).toBeVisible();
+  await expect(page.getByText("会话 9013")).toBeVisible();
+
+  const displayName = page.getByLabel("显示名称");
+  apiState.forceProfileConflict = true;
+  await displayName.fill("平台负责人");
+  await page.getByRole("button", { name: "保存资料" }).click();
+  await expect(
+    page.getByText("资料已在其他窗口更新。当前草稿仍保留，请重新加载后再确认。"),
+  ).toBeVisible();
+  await expect(displayName).toHaveValue("平台负责人");
+  await page.getByRole("button", { name: "重新加载" }).click();
+  await expect(displayName).toHaveValue("超级管理员");
+  await displayName.fill("平台负责人");
+  await page.getByRole("button", { name: "保存资料" }).click();
+  await expect(page.getByText("个人资料已保存。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "打开用户菜单" })).toContainText("平台负责人");
+
+  await page.getByRole("button", { name: "退出其他会话" }).click();
+  const revokeDialog = page.getByRole("dialog", { name: "退出其他会话？" });
+  await expect(revokeDialog).toContainText("将保留当前会话");
+  await revokeDialog.getByRole("button", { name: "确认退出" }).click();
+  await expect(page.getByText("已退出 1 个其他会话。")).toBeVisible();
+
+  await page.getByRole("button", { name: "修改" }).click();
+  const passwordDialog = page.getByRole("dialog", { name: "修改登录密码" });
+  await passwordDialog.getByLabel("当前密码").fill("secure-pass-123");
+  await passwordDialog.getByLabel("新密码").fill("secure-pass-456");
+  await passwordDialog.getByRole("button", { name: "确认修改" }).click();
+  await expect(page).toHaveURL(/\/login\?reason=password-changed/);
+  await expect(page.getByRole("heading", { name: "登录" })).toBeVisible();
+  await expect(page.getByText("密码已修改，请使用新密码重新登录。")).toBeVisible();
+  await expectDesktopLayout(page);
+});
+
+/** 验证审计路由默认拒绝非超级管理员，且 SUPER_ADMIN 可重访筛选与详情。 */
+test("audit route guards before fetch and preserves URL-owned filters and detail", async ({
+  page,
+}) => {
+  const apiState = await installMockApi(page);
+
+  await login(page, "admin.demo");
+  await page.goto("/security/audit");
+  await expect(page.getByRole("heading", { name: "无权访问此功能" })).toBeVisible();
+  expect(apiState.auditListCalls).toBe(0);
+
+  await page.getByRole("button", { name: "打开用户菜单" }).click();
+  await page.getByRole("menuitem", { name: "退出登录" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await login(page, "super.demo");
+  await page.goto("/security/audit");
+  await expect(page.getByRole("heading", { name: "安全审计" })).toBeVisible();
+  await expect(page.getByRole("table", { name: "审计事件" })).toBeVisible();
+
+  await page.getByLabel("Actor ID").fill(ids.super);
+  await page.getByRole("button", { name: "应用筛选" }).click();
+  await expect(page).toHaveURL(new RegExp(`actorId=${ids.super}`));
+  await page.getByRole("button", { name: "查看详情" }).click();
+  await expect(page).toHaveURL(new RegExp(`eventId=${ids.event}`));
+  const drawer = page.getByRole("presentation").filter({ hasText: "审计事件详情" });
+  await expect(drawer.getByText("检测到 Refresh 重放")).toBeVisible();
+  await expect(drawer.getByText("auth.refresh.replay_detected")).toBeVisible();
+  await page.getByRole("button", { name: "关闭审计详情" }).click();
+  await expect(page).not.toHaveURL(/eventId=/);
+  expect(apiState.auditListCalls).toBeGreaterThan(0);
   await expectDesktopLayout(page);
 });

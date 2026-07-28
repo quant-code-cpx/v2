@@ -1,0 +1,1327 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="将 service-data-sync 全部逻辑表迁移为可直接阅读的 SQLAlchemy 2 Declarative ORM 模型，并保持 PostgreSQL 约束、事务和同步语义。">
+  <title>同步服务 SQLAlchemy ORM 全量迁移｜技术方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #dfe4ec;
+      --surface: #f6f8fb;
+      --accent: #3157d5;
+      --accent-soft: #eef2ff;
+      --success: #176b4d;
+      --warning: #8a4b08;
+      --danger: #a52a2a;
+      --radius: 14px;
+      --shadow: 0 12px 30px rgb(23 32 51 / 7%);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    a {
+      color: var(--accent);
+      text-underline-offset: 0.2em;
+    }
+
+    a:focus-visible {
+      outline: 3px solid rgb(49 87 213 / 28%);
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
+
+    code {
+      padding: 0.08em 0.34em;
+      border-radius: 4px;
+      background: var(--surface);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+    }
+
+    .shell {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    header {
+      padding: 58px 0 38px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, var(--surface), #fff);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 750;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4 {
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+    }
+
+    h1 {
+      max-width: 880px;
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 3.5rem);
+    }
+
+    h2 {
+      margin: 0 0 20px;
+      font-size: clamp(1.45rem, 3vw, 2rem);
+    }
+
+    h3 {
+      margin: 24px 0 8px;
+      font-size: 1.12rem;
+    }
+
+    h4 {
+      margin: 18px 0 6px;
+      font-size: 1rem;
+    }
+
+    p {
+      max-width: 80ch;
+    }
+
+    .lede {
+      max-width: 820px;
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 1.08rem;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 30px 0 0;
+    }
+
+    .meta dl {
+      margin: 0;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgb(255 255 255 / 82%);
+    }
+
+    .meta dt {
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .meta dd {
+      margin: 3px 0 0;
+      font-weight: 650;
+    }
+
+    .status {
+      color: var(--warning);
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 95%);
+      backdrop-filter: blur(12px);
+    }
+
+    nav ul {
+      display: flex;
+      gap: 22px;
+      width: max-content;
+      margin: 0;
+      padding: 13px 0;
+      list-style: none;
+    }
+
+    nav a {
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 650;
+      text-decoration: none;
+    }
+
+    nav a:hover {
+      color: var(--accent);
+    }
+
+    main {
+      padding: 22px 0 72px;
+    }
+
+    section {
+      padding: 50px 0;
+      border-bottom: 1px solid var(--line);
+      scroll-margin-top: 58px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .card h3 {
+      margin-top: 0;
+    }
+
+    .card p:last-child,
+    .card ul:last-child {
+      margin-bottom: 0;
+    }
+
+    .label {
+      display: inline-block;
+      margin-bottom: 10px;
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 750;
+      letter-spacing: 0.06em;
+    }
+
+    .callout {
+      margin: 20px 0;
+      padding: 18px 22px;
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      background: var(--accent-soft);
+    }
+
+    .callout.warning {
+      border-left-color: var(--warning);
+      background: #fff7ed;
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    pre {
+      overflow-x: auto;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #111827;
+      color: #e5e7eb;
+      font: 0.88rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+      font-size: inherit;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--surface);
+      font-size: 0.84rem;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .steps {
+      padding-left: 1.25rem;
+    }
+
+    .steps li {
+      padding: 4px 0 14px 8px;
+    }
+
+    .good {
+      color: var(--success);
+      font-weight: 700;
+    }
+
+    .risk {
+      color: var(--warning);
+      font-weight: 700;
+    }
+
+    .danger {
+      color: var(--danger);
+      font-weight: 700;
+    }
+
+    footer {
+      padding: 28px 0 48px;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    @media (max-width: 800px) {
+      header {
+        padding-top: 42px;
+      }
+
+      .meta,
+      .grid,
+      .grid.two {
+        grid-template-columns: 1fr;
+      }
+
+      section {
+        padding: 40px 0;
+      }
+    }
+
+    @media print {
+      nav {
+        display: none;
+      }
+
+      header,
+      main,
+      section {
+        padding-top: 20px;
+      }
+
+      .shell {
+        width: 100%;
+      }
+
+      .card {
+        box-shadow: none;
+        break-inside: avoid;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      pre,
+      .table-wrap {
+        break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Technical solution · service-data-sync</p>
+      <h1>同步服务 SQLAlchemy ORM 全量迁移</h1>
+      <p class="lede">
+        推荐把现有 32 张逻辑表全部声明为 SQLAlchemy 2 Declarative 模型，并把持久化仓储迁移到
+        <code>Session</code> 与 ORM-enabled SQL expressions。首要目标不是少写 SQL，而是让维护者从
+        <code>models/</code> 目录直接看懂全部表、字段、类型、含义、约束、索引和业务归属。
+      </p>
+
+      <div class="meta">
+        <dl>
+          <dt>状态</dt>
+          <dd class="status">Accepted · 阶段 0–2 已完成；阶段 3 实施中</dd>
+        </dl>
+        <dl>
+          <dt>负责人</dt>
+          <dd>service-data-sync 维护者</dd>
+        </dl>
+        <dl>
+          <dt>最后修改</dt>
+          <dd>2026-07-28</dd>
+        </dl>
+        <dl>
+          <dt>关联决策</dt>
+          <dd><a href="../../decisions/0017-service-data-sync-declarative-orm.md">ADR-0017</a></dd>
+        </dl>
+      </div>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">摘要</a></li>
+        <li><a href="#scope">目标与边界</a></li>
+        <li><a href="#baseline">现状</a></li>
+        <li><a href="#model-layout">模型组织</a></li>
+        <li><a href="#model-contract">声明规范</a></li>
+        <li><a href="#runtime">运行时迁移</a></li>
+        <li><a href="#alembic">Alembic</a></li>
+        <li><a href="#risks">风险</a></li>
+        <li><a href="#delivery">实施与验收</a></li>
+        <li><a href="#decisions">已确认决策</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>1. 摘要</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">问题</span>
+          <h3>当前 schema 对产品决策不透明</h3>
+          <p>
+            表结构散落在历史 migration 和 152 处字符串 SQL 中。维护者无法从一个稳定目录确认当前表、字段、
+            类型、含义和索引，理解成本已经高于业务可接受范围。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">推荐</span>
+          <h3>全量 Declarative ORM</h3>
+          <p>
+            32 张逻辑表一表一模型文件，按业务能力分目录；每个字段显式声明数据库类型、可空性与中文注释；
+            全部仓储最终使用模型字段和 <code>Session</code>。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">主要风险</span>
+          <h3 class="risk">自动迁移不是完整安全网</h3>
+          <p>
+            Alembic 无法可靠自动识别 CHECK、EXCLUDE、重命名和物理分区变化。必须保留显式 migration、
+            PostgreSQL schema parity 测试与人工审查。
+          </p>
+        </article>
+      </div>
+
+      <aside class="callout">
+        <strong>核心结论</strong>
+        没有发现阻止全量 ORM 化的技术障碍。SQLAlchemy 2.0.51 能表达当前主要 PostgreSQL 结构和 DML。
+        但“全量 ORM”定义为：所有逻辑表都有 Declarative 模型，所有业务仓储通过 Session 与模型表达式访问；
+        不代表把历史 migration、extension 或每个月的物理分区伪装成 ORM entity。
+      </aside>
+      <aside class="callout">
+        <strong>0015 完成后的事实校准</strong>
+        0015 已进入 Accepted，四张 EOD 表、动态排行、raw replay、candidate/publish、lease/reaper、
+        fencing、受控回滚和原子 publication 已形成可执行基线。本文的 32 表、6 个 migration、
+        6,733 行持久化实现和 152 个 <code>text()</code> 统计已经包含该实现，因此技术选型与迁移范围不变；
+        ORM 阶段必须把这些已验证行为当作回归契约，而不是重新设计 EOD。
+      </aside>
+    </section>
+
+    <section id="scope">
+      <h2>2. 目标与边界</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>目标</h3>
+          <ul>
+            <li>打开一个 <code>models/</code> 目录即可看到同步服务全部逻辑表。</li>
+            <li>打开单个模型文件即可看到完整字段、类型、含义、主外键、约束、索引和分区策略。</li>
+            <li>一张逻辑表一个文件；功能相近的表进入同一子目录。</li>
+            <li>全部仓储从 <code>text()</code> SQL 迁移到类型化模型表达式。</li>
+            <li>保持现有数据、表名、字段名、事务、幂等、修订、质量门和发布语义不变。</li>
+            <li>让 Alembic metadata diff、静态检查和架构测试能发现模型漂移。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>非目标</h3>
+          <ul>
+            <li>不重写或压平已经发布的 Alembic migration 历史。</li>
+            <li>不改变 provider、市场语义、时区、交易日历、复权、单位或来源许可。</li>
+            <li>不改变 service-api 通过版本化内部 HTTP 读取的边界。</li>
+            <li>不把数据库模型暴露为 API DTO 或领域对象。</li>
+            <li>不依赖 <code>Base.metadata.create_all()</code> 管理生产 schema。</li>
+            <li>不把所有操作强制转换为逐行对象增删改。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>硬约束</h3>
+          <ul>
+            <li>PostgreSQL 仍是 canonical 权威库；S3 raw evidence 与 Redis 边界不变。</li>
+            <li>服务继续使用同步 psycopg 驱动和 Docker-only 验证流程。</li>
+            <li>应用、任务、质量和领域层仍只依赖 port；adapter 仍不得写 canonical DB。</li>
+            <li>新增和修改定义必须有简体中文职责注释。</li>
+            <li>迁移过程不得丢失历史修订、来源证据或 publication。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3>任务定义</h3>
+      <div class="table-wrap">
+        <table>
+          <tbody>
+            <tr><th>业务目的</th><td>让维护者直接理解同步服务持久化模型，支撑产品与数据范围决策。</td></tr>
+            <tr><th>消费者</th><td>项目维护者、同步服务开发者、数据库迁移评审者；不是外部 API 消费者。</td></tr>
+            <tr><th>覆盖数据集</th><td>现有全部 canonical、provenance、execution、quality 与 publication 表。</td></tr>
+            <tr><th>市场语义</th><td>不变；沿用现有 A 股、上海时区、交易日历、粒度、修订和 finality 决策。</td></tr>
+            <tr><th>数据迁移</th><td>模型接入本身不搬数据、不改表名；仅 table/column COMMENT 需要 metadata-only revision。</td></tr>
+            <tr><th>完成定义</th><td>32 张逻辑表全部建模，全部仓储切换，持久化目录无未批准 <code>text()</code>。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="baseline">
+      <h2>3. 当前事实与迁移规模</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">依赖事实</span>
+          <h3>框架已经具备</h3>
+          <p>
+            lock 当前为 SQLAlchemy 2.0.51、Alembic 1.18.5。现有 <code>DatabaseClient</code>
+            已持有 Engine，因此无需引入新 ORM 包或替换 PostgreSQL driver。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">代码事实</span>
+          <h3>6,733 行持久化实现</h3>
+          <p>
+            9 个仓储/辅助文件包含约 152 个 <code>text()</code> 调用；24 个测试文件直接依赖仓储、
+            DatabaseClient 或 SQLAlchemy repository 行为。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">Schema 事实</span>
+          <h3>32 张逻辑表</h3>
+          <p>
+            结构来自 6 个 migration revision；另有 Alembic 自有表、<code>btree_gist</code> extension、
+            个股年度物理分区和板块成员月度物理分区。
+          </p>
+        </article>
+      </div>
+
+      <h3>现有逻辑表归属</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>目标模型目录</th>
+              <th>数量</th>
+              <th>逻辑表</th>
+              <th>主要语义</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>provenance/</code></td>
+              <td>1</td>
+              <td><code>source_batch</code></td>
+              <td>外部观测、raw URI、provider 与 adapter 血缘。</td>
+            </tr>
+            <tr>
+              <td><code>execution/</code></td>
+              <td>2</td>
+              <td><code>sync_run</code>、<code>sync_partition</code></td>
+              <td>任务、分区、checkpoint、lease 与恢复状态。</td>
+            </tr>
+            <tr>
+              <td><code>publication/</code></td>
+              <td>3</td>
+              <td><code>dataset_publication</code>、<code>dataset_publication_component</code>、<code>data_quality_issue</code></td>
+              <td>对外可见版本、组成清单和跨数据集质量问题。</td>
+            </tr>
+            <tr>
+              <td><code>equity/identity/</code></td>
+              <td>8</td>
+              <td>
+                <code>equity_instrument</code>、<code>equity_identifier_version</code>、
+                <code>equity_name_version</code>、<code>equity_listing_status_version</code>、
+                <code>equity_master_snapshot</code>、<code>equity_master_snapshot_member</code>、
+                <code>equity_presence_anomaly</code>、<code>equity_identity_quarantine</code>
+              </td>
+              <td>身份锚、双时间历史、目录快照、缺席异常和身份隔离。</td>
+            </tr>
+            <tr>
+              <td><code>equity/market_data/</code></td>
+              <td>1</td>
+              <td><code>equity_daily_bar</code></td>
+              <td>按年分区的未复权个股日线修订。</td>
+            </tr>
+            <tr>
+              <td><code>sector/catalog/</code>、<code>sector/market_data/</code></td>
+              <td>5</td>
+              <td>
+                <code>sector_scheme</code>、<code>sector_entity</code>、<code>sector_daily_bar</code>、
+                <code>sector_weekly_bar</code>、<code>sector_monthly_bar</code>
+              </td>
+              <td>分类体系、板块身份和上游独立日/周/月行情。</td>
+            </tr>
+            <tr>
+              <td><code>sector/membership/</code></td>
+              <td>8</td>
+              <td>
+                <code>sector_membership_snapshot</code>、<code>sector_membership_item</code>、
+                <code>sector_membership_pending</code>、<code>sector_membership_quarantine</code>、
+                <code>sector_membership_quality_result</code>、<code>sector_membership_interval</code>、
+                <code>sector_membership_release</code>、<code>sector_membership_release_sector</code>
+              </td>
+              <td>完整快照、身份处理、观测区间和固定 release。</td>
+            </tr>
+            <tr>
+              <td><code>sector/eod/</code></td>
+              <td>4</td>
+              <td>
+                <code>sector_eod_sync_partition</code>、<code>sector_eod_snapshot</code>、
+                <code>sector_eod_quote</code>、<code>sector_eod_quality_result</code>
+              </td>
+              <td>0015 已验证的 EOD 恢复账本、横截面 revision、报价和质量证据。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="model-layout">
+      <h2>4. 目标模型组织</h2>
+      <p>
+        推荐路径为 <code>src/service_data_sync/infrastructure/database/models/</code>。数据库模型与领域对象分离，
+        避免 ORM 状态、Session 或 lazy loading 泄漏到 application/domain。
+      </p>
+
+      <pre aria-label="目标模型目录树"><code>models/
+├── base.py                         # DeclarativeBase 与当前目标 metadata
+├── registry.py                     # 显式列出全部 32 个 Model；Alembic 唯一导入入口
+├── provenance/
+│   └── source_batch.py
+├── execution/
+│   ├── sync_run.py
+│   └── sync_partition.py
+├── publication/
+│   ├── dataset_publication.py
+│   ├── dataset_publication_component.py
+│   └── data_quality_issue.py
+├── equity/
+│   ├── identity/
+│   │   ├── equity_instrument.py
+│   │   ├── equity_identifier_version.py
+│   │   ├── equity_name_version.py
+│   │   ├── equity_listing_status_version.py
+│   │   ├── equity_master_snapshot.py
+│   │   ├── equity_master_snapshot_member.py
+│   │   ├── equity_presence_anomaly.py
+│   │   └── equity_identity_quarantine.py
+│   └── market_data/
+│       └── equity_daily_bar.py
+└── sector/
+    ├── catalog/
+    │   ├── sector_scheme.py
+    │   └── sector_entity.py
+    ├── market_data/
+    │   ├── sector_daily_bar.py
+    │   ├── sector_weekly_bar.py
+    │   └── sector_monthly_bar.py
+    ├── membership/
+    │   ├── sector_membership_snapshot.py
+    │   ├── sector_membership_item.py
+    │   ├── sector_membership_pending.py
+    │   ├── sector_membership_quarantine.py
+    │   ├── sector_membership_quality_result.py
+    │   ├── sector_membership_interval.py
+    │   ├── sector_membership_release.py
+    │   └── sector_membership_release_sector.py
+    └── eod/
+        ├── sector_eod_sync_partition.py
+        ├── sector_eod_snapshot.py
+        ├── sector_eod_quote.py
+        └── sector_eod_quality_result.py</code></pre>
+
+      <div class="grid">
+        <article class="card">
+          <h3>一表一文件</h3>
+          <p>
+            每个逻辑表只有一个定义位置。文件名与数据库表名完全一致；class 使用
+            <code>PascalCase + Model</code>，避免与领域对象同名冲突。
+          </p>
+        </article>
+        <article class="card">
+          <h3>显式 registry</h3>
+          <p>
+            <code>registry.py</code> 明确 import 并列出全部模型。维护者可先看 registry 获取全表清单，
+            再打开对应文件查看字段；禁止自动扫描导致遗漏不可见。
+          </p>
+        </article>
+        <article class="card">
+          <h3>物理分区例外</h3>
+          <p>
+            年/月分区子表不是独立业务模型，不为每个日期分片复制 class。父表模型声明 partition key；
+            物理分区列表和创建策略进入专用 partition manager。
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section id="model-contract">
+      <h2>5. 模型声明规范</h2>
+      <p>
+        第一优先级是阅读，不使用会隐藏数据库行为的过度推断。以下示例只展示目标形态；实施时必须按
+        PostgreSQL <code>pg_catalog</code> 与历史 migration 逐项校准实际名称和默认值。
+      </p>
+
+      <pre><code>class EquityInstrumentModel(Base):
+    """标准证券身份锚点；行情和历史事实通过内部 `security_id` 关联。"""
+
+    __tablename__ = "equity_instrument"
+    __table_args__ = (
+        CheckConstraint(
+            "exchange IN ('SSE', 'SZSE', 'BSE')",
+            name="ck_equity_instrument_exchange",
+        ),
+        Index(
+            "ix_equity_instrument_exchange_symbol",
+            "exchange",
+            "symbol",
+        ),
+        {"comment": "保存证券稳定身份锚点及兼容 current projection。"},
+    )
+
+    security_id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        nullable=False,
+        autoincrement=True,
+        comment="数据库内部大表关联键，不对外暴露。",
+    )
+    instrument_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=False,
+        unique=True,
+        comment="证券内部永久 UUID，不因名称或上市状态变化。",
+    )
+    exchange: Mapped[str] = mapped_column(
+        String(4),
+        nullable=False,
+        comment="证券当前兼容投影所属交易所；历史解析以 identifier version 为准。",
+    )
+    symbol: Mapped[str] = mapped_column(
+        String(6),
+        nullable=False,
+        comment="六位证券代码 current projection；不能单独作为永久身份。",
+    )</code></pre>
+
+      <h3>强制规则</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>内容</th>
+              <th>规则</th>
+              <th>目的</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Python 类型</td>
+              <td>全部字段使用 <code>Mapped[T]</code>；可空字段明确 <code>T | None</code>。</td>
+              <td>Pyright 能检查读取、赋值和 repository 映射。</td>
+            </tr>
+            <tr>
+              <td>数据库类型</td>
+              <td>全部显式写 <code>BigInteger</code>、<code>Numeric(p,s)</code>、<code>JSONB</code>、<code>TSTZRANGE</code> 等。</td>
+              <td>不要求阅读者记忆 SQLAlchemy 类型推断规则。</td>
+            </tr>
+            <tr>
+              <td>可空与默认</td>
+              <td>显式声明 <code>nullable</code>、<code>server_default</code>、<code>Computed</code>。</td>
+              <td>区分 Python 默认值与数据库权威默认值。</td>
+            </tr>
+            <tr>
+              <td>含义</td>
+              <td>class 中文 docstring、table comment、每个字段中文 <code>comment</code>。</td>
+              <td>代码和 PostgreSQL 工具都能显示业务语义。</td>
+            </tr>
+            <tr>
+              <td>约束</td>
+              <td>PK、FK、UNIQUE、CHECK、EXCLUDE 全部在模型文件内显式命名。</td>
+              <td>单文件内看到表的不变量和引用边界。</td>
+            </tr>
+            <tr>
+              <td>索引</td>
+              <td>普通、partial、covering、GIN/GiST 索引全部放 <code>__table_args__</code>。</td>
+              <td>索引不再只藏在 migration 历史中。</td>
+            </tr>
+            <tr>
+              <td>关系</td>
+              <td>FK 必须声明；默认不声明可写 relationship，不允许 lazy load。</td>
+              <td>避免 cascade、N+1 和循环 import 掩盖事务行为。</td>
+            </tr>
+            <tr>
+              <td>枚举状态</td>
+              <td>先保持现有 <code>VARCHAR + CHECK</code>，不顺手改为 PostgreSQL ENUM。</td>
+              <td>ORM 化不引入无关 schema 迁移或 enum 运维成本。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout warning">
+        <strong>为什么不默认写 relationship()</strong>
+        ORM class 与表结构映射完整，不要求每个 FK 都建立对象导航。当前同步仓储强调批量写、显式 join、
+        历史版本和严格事务；默认 relationship 会增加隐式查询与 cascade 风险。FK 已足够让表关系一目了然。
+        后续确有阅读或查询价值的关系，优先使用 <code>viewonly=True</code> 并配查询数测试。
+      </aside>
+    </section>
+
+    <section id="runtime">
+      <h2>6. 运行时与仓储全量迁移</h2>
+      <h3>6.1 Session 与事务</h3>
+      <p>
+        <code>DatabaseClient</code> 增加同步 <code>sessionmaker</code>。每个 repository 公开方法维持现有事务边界，
+        用显式 <code>with session_factory.begin() as session</code> 开始、提交或回滚。关闭 Session 后再返回领域对象，
+        禁止向 application 返回 attached ORM instance。
+      </p>
+
+      <pre aria-label="事务流程"><code>application use case
+  │  调用 provider-neutral repository port
+  ▼
+repository method
+  │  session_factory.begin()
+  ├─ SELECT / row lock / advisory lock
+  ├─ raw provenance + canonical revision + quality + publication
+  ├─ 成功：一次 commit
+  └─ 任一步失败：一次 rollback，转换为现有领域错误
+  ▼
+domain result（不携带 Session / ORM state）</code></pre>
+
+      <h3>6.2 不把批处理退化为逐行对象操作</h3>
+      <div class="grid two">
+        <article class="card">
+          <h3>简单身份与读取</h3>
+          <p>
+            使用 <code>session.get()</code>、<code>select(Model)</code>、<code>session.scalars()</code>、
+            显式 join 和 ORM entity。适合目录、详情、当前 publication 等低行数路径。
+          </p>
+        </article>
+        <article class="card">
+          <h3>行情、成员和质量批次</h3>
+          <p>
+            使用 <code>Session.execute(insert(Model), list[dict])</code>、批量 UPDATE/DELETE 与 RETURNING。
+            不为成千上万行创建完整对象图，不依赖 flush 顺序猜测。
+          </p>
+        </article>
+      </div>
+
+      <h3>6.3 PostgreSQL 特性映射</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>当前能力</th>
+              <th>ORM/SQLAlchemy 表达</th>
+              <th>实施限制</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>partial unique/index</td>
+              <td><code>Index(..., unique=True, postgresql_where=...)</code></td>
+              <td>必须核对 predicate SQL 与现库一致。</td>
+            </tr>
+            <tr>
+              <td>covering index</td>
+              <td><code>Index(..., postgresql_include=[...])</code></td>
+              <td>覆盖列顺序进入 schema parity 测试。</td>
+            </tr>
+            <tr>
+              <td>双时间排斥约束</td>
+              <td><code>ExcludeConstraint</code> + <code>TSTZRANGE</code></td>
+              <td>Alembic 自动检测不足，显式 migration。</td>
+            </tr>
+            <tr>
+              <td>生成范围列</td>
+              <td><code>Computed("tstzrange(...)", persisted=True)</code></td>
+              <td>表达式文本必须与 PostgreSQL 反射归一化核对。</td>
+            </tr>
+            <tr>
+              <td>JSONB checkpoint/证据</td>
+              <td><code>JSONB</code></td>
+              <td>repository 边界继续验证中立 schema。</td>
+            </tr>
+            <tr>
+              <td>父分区表</td>
+              <td><code>postgresql_partition_by="RANGE (...)"</code></td>
+              <td>物理 child partition 由 migration/partition manager 管理。</td>
+            </tr>
+            <tr>
+              <td>upsert</td>
+              <td><code>postgresql.insert(Model).on_conflict_do_update()</code></td>
+              <td><code>onupdate</code> 不会自动应用，SET 字段必须显式列出。</td>
+            </tr>
+            <tr>
+              <td>RETURNING</td>
+              <td><code>insert/update(...).returning(...)</code></td>
+              <td>依赖输入顺序时必须显式排序或使用稳定业务键关联。</td>
+            </tr>
+            <tr>
+              <td>行锁</td>
+              <td><code>select(...).with_for_update()</code></td>
+              <td>保持现有锁顺序，避免新增死锁。</td>
+            </tr>
+            <tr>
+              <td>advisory xact lock</td>
+              <td><code>select(func.pg_advisory_xact_lock(...))</code></td>
+              <td>锁键算法必须与现有 <code>hashtextextended</code> 完全一致。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>6.4 关键执行与失败路径</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>场景</th>
+              <th>目标行为</th>
+              <th>验证</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>正常同步</td>
+              <td>同一 Session 事务保存 source batch、canonical revision、质量结果与 publication。</td>
+              <td>集成测试断言所有 ID、版本和最终 current row 与旧实现一致。</td>
+            </tr>
+            <tr>
+              <td>重复运行</td>
+              <td>保留独立 source observation；相同业务内容不新增 revision/dataVersion。</td>
+              <td>同一分区连续执行两次，比较行数与 current publication。</td>
+            </tr>
+            <tr>
+              <td>provider/schema 失败</td>
+              <td>发生在 repository 前；ORM 化不得改变 raw、quarantine 或拒绝边界。</td>
+              <td>复用现有失败注入测试。</td>
+            </tr>
+            <tr>
+              <td>数据库失败</td>
+              <td>Session rollback 整个现有事务；不留下半个 publication。</td>
+              <td>在 provenance、canonical、quality、publish 各阶段注入异常。</td>
+            </tr>
+            <tr>
+              <td>进程中断/lease 过期</td>
+              <td>checkpoint、lease 与 reaper 语义不变。</td>
+              <td>membership/EOD 恢复集成测试。</td>
+            </tr>
+            <tr>
+              <td>物理分区缺失</td>
+              <td>专用 partition manager 建立目标月分区后写入；DDL 不混入 ORM model lifecycle。</td>
+              <td>跨月、并发建分区、权限不足和重试测试。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="alembic">
+      <h2>7. Alembic、Schema 权威与漂移控制</h2>
+      <h3>7.1 权威关系</h3>
+      <pre><code>Declarative models
+  ├─ 人类阅读：当前目标 schema、字段含义、约束、索引
+  ├─ Alembic target_metadata：生成候选 migration
+  └─ Schema parity tests：与真实 PostgreSQL head 对比
+
+Historical Alembic revisions
+  └─ 数据库演进事实：从任意已支持版本升级到当前 head
+
+禁止 Base.metadata.create_all() 管理生产数据库</code></pre>
+
+      <p>
+        “模型是当前目标 schema”“migration 是演进历史”并不冲突。已有 migration 必须保持不可变；未来 schema
+        修改先改模型，再生成候选 revision，人工补齐 PostgreSQL 特性后执行。模型不能代替升级步骤，migration
+        也不再是维护者理解当前完整 schema 的唯一入口。
+      </p>
+
+      <h3>7.2 首次对齐</h3>
+      <ol class="steps">
+        <li>
+          <strong>冻结基线：</strong>以 0015 已验证实现和 migration
+          <code>202607270004_sector_eod_snapshot</code> 为当前 head 的一部分，从空 PostgreSQL 执行
+          <code>alembic upgrade head</code>，导出表、列、默认值、约束、索引、extension 和 partition 清单。
+        </li>
+        <li>
+          <strong>建立 32 个模型：</strong>按实际 catalog 名称声明，不重命名表、字段或既有约束。
+        </li>
+        <li>
+          <strong>接入 metadata：</strong><code>migrations/env.py</code> 从显式 registry 加载
+          <code>Base.metadata</code>；限制只比较服务拥有的 public 业务表。
+        </li>
+        <li>
+          <strong>归零差异：</strong><code>alembic check</code> 不得生成意外 table/column/index/FK 变更。
+          CHECK、EXCLUDE、partition 和 extension 另用 <code>pg_catalog</code> parity 测试。
+        </li>
+        <li>
+          <strong>注释迁移：</strong>单独 revision 添加 table/column COMMENT；不修改业务行、字段类型或约束。
+        </li>
+      </ol>
+
+      <h3>7.3 Autogenerate 不能替代评审</h3>
+      <div class="grid">
+        <article class="card">
+          <h3 class="good">可作为基础门</h3>
+          <p>表/列增删、nullable、基础索引、显式 unique、基础 FK 和主要类型变化。</p>
+        </article>
+        <article class="card">
+          <h3 class="risk">必须人工修正</h3>
+          <p>表/列重命名会被看成 drop/add；server default 比较可能产生误报；复杂 PostgreSQL 表达式需要核对。</p>
+        </article>
+        <article class="card">
+          <h3 class="danger">必须另建 parity 测试</h3>
+          <p>CHECK、EXCLUDE、extension、物理 partition、运行时 DDL 与依赖数据库版本的特性。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="tradeoffs">
+      <h2>8. 方案取舍</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>方案</th>
+              <th>可读性</th>
+              <th>实施成本</th>
+              <th>长期一致性</th>
+              <th>结论</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>文档/ER 图 + 现有 SQL</td>
+              <td>中；需要在代码和文档间切换</td>
+              <td>低</td>
+              <td>低；容易漂移</td>
+              <td>不采用：已被明确判定为过度复杂且非直接模型。</td>
+            </tr>
+            <tr>
+              <td>SQLAlchemy Core Table metadata</td>
+              <td>高</td>
+              <td>中</td>
+              <td>中高</td>
+              <td>不采用：仍保留字符串仓储和 Connection-only 事务。</td>
+            </tr>
+            <tr>
+              <td>SQLAlchemy Declarative + Session</td>
+              <td>最高；一表一文件、字段即代码</td>
+              <td>高</td>
+              <td>高；metadata、Alembic 与 CI 可联动</td>
+              <td><strong>推荐</strong>：最符合用户第一优先级。</td>
+            </tr>
+            <tr>
+              <td>Django ORM / SQLModel</td>
+              <td>高</td>
+              <td>最高；引入第二套框架</td>
+              <td>中</td>
+              <td>不采用：无能力优势，增加迁移面。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="risks">
+      <h2>9. 风险、隐患与控制</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>风险</th>
+              <th>暴露条件与影响</th>
+              <th>控制</th>
+              <th>退出条件</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>模型与现库漂移</td>
+              <td>类型、默认值、约束或索引写错，未来 migration 可能误删/重建对象。</td>
+              <td>空库升级、Alembic check、pg_catalog parity、禁止未审查 autogenerate。</td>
+              <td>32 表全部零意外差异。</td>
+            </tr>
+            <tr>
+              <td>表达式索引自动比较盲区</td>
+              <td>
+                2026-07-28 实测 <code>ix_equity_name_current_prefix</code> 使用
+                <code>lower(name) text_pattern_ops</code>，Alembic 无法比较操作符类，只会假定索引相等。
+              </td>
+              <td>保留模型声明；在 Session 仓储切换前补充针对该索引定义的 <code>pg_catalog</code> 断言和人工 migration 审查。</td>
+              <td>断言覆盖表达式、操作符类和部分索引条件后，才能将其纳入自动漂移门。</td>
+            </tr>
+            <tr>
+              <td>ORM 隐式行为</td>
+              <td>autoflush、lazy load、cascade 造成额外查询、写入或锁顺序变化。</td>
+              <td>禁 lazy、禁默认 cascade、显式事务与 join；关键路径查询数测试。</td>
+              <td>集成行为与 SQL 数预算通过。</td>
+            </tr>
+            <tr>
+              <td>批量写性能下降</td>
+              <td>日线、成分、EOD 把批量 SQL 改成逐行对象 flush。</td>
+              <td>强制 ORM bulk DML；记录批次 SQL 数、吞吐、内存和事务时间基线。</td>
+              <td>相同 fixture 不低于旧实现验收阈值；阈值先由基线确定。</td>
+            </tr>
+            <tr>
+              <td>锁/并发语义改变</td>
+              <td>identity、membership、EOD 的行锁或 advisory lock 顺序变化，引发竞争或重复发布。</td>
+              <td>逐条迁移锁语句；并发集成测试；保持锁键算法和锁顺序。</td>
+              <td>重复、并发、超时与 reaper 测试通过。</td>
+            </tr>
+            <tr>
+              <td>EOD 生产开关尚未启用</td>
+              <td>0015 的来源许可、连续探针和生产观测准入仍待完成，不能依赖生产流量发现 ORM 回归。</td>
+              <td>迁移复用 0015 已通过的 fixture、仓储集成、迁移、raw replay、排行、租约恢复和 rollback 测试；生产准入保持独立。</td>
+              <td>默认关闭生产开关时，EOD 新旧实现的结果、事务、锁和失败注入测试仍全部等价。</td>
+            </tr>
+            <tr>
+              <td>分区不可见</td>
+              <td>ORM 只显示父表，维护者误以为没有物理分区；缺月分区时写入失败。</td>
+              <td>父模型明确 partition comment；专用 registry 显示策略；partition manager 测试。</td>
+              <td>跨年/月、并发和权限故障验证通过。</td>
+            </tr>
+            <tr>
+              <td>永久混合模式</td>
+              <td>简单表切 ORM，复杂仓储长期保留 text，最终仍无统一入口。</td>
+              <td>阶段有明确结束日期和 architecture gate；最终 persistence text allowlist 为空。</td>
+              <td>全部 9 个现有持久化文件完成迁移或被替代。</td>
+            </tr>
+            <tr>
+              <td>模型过度耦合领域</td>
+              <td>application 开始依赖 ORM instance，Session 泄漏到 API/Celery。</td>
+              <td>repository port 不变；只返回领域 dataclass/DTO；架构测试禁止上层 import models。</td>
+              <td>architecture tests 通过。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="delivery">
+      <h2>10. 分阶段实施、发布与回滚</h2>
+      <p>
+        分阶段只用于降低回归风险，最终状态仍是全量 ORM。阶段完成前允许临时双轨代码，但不允许双写两套业务事实。
+      </p>
+
+      <ol class="steps">
+        <li>
+          <strong>阶段 0 — 基线冻结：</strong>以 0015 Accepted 实现和 revision
+          <code>202607270004</code> 为既定基线；从空库升级到 head，记录 32 张逻辑表、物理分区、约束、索引，
+          并固化现有 EOD 仓储集成与故障测试结果。退出条件：schema 与行为基线均可重复生成。
+        </li>
+        <li>
+          <strong>阶段 1 — 模型全量落地（已完成）：</strong>建立 Base、registry 和 32 个一表一文件模型；repository 暂不切换。
+          退出条件：模型 import、Pyright、字段注释完整性、metadata/pg_catalog parity 全过。
+        </li>
+        <li>
+          <strong>阶段 2 — Alembic 接入：</strong>配置 <code>target_metadata</code>、naming convention、
+          include filter、comment migration 和 <code>alembic check</code>。退出条件：空库和已升级库均零意外 diff。
+        </li>
+        <li>
+          <strong>阶段 3 — Session 基础设施：</strong>增加 sessionmaker/Unit of Work，保持原 Engine 探活；
+          建立 rollback、连接释放、事务边界测试。退出条件：无 application/domain import ORM。
+        </li>
+        <li>
+          <strong>阶段 4 — 低风险切片：</strong>先迁移 publication、简单目录读取、source batch 和基础身份读取；
+          用相同 fixture 比较旧/新查询结果。退出条件：行为等价、SQL 数无异常。
+        </li>
+        <li>
+          <strong>阶段 5 — 行情与主数据：</strong>迁移 equity daily bar、sector 三周期、identity resolver、
+          master/lifecycle 双时间写入；验证 revision、排斥约束、代码复用和 publication。
+        </li>
+        <li>
+          <strong>阶段 6 — Membership 与 EOD：</strong>最后迁移锁、lease、checkpoint、动态分区、quarantine、
+          release 和 rollback 最密集的仓储；EOD 必须逐项保持 0015 的 raw replay、candidate/publish、
+          fencing、动态 rank、ETag/cursor、reaper 和受控回滚语义，并执行并发与故障注入。
+        </li>
+        <li>
+          <strong>阶段 7 — 收口：</strong>删除旧字符串 statement 和假 Connection 测试，architecture test 禁止
+          persistence <code>text()</code>；更新 README。退出条件：最终 allowlist 只含 migration/partition DDL。
+        </li>
+      </ol>
+
+      <aside class="callout">
+        <strong>2026-07-28 首轮实施状态</strong>
+        阶段 0–2 已完成：32 张逻辑表均已有一表一文件 Declarative 模型，并按业务能力分目录；registry、
+        模型注释完整性、真实 PostgreSQL 的字段/主键/COMMENT parity、<code>alembic check</code>，以及
+        COMMENT migration 的升降级均已验证。阶段 3 已开始：<code>DatabaseClient</code> 提供短生命周期
+        <code>Session</code> 与显式事务，基础身份读取已迁为模型表达式；其余仓储尚保留既有生产读写路径。
+      </aside>
+
+      <h3>发布与回滚</h3>
+      <div class="grid">
+        <article class="card">
+          <h3>模型阶段回滚</h3>
+          <p>模型尚未被仓储使用时可直接回滚应用代码；COMMENT migration 可反向删除注释，不影响业务行。</p>
+        </article>
+        <article class="card">
+          <h3>仓储阶段回滚</h3>
+          <p>每个切片保持 schema 与 port 不变，可回退上一镜像。不得回写旧逻辑产生重复 revision 或折叠 source batch。</p>
+        </article>
+        <article class="card">
+          <h3>不可回滚边界</h3>
+          <p>本方案不新增业务事实或删除字段，因此没有新的数据不可逆点；既有身份/发布语义的 roll-forward 规则继续有效。</p>
+        </article>
+      </div>
+
+      <h3>计划验收命令</h3>
+      <pre><code># 构建与基础质量门
+docker build --target test --tag quant-v2/service-data-sync:test service-data-sync
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff format --check .
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff check .
+docker run --rm quant-v2/service-data-sync:test pyright
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test pytest -m "not integration"
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test pytest tests/architecture --no-cov
+
+# PostgreSQL、迁移与集成
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra up -d
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra --profile data-sync-test run --rm data-sync-test \
+  /bin/sh -ec 'alembic upgrade head &amp;&amp; alembic check &amp;&amp; pytest -m integration'
+
+# 镜像与运行探活
+docker build --tag quant-v2/service-data-sync:local service-data-sync
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra --profile data-sync-worker run --rm --no-deps \
+  data-sync-worker data-sync-diagnostics --format json</code></pre>
+
+      <p>
+        本轮已完成模型层、数据库说明迁移与 Session 基础设施：测试镜像构建、Ruff、Pyright、目标模型单元测试、
+        真实 PostgreSQL 的 <code>alembic upgrade head</code>/<code>downgrade</code>、<code>alembic check</code>
+        和 schema parity 测试均已运行。
+        受本机既有 PostgreSQL 卷凭据不匹配影响，未重置该卷执行 Compose 全量集成；改以独立临时 PostgreSQL
+        完成迁移与结构验证。后续 <code>Session</code> 仓储切片仍须按本节完整质量门执行。
+      </p>
+    </section>
+
+    <section id="decisions">
+      <h2>11. 已确认的决策</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>编号</th>
+              <th>建议</th>
+              <th>接受理由</th>
+              <th>不接受的影响</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>D1</td>
+              <td><strong>接受</strong>：32 张逻辑表全部 Declarative 建模，最终仓储全量 Session 化。</td>
+              <td>直接满足“看得懂最高优先级”。</td>
+              <td>若只建模型不迁仓储，会长期保留模型与字符串 SQL 双轨。</td>
+            </tr>
+            <tr>
+              <td>D2</td>
+              <td><strong>接受</strong>：一张逻辑表一个文件，并按业务能力分目录。</td>
+              <td>文件名即表名；单表字段、约束和索引集中。</td>
+              <td>多个表共文件会重新形成大型 schema 文件，不利于导航和代码归属。</td>
+            </tr>
+            <tr>
+              <td>D3</td>
+              <td><strong>接受</strong>：物理日期分区不建立独立 ORM class。</td>
+              <td>分区是同一逻辑表的存储切片，不是产品实体；复制 class 会制造伪模型。</td>
+              <td>若要求每个物理分区一文件，未来每月都需新增代码，且字段重复必然漂移。</td>
+            </tr>
+            <tr>
+              <td>D4</td>
+              <td><strong>接受</strong>：字段类型与 nullable 全部显式书写，不依赖类型推断简写。</td>
+              <td>牺牲少量代码长度，换取直接可读性。</td>
+              <td>模型更短，但维护者需要掌握 SQLAlchemy 推断规则才能确认数据库类型。</td>
+            </tr>
+            <tr>
+              <td>D5</td>
+              <td><strong>接受</strong>：默认无可写 relationship/lazy loading，FK 与显式 join 为主。</td>
+              <td>避免隐式查询、cascade 和历史实体对象图；表关系仍由 FK 清楚表达。</td>
+              <td>若全面 relationship 化，需要额外查询数、cascade 和并发行为评审。</td>
+            </tr>
+            <tr>
+              <td>D6</td>
+              <td><strong>接受</strong>：历史 migration 不改写，Declarative metadata 表达当前目标 schema。</td>
+              <td>既能一处看当前模型，也保留升级路径和已部署数据库兼容。</td>
+              <td>重写 migration 会破坏已有环境升级链，风险远高于收益。</td>
+            </tr>
+            <tr>
+              <td>D7</td>
+              <td><strong>接受</strong>：模型 table/column comment 同步写入 PostgreSQL。</td>
+              <td>代码和数据库工具都能直接显示中文业务含义。</td>
+              <td>若只保留 Python docstring，psql/DBeaver 等工具仍看不到字段语义。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="sources">
+      <h2>12. 依据与关联资料</h2>
+      <ul>
+        <li><a href="../0001-data-sync-foundation/index.html">0001：同步服务工程基础设施</a></li>
+        <li><a href="../0013-sector-membership-history/index.html">0013：板块成分股与观测历史</a></li>
+        <li><a href="../0014-equity-instrument-master/index.html">0014：A 股证券主数据与上市生命周期</a></li>
+        <li><a href="../0015-sector-eod-snapshot-ranking/index.html">0015：板块 EOD 横截面快照与排行</a></li>
+        <li><a href="https://docs.sqlalchemy.org/en/20/orm/declarative_styles.html">SQLAlchemy 2 Declarative Mapping</a></li>
+        <li><a href="https://docs.sqlalchemy.org/en/20/orm/session_basics.html">SQLAlchemy Session Basics</a></li>
+        <li><a href="https://docs.sqlalchemy.org/en/20/orm/queryguide/dml.html">SQLAlchemy ORM-enabled DML</a></li>
+        <li><a href="https://docs.sqlalchemy.org/en/20/dialects/postgresql.html">SQLAlchemy PostgreSQL dialect</a></li>
+        <li><a href="https://docs.sqlalchemy.org/en/20/core/constraints.html">SQLAlchemy Constraints and Indexes</a></li>
+        <li><a href="https://alembic.sqlalchemy.org/en/latest/autogenerate.html">Alembic Autogenerate and Limitations</a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      同步服务 SQLAlchemy ORM 全量迁移 · Accepted ·
+      变更摘要：已落地 32 表 Declarative 模型、按能力分组 registry、数据库 COMMENT migration、Alembic
+      结构 parity 与真实 PostgreSQL 验证；后续继续迁移其余 Session 仓储与质量门。0015 的 EOD Accepted 实现仍是既定回归基线。
+    </div>
+  </footer>
+</body>
+</html>

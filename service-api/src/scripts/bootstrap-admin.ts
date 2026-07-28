@@ -4,8 +4,8 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from '../app.module.js';
-import { UserService } from '../modules/user/user.service.js';
-import { AppConfigService } from '../platform/config/app-config.service.js';
+import { UserService } from '../apps/user/user.service.js';
+import { AppConfigService } from '../config/app-config.service.js';
 
 /** 在迁移完成后确认唯一 `SUPER_ADMIN` 存在，同时绝不输出账号或密码。 */
 async function bootstrapAdmin(): Promise<void> {

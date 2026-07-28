@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from service_data_sync.application.ports.market_data import RawPayload, RawPayloadStore
 from service_data_sync.infrastructure.object_storage.client import ObjectStorageClient
 
@@ -23,3 +25,20 @@ class S3RawPayloadStore(RawPayloadStore):
             Metadata={"sha256": payload.content_sha256},
         )
         return f"s3://{self._object_storage.bucket}/{payload.object_key}"
+
+    def get(self, uri: str) -> bytes:
+        """只读取本服务桶中的受控 S3 URI，拒绝外部桶或路径穿透输入。"""
+        parsed = urlparse(uri)
+        if parsed.scheme != "s3" or parsed.netloc != self._object_storage.bucket:
+            raise ValueError("raw URI must target the configured S3 bucket")
+        key = parsed.path.lstrip("/")
+        if not key or "//" in key or key.startswith("../"):
+            raise ValueError("raw URI key is invalid")
+        response = self._object_storage.client.get_object(
+            Bucket=self._object_storage.bucket,
+            Key=key,
+        )
+        payload = response["Body"].read()
+        if not isinstance(payload, bytes):
+            raise ValueError("raw S3 object must be bytes")
+        return payload

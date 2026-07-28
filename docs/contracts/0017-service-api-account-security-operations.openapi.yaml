@@ -1,0 +1,681 @@
+openapi: 3.1.0
+info:
+  title: Apex Account Security and Operations API
+  version: 1.0.0
+  description: |
+    Implemented additive contract for self-service Session management, SUPER_ADMIN audit
+    inspection, and role-scoped user statistics.
+    Existing profile and password operations remain authoritative in contract 0002.
+  x-contract-status: implemented
+x-http-method-policy: post-only
+x-audit-retention-policy:
+  onlineDays: 90
+  archive: false
+x-permission-additions:
+  USER: ["sessions:read", "sessions:revoke"]
+  ADMIN: ["sessions:read", "sessions:revoke"]
+  SUPER_ADMIN: ["sessions:read", "sessions:revoke", "audit:read"]
+servers:
+  - url: /
+tags:
+  - name: sessions
+    description: Authenticated self-service Session family inspection and revocation.
+  - name: audit-events
+    description: SUPER_ADMIN-only inspection of sanitized durable audit evidence.
+  - name: user-statistics
+    description: Role-scoped statistics for users manageable by the authenticated actor.
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/auth/sessions/list:
+    post:
+      tags: [sessions]
+      operationId: listMySessionFamilies
+      summary: List active Session families owned by the current user
+      description: |
+        Returns only the actor's active, unexpired Session families. No IP address,
+        User-Agent, device fingerprint, geolocation, refresh-token hash, or raw token is
+        stored or returned. lastActiveAt is the createdAt value of the current active row
+        in the family and is therefore a refresh-activity approximation.
+      x-required-permissions: ["sessions:read"]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionListRequest"
+      responses:
+        "200":
+          description: Active Session family page.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/CacheControlNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionFamilyPage"
+        "400":
+          $ref: "#/components/responses/ValidationProblem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/DependencyUnavailable"
+
+  /api/v1/auth/sessions/{familyId}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/SessionFamilyId"
+    post:
+      tags: [sessions]
+      operationId: revokeMySessionFamily
+      summary: Revoke one Session family owned by the current user
+      description: |
+        Revokes every still-active row in the selected family and appends one audit event.
+        A family already in a terminal revoked or expired state returns 204 when ownership
+        can still be established. Unknown or foreign family IDs return 404. Revoking the
+        current family invalidates the caller's access token immediately after this
+        response and the Web client must clear local authentication state.
+      x-required-permissions: ["sessions:revoke"]
+      responses:
+        "204":
+          description: The selected family is revoked or was already terminal.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/CacheControlNoStore"
+        "400":
+          $ref: "#/components/responses/ValidationProblem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/DependencyUnavailable"
+
+  /api/v1/auth/sessions/revoke-others:
+    post:
+      tags: [sessions]
+      operationId: revokeMyOtherSessionFamilies
+      summary: Revoke every Session family except the caller's current family
+      description: |
+        Resolves the current family from the authenticated session, revokes all other
+        active families owned by the actor, and appends one aggregate audit event. The
+        operation is idempotent and never increments User.securityVersion.
+      x-required-permissions: ["sessions:revoke"]
+      responses:
+        "200":
+          description: Other Session families are revoked.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/CacheControlNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeOtherSessionsResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/DependencyUnavailable"
+
+  /api/v1/audit-events/list:
+    post:
+      tags: [audit-events]
+      operationId: listAuditEvents
+      summary: List sanitized durable audit events
+      description: |
+        SUPER_ADMIN-only cursor query. The default time window is the previous seven days,
+        the maximum requested window is 90 days, and routine token-rotation evidence is
+        excluded unless includeRoutine is true. Raw AuditLog.metadata is never returned.
+      x-required-permissions: ["audit:read"]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuditEventListRequest"
+      responses:
+        "200":
+          description: Sanitized audit event page.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/CacheControlNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventPage"
+        "400":
+          $ref: "#/components/responses/ValidationProblem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/DependencyUnavailable"
+
+  /api/v1/audit-events/{id}:
+    parameters:
+      - $ref: "#/components/parameters/AuditEventId"
+    post:
+      tags: [audit-events]
+      operationId: getAuditEvent
+      summary: Read one sanitized audit event
+      description: |
+        Returns a server-owned summary and an action-specific allowlist of detail fields.
+        Unknown action strings receive a generic summary and empty details; raw metadata
+        is never used as a fallback response.
+      x-required-permissions: ["audit:read"]
+      responses:
+        "200":
+          description: Sanitized immutable audit event detail.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/CacheControlNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/DependencyUnavailable"
+
+  /api/v1/users/statistics:
+    post:
+      tags: [user-statistics]
+      operationId: getManageableUserStatistics
+      summary: Get statistics for users manageable by the current administrator
+      description: |
+        ADMIN receives statistics for USER targets only. SUPER_ADMIN receives statistics
+        for USER and ADMIN targets. The actor and every SUPER_ADMIN are excluded. The
+        response states its exact role scope and never returns individual user records.
+      x-required-permissions: ["users:read"]
+      responses:
+        "200":
+          description: Role-scoped user statistics.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManageableUserStatistics"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/DependencyUnavailable"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Short-lived access token. service-api also validates the authoritative PostgreSQL
+        Session and User securityVersion on every protected request.
+
+  parameters:
+    SessionFamilyId:
+      name: familyId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AuditEventId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  headers:
+    CacheControlNoStore:
+      description: Sensitive security data must not be stored by intermediaries or browsers.
+      schema:
+        type: string
+        const: no-store
+
+  responses:
+    ValidationProblem:
+      description: Request validation failed.
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/CacheControlNoStore"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unauthorized:
+      description: A valid authenticated Session is required.
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/CacheControlNoStore"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Forbidden:
+      description: The actor lacks the required permission.
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/CacheControlNoStore"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: The resource is absent or outside the actor's scope.
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/CacheControlNoStore"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    RateLimited:
+      description: Security query or mutation rate limit exceeded.
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/CacheControlNoStore"
+        Retry-After:
+          description: Positive seconds before retry is allowed.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    DependencyUnavailable:
+      description: PostgreSQL or another required security dependency is unavailable.
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/CacheControlNoStore"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+  schemas:
+    SessionListRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 512
+        pageSize:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+
+    SessionFamily:
+      type: object
+      additionalProperties: false
+      required:
+        - familyId
+        - current
+        - lastActiveAt
+        - absoluteExpiresAt
+      properties:
+        familyId:
+          type: string
+          format: uuid
+          description: Random opaque family identifier; not an authentication secret.
+        current:
+          type: boolean
+          description: True when this family contains the Session authenticating the request.
+        lastActiveAt:
+          type: string
+          format: date-time
+          description: Creation time of the current active rotated Session row.
+        absoluteExpiresAt:
+          type: string
+          format: date-time
+
+    SessionFamilyPage:
+      type: object
+      additionalProperties: false
+      required: [items, page, total]
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/SessionFamily"
+        page:
+          $ref: "#/components/schemas/CursorPage"
+        total:
+          type: integer
+          minimum: 0
+          description: Exact count of the actor's active, unexpired Session families.
+
+    RevokeOtherSessionsResult:
+      type: object
+      additionalProperties: false
+      required: [revokedFamilyCount]
+      properties:
+        revokedFamilyCount:
+          type: integer
+          minimum: 0
+
+    AuditCategory:
+      type: string
+      enum:
+        - AUTHENTICATION
+        - ACCOUNT
+        - USER_ADMINISTRATION
+        - SYSTEM
+
+    AuditSeverity:
+      type: string
+      enum: [INFO, WARNING, CRITICAL]
+
+    AuditEventListRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        category:
+          $ref: "#/components/schemas/AuditCategory"
+        actorId:
+          type: string
+          format: uuid
+        targetId:
+          type: string
+          format: uuid
+        occurredFrom:
+          type: string
+          format: date-time
+          description: Defaults to seven days before the request time.
+        occurredTo:
+          type: string
+          format: date-time
+          description: Defaults to the request time and must be later than occurredFrom.
+        includeRoutine:
+          type: boolean
+          default: false
+          description: Include high-volume auth.refresh.rotated evidence.
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 512
+        pageSize:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+
+    AuditActor:
+      type: object
+      additionalProperties: false
+      required: [id, account, displayName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        account:
+          type: string
+          minLength: 5
+          maxLength: 32
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+
+    AuditTarget:
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [USER, SESSION, SYSTEM, UNKNOWN]
+        id:
+          type: [string, "null"]
+          format: uuid
+
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - category
+        - severity
+        - action
+        - summary
+        - actor
+        - target
+        - requestId
+        - occurredAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        category:
+          $ref: "#/components/schemas/AuditCategory"
+        severity:
+          $ref: "#/components/schemas/AuditSeverity"
+        action:
+          type: string
+          minLength: 1
+          maxLength: 128
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 240
+          description: Server-generated localized-safe summary without raw metadata.
+        actor:
+          oneOf:
+            - $ref: "#/components/schemas/AuditActor"
+            - type: "null"
+        target:
+          $ref: "#/components/schemas/AuditTarget"
+        requestId:
+          type: [string, "null"]
+          maxLength: 128
+        occurredAt:
+          type: string
+          format: date-time
+
+    AuditEventPage:
+      type: object
+      additionalProperties: false
+      required: [items, page, appliedWindow]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        page:
+          $ref: "#/components/schemas/CursorPage"
+        appliedWindow:
+          $ref: "#/components/schemas/AppliedTimeWindow"
+
+    AuditEventDetail:
+      allOf:
+        - $ref: "#/components/schemas/AuditEvent"
+        - type: object
+          required: [details]
+          properties:
+            details:
+              $ref: "#/components/schemas/AuditDetails"
+      unevaluatedProperties: false
+
+    AuditDetails:
+      type: object
+      additionalProperties: false
+      description: |
+        Action-specific allowlisted fields. Omitted properties are unavailable or
+        inappropriate for the event. This object is never a raw metadata passthrough.
+      properties:
+        actorRole:
+          $ref: "#/components/schemas/Role"
+        accountMasked:
+          type: string
+          maxLength: 32
+        assignedRole:
+          $ref: "#/components/schemas/ManageableRole"
+        before:
+          $ref: "#/components/schemas/UserSecuritySnapshot"
+        after:
+          $ref: "#/components/schemas/UserSecuritySnapshot"
+        revokedFamilyCount:
+          type: integer
+          minimum: 0
+
+    AppliedTimeWindow:
+      type: object
+      additionalProperties: false
+      required: [occurredFrom, occurredTo]
+      properties:
+        occurredFrom:
+          type: string
+          format: date-time
+        occurredTo:
+          type: string
+          format: date-time
+
+    CursorPage:
+      type: object
+      additionalProperties: false
+      required: [nextCursor]
+      properties:
+        nextCursor:
+          type: [string, "null"]
+          maxLength: 512
+
+    Role:
+      type: string
+      enum: [USER, ADMIN, SUPER_ADMIN]
+
+    ManageableRole:
+      type: string
+      enum: [USER, ADMIN]
+
+    UserStatus:
+      type: string
+      enum: [ACTIVE, DISABLED, DELETED]
+
+    UserSecuritySnapshot:
+      type: object
+      additionalProperties: false
+      properties:
+        role:
+          $ref: "#/components/schemas/Role"
+        status:
+          $ref: "#/components/schemas/UserStatus"
+
+    ManageableUserStatistics:
+      type: object
+      additionalProperties: false
+      required:
+        - generatedAt
+        - scope
+        - total
+        - active
+        - disabled
+        - deleted
+        - loggedInLast30Days
+        - byRole
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        scope:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ManageableRole"
+          description: Exact target roles counted by this response.
+        total:
+          type: integer
+          minimum: 0
+        active:
+          type: integer
+          minimum: 0
+        disabled:
+          type: integer
+          minimum: 0
+        deleted:
+          type: integer
+          minimum: 0
+        loggedInLast30Days:
+          type: integer
+          minimum: 0
+        byRole:
+          type: array
+          minItems: 1
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/RoleStatistics"
+
+    RoleStatistics:
+      type: object
+      additionalProperties: false
+      required: [role, total, active, disabled, deleted]
+      properties:
+        role:
+          $ref: "#/components/schemas/ManageableRole"
+        total:
+          type: integer
+          minimum: 0
+        active:
+          type: integer
+          minimum: 0
+        disabled:
+          type: integer
+          minimum: 0
+        deleted:
+          type: integer
+          minimum: 0
+
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail, instance, requestId, code]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+        requestId:
+          type: string
+          maxLength: 128
+        code:
+          type: string
+          pattern: "^[a-z][a-z0-9-]*$"

@@ -1,7 +1,7 @@
 openapi: 3.1.1
 info:
   title: service-api equity public API
-  version: 1.0.0-proposed
+  version: 2.0.0-proposed
   description: |
     Proposed authenticated read contract for published A-share master, bar,
     adjustment, corporate-action and financial data. service-api owns this
@@ -9,6 +9,7 @@ info:
     service-data-sync internal API; provider identities and storage details are
     intentionally absent.
   x-contract-status: Proposed
+x-http-method-policy: post-only
 servers:
   - url: /api/v1
 tags:
@@ -17,7 +18,7 @@ security:
   - accessToken: []
 paths:
   /equities:
-    get:
+    post:
       tags: [equities]
       operationId: listEquities
       summary: Search the published A-share instrument catalog
@@ -38,8 +39,8 @@ paths:
             application/json:
               schema:
                 $ref: './0003-data-sync-equity-internal.openapi.yaml#/components/schemas/EquityPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -50,7 +51,7 @@ paths:
           $ref: '#/components/responses/DependencyUnavailable'
 
   /equities/{instrumentId}:
-    get:
+    post:
       tags: [equities]
       operationId: getEquity
       summary: Get one instrument and its current company profile
@@ -67,8 +68,8 @@ paths:
             application/json:
               schema:
                 $ref: './0003-data-sync-equity-internal.openapi.yaml#/components/schemas/EquityDetailResponse'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -77,7 +78,7 @@ paths:
           $ref: '#/components/responses/DependencyUnavailable'
 
   /equities/{instrumentId}/bars:
-    get:
+    post:
       tags: [equities]
       operationId: listEquityBars
       summary: Read raw or adjusted daily, weekly or monthly bars
@@ -106,8 +107,8 @@ paths:
             application/json:
               schema:
                 $ref: './0003-data-sync-equity-internal.openapi.yaml#/components/schemas/BarPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -122,7 +123,7 @@ paths:
           $ref: '#/components/responses/DependencyUnavailable'
 
   /equities/{instrumentId}/adjustment-factors:
-    get:
+    post:
       tags: [equities]
       operationId: listEquityAdjustmentFactors
       summary: Read sparse cumulative adjustment-factor revisions
@@ -143,8 +144,8 @@ paths:
             application/json:
               schema:
                 $ref: './0003-data-sync-equity-internal.openapi.yaml#/components/schemas/AdjustmentFactorPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -155,7 +156,7 @@ paths:
           $ref: '#/components/responses/DependencyUnavailable'
 
   /equities/{instrumentId}/corporate-actions:
-    get:
+    post:
       tags: [equities]
       operationId: listEquityCorporateActions
       summary: Read versioned dividend and share-distribution events
@@ -176,8 +177,8 @@ paths:
             application/json:
               schema:
                 $ref: './0003-data-sync-equity-internal.openapi.yaml#/components/schemas/CorporateActionPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -188,7 +189,7 @@ paths:
           $ref: '#/components/responses/DependencyUnavailable'
 
   /equities/{instrumentId}/financial-reports:
-    get:
+    post:
       tags: [equities]
       operationId: listEquityFinancialReports
       summary: List current financial-statement versions
@@ -210,8 +211,8 @@ paths:
             application/json:
               schema:
                 $ref: './0003-data-sync-equity-internal.openapi.yaml#/components/schemas/FinancialReportPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -222,7 +223,7 @@ paths:
           $ref: '#/components/responses/DependencyUnavailable'
 
   /equities/{instrumentId}/financial-reports/{reportId}:
-    get:
+    post:
       tags: [equities]
       operationId: getEquityFinancialReport
       summary: Get one financial statement and its canonical items
@@ -240,8 +241,8 @@ paths:
             application/json:
               schema:
                 $ref: './0003-data-sync-equity-internal.openapi.yaml#/components/schemas/FinancialReportDetailResponse'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -250,7 +251,7 @@ paths:
           $ref: '#/components/responses/DependencyUnavailable'
 
   /equities/{instrumentId}/financial-metrics:
-    get:
+    post:
       tags: [equities]
       operationId: listEquityFinancialMetrics
       summary: Read provider-reported or internally derived financial metrics
@@ -273,8 +274,8 @@ paths:
             application/json:
               schema:
                 $ref: './0003-data-sync-equity-internal.openapi.yaml#/components/schemas/FinancialMetricPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':

@@ -127,7 +127,7 @@
       <dl class="meta">
         <div><dt>状态</dt><dd class="status">Implemented</dd></div>
         <div><dt>负责人</dt><dd>service-web 团队</dd></div>
-        <div><dt>最后修改</dt><dd>2026-07-26</dd></div>
+        <div><dt>最后修改</dt><dd>2026-07-28</dd></div>
         <div><dt>关联决策</dt><dd><a href="../../decisions/0008-default-deny-auth-and-hierarchical-rbac.md">ADR-0008</a></dd></div>
       </dl>
     </div>
@@ -272,7 +272,7 @@
         <div class="route"><code>/users?dialog=create</code><div><strong>Protected + <code>users:create</code>。</strong>
           URL 打开 720px Dialog，使返回键恢复列表；可选角色按服务端 permissions 与 actor role 收敛。</div></div>
         <div class="route"><code>/users/:id?dialog=edit</code><div><strong>Protected + target policy。</strong>
-          URL 打开 720px Dialog；详情从 Query 获取 ETag，提交 PATCH/DELETE/reset 时带 <code>If-Match</code>。</div></div>
+          URL 打开 720px Dialog；详情从 Query 获取 ETag，提交 update/delete/reset 动作时带 <code>If-Match</code>。</div></div>
         <div class="route"><code>403 / route error</code><div><strong>壳层内失败边界。</strong>
           403 不渲染受限数据；未知路由、可恢复数据错误和全局启动失败分别处理，不让一个子路由替换整个 AppShell。</div></div>
       </div>
@@ -347,7 +347,7 @@
   → 原样显示后端 PNG；用户可刷新
   → 提交 account/password/captchaId/captchaAnswer
   ├─ 200 → token 仅存内存
-  │        → GET /users/me
+  │        → POST /users/me
   │        → 校验 returnTo
   │        → 进入受保护路由
   ├─ 422 captcha-invalid → 刷新图片并聚焦验证码
@@ -371,7 +371,7 @@
           <pre class="flow" aria-label="用户写入流程">Actor 打开 720px Dialog
   → 前端按 permissions 收敛字段
   → API 再做 actor/target 校验
-  → POST 或 PATCH + If-Match
+  → POST /users/{id}/update + If-Match
   ├─ 2xx → 清空密码、关闭 Dialog、invalidate list/detail、提示成功
   ├─ 409 → 账号冲突，定位字段
   ├─ 412 → 保留草稿、重取详情、提示已被修改
@@ -380,7 +380,7 @@
         <article class="card">
           <h3>软删除与退出</h3>
           <pre class="flow" aria-label="删除与退出流程">删除：行操作 → 明确对象 Dialog
-  → DELETE + If-Match
+  → POST /users/{id}/delete + If-Match
   → 204（含目标已删除）→ 移除缓存、回列表、toast
 
 退出：POST logout
@@ -432,13 +432,13 @@
             <tr><td>login / captcha / refresh / logout</td><td>AuthShell、会话启动与幂等退出</td><td>页面打开加载 captcha；challenge 单次使用且 no-store；跨标签页协调 refresh</td><td>400、401、403、409、422、429、503</td></tr>
             <tr><td>GET users/me</td><td>AppShell 用户、角色与 permissions</td><td><code>auth/me</code>；安全变化立即失效</td><td>401</td></tr>
             <tr><td>GET users</td><td>列表、q/role/status/sort/cursor/pageSize</td><td>筛选绑定 query key；保留前页几何</td><td>400、401、403</td></tr>
-            <tr><td>GET/PATCH users/{id}</td><td>详情与编辑 Dialog</td><td>保存 ETag；PATCH 带 If-Match</td><td>403/404、412</td></tr>
+            <tr><td>POST users/{id}<br>POST users/{id}/update</td><td>详情与编辑 Dialog</td><td>保存 ETag；update 带 If-Match</td><td>403/404、412</td></tr>
             <tr>
               <td>POST users</td><td>新建用户 Dialog</td>
               <td>管理员输入初始密码并站外交付；提交结束即清空；响应/Toast 不回显；随后 invalidates list</td>
               <td>400、403、409</td>
             </tr>
-            <tr><td>DELETE users/{id}</td><td>明确对象的危险确认</td><td>If-Match；成功移除 detail/list</td><td>403/404、412</td></tr>
+            <tr><td>POST users/{id}/delete</td><td>明确对象的危险确认</td><td>If-Match；成功移除 detail/list</td><td>403/404、412</td></tr>
             <tr>
               <td>password-reset</td><td>更多操作中的独立确认</td>
               <td>管理员输入新密码；提交结束即清空且不缓存、不在响应或提示回显；站外交付</td>
@@ -579,7 +579,8 @@
 
   <footer>
     <div class="shell">
-      Apex数据智能分析平台登录、受保护应用骨架与用户管理 · 变更摘要：2026-07-26 已补齐品牌标志、菜单分组、顶部搜索、桌面分档内容宽度、列表刷新与本人只读行；PC 桌面专用。
+      Apex数据智能分析平台登录、受保护应用骨架与用户管理 · 变更摘要：2026-07-28
+      service-api 调用已固定为 POST-only，并迁移用户列表、更新与删除动作路径；PC 桌面专用。
     </div>
   </footer>
 </body>

@@ -45,9 +45,13 @@ export function useUserEditorDialog({ mode, userId, actor, onClose }: UseUserEdi
     onClose();
   }, [form.clearPassword, form.setFormError, onClose]);
 
-  /** 成功写入后刷新受影响的列表与详情缓存。 */
+  /** 成功写入后刷新受影响的列表、统计、审计与详情缓存。 */
   const invalidateUsers = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ["users", "list"] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["users", "list"] }),
+      queryClient.invalidateQueries({ queryKey: ["users", "statistics"] }),
+      queryClient.invalidateQueries({ queryKey: ["audit-events"] }),
+    ]);
     if (userId !== undefined) {
       await queryClient.invalidateQueries({ queryKey: ["users", "detail", userId] });
     }

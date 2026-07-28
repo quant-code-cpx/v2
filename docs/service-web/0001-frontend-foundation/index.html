@@ -460,7 +460,7 @@
         </div>
         <div>
           <dt>最后修改</dt>
-          <dd>2026-07-26</dd>
+          <dd>2026-07-28</dd>
         </div>
         <div>
           <dt>关联决策</dt>
@@ -856,7 +856,7 @@ interface Candle {
             <tr>
               <td>历史接口</td>
               <td>
-                <code>GET /api/v1/market/candles</code>；参数含 symbol、interval、
+                <code>POST /api/v1/market/candles</code>；参数含 symbol、interval、
                 before/after、limit；返回 items 与双向 paging。
               </td>
               <td>由生成 client 调用，经 Query Client 去重和缓存。</td>
@@ -1393,7 +1393,8 @@ useEffect(() => {
 
   <footer>
     <div class="shell">
-      Web 前端工程基础与双图表实现方案 · 变更摘要（2026-07-26）：完成 Vite+ React 基线、双图表 fixture、单元/E2E 配置、容器与 CI；统一为 1440×900 PC 桌面布局与交互验收；真实 API/实时能力待契约。
+      Web 前端工程基础与双图表实现方案 · 变更摘要（2026-07-28）：完成 Vite+ React 基线、双图表
+      fixture、单元/E2E 配置、容器与 CI；service-api 传输层固定为 POST；统一为 1440×900 PC 桌面布局与交互验收。
     </div>
   </footer>
 </body>

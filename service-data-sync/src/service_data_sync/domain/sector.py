@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
+from uuid import UUID
 
 
 class SectorScheme(StrEnum):
@@ -43,6 +47,32 @@ class SectorMembershipResolution(StrEnum):
     VERIFIED = "VERIFIED"
     PENDING = "PENDING"
     QUARANTINED = "QUARANTINED"
+
+
+class SectorEodSort(StrEnum):
+    """声明同一不可变 EOD 快照中允许的确定性排行字段。"""
+
+    CHANGE_PERCENT = "changePercent"
+    TURNOVER_PERCENT = "turnoverPercent"
+    MARKET_VALUE = "marketValue"
+    LATEST_VALUE = "latestValue"
+    ADVANCERS = "advancers"
+    DECLINERS = "decliners"
+    LEADER_CHANGE_PERCENT = "leaderChangePercent"
+    CODE = "code"
+
+
+class SortOrder(StrEnum):
+    """限制由仓储映射为 SQL 常量的排行方向。"""
+
+    ASC = "asc"
+    DESC = "desc"
+
+
+class SectorEodFinality(StrEnum):
+    """标识收盘策略截点后的观察，不把它误称为上游官方终态。"""
+
+    POST_CLOSE_OBSERVATION = "post_close_observation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +163,92 @@ class SectorBar:
         _require_optional_finite(self.change_amount, "change_amount")
 
 
+@dataclass(frozen=True, slots=True)
+class SectorEodQuote:
+    """表示一个板块在同批 EOD 横截面中的来源原生报价。"""
+
+    identifier: SectorIdentifier
+    name: str
+    latest_value: Decimal | None
+    change_value: Decimal | None
+    change_percent: Decimal | None
+    market_value: Decimal | None
+    turnover_percent: Decimal | None
+    advancers: int | None
+    decliners: int | None
+    leader_name: str | None
+    leader_change_percent: Decimal | None
+
+    def __post_init__(self) -> None:
+        """拒绝不完整身份与非法数值，避免质量门前已丢失坏数据语义。"""
+        if self.name != self.name.strip() or not self.name or len(self.name) > 200:
+            raise ValueError("sector eod name must be a trimmed string from 1 to 200 characters")
+        _require_optional_non_negative(self.latest_value, "latest_value")
+        _require_optional_finite(self.change_value, "change_value")
+        _require_optional_finite(self.change_percent, "change_percent")
+        _require_optional_non_negative(self.market_value, "market_value")
+        _require_optional_non_negative(self.turnover_percent, "turnover_percent")
+        _require_optional_count(self.advancers, "advancers")
+        _require_optional_count(self.decliners, "decliners")
+        if self.leader_name is not None:
+            if self.leader_name != self.leader_name.strip() or len(self.leader_name) > 200:
+                raise ValueError(
+                    "leader_name must be a trimmed string no longer than 200 characters"
+                )
+        _require_optional_finite(self.leader_change_percent, "leader_change_percent")
+
+
+@dataclass(frozen=True, slots=True)
+class SectorEodSnapshot:
+    """表示一个已持久化 EOD 横截面版本的不可变元数据。"""
+
+    snapshot_id: UUID
+    data_version: UUID
+    scheme: SectorScheme
+    trade_date: date
+    source_cutoff_at: datetime
+    observed_at: datetime
+    finality: SectorEodFinality
+    quality_status: str
+    published_at: datetime | None
+
+    def __post_init__(self) -> None:
+        """确保候选或可见快照的时间均带时区且观察不早于策略截点。"""
+        if self.source_cutoff_at.tzinfo is None or self.observed_at.tzinfo is None:
+            raise ValueError("sector eod timestamps must include a timezone")
+        if self.published_at is not None and self.published_at.tzinfo is None:
+            raise ValueError("published_at must include a timezone")
+        if self.observed_at < self.source_cutoff_at:
+            raise ValueError("observed_at must not precede source_cutoff_at")
+        if self.finality is not SectorEodFinality.POST_CLOSE_OBSERVATION:
+            raise ValueError("sector eod finality must be post_close_observation")
+        if self.quality_status not in {"passed", "warned"}:
+            raise ValueError("sector eod quality status must be passed or warned")
+
+
+def sector_eod_snapshot_content_sha256(quotes: Sequence[SectorEodQuote]) -> bytes:
+    """按稳定代码顺序计算完整横截面摘要，供幂等、跨日 stale 检测与审计共用。"""
+    serialized = [
+        {
+            "code": quote.identifier.code,
+            "name": quote.name,
+            "latestValue": _decimal_text(quote.latest_value),
+            "changeValue": _decimal_text(quote.change_value),
+            "changePercent": _decimal_text(quote.change_percent),
+            "marketValue": _decimal_text(quote.market_value),
+            "turnoverPercent": _decimal_text(quote.turnover_percent),
+            "advancers": quote.advancers,
+            "decliners": quote.decliners,
+            "leaderName": quote.leader_name,
+            "leaderChangePercent": _decimal_text(quote.leader_change_percent),
+        }
+        for quote in sorted(quotes, key=lambda value: value.identifier.code)
+    ]
+    return hashlib.sha256(
+        json.dumps(serialized, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
+    ).digest()
+
+
 def _require_non_negative(value: Decimal, field_name: str) -> None:
     """拒绝 NaN、无穷和负数，防止数值异常进入可发布数据集。"""
     if not value.is_finite() or value < 0:
@@ -149,3 +265,14 @@ def _require_optional_finite(value: Decimal | None, field_name: str) -> None:
     """校验可正可负的变动字段在存在时不是 NaN 或无穷。"""
     if value is not None and not value.is_finite():
         raise ValueError(f"{field_name} must be finite")
+
+
+def _require_optional_count(value: int | None, field_name: str) -> None:
+    """校验可选上涨或下跌家数在存在时为非负整数而非布尔值。"""
+    if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+        raise ValueError(f"{field_name} must be a non-negative integer")
+
+
+def _decimal_text(value: Decimal | None) -> str | None:
+    """将可空精确数值标准化为摘要文本，避免二进制浮点与本地格式影响版本判断。"""
+    return None if value is None else format(value, "f")

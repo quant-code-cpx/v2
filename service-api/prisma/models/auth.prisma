@@ -1,3 +1,4 @@
+/// 保存 refresh 凭据轮换链；PostgreSQL 是会话安全状态唯一权威来源。
 model Session {
   id                String    @id @default(uuid()) @db.Uuid
   userId            String    @map("user_id") @db.Uuid
@@ -14,5 +15,6 @@ model Session {
 
   @@index([userId, revokedAt, expiresAt])
   @@index([familyId, revokedAt, expiresAt])
+  @@index([userId, revokedAt, createdAt, id])
   @@map("sessions")
 }

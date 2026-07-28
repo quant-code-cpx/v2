@@ -1,15 +1,16 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
-import { AuthModule } from './modules/auth/auth.module.js';
-import { EquityInstrumentModule } from './modules/equity-instrument/equity-instrument.module.js';
-import { SectorMarketDataModule } from './modules/sector-market-data/sector-market-data.module.js';
-import { UserModule } from './modules/user/user.module.js';
-import { PlatformConfigModule } from './platform/config/config.module.js';
-import { validateEnvironment } from './platform/config/env.validation.js';
-import { DatabaseModule } from './platform/database/database.module.js';
-import { HealthModule } from './platform/health/health.module.js';
-import { RedisModule } from './platform/redis/redis.module.js';
+import { AuthModule } from './apps/auth/auth.module.js';
+import { AuditModule } from './apps/audit/audit.module.js';
+import { IndustryModule } from './apps/industry/industry.module.js';
+import { StockModule } from './apps/stock/stock.module.js';
+import { UserModule } from './apps/user/user.module.js';
+import { AppConfigModule } from './config/app-config.module.js';
+import { validateEnvironment } from './config/env.validation.js';
+import { DatabaseModule } from './shared/database/database.module.js';
+import { HealthModule } from './shared/health/health.module.js';
+import { RedisModule } from './shared/redis/redis.module.js';
 
 /** 组合 API 服务的基础设施与业务模块，保持模块依赖由根模块单向装配。 */
 @Module({
@@ -19,14 +20,15 @@ import { RedisModule } from './platform/redis/redis.module.js';
       validate: validateEnvironment,
       cache: true,
     }),
-    PlatformConfigModule,
+    AppConfigModule,
     DatabaseModule,
     RedisModule,
     HealthModule,
     UserModule,
     AuthModule,
-    EquityInstrumentModule,
-    SectorMarketDataModule,
+    AuditModule,
+    StockModule,
+    IndustryModule,
   ],
 })
 export class AppModule {}

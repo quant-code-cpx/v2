@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import cast
@@ -9,13 +10,24 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
+from service_data_sync.application.ports.sector_eod import RankedSectorEodQuote, SectorEodRepository
 from service_data_sync.application.ports.sector_market_data import (
     DatasetPublication,
     SectorMarketDataRepository,
     StoredSector,
 )
 from service_data_sync.bootstrap.settings import load_settings
-from service_data_sync.domain.sector import SectorBar, SectorIdentifier, SectorPeriod, SectorScheme
+from service_data_sync.domain.sector import (
+    SectorBar,
+    SectorEodFinality,
+    SectorEodQuote,
+    SectorEodSnapshot,
+    SectorEodSort,
+    SectorIdentifier,
+    SectorPeriod,
+    SectorScheme,
+    SortOrder,
+)
 from service_data_sync.interfaces.internal_sector_api import create_app
 
 
@@ -91,6 +103,60 @@ class FakeRepository:
         assert sector_id == self.first.sector_id
         assert period is SectorPeriod.DAY_1
         return tuple((bar, 1, True) for bar in self.bars if start <= bar.period_end <= end)
+
+
+class FakeEodRepository:
+    """提供 EOD 内部 API 所需的不可变快照和确定性排行，不连接数据库。"""
+
+    def __init__(self) -> None:
+        """构造两条同一行业快照报价，用于分页、ETag 和 cursor 回归。"""
+        self.snapshot = SectorEodSnapshot(
+            snapshot_id=uuid4(),
+            data_version=uuid4(),
+            scheme=SectorScheme.EASTMONEY_INDUSTRY,
+            trade_date=date(2026, 7, 27),
+            source_cutoff_at=datetime(2026, 7, 27, 8, 15, tzinfo=UTC),
+            observed_at=datetime(2026, 7, 27, 8, 20, tzinfo=UTC),
+            finality=SectorEodFinality.POST_CLOSE_OBSERVATION,
+            quality_status="passed",
+            published_at=datetime(2026, 7, 27, 8, 21, tzinfo=UTC),
+        )
+        self.rows = (
+            _eod_quote("BK0001", "银行", Decimal("3"), 1, 1),
+            _eod_quote("BK0002", "证券", Decimal("2"), 2, 2),
+        )
+
+    def get_published_snapshot(
+        self, *, scheme: SectorScheme, trade_date: date | None
+    ) -> SectorEodSnapshot | None:
+        """只在请求行业且 latest 或精确日期匹配时返回当前快照。"""
+        if scheme is not SectorScheme.EASTMONEY_INDUSTRY:
+            return None
+        if trade_date is not None and trade_date != self.snapshot.trade_date:
+            return None
+        return self.snapshot
+
+    def list_ranked_quotes(
+        self,
+        *,
+        snapshot_id: UUID,
+        sort: SectorEodSort,
+        order: SortOrder,
+        after_position: int | None,
+        limit: int,
+    ) -> tuple[RankedSectorEodQuote, ...]:
+        """模拟同一 dataVersion 中按 position 续页的稳定排行结果。"""
+        assert snapshot_id == self.snapshot.snapshot_id
+        assert sort is SectorEodSort.CHANGE_PERCENT
+        assert order is SortOrder.DESC
+        return tuple(row for row in self.rows if row.position > (after_position or 0))[:limit]
+
+    def get_snapshot_quote(
+        self, *, snapshot_id: UUID, identifier: SectorIdentifier
+    ) -> RankedSectorEodQuote | None:
+        """按快照身份和 scheme/code 返回单板块报价。"""
+        assert snapshot_id == self.snapshot.snapshot_id
+        return next((row for row in self.rows if row.quote.identifier == identifier), None)
 
 
 def test_internal_api_requires_service_bearer(configured_environment) -> None:
@@ -220,6 +286,63 @@ def test_internal_api_rejects_unpublished_or_malformed_read_requests(
     assert unpublished_catalog.status_code == 503
 
 
+def test_internal_api_reads_eod_page_with_bound_cursor_and_internal_identifier(
+    configured_environment,
+) -> None:
+    """EOD 路由应返回内部 UUID、null-safe 排行字段，并拒绝已替代版本的 cursor。"""
+    del configured_environment
+    settings = load_settings()
+    eod_repository = FakeEodRepository()
+    client = TestClient(
+        create_app(
+            settings=settings,
+            repository=cast(SectorMarketDataRepository, FakeRepository()),
+            eod_repository=cast(SectorEodRepository, eod_repository),
+        )
+    )
+    headers = {"Authorization": f"Bearer {settings.internal_api_bearer_token.get_secret_value()}"}
+    endpoint = "/internal/v1/sectors/eod-snapshots?scheme=eastmoney.industry&limit=1"
+
+    first = client.get(endpoint, headers=headers)
+    cached = client.get(endpoint, headers={**headers, "If-None-Match": first.headers["etag"]})
+    single = client.get(
+        "/internal/v1/sectors/eastmoney.industry/BK0001/eod-snapshot",
+        headers=headers,
+    )
+    invalid_sort = client.get(
+        "/internal/v1/sectors/eod-snapshots?scheme=eastmoney.industry&sort=unknown",
+        headers=headers,
+    )
+    invalid_scheme = client.get(
+        "/internal/v1/sectors/eod-snapshots?scheme=unknown",
+        headers=headers,
+    )
+    invalid_order = client.get(
+        "/internal/v1/sectors/eod-snapshots?scheme=eastmoney.industry&order=unknown",
+        headers=headers,
+    )
+    eod_repository.snapshot = replace(eod_repository.snapshot, data_version=uuid4())
+    expired = client.get(f"{endpoint}&cursor={first.json()['nextCursor']}", headers=headers)
+    exact_missing = client.get(
+        "/internal/v1/sectors/eastmoney.industry/BK0001/eod-snapshot?asOf=2026-07-26",
+        headers=headers,
+    )
+
+    assert first.status_code == 200
+    assert first.json()["items"][0]["sectorId"] == str(eod_repository.rows[0].sector_id)
+    assert first.json()["finality"] == "post_close_observation"
+    assert cached.status_code == 304
+    assert single.status_code == 200
+    assert single.json()["code"] == "BK0001"
+    assert "rank" not in single.json()
+    assert invalid_sort.status_code == 400
+    assert invalid_scheme.status_code == 400
+    assert invalid_order.status_code == 400
+    assert expired.status_code == 409
+    assert expired.json()["code"] == "snapshot-expired"
+    assert exact_missing.status_code == 404
+
+
 def _sector(code: str, name: str) -> StoredSector:
     """构造目录已确认的行业板块身份。"""
     return StoredSector(
@@ -246,4 +369,28 @@ def _bar(period_end: date) -> SectorBar:
         change_percent=Decimal("5"),
         change_amount=Decimal("0.5"),
         turnover_percent=Decimal("3"),
+    )
+
+
+def _eod_quote(
+    code: str, name: str, change_percent: Decimal, rank: int, position: int
+) -> RankedSectorEodQuote:
+    """构造一条同快照 EOD 排行结果，保留内部 UUID 仅供服务间测试断言。"""
+    return RankedSectorEodQuote(
+        sector_id=uuid4(),
+        quote=SectorEodQuote(
+            identifier=SectorIdentifier(SectorScheme.EASTMONEY_INDUSTRY, code),
+            name=name,
+            latest_value=Decimal("1000"),
+            change_value=Decimal("10"),
+            change_percent=change_percent,
+            market_value=Decimal("1000000"),
+            turnover_percent=Decimal("3"),
+            advancers=10,
+            decliners=3,
+            leader_name="示例证券",
+            leader_change_percent=Decimal("5"),
+        ),
+        rank=rank,
+        position=position,
     )

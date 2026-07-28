@@ -85,6 +85,7 @@ describe("auth session", () => {
     expect(window.localStorage.length).toBe(0);
     expect(window.sessionStorage.length).toBe(0);
     expect(requests.every((request) => request.init.credentials === "include")).toBe(true);
+    expect(requests.every((request) => request.init.method === "POST")).toBe(true);
     expect(new Headers(requests[1]?.init.headers).get("Authorization")).toBe(
       "Bearer short-lived-token",
     );
@@ -176,6 +177,7 @@ describe("auth session", () => {
   it("refreshes and retries once after a protected API 401 response", async () => {
     let refreshCalls = 0;
     let listCalls = 0;
+    // 模拟列表首次 401、刷新成功及携带新 token 的 POST 重放。
     setHttpTransportForTests(async (request) => {
       if (request.url.endsWith("/api/v1/auth/login")) {
         return jsonResponse(200, {
@@ -192,7 +194,7 @@ describe("auth session", () => {
           user: currentUserPayload(),
         });
       }
-      if (request.url.includes("/api/v1/users?")) {
+      if (request.url.includes("/api/v1/users/list?")) {
         listCalls += 1;
         const authorization = new Headers(request.init.headers).get("Authorization");
         return authorization === "Bearer refreshed-token"
@@ -235,6 +237,7 @@ describe("auth session", () => {
       releaseVerification = resolve;
     });
 
+    // 模拟刷新后当前用户校验延迟，保留既有认证界面。
     setHttpTransportForTests(async (request) => {
       if (request.url.endsWith("/api/v1/auth/login")) {
         return jsonResponse(200, {
@@ -250,7 +253,7 @@ describe("auth session", () => {
           user: currentUserPayload(),
         });
       }
-      if (request.url.includes("/api/v1/users?")) {
+      if (request.url.includes("/api/v1/users/list?")) {
         const authorization = new Headers(request.init.headers).get("Authorization");
         return authorization === "Bearer refreshed-token"
           ? jsonResponse(200, { items: [], page: { nextCursor: null } })
@@ -293,6 +296,7 @@ describe("auth session", () => {
   /** 多个过期请求共享一次 refresh，各自用新 token 重放一次。 */
   it("uses one refresh for concurrent protected API 401 responses", async () => {
     let refreshCalls = 0;
+    // 模拟多个 POST 列表请求共享一次 refresh。
     setHttpTransportForTests(async (request) => {
       if (request.url.endsWith("/api/v1/auth/login")) {
         return jsonResponse(200, {
@@ -309,7 +313,7 @@ describe("auth session", () => {
           user: currentUserPayload(),
         });
       }
-      if (request.url.includes("/api/v1/users?")) {
+      if (request.url.includes("/api/v1/users/list?")) {
         const authorization = new Headers(request.init.headers).get("Authorization");
         return authorization === "Bearer refreshed-token"
           ? jsonResponse(200, { items: [], page: { nextCursor: null } })
@@ -336,6 +340,7 @@ describe("auth session", () => {
 
   /** refresh cookie 被拒绝时才清理身份，并通知壳层站内跳转。 */
   it("clears identity when refresh after a protected 401 is rejected", async () => {
+    // 模拟列表过期后 refresh cookie 被拒绝。
     setHttpTransportForTests(async (request) => {
       if (request.url.endsWith("/api/v1/auth/login")) {
         return jsonResponse(200, {
@@ -347,7 +352,7 @@ describe("auth session", () => {
       if (request.url.endsWith("/api/v1/auth/refresh")) {
         return jsonResponse(401, { code: "invalid-refresh-token" });
       }
-      if (request.url.includes("/api/v1/users?")) {
+      if (request.url.includes("/api/v1/users/list?")) {
         return jsonResponse(401, { code: "access-token-expired" });
       }
 
@@ -372,6 +377,7 @@ describe("auth session", () => {
   /** 每个列表请求都包含稳定的默认创建时间降序。 */
   it("sends the default created-time descending list order", async () => {
     let userListRequest: HttpTransportRequest | undefined;
+    // 捕获 POST 用户列表请求以核对 URL 查询参数。
     setHttpTransportForTests(async (request) => {
       if (request.url.endsWith("/api/v1/auth/login")) {
         return jsonResponse(200, {
@@ -380,7 +386,7 @@ describe("auth session", () => {
           user: currentUserPayload(),
         });
       }
-      if (request.url.includes("/api/v1/users?")) {
+      if (request.url.includes("/api/v1/users/list?")) {
         userListRequest = request;
         return jsonResponse(200, { items: [], page: { nextCursor: null } });
       }

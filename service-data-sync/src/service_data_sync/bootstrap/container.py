@@ -5,14 +5,22 @@ from __future__ import annotations
 from contextlib import suppress
 from dataclasses import dataclass
 
+from service_data_sync.application.ports.trading_calendar import TradingCalendarPort
 from service_data_sync.application.source_registry import SourceRegistry
 from service_data_sync.bootstrap.settings import Settings
+from service_data_sync.infrastructure.calendar.sse_szse_a_share_2026 import (
+    SseSzseAshare2026TradingCalendar,
+)
+from service_data_sync.infrastructure.calendar.unavailable_trading_calendar import (
+    UnavailableTradingCalendar,
+)
 from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.messaging.redis_client import RedisClient
 from service_data_sync.infrastructure.object_storage.client import ObjectStorageClient
 from service_data_sync.infrastructure.providers.akshare import (
     AkshareEastmoneyEquityCatalogAdapter,
     AkshareEastmoneySectorBarsAdapter,
+    AkshareEastmoneySectorEodAdapter,
     AkshareEastmoneySectorMembershipAdapter,
     AkshareTencentDailyBarsAdapter,
 )
@@ -27,6 +35,7 @@ class ServiceContainer:
     broker: RedisClient
     object_storage: ObjectStorageClient
     source_registry: SourceRegistry
+    trading_calendar: TradingCalendarPort
 
     def close(self) -> None:
         """在进程退出时按反向使用顺序尽力关闭依赖。"""
@@ -56,6 +65,12 @@ def build_container(settings: Settings) -> ServiceContainer:
                     request_timeout_seconds=settings.akshare_request_timeout_seconds
                 )
             )
+            if settings.sector_eod_enabled:
+                registry.register(
+                    AkshareEastmoneySectorEodAdapter(
+                        request_timeout_seconds=settings.akshare_request_timeout_seconds
+                    )
+                )
             if settings.sector_membership_enabled:
                 registry.register(
                     AkshareEastmoneySectorMembershipAdapter(
@@ -68,4 +83,12 @@ def build_container(settings: Settings) -> ServiceContainer:
         broker=RedisClient.from_settings(settings),
         object_storage=ObjectStorageClient.from_settings(settings),
         source_registry=registry,
+        trading_calendar=_trading_calendar_for_settings(settings),
     )
+
+
+def _trading_calendar_for_settings(settings: Settings) -> TradingCalendarPort:
+    """仅在显式开关开启时提供已发布的年度日历，其余场景保持未知并阻止 EOD。"""
+    if settings.trading_calendar_enabled:
+        return SseSzseAshare2026TradingCalendar()
+    return UnavailableTradingCalendar()

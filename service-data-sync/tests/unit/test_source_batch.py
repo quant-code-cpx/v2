@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import cast
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Connection
+from sqlalchemy.sql import ClauseElement
 
 from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 
@@ -15,30 +17,26 @@ from service_data_sync.infrastructure.persistence.source_batch import record_sou
 class FakeResult:
     """提供来源账本写入器读取 `RETURNING` 行所需的最小接口。"""
 
-    def __init__(self, row: dict[str, Any]) -> None:
-        """保存每次写入对应的伪造数据库返回行。"""
-        self._row = row
+    def __init__(self) -> None:
+        """为每个模拟的 `RETURNING` 调用生成独立来源批次标识。"""
+        self._source_batch_id = uuid4()
 
-    def mappings(self) -> FakeResult:
-        """返回已经是映射结构的测试结果。"""
-        return self
-
-    def one(self) -> dict[str, Any]:
-        """模拟 `RETURNING source_batch_id` 的单行结果。"""
-        return self._row
+    def scalar_one(self) -> object:
+        """模拟 ORM-enabled `RETURNING source_batch_id` 的标量读取。"""
+        return self._source_batch_id
 
 
 class RecordingConnection:
     """记录 CTE 写入语句与参数，不连接 PostgreSQL。"""
 
     def __init__(self) -> None:
-        """初始化空的 SQL 调用记录。"""
-        self.calls: list[tuple[str, dict[str, Any]]] = []
+        """初始化空的 ORM statement 调用记录。"""
+        self.calls: list[ClauseElement] = []
 
-    def execute(self, statement: object, parameters: dict[str, Any]) -> FakeResult:
-        """记录一次事务内账本写入并回传调用方生成的批次标识。"""
-        self.calls.append((str(statement), parameters))
-        return FakeResult({"source_batch_id": parameters["source_batch_id"]})
+    def execute(self, statement: ClauseElement) -> FakeResult:
+        """记录一次 ORM-enabled 写入并回传独立的来源批次标识。"""
+        self.calls.append(statement)
+        return FakeResult()
 
 
 def test_same_payload_creates_distinct_source_observations() -> None:
@@ -65,15 +63,14 @@ def test_same_payload_creates_distinct_source_observations() -> None:
         created_at=observed_at,
     )
 
-    first_sql, first_parameters = connection.calls[0]
-    _, second_parameters = connection.calls[1]
+    first_sql = _compile(connection.calls[0])
+    second_sql = _compile(connection.calls[1])
     assert first != second
-    assert first_parameters["run_id"] != second_parameters["run_id"]
-    assert first_parameters["request_key"] != second_parameters["request_key"]
-    assert first_parameters["payload_sha256"] == second_parameters["payload_sha256"]
     assert "ON CONFLICT" not in first_sql
     assert "INSERT INTO sync_run" in first_sql
     assert "INSERT INTO sync_partition" in first_sql
+    assert "fixture-provider" not in first_sql
+    assert first_sql == second_sql
 
 
 def test_existing_run_partition_appends_source_evidence_without_creating_new_run() -> None:
@@ -94,11 +91,10 @@ def test_existing_run_partition_appends_source_evidence_without_creating_new_run
         partition_key="eastmoney.industry:BK0475:2026-07-27",
     )
 
-    sql, parameters = connection.calls[0]
-    assert source_batch_id == parameters["source_batch_id"]
-    assert parameters["run_id"] == run_id
+    sql = _compile(connection.calls[0])
+    assert source_batch_id
     assert "INSERT INTO sync_run" not in sql
-    assert "MAX(observation_seq) + 1" in sql
+    assert "max(source_batch.observation_seq)" in sql
 
 
 def test_source_observation_requires_complete_execution_context() -> None:
@@ -117,3 +113,8 @@ def test_source_observation_requires_complete_execution_context() -> None:
             created_at=observed_at,
             run_id=uuid4(),
         )
+
+
+def _compile(statement: ClauseElement) -> str:
+    """以 PostgreSQL 方言编译 ORM statement，断言其结构而非私有参数名。"""
+    return str(statement.compile(dialect=postgresql.dialect()))

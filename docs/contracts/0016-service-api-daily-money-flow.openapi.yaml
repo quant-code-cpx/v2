@@ -1,13 +1,14 @@
 openapi: 3.1.1
 info:
   title: service-api daily money-flow API
-  version: 1.0.0
+  version: 2.0.0
   description: |
     Proposed authenticated projection of published vendor-derived daily
     money-flow series and supplier ranking snapshots. Methodology discovery is
     mandatory. The API exposes no ambiguous generic money-flow value and never
     combines providers, methodologies, daily observations, or rolling windows.
   x-contract-status: Proposed
+x-http-method-policy: post-only
 servers:
   - url: /api/v1
 tags:
@@ -18,7 +19,7 @@ security:
   - userBearer: []
 paths:
   /market/money-flow/methodologies:
-    get:
+    post:
       tags: [market-money-flow-methodologies]
       operationId: listMoneyFlowMethodologies
       summary: Discover published money-flow methodologies
@@ -45,8 +46,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MethodologyPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -61,7 +62,7 @@ paths:
           $ref: '#/components/responses/DataSyncUnavailable'
 
   /market/money-flow/methodologies/{methodologyId}/daily-series/equities/{exchange}/{symbol}:
-    get:
+    post:
       tags: [market-money-flow-daily-series]
       operationId: listEquityDailyMoneyFlow
       summary: Read one explicit equity daily series
@@ -84,8 +85,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/EquityDailySeries'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -102,7 +103,7 @@ paths:
           $ref: '#/components/responses/DataSyncUnavailable'
 
   /market/money-flow/methodologies/{methodologyId}/daily-series/sectors/{scheme}/{sectorCode}:
-    get:
+    post:
       tags: [market-money-flow-daily-series]
       operationId: listSectorDailyMoneyFlow
       summary: Read one explicit sector daily series
@@ -124,8 +125,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/SectorDailySeries'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -142,7 +143,7 @@ paths:
           $ref: '#/components/responses/DataSyncUnavailable'
 
   /market/money-flow/methodologies/{methodologyId}/daily-series/markets/{marketCode}:
-    get:
+    post:
       tags: [market-money-flow-daily-series]
       operationId: listMarketDailyMoneyFlow
       summary: Read one explicit market daily series
@@ -163,8 +164,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/MarketDailySeries'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -181,7 +182,7 @@ paths:
           $ref: '#/components/responses/DataSyncUnavailable'
 
   /market/money-flow/methodologies/{methodologyId}/supplier-rankings:
-    get:
+    post:
       tags: [market-money-flow-supplier-rankings]
       operationId: listSupplierMoneyFlowRanking
       summary: Read one supplier ranking snapshot
@@ -215,8 +216,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RankingPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':

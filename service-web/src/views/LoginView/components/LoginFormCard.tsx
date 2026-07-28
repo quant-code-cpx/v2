@@ -53,9 +53,9 @@ export function LoginFormCard({ model }: LoginFormCardProps) {
         sx={{ mt: 4 }}
       >
         <Stack spacing={2}>
-          {model.sessionExpired ? (
-            <Alert severity="info">登录状态已失效，请重新登录。验证后将返回原页面。</Alert>
-          ) : null}
+          {model.sessionNotice === null ? null : (
+            <Alert severity="info">{model.sessionNotice}</Alert>
+          )}
           {model.errorMessage === null ? null : (
             <Alert severity="error">{model.errorMessage}</Alert>
           )}

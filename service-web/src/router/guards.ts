@@ -6,7 +6,7 @@ import { isApiError } from "../api/http";
 import type { CurrentUser, Permission } from "../types/access";
 import { safeReturnTo } from "../utils/return-to";
 
-/** Redirect an anonymous visitor to login while preserving one safe in-app target. */
+/** 将匿名访问者重定向到登录，并保留一个安全站内目标。 */
 function loginRedirect(request: Request): Response {
   const requestUrl = new URL(request.url);
   const returnTo = `${requestUrl.pathname}${requestUrl.search}${requestUrl.hash}`;
@@ -14,7 +14,7 @@ function loginRedirect(request: Request): Response {
   return redirect(`/login?returnTo=${encodeURIComponent(returnTo)}`);
 }
 
-/** Require a validated session before any protected route loader continues. */
+/** 在任何受保护路由 loader 继续前要求已验证会话。 */
 export async function requireSession({
   request,
 }: LoaderFunctionArgs): Promise<CurrentUser | Response> {
@@ -35,9 +35,9 @@ export async function requireSession({
   }
 }
 
-/** Build a protected route loader that requires one server-calculated permission. */
+/** 构造要求一个服务端计算权限的受保护路由 loader。 */
 export function requirePermission(permission: Permission) {
-  /** Check the shared authenticated session before rendering a permission-bound route. */
+  /** 在渲染权限路由前检查共享已认证会话。 */
   return async (arguments_: LoaderFunctionArgs): Promise<CurrentUser | Response> => {
     const userOrRedirect = await requireSession(arguments_);
 
@@ -53,7 +53,7 @@ export function requirePermission(permission: Permission) {
   };
 }
 
-/** Redirect an already authenticated visitor away from the sole anonymous login route. */
+/** 将已认证访问者从唯一匿名登录路由重定向出去。 */
 export async function redirectAuthenticatedLogin({
   request,
 }: LoaderFunctionArgs): Promise<Response | null> {
@@ -66,7 +66,7 @@ export async function redirectAuthenticatedLogin({
     const requestUrl = new URL(request.url);
     return redirect(safeReturnTo(requestUrl.searchParams.get("returnTo")));
   } catch {
-    // Login remains available when a refresh dependency is temporarily unavailable.
+    // refresh 依赖暂时不可用时仍保留登录入口。
     return null;
   }
 }

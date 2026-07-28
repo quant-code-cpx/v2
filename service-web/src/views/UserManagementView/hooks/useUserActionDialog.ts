@@ -54,9 +54,13 @@ export function useUserActionDialog({ kind, userId, onClose }: UseUserActionDial
     setFormError(null);
   }, []);
 
-  /** 成功动作后刷新列表并移除目标详情缓存。 */
+  /** 成功动作后刷新列表、统计、审计并移除目标详情缓存。 */
   const invalidateUsers = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ["users", "list"] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["users", "list"] }),
+      queryClient.invalidateQueries({ queryKey: ["users", "statistics"] }),
+      queryClient.invalidateQueries({ queryKey: ["audit-events"] }),
+    ]);
     queryClient.removeQueries({ queryKey: ["users", "detail", userId] });
   }, [queryClient, userId]);
 

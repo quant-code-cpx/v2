@@ -72,9 +72,14 @@ services:
     volumes:
       - ./service-api/src/app.module.ts:/app/src/app.module.ts:ro
       - ./service-api/src/main.ts:/app/src/main.ts:ro
-      - ./service-api/src/modules:/app/src/modules:ro
-      - ./service-api/src/platform:/app/src/platform:ro
+      - ./service-api/src/apps:/app/src/apps:ro
+      - ./service-api/src/bootstrap:/app/src/bootstrap:ro
+      - ./service-api/src/common:/app/src/common:ro
+      - ./service-api/src/config:/app/src/config:ro
+      - ./service-api/src/data-sync:/app/src/data-sync:ro
+      - ./service-api/src/lifecycle:/app/src/lifecycle:ro
       - ./service-api/src/scripts:/app/src/scripts:ro
+      - ./service-api/src/shared:/app/src/shared:ro
       - ./service-api/src/types:/app/src/types:ro
       - ./service-api/prisma:/app/prisma:ro
       - ./service-api/prisma.config.ts:/app/prisma.config.ts:ro
@@ -94,6 +99,20 @@ services:
       - "127.0.0.1:${DATA_SYNC_MINIO_CONSOLE_PORT:-19001}:9001"
 
   data-sync-worker:
+    image: quant-v2/service-data-sync:dev
+    build:
+      context: ./service-data-sync
+      dockerfile: Dockerfile
+      target: development
+    environment:
+      DATA_SYNC_ENV: local
+      DATA_SYNC_LOG_FORMAT: console
+    volumes:
+      - ./service-data-sync/src:/app/src:ro
+      - ./service-data-sync/migrations:/app/migrations:ro
+      - ./service-data-sync/alembic.ini:/app/alembic.ini:ro
+
+  data-sync-scheduler:
     image: quant-v2/service-data-sync:dev
     build:
       context: ./service-data-sync
@@ -158,6 +177,10 @@ services:
       DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS: ${DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS:-10}
       DATA_SYNC_AKSHARE_ENABLED: ${DATA_SYNC_AKSHARE_ENABLED:-false}
       DATA_SYNC_SECTOR_ENABLED: ${DATA_SYNC_SECTOR_ENABLED:-false}
+      DATA_SYNC_SECTOR_EOD_ENABLED: ${DATA_SYNC_SECTOR_EOD_ENABLED:-false}
+      DATA_SYNC_SECTOR_EOD_PUBLISH_ENABLED: ${DATA_SYNC_SECTOR_EOD_PUBLISH_ENABLED:-false}
+      DATA_SYNC_SECTOR_EOD_SCHEDULER_ENABLED: ${DATA_SYNC_SECTOR_EOD_SCHEDULER_ENABLED:-false}
+      DATA_SYNC_TRADING_CALENDAR_ENABLED: ${DATA_SYNC_TRADING_CALENDAR_ENABLED:-false}
       DATA_SYNC_INTERNAL_API_BEARER_TOKEN: ${DATA_SYNC_INTERNAL_API_BEARER_TOKEN:?set DATA_SYNC_INTERNAL_API_BEARER_TOKEN}
       DATA_SYNC_AKSHARE_REQUEST_TIMEOUT_SECONDS: ${DATA_SYNC_AKSHARE_REQUEST_TIMEOUT_SECONDS:-30}
     networks:

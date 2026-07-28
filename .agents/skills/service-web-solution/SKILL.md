@@ -76,6 +76,8 @@ Include, when applicable:
 - Keep KLineChart for K-line, indicators, and overlays; use ECharts only for non-K-line analytics.
 - Keep server state in TanStack Query and chart interaction state in the engine.
 - Keep service-web behind service-api; never access databases or providers directly.
+- Keep every service-web call to service-api POST-only through the shared transport; business
+  callers must not select an HTTP method.
 - Do not guess unfrozen endpoints, real-time protocols, permissions, or financial semantics.
 - Do not replace the product homepage market overview with personal portfolio content.
 - Do not spend design, implementation, screenshot, or test effort on mobile, tablet, touch, responsive, or narrow-screen scenarios.

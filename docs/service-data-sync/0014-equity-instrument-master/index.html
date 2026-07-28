@@ -463,7 +463,7 @@ service-data-sync application ──▶ raw object store
 service-data-sync PostgreSQL ──▶ internal v1 HTTP
                                       │ dedicated service credential
                                       ▼
-                              service-api EquityInstrumentModule
+                              service-api StockModule
                                       │ authenticated public v1
                                       ▼
                                   consumers
@@ -1027,7 +1027,7 @@ COMMIT
 
       <h3>service-api 模块与安全</h3>
       <ul>
-        <li>新增 <code>EquityInstrumentModule</code>，只依赖配置、全局 Auth Guard、Problem Details 和专用 DataSync client；禁止 <code>forwardRef()</code>。</li>
+        <li>新增 <code>StockModule</code>，只依赖配置、全局 Auth Guard、Problem Details 和专用 DataSync client；禁止 <code>forwardRef()</code>。</li>
         <li>现有 ACTIVE USER/ADMIN/SUPER_ADMIN 可读是首期提案，最终 permission 是发布门；controller 不得标记 Public。</li>
         <li>client 只调用 0009 internal HTTP，使用运行时 service Bearer；响应先做严格 schema 校验，再投影公开 schema。</li>
         <li>必须删除 <code>instrumentId</code>、任何 securityId、raw URI、provider、batch、quality detail；公开身份只用 exchange+symbol。</li>

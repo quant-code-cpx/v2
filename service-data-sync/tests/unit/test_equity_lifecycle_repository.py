@@ -35,6 +35,12 @@ class FakeResult:
         """测试值已经是映射结构，无需额外转换。"""
         return self
 
+    def scalar_one(self) -> object:
+        """模拟 ORM-enabled `RETURNING` 的单一标量结果。"""
+        if isinstance(self._value, dict):
+            return self._value["source_batch_id"]
+        return self._value
+
     def all(self) -> list[object]:
         """返回身份解析查询的全部候选行。"""
         assert isinstance(self._value, list)

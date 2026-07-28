@@ -463,7 +463,7 @@
             <div>AKShare Adapters<br>抓取并落 raw</div>
             <div>Normalize + Quality<br>隔离与校验</div>
             <div>PostgreSQL<br>canonical + publication</div>
-            <div>Internal FastAPI<br>→ NestJS EquityModule</div>
+            <div>Internal FastAPI<br>→ NestJS StockModule</div>
           </div>
           <ul>
             <li><strong>service-data-sync</strong> 拥有同步任务、raw 对象、canonical 表、发布目录及内部查询 API。</li>
@@ -484,7 +484,7 @@
                 </tr>
                 <tr>
                   <td>service-api</td>
-                  <td><code>EquityModule</code>、<code>DataSyncClient</code></td>
+                  <td><code>StockModule</code>、<code>DataSyncClient</code></td>
                   <td>认证用户 API、输入限制、超时/熔断、Problem Details、ETag 透传。</td>
                 </tr>
                 <tr>
@@ -925,7 +925,7 @@ CREATE INDEX ix_equity_daily_bar_2026_read
           <h3>9.2 service-api 行为</h3>
           <ul>
             <li>沿用全局 bearer 鉴权；有效 USER、ADMIN、SUPER_ADMIN 均可读。同步控制端点不公开。</li>
-            <li><code>EquityModule → DataSyncClient</code> 单向依赖；默认请求预算 2 秒，财报详情 5 秒。</li>
+            <li><code>StockModule → DataSyncClient</code> 单向依赖；默认请求预算 2 秒，财报详情 5 秒。</li>
             <li>幂等 GET 可在总预算内重试 1 次；熔断开启或下游失败统一映射 503 Problem Details，并返回 Retry-After。</li>
             <li>首期不在 service-api 建业务缓存或读模型，直接透传 ETag；Redis 仅可保存短期滥用计数，不能成为行情权威副本。</li>
             <li>所有错误采用现有 Problem Details 结构，保留 <code>requestId</code>，不返回上游 URL、异常栈或服务凭证。</li>
@@ -1038,7 +1038,7 @@ CREATE INDEX ix_equity_daily_bar_2026_read
                 </tr>
                 <tr>
                   <td>5. service-api（4–6 天）</td>
-                  <td>EquityModule、DataSyncClient、认证/限流、ETag、熔断、公开 OpenAPI 与契约测试。</td>
+                  <td>StockModule、DataSyncClient、认证/限流、ETag、熔断、公开 OpenAPI 与契约测试。</td>
                   <td>公开契约一致；下游超时/失败映射正确；无 DB 跨服务连接。</td>
                 </tr>
                 <tr>

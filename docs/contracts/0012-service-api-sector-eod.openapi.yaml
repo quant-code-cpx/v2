@@ -1,13 +1,14 @@
 openapi: 3.1.1
 info:
   title: service-api sector EOD snapshot API
-  version: 1.0.0
+  version: 2.0.0
   description: |
     Proposed additive extension to contract 0006. It exposes authenticated,
     published post-close sector observations and deterministic rankings.
     service-api owns the public projection but reads canonical data only through
     contract 0011; it never queries service-data-sync storage or a provider.
   x-contract-status: Proposed
+x-http-method-policy: post-only
 servers:
   - url: /api/v1
 tags:
@@ -16,7 +17,7 @@ security:
   - userBearer: []
 paths:
   /market/sectors/eod-snapshots:
-    get:
+    post:
       tags: [market-sector-eod-snapshots]
       operationId: listMarketSectorEodSnapshots
       summary: Rank one published post-close sector snapshot
@@ -45,8 +46,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SectorEodPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -63,7 +64,7 @@ paths:
           $ref: '#/components/responses/DataSyncUnavailable'
 
   /market/sectors/{scheme}/{sectorCode}/eod-snapshot:
-    get:
+    post:
       tags: [market-sector-eod-snapshots]
       operationId: getMarketSectorEodSnapshot
       summary: Read one sector from a published post-close snapshot
@@ -88,8 +89,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SectorEodResource'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':

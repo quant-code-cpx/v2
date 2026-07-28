@@ -26,7 +26,7 @@ Design contract-first API capabilities with explicit module ownership, security 
    - authoritative owner of every read or write.
 3. Define module ownership and dependency direction before Controller/Service/Repository structure.
 4. Design the external contract:
-   - method, path, version, request/response schema, validation, status, Problem Details;
+   - POST path, version, request/response schema, validation, status, Problem Details;
    - pagination, filtering, sorting, idempotency, concurrency, caching, and deprecation;
    - request/correlation ID, audit context, and sensitive-field handling.
 5. Design security:
@@ -63,6 +63,9 @@ Include, when applicable:
 - Keep PostgreSQL authoritative for users, credentials, sessions, audit, and business state.
 - Keep Redis limited to short-lived auth security state.
 - Keep production migrations separate from application startup.
+- Keep every service-api application and operations route POST-only, including health/readiness;
+  never declare another Controller method decorator. Framework-managed CORS preflight and
+  outbound downstream calls are outside this route rule.
 - Do not guess endpoints, schemas, auth policy, or downstream capabilities.
 - Do not expose internal exceptions, secrets, credentials, or restricted fields.
 - Do not let service-web bypass service-api or let service-api bypass downstream versioned boundaries.

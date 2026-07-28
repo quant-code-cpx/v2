@@ -49,6 +49,10 @@ class RawPayloadStore(Protocol):
         """持久化一个不可变对象并返回其标准存储 URI。"""
         ...
 
+    def get(self, uri: str) -> bytes:
+        """读取服务自有 raw evidence，供受控 replay 恢复标准载荷。"""
+        ...
+
 
 class EquityMarketDataRepository(Protocol):
     """负责标准日线写入及已发布数据读取。"""

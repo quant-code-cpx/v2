@@ -32,6 +32,12 @@ export function useAppHeaderActions() {
     info("帮助中心正在建设中。");
   }, [info]);
 
+  /** 关闭账号菜单并进入本人资料与 Session 管理页面。 */
+  const handleAccount = useCallback(() => {
+    handleAccountMenuClose();
+    void navigate("/account");
+  }, [handleAccountMenuClose, navigate]);
+
   /** 清理会话并用 React Router 替换为匿名登录路由。 */
   const handleLogout = useCallback(async () => {
     handleAccountMenuClose();
@@ -46,6 +52,7 @@ export function useAppHeaderActions() {
     handleAccountMenuClose,
     handleGlobalSearch,
     handleHelp,
+    handleAccount,
     handleLogout,
   };
 }

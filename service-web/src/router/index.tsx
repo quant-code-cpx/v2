@@ -30,12 +30,21 @@ export function createAppRouter() {
       children: [
         {
           index: true,
-          /** 加载不含市场或图表 fixture 的受保护首页占位。 */
+          /** 按权限加载不含图表依赖的平台工作台。 */
           lazy: async () => {
-            const { HomePlaceholderView } =
-              await import("../views/HomePlaceholderView/HomePlaceholderView");
+            const { WorkspaceView } = await import("../views/WorkspaceView/WorkspaceView");
 
-            return { Component: HomePlaceholderView };
+            return { Component: WorkspaceView };
+          },
+        },
+        {
+          path: "account",
+          loader: requireSession,
+          /** 会话验证后加载本人资料与安全管理页面。 */
+          lazy: async () => {
+            const { AccountView } = await import("../views/AccountView/AccountView");
+
+            return { Component: AccountView };
           },
         },
         {
@@ -48,6 +57,17 @@ export function createAppRouter() {
               await import("../views/UserManagementView/UserManagementView");
 
             return { Component: UserManagementView };
+          },
+        },
+        {
+          path: "security/audit",
+          loader: requirePermission("audit:read"),
+          errorElement: <ForbiddenView />,
+          /** 权限验证完成后才加载审计页面和查询代码。 */
+          lazy: async () => {
+            const { AuditEventsView } = await import("../views/AuditEventsView/AuditEventsView");
+
+            return { Component: AuditEventsView };
           },
         },
         {

@@ -35,6 +35,12 @@ class FakeResult:
         """已排队值是映射形数据，因此保持当前替身。"""
         return self
 
+    def scalar_one(self) -> object:
+        """模拟 ORM-enabled `RETURNING` 的单一标量结果。"""
+        if isinstance(self._value, dict):
+            return self._value["source_batch_id"]
+        return self._value
+
     def one_or_none(self) -> object:
         """为可选查询返回排队行或 `None`。"""
         return self._value

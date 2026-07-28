@@ -20,7 +20,8 @@ PostgreSQL canonical revision 和人工 CLI。
 - 已实现东财行业/概念板块的日线、周线、月线 adapter；三个周期分别调用上游参数、分别存入
   `sector_daily_bar`、`sector_weekly_bar`、`sector_monthly_bar`，绝不由日线计算。除 `DATA_SYNC_AKSHARE_ENABLED=true`
   外，还必须显式设置 `DATA_SYNC_SECTOR_ENABLED=true`。
-- 已实现行业/概念目录 CLI；目录快照写入 raw evidence 后会激活带名称的 `ACTIVE` 身份。行情先创建的 `PENDING` 身份会保留 UUID 后升级；已实现板块成分当前快照、观测区间、固定 release、双向 internal 读取与手动 CLI。申万体系、EOD 快照、资金流和定时调度仍未实现。
+- 已实现行业/概念目录 CLI；目录快照写入 raw evidence 后会激活带名称的 `ACTIVE` 身份。行情先创建的 `PENDING` 身份会保留 UUID 后升级；已实现板块成分当前快照、观测区间、固定 release、双向 internal 读取与手动 CLI。
+- 已实现行业/概念板块 EOD 完整横截面 adapter、raw evidence、revision、质量门、内部读取、受控手工 CLI、shadow scheduler、租约 reaper、publication rollback、结构化任务日志与 2026 沪深公告交易日历。它只保存 `post_close_observation`，不宣称官方终态；全部 EOD 开关默认关闭。2026 年以外日期安全阻断，且许可、单位对账、连续探针与生产观测验收仍未完成；仓内未选择或引入监控平台。
 - 默认日线 CLI 只拉最近 31 个自然日；首次回填、复权、财务和定时调度尚未实现。
 - 已实现证券目录、双时间身份/名称/上市状态、交易所独立 publication、全市场稳定聚合、内部读取和公开 API
   代理。目录缺席、空响应和行情缺席不会改变生命周期；显式退市、暂停和恢复只能经专用生命周期 port 发布。
@@ -80,6 +81,47 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
 ~~~
 
 上例只适用于获准的 local/research 来源。生产开关继续保持关闭，直到许可、频率、留存和连续稳定性完成评审。
+
+## 板块 EOD 横截面同步
+
+EOD 只接受显式的 `scheme` 和 `trade-date`，一次调用对应分类体系的批量 name 接口；它不会用逐板块
+spot、K 线或其他来源补齐缺失行。运行前目录必须已经发布为完整 `ACTIVE` 集合，候选覆盖率必须为 100%；
+同内容重跑只新增来源观测，不创建新的 canonical revision 或 `dataVersion`。
+
+~~~sh
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra up -d
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra --profile data-sync-test run --rm data-sync-test \
+  /bin/sh -ec 'alembic upgrade head && DATA_SYNC_AKSHARE_ENABLED=true \
+  DATA_SYNC_SECTOR_ENABLED=true DATA_SYNC_SECTOR_EOD_ENABLED=true \
+  data-sync-sector-eod --scheme eastmoney.industry --trade-date 2026-07-27'
+~~~
+
+该命令默认只写 `candidate`，只能用于获准的 local/research/shadow。2026 年可在显式开启
+`DATA_SYNC_TRADING_CALENDAR_ENABLED=true` 后使用沪深公告日历；其他年份、来源许可、单位与连续稳定性仍未获批准，
+缺少或未知日历时命令会在访问 provider 前停止。只有 `DATA_SYNC_SECTOR_EOD_PUBLISH_ENABLED=true` 且显式传入
+`--publish` 才会推进 `dataset_publication`，生产开关必须保持关闭。
+
+发生归一化或质量规则变更时，可用 `--replay-raw` 按该分区已 checkpoint 的 raw evidence 重放；该模式不会调用上游，且
+仅在已有来源观测后可用。
+
+阻断质量失败会保存完整 `quarantined` snapshot、报价和规则证据，但不会替换已有 `published` version 或创建
+`dataset_publication`；质量证据固定记录 `sector-eod-shadow-v1` policy；同一 scheme 的最近已发布快照用于市值稳定性
+和全批 stale 检测。
+
+运维可单独运行 `data-sync-sector-eod-reaper` 回收过期租约；它只将 checkpoint 置回 `queued`，不会访问 provider、
+推断交易日或启用 EOD source policy。`DATA_SYNC_SECTOR_EOD_SCHEDULER_ENABLED=true` 时，独立
+`data-sync-scheduler` 会在上海时间 16:20 投递两个 scheme，并每 5 分钟回收后重投 queued 分区；它仍会因未知日历停止。
+
+若需恢复指定已通过 revision，可在受控变更窗口执行：
+
+~~~sh
+DATA_SYNC_SECTOR_EOD_PUBLISH_ENABLED=true data-sync-sector-eod-rollback \
+  --scheme eastmoney.industry --trade-date 2026-07-27 --revision 1
+~~~
+
+rollback 只把 consumer publication 指回既有 `passed`/`warned` history，不删除 raw、candidate、quarantine 或较新 revision。
 
 ## P0 板块目录与内部读取
 

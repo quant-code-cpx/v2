@@ -6,30 +6,29 @@ import type {
   LoginInput,
 } from "../types/access";
 
-/** Request a new backend-rendered CAPTCHA without a client-generated challenge. */
+/** 请求后端渲染的新验证码，不由客户端生成 challenge。 */
 export async function createLoginCaptcha(): Promise<CaptchaChallenge> {
-  return requestJson<CaptchaChallenge>("/api/v1/auth/captcha", { method: "POST" });
+  return requestJson<CaptchaChallenge>("/api/v1/auth/captcha", {});
 }
 
-/** Exchange account, password, and one CAPTCHA answer for a short-lived access token. */
+/** 使用账号、密码和一次验证码答案换取短期 access token。 */
 export async function loginWithCaptcha(input: LoginInput): Promise<AccessTokenResponse> {
-  return requestJson<AccessTokenResponse>("/api/v1/auth/login", { method: "POST", body: input });
+  return requestJson<AccessTokenResponse>("/api/v1/auth/login", { body: input });
 }
 
-/** Rotate the HttpOnly refresh cookie into a new short-lived access token. */
+/** 轮换 HttpOnly refresh cookie 并取得新的短期 access token。 */
 export async function refreshAccessToken(): Promise<AccessTokenResponse> {
-  return requestJson<AccessTokenResponse>("/api/v1/auth/refresh", { method: "POST" });
+  return requestJson<AccessTokenResponse>("/api/v1/auth/refresh", {});
 }
 
-/** Clear the server session cookie through its idempotent same-origin endpoint. */
+/** 通过幂等同源端点清除服务端会话 cookie。 */
 export async function logoutCurrentSession(): Promise<void> {
-  await requestJson<void>("/api/v1/auth/logout", { method: "POST" });
+  await requestJson<void>("/api/v1/auth/logout", {});
 }
 
-/** Read current identity and permissions using an in-memory Bearer token. */
+/** 使用内存中的 Bearer token 读取当前身份和权限。 */
 export async function getCurrentUser(accessToken: string): Promise<CurrentUser> {
   return requestJson<CurrentUser>("/api/v1/users/me", {
-    method: "GET",
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 }

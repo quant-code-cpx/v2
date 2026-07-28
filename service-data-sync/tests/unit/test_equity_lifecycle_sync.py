@@ -75,6 +75,10 @@ class FakeRawPayloadStore:
         self.payloads.append(payload)
         return f"s3://test/{payload.object_key}"
 
+    def get(self, uri: str) -> bytes:
+        """生命周期同步未声明 replay；读取 raw 即表示测试路径错误。"""
+        raise AssertionError(f"unexpected raw replay read: {uri}")
+
 
 class FakeRepository:
     """记录应用层传入的生命周期标准事实和来源字段。"""

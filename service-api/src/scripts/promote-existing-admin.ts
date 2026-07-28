@@ -4,7 +4,7 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from '../app.module.js';
-import { UserService } from '../modules/user/user.service.js';
+import { UserService } from '../apps/user/user.service.js';
 
 const PROMOTION_CONFIRMATION = 'PROMOTE_ACTIVE_ADMIN';
 

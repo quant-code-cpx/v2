@@ -1,4 +1,4 @@
-"""启动当前不注册业务任务的 Celery worker 进程。"""
+"""启动注册受控 EOD 任务的 Celery worker 进程。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from service_data_sync.infrastructure.messaging.celery_app import create_worker_
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """配置并启动刻意保持任务为空的 Celery worker 进程。"""
+    """配置并启动 worker；任务执行仍受 source、scheduler、publish 与日历门控。"""
     settings = load_settings()
     configure_logging(settings, process_role="worker")
     app = create_worker_app(settings)

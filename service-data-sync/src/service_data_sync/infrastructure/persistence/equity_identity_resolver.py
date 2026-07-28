@@ -6,7 +6,8 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import Connection, Engine, text
+from sqlalchemy import Connection, Select, select
+from sqlalchemy.orm import Session
 
 from service_data_sync.application.ports.equity_master import EquityIdentityResolver
 from service_data_sync.domain.equity import Exchange
@@ -16,13 +17,17 @@ from service_data_sync.domain.equity_master import (
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
 
+from ..database.models.equity.identity.equity_identifier_version import (
+    EquityIdentifierVersion,
+)
+
 
 class SqlAlchemyEquityIdentityResolver(EquityIdentityResolver):
     """在服务自有 PostgreSQL 上执行只读的双时间证券标识查询。"""
 
     def __init__(self, database: DatabaseClient) -> None:
-        """保存 SQLAlchemy 引擎，不向应用层暴露连接管理细节。"""
-        self._engine: Engine = database.engine
+        """保存 Session 工厂，不向应用层暴露连接或事务管理细节。"""
+        self._database = database
 
     def resolve(
         self,
@@ -33,9 +38,9 @@ class SqlAlchemyEquityIdentityResolver(EquityIdentityResolver):
         known_at: datetime,
     ) -> EquityIdentityResolution:
         """按市场有效日和系统知识时刻解析，不回退至身份锚当前列。"""
-        with self._engine.connect() as connection:
+        with self._database.session() as session:
             return resolve_identity_on_connection(
-                connection,
+                session,
                 exchange=exchange,
                 symbol=symbol,
                 fact_date=fact_date,
@@ -44,31 +49,24 @@ class SqlAlchemyEquityIdentityResolver(EquityIdentityResolver):
 
     def resolve_current_open(self, *, exchange: Exchange, symbol: str) -> EquityIdentityResolution:
         """解析唯一当前开放确认标识，PENDING 占位不允许作为公开读取结果。"""
-        with self._engine.connect() as connection:
-            rows = (
-                connection.execute(
-                    text(
-                        """
-                        SELECT security_id, identity_state
-                        FROM equity_identifier_version
-                        WHERE exchange = :exchange
-                          AND symbol = :symbol
-                          AND effective_to IS NULL
-                          AND known_to IS NULL
-                          AND identity_state = 'CONFIRMED'
-                        ORDER BY security_id
-                        """
-                    ),
-                    {"exchange": exchange.value, "symbol": symbol},
-                )
-                .mappings()
-                .all()
+        statement = (
+            select(EquityIdentifierVersion.security_id, EquityIdentifierVersion.identity_state)
+            .where(
+                EquityIdentifierVersion.exchange == exchange.value,
+                EquityIdentifierVersion.symbol == symbol,
+                EquityIdentifierVersion.effective_to.is_(None),
+                EquityIdentifierVersion.known_to.is_(None),
+                EquityIdentifierVersion.identity_state == "CONFIRMED",
             )
+            .order_by(EquityIdentifierVersion.security_id)
+        )
+        with self._database.session() as session:
+            rows = session.execute(statement).mappings().all()
         return _resolution(rows)
 
 
 def resolve_identity_on_connection(
-    connection: Connection,
+    connection: Session | Connection,
     *,
     exchange: Exchange,
     symbol: str,
@@ -78,29 +76,17 @@ def resolve_identity_on_connection(
     """在调用方事务中解析标识，使事实写入和身份选择共享同一知识视图。"""
     if known_at.tzinfo is None:
         raise ValueError("known_at must include a timezone")
-    rows = (
-        connection.execute(
-            text(
-                """
-                SELECT security_id, identity_state
-                FROM equity_identifier_version
-                WHERE exchange = :exchange
-                  AND symbol = :symbol
-                  AND effective_range @> :fact_date
-                  AND knowledge_range @> :known_at
-                ORDER BY security_id
-                """
-            ),
-            {
-                "exchange": exchange.value,
-                "symbol": symbol,
-                "fact_date": fact_date,
-                "known_at": known_at.astimezone(UTC),
-            },
+    statement: Select[tuple[int, str]] = (
+        select(EquityIdentifierVersion.security_id, EquityIdentifierVersion.identity_state)
+        .where(
+            EquityIdentifierVersion.exchange == exchange.value,
+            EquityIdentifierVersion.symbol == symbol,
+            EquityIdentifierVersion.effective_range.op("@>")(fact_date),
+            EquityIdentifierVersion.knowledge_range.op("@>")(known_at.astimezone(UTC)),
         )
-        .mappings()
-        .all()
+        .order_by(EquityIdentifierVersion.security_id)
     )
+    rows = connection.execute(statement).mappings().all()
     return _resolution(rows)
 
 

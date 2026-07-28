@@ -1,0 +1,1647 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Apex 个人中心、安全审计与平台工作台 1440×900 PC 桌面高保真原型"
+    />
+    <title>平台工作台｜Apex 原型</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --qv-neutral-0: #fff;
+        --qv-neutral-100: #f9fafb;
+        --qv-neutral-200: #f4f6f8;
+        --qv-neutral-300: #dfe3e8;
+        --qv-neutral-400: #c4cdd5;
+        --qv-neutral-500: #919eab;
+        --qv-neutral-600: #637381;
+        --qv-neutral-700: #454f5b;
+        --qv-neutral-800: #1c252e;
+        --qv-primary-lighter: #f0eeff;
+        --qv-primary-main: #6d5ce7;
+        --qv-primary-dark: #4f46b8;
+        --qv-secondary-lighter: #eaf0ff;
+        --qv-secondary-main: #2f6bff;
+        --qv-info-main: #008fb3;
+        --qv-success-main: #22c55e;
+        --qv-warning-main: #d99118;
+        --qv-error-main: #ff5630;
+        --qv-divider: rgb(145 158 171 / 20%);
+        --qv-focus: 0 0 0 3px rgb(109 92 231 / 28%);
+        --qv-shadow-card: 0 0 2px rgb(145 158 171 / 20%), 0 12px 24px -4px rgb(145 158 171 / 12%);
+        --qv-shadow-dialog: 0 24px 72px -12px rgb(20 26 33 / 30%);
+        --qv-font: "Public Sans Variable", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+        --qv-display: Barlow, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+        --sidebar: 300px;
+        --appbar: 72px;
+        --radius-control: 8px;
+        --radius-card: 16px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        background: var(--qv-neutral-0);
+      }
+      body {
+        min-width: 1200px;
+        margin: 0;
+        color: var(--qv-neutral-800);
+        background: var(--qv-neutral-200);
+        font-family: var(--qv-font);
+        font-size: 14px;
+        line-height: 1.55;
+        font-variant-numeric: tabular-nums;
+      }
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+      button:focus-visible,
+      a:focus-visible,
+      input:focus-visible,
+      select:focus-visible {
+        outline: none;
+        box-shadow: var(--qv-focus);
+      }
+      a {
+        color: inherit;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      .icon {
+        width: 20px;
+        height: 20px;
+        flex: 0 0 auto;
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.8;
+      }
+      .icon-sm {
+        width: 17px;
+        height: 17px;
+      }
+      .muted {
+        color: var(--qv-neutral-600);
+      }
+
+      .workspace {
+        min-height: 100vh;
+        background: var(--qv-neutral-200);
+      }
+      .sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        z-index: 30;
+        width: var(--sidebar);
+        padding: 26px 16px 20px;
+        border-right: 1px solid var(--qv-divider);
+        background: #fff;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 8px 30px;
+        color: var(--qv-neutral-800);
+        font: 800 15px/1 var(--qv-display);
+        text-decoration: none;
+        white-space: nowrap;
+      }
+      .brand-mark {
+        position: relative;
+        width: 24px;
+        height: 28px;
+        flex: 0 0 24px;
+      }
+      .brand-mark::before,
+      .brand-mark::after {
+        content: "";
+        position: absolute;
+        inset: 1px 8px;
+        border-radius: 999px;
+        background: var(--qv-primary-main);
+        transform: rotate(-28deg);
+      }
+      .brand-mark::after {
+        inset: 7px 3px;
+        background: var(--qv-secondary-main);
+        transform: rotate(28deg);
+      }
+      .nav-label {
+        display: block;
+        margin: 20px 12px 8px;
+        color: var(--qv-neutral-500);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .side-nav {
+        display: grid;
+        gap: 4px;
+      }
+      .side-nav a {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 12px;
+        border-radius: var(--radius-control);
+        color: var(--qv-neutral-600);
+        font-weight: 700;
+        text-decoration: none;
+      }
+      .side-nav a:hover {
+        background: var(--qv-neutral-100);
+        color: var(--qv-neutral-800);
+      }
+      .side-nav a[aria-current="page"] {
+        background: var(--qv-primary-lighter);
+        color: var(--qv-primary-dark);
+      }
+
+      .appbar {
+        position: fixed;
+        inset: 0 0 auto var(--sidebar);
+        z-index: 25;
+        height: var(--appbar);
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 24px;
+        padding: 0 24px;
+        border-bottom: 1px solid var(--qv-divider);
+        background: #fff;
+      }
+      .global-search {
+        position: relative;
+        width: min(100%, 560px);
+        justify-self: center;
+      }
+      .global-search input {
+        width: 100%;
+        height: 42px;
+        padding: 0 44px 0 42px;
+        border: 1px solid var(--qv-divider);
+        border-radius: var(--radius-control);
+        background: #fff;
+        outline: none;
+      }
+      .global-search > .icon {
+        position: absolute;
+        top: 11px;
+        left: 14px;
+        color: var(--qv-neutral-500);
+      }
+      .kbd {
+        position: absolute;
+        top: 8px;
+        right: 9px;
+        padding: 3px 7px;
+        border: 1px solid var(--qv-divider);
+        border-radius: 6px;
+        color: var(--qv-neutral-500);
+        background: var(--qv-neutral-100);
+        font-size: 11px;
+      }
+      .top-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .icon-btn {
+        width: 40px;
+        height: 40px;
+        display: inline-grid;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--qv-neutral-700);
+        cursor: pointer;
+      }
+      .icon-btn:hover {
+        background: var(--qv-neutral-100);
+      }
+      .user-menu {
+        min-width: 190px;
+        min-height: 48px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-left: 4px;
+        padding: 4px 8px 4px 4px;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        color: var(--qv-neutral-800);
+        text-align: left;
+      }
+      .avatar {
+        width: 40px;
+        height: 40px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--qv-primary-main);
+        color: #fff;
+        font-weight: 800;
+      }
+      .user-copy {
+        min-width: 0;
+        flex: 1;
+      }
+      .user-copy strong,
+      .user-copy span {
+        display: block;
+      }
+      .user-copy span {
+        color: var(--qv-neutral-600);
+        font-size: 11px;
+      }
+
+      .workspace-main {
+        min-height: 100vh;
+        margin-left: var(--sidebar);
+        padding: calc(var(--appbar) + 28px) 40px 40px;
+      }
+      .page {
+        width: min(100%, 1200px);
+        margin: 0 auto;
+      }
+      .page-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: 20px;
+      }
+      .page-header h1 {
+        margin: 0;
+        font: 800 28px/1.35 var(--qv-display);
+        letter-spacing: -0.02em;
+      }
+      .page-header p {
+        margin: 4px 0 0;
+        color: var(--qv-neutral-600);
+      }
+      .breadcrumb {
+        display: flex;
+        gap: 7px;
+        margin-bottom: 7px;
+        color: var(--qv-neutral-600);
+        font-size: 12px;
+      }
+      .btn {
+        min-height: 36px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border: 1px solid transparent;
+        border-radius: var(--radius-control);
+        background: transparent;
+        color: var(--qv-neutral-800);
+        font-weight: 700;
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .btn-primary {
+        background: var(--qv-primary-main);
+        color: #fff;
+        box-shadow: 0 8px 16px rgb(109 92 231 / 24%);
+      }
+      .btn-outlined {
+        border-color: var(--qv-divider);
+        background: #fff;
+      }
+      .btn-danger {
+        background: var(--qv-error-main);
+        color: #fff;
+      }
+      .btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.52;
+      }
+      .card {
+        border-radius: var(--radius-card);
+        background: #fff;
+        box-shadow: var(--qv-shadow-card);
+      }
+      .card-content {
+        padding: 22px 24px;
+      }
+      .card-title {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+      .card-title h2 {
+        margin: 0;
+        font: 800 17px/1.45 var(--qv-display);
+      }
+      .card-title p {
+        margin: 3px 0 0;
+        color: var(--qv-neutral-600);
+        font-size: 12px;
+      }
+
+      .chip {
+        min-height: 24px;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      .chip-primary {
+        background: var(--qv-primary-lighter);
+        color: var(--qv-primary-dark);
+      }
+      .chip-info {
+        background: rgb(0 143 179 / 10%);
+        color: #006e89;
+      }
+      .chip-success {
+        background: rgb(34 197 94 / 10%);
+        color: #16803d;
+      }
+      .chip-warning {
+        background: rgb(217 145 24 / 12%);
+        color: #845406;
+      }
+      .chip-error {
+        background: rgb(255 86 48 / 10%);
+        color: #b52e13;
+      }
+      .chip-neutral {
+        background: var(--qv-neutral-200);
+        color: var(--qv-neutral-600);
+      }
+      .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+
+      /* Workspace */
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 20px;
+        margin-bottom: 20px;
+      }
+      .metric {
+        padding: 20px;
+      }
+      .metric-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--qv-neutral-600);
+        font-weight: 700;
+      }
+      .metric-icon {
+        width: 40px;
+        height: 40px;
+        display: grid;
+        place-items: center;
+        border-radius: 10px;
+        background: var(--qv-primary-lighter);
+        color: var(--qv-primary-main);
+      }
+      .metric-value {
+        margin-top: 10px;
+        font: 800 28px/1.2 var(--qv-display);
+      }
+      .metric-copy {
+        margin-top: 6px;
+        color: var(--qv-neutral-600);
+        font-size: 12px;
+      }
+      .workspace-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 7fr) minmax(340px, 5fr);
+        gap: 20px;
+        margin-bottom: 20px;
+      }
+      .status-bars {
+        display: grid;
+        gap: 15px;
+      }
+      .status-row {
+        display: grid;
+        grid-template-columns: 74px minmax(0, 1fr) 48px;
+        align-items: center;
+        gap: 12px;
+      }
+      .bar {
+        height: 9px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--qv-neutral-200);
+      }
+      .bar span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--qv-primary-main);
+      }
+      .bar .secondary {
+        background: var(--qv-secondary-main);
+      }
+      .bar .disabled {
+        background: var(--qv-neutral-400);
+      }
+      .event-list {
+        display: grid;
+        gap: 0;
+      }
+      .event {
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 11px;
+        min-height: 66px;
+        border-bottom: 1px dashed var(--qv-divider);
+      }
+      .event:last-child {
+        border-bottom: 0;
+      }
+      .event-icon {
+        width: 34px;
+        height: 34px;
+        display: grid;
+        place-items: center;
+        border-radius: 9px;
+        background: var(--qv-neutral-100);
+        color: var(--qv-primary-dark);
+      }
+      .event strong,
+      .event small {
+        display: block;
+      }
+      .event small {
+        color: var(--qv-neutral-600);
+      }
+      .quick-actions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .quick-action {
+        min-height: 70px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 16px;
+        border: 1px solid var(--qv-divider);
+        border-radius: 10px;
+        text-decoration: none;
+      }
+      .quick-action:hover {
+        border-color: rgb(109 92 231 / 30%);
+        background: var(--qv-primary-lighter);
+      }
+      .quick-action strong,
+      .quick-action span {
+        display: block;
+      }
+      .quick-action span {
+        color: var(--qv-neutral-600);
+        font-size: 12px;
+      }
+
+      /* Account */
+      .account-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 7fr) minmax(330px, 5fr);
+        gap: 20px;
+        margin-bottom: 20px;
+      }
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 17px;
+      }
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+      .field label {
+        color: var(--qv-neutral-700);
+        font-weight: 700;
+      }
+      .field input,
+      .field select {
+        width: 100%;
+        height: 56px;
+        padding: 0 14px;
+        border: 1px solid var(--qv-divider);
+        border-radius: var(--radius-control);
+        background: #fff;
+        color: var(--qv-neutral-800);
+        outline: none;
+      }
+      .field input[readonly] {
+        background: var(--qv-neutral-100);
+        color: var(--qv-neutral-600);
+      }
+      .helper {
+        margin: 0;
+        color: var(--qv-neutral-600);
+        font-size: 12px;
+      }
+      .form-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 18px;
+      }
+      .security-summary {
+        display: grid;
+        gap: 12px;
+      }
+      .security-item {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+        min-height: 58px;
+        padding: 11px 0;
+        border-bottom: 1px dashed var(--qv-divider);
+      }
+      .security-item:last-child {
+        border-bottom: 0;
+      }
+      .security-item strong,
+      .security-item span {
+        display: block;
+      }
+      .security-item span {
+        color: var(--qv-neutral-600);
+        font-size: 12px;
+      }
+      .table-scroll {
+        overflow-x: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        height: 58px;
+        padding: 11px 16px;
+        border-bottom: 1px dashed var(--qv-divider);
+        text-align: left;
+        vertical-align: middle;
+      }
+      th {
+        height: 52px;
+        background: var(--qv-neutral-200);
+        color: var(--qv-neutral-600);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      tbody tr:hover {
+        background: rgb(145 158 171 / 6%);
+      }
+      .session-table {
+        min-width: 820px;
+      }
+      .session-name {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .session-mark {
+        width: 34px;
+        height: 34px;
+        display: grid;
+        place-items: center;
+        border-radius: 9px;
+        background: var(--qv-secondary-lighter);
+        color: var(--qv-secondary-main);
+      }
+      .session-name strong,
+      .session-name span {
+        display: block;
+      }
+      .session-name span {
+        color: var(--qv-neutral-600);
+        font-size: 12px;
+      }
+
+      /* Audit */
+      .filter-card {
+        padding: 18px 20px;
+      }
+      .filters {
+        display: grid;
+        grid-template-columns: 180px 180px minmax(220px, 1fr) auto auto;
+        gap: 12px;
+        align-items: center;
+      }
+      .compact-field input,
+      .compact-field select {
+        width: 100%;
+        height: 44px;
+        padding: 0 12px;
+        border: 1px solid var(--qv-divider);
+        border-radius: var(--radius-control);
+        background: #fff;
+        color: var(--qv-neutral-800);
+        outline: none;
+      }
+      .result-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin: 16px 2px 10px;
+      }
+      .result-bar strong {
+        font-size: 16px;
+      }
+      .result-bar span {
+        color: var(--qv-neutral-600);
+      }
+      .audit-card {
+        overflow: hidden;
+      }
+      .audit-table {
+        min-width: 950px;
+        table-layout: fixed;
+      }
+      .audit-table th,
+      .audit-table td {
+        height: 64px;
+      }
+      .audit-summary strong,
+      .audit-summary span {
+        display: block;
+      }
+      .audit-summary span {
+        color: var(--qv-neutral-600);
+        font-size: 12px;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+      .table-footer {
+        min-height: 58px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 10px 16px;
+        color: var(--qv-neutral-600);
+      }
+
+      /* States */
+      .state-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+      .state-card {
+        min-height: 152px;
+        padding: 18px;
+      }
+      .state-card h2 {
+        margin: 0 0 4px;
+        font: 800 16px/1.4 var(--qv-display);
+      }
+      .state-card p {
+        margin: 0 0 14px;
+        color: var(--qv-neutral-600);
+        font-size: 12px;
+      }
+      .alert {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        padding: 11px 12px;
+        border: 1px solid;
+        border-radius: var(--radius-control);
+        font-size: 12px;
+      }
+      .alert-error {
+        border-color: rgb(255 86 48 / 22%);
+        background: rgb(255 86 48 / 8%);
+        color: #b52e13;
+      }
+      .alert-warning {
+        border-color: rgb(217 145 24 / 24%);
+        background: rgb(217 145 24 / 8%);
+        color: #845406;
+      }
+      .alert-success {
+        border-color: rgb(34 197 94 / 24%);
+        background: rgb(34 197 94 / 8%);
+        color: #16803d;
+      }
+      .skeleton {
+        position: relative;
+        overflow: hidden;
+        height: 12px;
+        margin-top: 10px;
+        border-radius: 6px;
+        background: var(--qv-neutral-200);
+      }
+      .interaction-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .stage {
+        position: relative;
+        min-height: 280px;
+        overflow: hidden;
+        border-radius: var(--radius-card);
+        background: var(--qv-neutral-100);
+        box-shadow: var(--qv-shadow-card);
+      }
+      .stage-backdrop {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 18px;
+        background: rgb(20 26 33 / 28%);
+      }
+      .dialog {
+        width: min(100%, 460px);
+        padding: 22px;
+        border-radius: var(--radius-card);
+        background: #fff;
+        box-shadow: var(--qv-shadow-dialog);
+      }
+      .dialog h2 {
+        margin: 0;
+        font: 800 19px/1.4 var(--qv-display);
+      }
+      .dialog p {
+        margin: 8px 0 16px;
+        color: var(--qv-neutral-600);
+        font-size: 12px;
+      }
+      .dialog-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      .dialog .field input {
+        height: 44px;
+      }
+      .dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 16px;
+      }
+      .drawer {
+        position: absolute;
+        inset: 0 0 0 auto;
+        width: 360px;
+        padding: 20px;
+        border-left: 1px solid var(--qv-divider);
+        background: rgb(255 255 255 / 96%);
+        box-shadow: -40px 40px 80px -8px rgb(145 158 171 / 24%);
+      }
+      .drawer-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .drawer h2 {
+        margin: 0;
+        font: 800 18px/1.4 var(--qv-display);
+      }
+      .detail-list {
+        display: grid;
+        gap: 11px;
+        margin: 18px 0 0;
+      }
+      .detail-list div {
+        padding-bottom: 10px;
+        border-bottom: 1px dashed var(--qv-divider);
+      }
+      .detail-list dt {
+        color: var(--qv-neutral-600);
+        font-size: 11px;
+      }
+      .detail-list dd {
+        margin: 3px 0 0;
+        font-weight: 700;
+      }
+
+      .prototype-switcher {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        z-index: 100;
+        display: flex;
+        gap: 4px;
+        padding: 5px;
+        border: 1px solid var(--qv-divider);
+        border-radius: 10px;
+        background: rgb(255 255 255 / 95%);
+        box-shadow: var(--qv-shadow-card);
+      }
+      .prototype-switcher a {
+        padding: 6px 9px;
+        border-radius: 7px;
+        color: var(--qv-neutral-600);
+        font-size: 12px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+      .prototype-switcher a[aria-current="page"] {
+        background: var(--qv-primary-lighter);
+        color: var(--qv-primary-dark);
+      }
+      body.capture .prototype-switcher {
+        display: none;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <svg width="0" height="0" aria-hidden="true" focusable="false">
+      <symbol id="i-home" viewBox="0 0 24 24">
+        <path d="m3 11 9-8 9 8" />
+        <path d="M5 10v10h14V10" />
+        <path d="M9 20v-6h6v6" />
+      </symbol>
+      <symbol id="i-user" viewBox="0 0 24 24">
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 21c.7-5 3.3-7 8-7s7.3 2 8 7" />
+      </symbol>
+      <symbol id="i-users" viewBox="0 0 24 24">
+        <circle cx="9" cy="8" r="3" />
+        <path d="M3 20c.5-4.2 2.5-6 6-6s5.5 1.8 6 6" />
+        <path d="M16 5a3 3 0 0 1 0 6M18 14c2 .7 3 2.5 3 5" />
+      </symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24">
+        <path d="M12 3 4 6v5c0 5.2 3.2 8.6 8 10 4.8-1.4 8-4.8 8-10V6l-8-3Z" />
+        <path d="m9 12 2 2 4-5" />
+      </symbol>
+      <symbol id="i-search" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="7" />
+        <path d="m20 20-4-4" />
+      </symbol>
+      <symbol id="i-bell" viewBox="0 0 24 24">
+        <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+        <path d="M10 21h4" />
+      </symbol>
+      <symbol id="i-help" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M9.5 9a2.7 2.7 0 1 1 4.2 2.2c-1.2.7-1.7 1.1-1.7 2.3" />
+        <path d="M12 17h.01" />
+      </symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4" /></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24">
+        <path d="M20 6v5h-5" />
+        <path d="M4 18v-5h5" />
+        <path d="M6 9a7 7 0 0 1 12-2l2 4M18 15a7 7 0 0 1-12 2l-2-4" />
+      </symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24">
+        <rect x="5" y="10" width="14" height="11" rx="2" />
+        <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+      </symbol>
+      <symbol id="i-key" viewBox="0 0 24 24">
+        <circle cx="8" cy="15" r="4" />
+        <path d="m11 12 8-8M15 8l2 2M17 6l2 2" />
+      </symbol>
+      <symbol id="i-session" viewBox="0 0 24 24">
+        <rect x="3" y="4" width="18" height="13" rx="2" />
+        <path d="M8 21h8M12 17v4" />
+      </symbol>
+      <symbol id="i-audit" viewBox="0 0 24 24">
+        <path d="M6 3h12v18H6z" />
+        <path d="M9 8h6M9 12h6M9 16h4" />
+      </symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5" /></symbol>
+      <symbol id="i-info" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 11v6M12 7h.01" />
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></symbol>
+    </svg>
+
+    <div class="workspace">
+      <aside class="sidebar" aria-label="主导航">
+        <a class="brand" href="?view=workspace">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>Apex数据智能分析平台</span>
+        </a>
+        <span class="nav-label">工作区</span>
+        <nav class="side-nav">
+          <a href="?view=workspace" data-nav="workspace"
+            ><svg class="icon"><use href="#i-home" /></svg>平台工作台</a
+          >
+        </nav>
+        <span class="nav-label">个人</span>
+        <nav class="side-nav">
+          <a href="?view=account" data-nav="account"
+            ><svg class="icon"><use href="#i-user" /></svg>我的账户</a
+          >
+        </nav>
+        <span class="nav-label">系统管理</span>
+        <nav class="side-nav">
+          <a href="#users"
+            ><svg class="icon"><use href="#i-users" /></svg>用户管理</a
+          >
+          <a href="?view=audit" data-nav="audit"
+            ><svg class="icon"><use href="#i-audit" /></svg>安全审计</a
+          >
+        </nav>
+      </aside>
+
+      <header class="appbar">
+        <label class="global-search">
+          <span class="sr-only">全局搜索功能尚未开放</span>
+          <svg class="icon"><use href="#i-search" /></svg>
+          <input type="search" placeholder="搜索功能尚未开放" disabled />
+          <span class="kbd">⌘ K</span>
+        </label>
+        <div class="top-actions" aria-label="全局操作">
+          <button class="icon-btn" type="button" aria-label="通知功能尚未开放" disabled>
+            <svg class="icon"><use href="#i-bell" /></svg>
+          </button>
+          <button class="icon-btn" type="button" aria-label="帮助与系统提示">
+            <svg class="icon"><use href="#i-help" /></svg>
+          </button>
+          <button class="user-menu" type="button" aria-label="打开用户菜单">
+            <span class="avatar" aria-hidden="true">系</span>
+            <span class="user-copy"><strong>系统管理员</strong><span>超级管理员</span></span>
+            <svg class="icon icon-sm"><use href="#i-chevron" /></svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace-main">
+        <section class="page" data-page="workspace">
+          <header class="page-header">
+            <div>
+              <div class="breadcrumb"><span>工作区</span><span>/</span><span>平台工作台</span></div>
+              <h1>平台工作台</h1>
+              <p>账户安全、用户运营与关键操作概览。</p>
+            </div>
+            <button class="btn btn-outlined" type="button">
+              <svg class="icon icon-sm"><use href="#i-refresh" /></svg>刷新数据
+            </button>
+          </header>
+
+          <div class="metrics">
+            <article class="card metric">
+              <div class="metric-head">
+                <span>账号状态</span
+                ><span class="metric-icon"
+                  ><svg class="icon"><use href="#i-shield" /></svg
+                ></span>
+              </div>
+              <div class="metric-value">安全</div>
+              <div class="metric-copy">
+                <span class="chip chip-success"><span class="dot"></span>正常</span> 最近登录 今天
+                14:28
+              </div>
+            </article>
+            <article class="card metric">
+              <div class="metric-head">
+                <span>活动会话</span
+                ><span class="metric-icon"
+                  ><svg class="icon"><use href="#i-session" /></svg
+                ></span>
+              </div>
+              <div class="metric-value">3</div>
+              <div class="metric-copy">含当前会话 · 最晚过期 08-04</div>
+            </article>
+            <article class="card metric">
+              <div class="metric-head">
+                <span>可管理用户</span
+                ><span class="metric-icon"
+                  ><svg class="icon"><use href="#i-users" /></svg
+                ></span>
+              </div>
+              <div class="metric-value">126</div>
+              <div class="metric-copy">启用 118 · 禁用 6 · 已删除 2</div>
+            </article>
+            <article class="card metric">
+              <div class="metric-head">
+                <span>重要审计</span
+                ><span class="metric-icon"
+                  ><svg class="icon"><use href="#i-audit" /></svg
+                ></span>
+              </div>
+              <div class="metric-value">4</div>
+              <div class="metric-copy">最近 7 天 · 不含例行 Token 轮换</div>
+            </article>
+          </div>
+
+          <div class="workspace-grid">
+            <article class="card card-content">
+              <div class="card-title">
+                <div>
+                  <h2>用户状态</h2>
+                  <p>仅统计当前角色可管理的 USER 与 ADMIN。</p>
+                </div>
+                <span class="chip chip-neutral">更新于 14:32</span>
+              </div>
+              <div class="status-bars">
+                <div class="status-row">
+                  <strong>普通用户</strong>
+                  <div class="bar"><span style="width: 84%"></span></div>
+                  <strong>112</strong>
+                </div>
+                <div class="status-row">
+                  <strong>管理员</strong>
+                  <div class="bar"><span class="secondary" style="width: 11%"></span></div>
+                  <strong>14</strong>
+                </div>
+                <div class="status-row">
+                  <strong>已禁用</strong>
+                  <div class="bar"><span class="disabled" style="width: 5%"></span></div>
+                  <strong>6</strong>
+                </div>
+                <div class="status-row">
+                  <strong>近30天登录</strong>
+                  <div class="bar"><span style="width: 73%"></span></div>
+                  <strong>92</strong>
+                </div>
+              </div>
+            </article>
+
+            <article class="card card-content">
+              <div class="card-title">
+                <div>
+                  <h2>近期重要操作</h2>
+                  <p>SUPER_ADMIN 可见的脱敏审计摘要。</p>
+                </div>
+                <a class="btn" href="?view=audit">查看全部</a>
+              </div>
+              <div class="event-list">
+                <div class="event">
+                  <span class="event-icon"
+                    ><svg class="icon icon-sm"><use href="#i-lock" /></svg
+                  ></span>
+                  <span><strong>检测到 Refresh 重放</strong><small>系统 · 会话 5D91</small></span>
+                  <span class="chip chip-warning">警告</span>
+                </div>
+                <div class="event">
+                  <span class="event-icon"
+                    ><svg class="icon icon-sm"><use href="#i-users" /></svg
+                  ></span>
+                  <span><strong>用户状态已修改</strong><small>系统管理员 · 14:06</small></span>
+                  <span class="chip chip-info">管理</span>
+                </div>
+                <div class="event">
+                  <span class="event-icon"
+                    ><svg class="icon icon-sm"><use href="#i-key" /></svg
+                  ></span>
+                  <span
+                    ><strong>管理员密码已重置</strong><small>系统管理员 · 昨天 17:42</small></span
+                  >
+                  <span class="chip chip-primary">账号</span>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <article class="card card-content">
+            <div class="card-title">
+              <div>
+                <h2>快捷任务</h2>
+                <p>按服务端权限显示可执行入口。</p>
+              </div>
+            </div>
+            <div class="quick-actions">
+              <a class="quick-action" href="?view=account"
+                ><span class="metric-icon"
+                  ><svg class="icon"><use href="#i-user" /></svg></span
+                ><span><strong>维护个人资料</strong><span>显示名称与账户安全</span></span
+                ><svg class="icon icon-sm"><use href="#i-arrow" /></svg
+              ></a>
+              <a class="quick-action" href="#users"
+                ><span class="metric-icon"
+                  ><svg class="icon"><use href="#i-users" /></svg></span
+                ><span><strong>管理平台用户</strong><span>查询、创建与维护账号</span></span
+                ><svg class="icon icon-sm"><use href="#i-arrow" /></svg
+              ></a>
+              <a class="quick-action" href="?view=audit"
+                ><span class="metric-icon"
+                  ><svg class="icon"><use href="#i-audit" /></svg></span
+                ><span><strong>检查安全审计</strong><span>查看关键操作和请求标识</span></span
+                ><svg class="icon icon-sm"><use href="#i-arrow" /></svg
+              ></a>
+            </div>
+          </article>
+        </section>
+
+        <section class="page" data-page="account" hidden>
+          <header class="page-header">
+            <div>
+              <div class="breadcrumb"><span>个人</span><span>/</span><span>我的账户</span></div>
+              <h1>我的账户</h1>
+              <p>维护个人资料，检查并处置自己的登录会话。</p>
+            </div>
+          </header>
+
+          <div class="account-grid">
+            <article class="card card-content">
+              <div class="card-title">
+                <div>
+                  <h2>个人资料</h2>
+                  <p>账号和角色由系统管理，显示名称可修改。</p>
+                </div>
+                <span class="chip chip-success"><span class="dot"></span>账号启用</span>
+              </div>
+              <form>
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="account-id">账号</label
+                    ><input id="account-id" value="apex.root" readonly />
+                    <p class="helper">登录标识创建后不可修改。</p>
+                  </div>
+                  <div class="field">
+                    <label for="account-role">角色</label
+                    ><input id="account-role" value="超级管理员" readonly />
+                    <p class="helper">权限由服务端角色策略计算。</p>
+                  </div>
+                  <div class="field" style="grid-column: 1 / -1">
+                    <label for="display-name">显示名称</label
+                    ><input id="display-name" value="系统管理员" maxlength="120" />
+                    <p class="helper">用于页面身份和审计 Actor 展示，最多 120 字。</p>
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button class="btn btn-primary" type="button">保存资料</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="card card-content">
+              <div class="card-title">
+                <div>
+                  <h2>账户安全</h2>
+                  <p>安全动作会生成审计记录。</p>
+                </div>
+              </div>
+              <div class="security-summary">
+                <div class="security-item">
+                  <span class="metric-icon"
+                    ><svg class="icon"><use href="#i-key" /></svg></span
+                  ><span
+                    ><strong>登录密码</strong><span>修改后全部会话失效，需要重新登录</span></span
+                  ><a class="btn btn-outlined" href="?view=states">修改</a>
+                </div>
+                <div class="security-item">
+                  <span class="metric-icon"
+                    ><svg class="icon"><use href="#i-clock" /></svg></span
+                  ><span><strong>最近登录</strong><span>2026-07-28 14:28</span></span
+                  ><span class="chip chip-success">正常</span>
+                </div>
+                <div class="security-item">
+                  <span class="metric-icon"
+                    ><svg class="icon"><use href="#i-session" /></svg></span
+                  ><span><strong>活动会话</strong><span>当前账号共有 3 个活动 family</span></span
+                  ><span class="chip chip-info">3</span>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <article class="card" aria-label="活动会话">
+            <div class="card-content">
+              <div class="card-title">
+                <div>
+                  <h2>活动会话</h2>
+                  <p>不保存设备、IP 或位置；以最近活动时间和随机会话标识区分。</p>
+                </div>
+                <button class="btn btn-outlined" type="button">退出其他会话</button>
+              </div>
+            </div>
+            <div class="table-scroll" tabindex="0">
+              <table class="session-table">
+                <thead>
+                  <tr>
+                    <th>会话</th>
+                    <th>最近活动</th>
+                    <th>绝对过期</th>
+                    <th>状态</th>
+                    <th style="text-align: right">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <div class="session-name">
+                        <span class="session-mark"
+                          ><svg class="icon icon-sm"><use href="#i-session" /></svg></span
+                        ><span><strong>会话 7F2A</strong><span>随机 family 标识</span></span>
+                      </div>
+                    </td>
+                    <td>今天 14:28</td>
+                    <td>2026-08-04 14:28</td>
+                    <td>
+                      <span class="chip chip-success"><span class="dot"></span>当前会话</span>
+                    </td>
+                    <td style="text-align: right">
+                      <button class="btn" type="button" disabled>当前使用中</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="session-name">
+                        <span class="session-mark"
+                          ><svg class="icon icon-sm"><use href="#i-session" /></svg></span
+                        ><span><strong>会话 B318</strong><span>随机 family 标识</span></span>
+                      </div>
+                    </td>
+                    <td>今天 09:16</td>
+                    <td>2026-08-03 09:16</td>
+                    <td><span class="chip chip-info">活动</span></td>
+                    <td style="text-align: right">
+                      <button class="btn btn-outlined" type="button">退出会话</button>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="session-name">
+                        <span class="session-mark"
+                          ><svg class="icon icon-sm"><use href="#i-session" /></svg></span
+                        ><span><strong>会话 4C90</strong><span>随机 family 标识</span></span>
+                      </div>
+                    </td>
+                    <td>昨天 20:42</td>
+                    <td>2026-08-02 20:42</td>
+                    <td><span class="chip chip-info">活动</span></td>
+                    <td style="text-align: right">
+                      <button class="btn btn-outlined" type="button">退出会话</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="page" data-page="audit" hidden>
+          <header class="page-header">
+            <div>
+              <div class="breadcrumb"><span>系统管理</span><span>/</span><span>安全审计</span></div>
+              <h1>安全审计</h1>
+              <p>查看脱敏的账户、认证和管理操作；仅超级管理员可访问。</p>
+            </div>
+            <button class="btn btn-outlined" type="button">
+              <svg class="icon icon-sm"><use href="#i-refresh" /></svg>刷新
+            </button>
+          </header>
+
+          <section class="card filter-card" aria-label="审计筛选">
+            <div class="filters">
+              <label class="compact-field"
+                ><span class="sr-only">事件分类</span
+                ><select>
+                  <option>全部分类</option>
+                  <option>认证安全</option>
+                  <option>账户安全</option>
+                  <option>用户管理</option>
+                  <option>系统</option>
+                </select></label
+              >
+              <label class="compact-field"
+                ><span class="sr-only">时间范围</span
+                ><select>
+                  <option>最近 7 天</option>
+                  <option>最近 24 小时</option>
+                  <option>最近 30 天</option>
+                  <option>自定义范围</option>
+                </select></label
+              >
+              <label class="compact-field"
+                ><span class="sr-only">Actor 或目标 ID</span
+                ><input placeholder="Actor ID 或目标 ID"
+              /></label>
+              <button class="btn btn-primary" type="button">应用筛选</button>
+              <button class="btn btn-outlined" type="button">重置</button>
+            </div>
+          </section>
+
+          <div class="result-bar">
+            <div><strong>审计事件</strong> <span>本页 5 条 · 默认排除例行 Token 轮换</span></div>
+            <span>时间窗 07-21 14:32 — 07-28 14:32</span>
+          </div>
+          <section class="card audit-card">
+            <div class="table-scroll" tabindex="0" aria-label="审计事件表格，可横向滚动">
+              <table class="audit-table">
+                <thead>
+                  <tr>
+                    <th style="width: 18%">时间</th>
+                    <th style="width: 17%">分类</th>
+                    <th style="width: 31%">事件</th>
+                    <th style="width: 18%">Actor</th>
+                    <th style="width: 16%; text-align: right">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>今天 14:21:08</td>
+                    <td><span class="chip chip-warning">认证安全</span></td>
+                    <td>
+                      <div class="audit-summary">
+                        <strong>检测到 Refresh 重放</strong
+                        ><span class="mono">auth.refresh.replay_detected</span>
+                      </div>
+                    </td>
+                    <td>系统</td>
+                    <td style="text-align: right">
+                      <a class="btn" href="?view=states">查看详情</a>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>今天 14:06:31</td>
+                    <td><span class="chip chip-info">用户管理</span></td>
+                    <td>
+                      <div class="audit-summary">
+                        <strong>用户状态由启用改为禁用</strong
+                        ><span class="mono">user.admin.updated</span>
+                      </div>
+                    </td>
+                    <td>系统管理员</td>
+                    <td style="text-align: right">
+                      <a class="btn" href="?view=states">查看详情</a>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>今天 11:48:02</td>
+                    <td><span class="chip chip-primary">账户安全</span></td>
+                    <td>
+                      <div class="audit-summary">
+                        <strong>个人显示名称已修改</strong
+                        ><span class="mono">user.profile.updated</span>
+                      </div>
+                    </td>
+                    <td>林岚</td>
+                    <td style="text-align: right">
+                      <a class="btn" href="?view=states">查看详情</a>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>昨天 17:42:16</td>
+                    <td><span class="chip chip-error">用户管理</span></td>
+                    <td>
+                      <div class="audit-summary">
+                        <strong>管理员密码已重置</strong
+                        ><span class="mono">user.password.reset</span>
+                      </div>
+                    </td>
+                    <td>系统管理员</td>
+                    <td style="text-align: right">
+                      <a class="btn" href="?view=states">查看详情</a>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>07-26 09:04:55</td>
+                    <td><span class="chip chip-info">认证安全</span></td>
+                    <td>
+                      <div class="audit-summary">
+                        <strong>用户登录成功</strong><span class="mono">auth.login.succeeded</span>
+                      </div>
+                    </td>
+                    <td>陈晨</td>
+                    <td style="text-align: right">
+                      <a class="btn" href="?view=states">查看详情</a>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <footer class="table-footer">
+              <span>每页 20 条 · 游标分页</span
+              ><span
+                ><button class="btn" type="button" disabled>首页</button
+                ><button class="btn btn-outlined" type="button">下一页</button></span
+              >
+            </footer>
+          </section>
+        </section>
+
+        <section class="page" data-page="states" hidden>
+          <header class="page-header">
+            <div>
+              <div class="breadcrumb">
+                <span>原型审查</span><span>/</span><span>状态与交互</span>
+              </div>
+              <h1>状态与安全交互</h1>
+              <p>覆盖 partial、loading、empty、error、forbidden、success、Dialog 与 Drawer。</p>
+            </div>
+          </header>
+
+          <div class="state-grid">
+            <article class="card state-card">
+              <h2>工作台部分失败</h2>
+              <p>不让审计失败阻断账户与用户统计。</p>
+              <div class="alert alert-warning">
+                <svg class="icon icon-sm"><use href="#i-info" /></svg
+                ><span
+                  ><strong>近期审计暂时不可用</strong><br />其他区块保持可用。 <u>重试</u></span
+                >
+              </div>
+            </article>
+            <article class="card state-card">
+              <h2>会话加载中</h2>
+              <p>Skeleton 保留表格行几何。</p>
+              <div class="skeleton" style="width: 42%"></div>
+              <div class="skeleton"></div>
+              <div class="skeleton" style="width: 84%"></div>
+            </article>
+            <article class="card state-card">
+              <h2>无其他会话</h2>
+              <p>明确当前状态，不制造设备数据。</p>
+              <div class="alert alert-success">
+                <svg class="icon icon-sm"><use href="#i-check" /></svg
+                ><span><strong>只有当前会话</strong><br />无需执行额外操作。</span>
+              </div>
+            </article>
+            <article class="card state-card">
+              <h2>审计查询失败</h2>
+              <p>保留 URL 筛选与已加载数据。</p>
+              <div class="alert alert-error">
+                <svg class="icon icon-sm"><use href="#i-info" /></svg
+                ><span><strong>审计事件加载失败</strong><br />请稍后重新加载。</span>
+              </div>
+            </article>
+            <article class="card state-card">
+              <h2>权限不足</h2>
+              <p>USER/ADMIN 不加载审计数据。</p>
+              <div class="alert alert-warning">
+                <svg class="icon icon-sm"><use href="#i-lock" /></svg
+                ><span><strong>无权访问安全审计</strong><br />需要 audit:read 权限。</span>
+              </div>
+            </article>
+            <article class="card state-card">
+              <h2>操作成功</h2>
+              <p>更新 Query，并提供清楚反馈。</p>
+              <div class="alert alert-success">
+                <svg class="icon icon-sm"><use href="#i-check" /></svg
+                ><span><strong>其他会话已退出</strong><br />当前会话继续保持登录。</span>
+              </div>
+            </article>
+          </div>
+
+          <div class="interaction-grid">
+            <section class="stage" aria-label="修改密码 Dialog 示例">
+              <div class="stage-backdrop">
+                <form class="dialog">
+                  <h2>修改登录密码</h2>
+                  <p>成功后全部会话失效，当前页面将返回登录。</p>
+                  <div class="dialog-row">
+                    <div class="field">
+                      <label for="current-password">当前密码</label
+                      ><input id="current-password" type="password" value="••••••••••••" />
+                    </div>
+                    <div class="field">
+                      <label for="new-password">新密码</label
+                      ><input id="new-password" type="password" value="••••••••••••" />
+                    </div>
+                  </div>
+                  <p class="helper">新密码至少 12 位，并包含数字；不记录或回显密码。</p>
+                  <div class="dialog-actions">
+                    <button class="btn btn-outlined" type="button">取消</button
+                    ><button class="btn btn-primary" type="button">确认修改</button>
+                  </div>
+                </form>
+              </div>
+            </section>
+
+            <section class="stage" aria-label="审计详情 Drawer 示例">
+              <div style="padding: 20px; color: var(--qv-neutral-600)">
+                审计列表保持原位置与筛选。
+              </div>
+              <aside class="drawer">
+                <div class="drawer-head">
+                  <div>
+                    <h2>审计事件详情</h2>
+                    <span class="chip chip-warning">认证安全</span>
+                  </div>
+                  <button class="icon-btn" type="button" aria-label="关闭">
+                    <svg class="icon"><use href="#i-close" /></svg>
+                  </button>
+                </div>
+                <dl class="detail-list">
+                  <div>
+                    <dt>事件</dt>
+                    <dd>检测到 Refresh 重放</dd>
+                  </div>
+                  <div>
+                    <dt>Action</dt>
+                    <dd class="mono">auth.refresh.replay_detected</dd>
+                  </div>
+                  <div>
+                    <dt>时间</dt>
+                    <dd>2026-07-28 14:21:08</dd>
+                  </div>
+                  <div>
+                    <dt>目标</dt>
+                    <dd>会话 5D91</dd>
+                  </div>
+                  <div>
+                    <dt>Request ID</dt>
+                    <dd class="mono">91e2…8a40</dd>
+                  </div>
+                </dl>
+              </aside>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <nav class="prototype-switcher" aria-label="原型视图">
+      <a href="?view=workspace" data-switch="workspace">工作台</a>
+      <a href="?view=account" data-switch="account">个人中心</a>
+      <a href="?view=audit" data-switch="audit">安全审计</a>
+      <a href="?view=states" data-switch="states">状态</a>
+    </nav>
+
+    <script>
+      /** 根据 URL 切换静态原型视图，不模拟生产数据请求。 */
+      (() => {
+        const allowed = new Set(["workspace", "account", "audit", "states"]);
+        const params = new URLSearchParams(window.location.search);
+        const requested = params.get("view") || "workspace";
+        const view = allowed.has(requested) ? requested : "workspace";
+        document.body.dataset.view = view;
+        document.body.classList.toggle("capture", params.get("capture") === "1");
+
+        for (const page of document.querySelectorAll("[data-page]")) {
+          page.hidden = page.dataset.page !== view;
+        }
+        for (const link of document.querySelectorAll("[data-nav]")) {
+          if (link.dataset.nav === view) link.setAttribute("aria-current", "page");
+          else link.removeAttribute("aria-current");
+        }
+        for (const link of document.querySelectorAll("[data-switch]")) {
+          if (link.dataset.switch === view) link.setAttribute("aria-current", "page");
+          else link.removeAttribute("aria-current");
+        }
+
+        for (const form of document.querySelectorAll("form")) {
+          form.addEventListener("submit", (event) => event.preventDefault());
+        }
+
+        const titles = {
+          workspace: "平台工作台",
+          account: "我的账户",
+          audit: "安全审计",
+          states: "状态与安全交互",
+        };
+        document.title = `${titles[view]}｜Apex 原型`;
+      })();
+    </script>
+  </body>
+</html>

@@ -16,6 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 
 from service_data_sync.application.ports.equity_master_read import EquityMasterReadRepository
+from service_data_sync.application.ports.sector_eod import SectorEodRepository
 from service_data_sync.application.ports.sector_market_data import (
     DatasetPublication,
     SectorMarketDataRepository,
@@ -27,6 +28,9 @@ from service_data_sync.bootstrap.settings import Settings, load_settings
 from service_data_sync.domain.sector import SectorBar, SectorIdentifier, SectorPeriod, SectorScheme
 from service_data_sync.infrastructure.persistence.equity_master_read_repository import (
     SqlAlchemyEquityMasterReadRepository,
+)
+from service_data_sync.infrastructure.persistence.sector_eod_repository import (
+    SqlAlchemySectorEodRepository,
 )
 from service_data_sync.infrastructure.persistence.sector_market_data_repository import (
     SqlAlchemySectorMarketDataRepository,
@@ -54,6 +58,7 @@ def create_app(
     *,
     settings: Settings | None = None,
     repository: SectorMarketDataRepository | None = None,
+    eod_repository: SectorEodRepository | None = None,
     equity_repository: EquityMasterReadRepository | None = None,
     membership_repository: SectorMembershipRepository | None = None,
 ) -> FastAPI:
@@ -63,6 +68,8 @@ def create_app(
     if repository is None:
         container = build_container(resolved_settings)
         repository = SqlAlchemySectorMarketDataRepository(container.database)
+        if eod_repository is None:
+            eod_repository = SqlAlchemySectorEodRepository(container.database)
         if equity_repository is None:
             equity_repository = SqlAlchemyEquityMasterReadRepository(container.database)
         if membership_repository is None:
@@ -144,6 +151,17 @@ def create_app(
             app,
             repository=membership_repository,
             require_service_bearer=require_service_bearer,
+        )
+
+    if eod_repository is not None:
+        # EOD 静态路径必须先注册，避免被通用 `/{scheme}/{sectorCode}` 路由抢占。
+        from service_data_sync.interfaces.internal_sector_eod_api import register_sector_eod_routes
+
+        register_sector_eod_routes(
+            app,
+            repository=eod_repository,
+            require_service_bearer=require_service_bearer,
+            cursor_secret=credential.encode(),
         )
 
     @app.get("/internal/v1/sectors", dependencies=[Depends(require_service_bearer)])

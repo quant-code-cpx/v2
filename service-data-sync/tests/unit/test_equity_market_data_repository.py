@@ -32,6 +32,12 @@ class FakeResult:
         """排队值已是映射形字典，因此返回当前替身。"""
         return self
 
+    def scalar_one(self) -> object:
+        """模拟 ORM-enabled `RETURNING` 的单一标量结果。"""
+        if isinstance(self._value, dict):
+            return self._value["source_batch_id"]
+        return self._value
+
     def one_or_none(self) -> object:
         """为允许无匹配的 SELECT 返回可选排队行。"""
         return self._value

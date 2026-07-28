@@ -458,7 +458,7 @@
         </div>
         <div>
           <dt>最后修改</dt>
-          <dd>2026-07-26</dd>
+          <dd>2026-07-28</dd>
         </div>
         <div>
           <dt>关联决策</dt>
@@ -637,7 +637,7 @@
             <tr>
               <td>所有端点只使用 POST</td>
               <td><strong>不沿用</strong></td>
-              <td>使用标准 GET/POST/PATCH/DELETE 语义。</td>
+              <td>按 ADR-0018 统一使用 POST，并以明确动作路径区分读取、更新和删除。</td>
               <td>保留缓存、幂等、代理、审计和客户端工具的标准语义。</td>
             </tr>
             <tr>
@@ -734,27 +734,30 @@
 │   ├── main.ts
 │   ├── app.module.ts
 │   ├── bootstrap/
-│   │   ├── configure-http.ts       # prefix、version、validation、security headers
-│   │   └── configure-shutdown.ts
-│   ├── platform/
-│   │   ├── config/
+│   │   └── configure-api.ts
+│   ├── common/
+│   │   ├── decorators/
+│   │   ├── exceptions/
+│   │   ├── models/
+│   │   └── utils/
+│   ├── config/
+│   ├── lifecycle/
+│   │   ├── filters/
+│   │   ├── guards/
+│   │   └── middleware/
+│   ├── shared/
 │   │   ├── database/
 │   │   ├── health/
-│   │   ├── logging/
-│   │   └── redis/                  # client 生命周期、key namespace、TTL、健康检查
-│   └── modules/
+│   │   └── redis/
+│   ├── data-sync/
+│   │   ├── clients/
+│   │   ├── contracts/
+│   │   └── test/
+│   └── apps/
+│       ├── auth/
 │       ├── user/
-│       │   ├── api/                # 用户与管理员端点、DTO
-│       │   ├── application/        # 用户资料、角色、状态、改密用例
-│       │   ├── domain/             # 用户聚合、凭证、securityVersion
-│       │   ├── infrastructure/     # Prisma user/credential repository
-│       │   └── user.module.ts
-│       └── auth/
-│           ├── api/                # login/refresh/logout、Guard、Strategy
-│           ├── application/        # 登录、轮换、撤销用例
-│           ├── domain/             # Session 与 Token 规则
-│           ├── infrastructure/     # Prisma session repository、JWT、Redis 安全状态
-│           └── auth.module.ts
+│       ├── stock/
+│       └── industry/
 ├── prisma/
 │   ├── schema.prisma
 │   └── migrations/
@@ -767,7 +770,8 @@
 └── pnpm-lock.yaml</pre>
       <p class="source-note">
         <code>AuthModule</code> 只通过 <code>UserModule</code> 导出的窄接口读取认证所需用户状态；
-        不创建 <code>shared/</code> 杂物目录，也不使用 <code>forwardRef()</code> 掩盖循环依赖。
+        <code>common/</code> 只放无状态公共代码，<code>shared/</code> 只放基础设施，
+        <code>data-sync/</code> 只放内部读取 Client；不使用 <code>forwardRef()</code> 掩盖循环依赖。
       </p>
     </section>
 
@@ -865,7 +869,7 @@
 
       <h3 class="mt-30">4. 管理员禁用用户</h3>
       <ol class="steps">
-        <li>ADMIN 调用 <code>PATCH /api/v1/users/{id}</code>，应用层校验权限与目标状态。</li>
+        <li>ADMIN 调用 <code>POST /api/v1/users/{id}/update</code>，应用层校验权限与目标状态。</li>
         <li>UserModule 在自身事务内更新用户为 <code>DISABLED</code>、递增 <code>securityVersion</code> 并写安全审计，不反向调用 AuthModule。</li>
         <li>后续 access token 虽未过期，也因 token/session 版本与用户版本不一致而被 AuthModule 拒绝。</li>
       </ol>
@@ -904,13 +908,13 @@
               <td>204。</td>
             </tr>
             <tr>
-              <td><code>GET /api/v1/users/me</code></td>
+              <td><code>POST /api/v1/users/me</code></td>
               <td>读取当前用户。</td>
               <td>Authenticated</td>
               <td>200 + UserResource。</td>
             </tr>
             <tr>
-              <td><code>PATCH /api/v1/users/me</code></td>
+              <td><code>POST /api/v1/users/me/update</code></td>
               <td>修改允许自助维护的资料。</td>
               <td>Authenticated</td>
               <td>200 + UserResource。</td>
@@ -922,7 +926,7 @@
               <td>204。</td>
             </tr>
             <tr>
-              <td><code>GET /api/v1/users</code></td>
+              <td><code>POST /api/v1/users/list</code></td>
               <td>管理员分页查询用户。</td>
               <td>ADMIN</td>
               <td>200 + cursor page。</td>
@@ -934,7 +938,7 @@
               <td>201 + UserResource。</td>
             </tr>
             <tr>
-              <td><code>PATCH /api/v1/users/{id}</code></td>
+              <td><code>POST /api/v1/users/{id}/update</code></td>
               <td>修改角色或账户状态。</td>
               <td>ADMIN</td>
               <td>200 + UserResource。</td>
@@ -948,7 +952,8 @@
           <span class="marker decision">HTTP</span>
           <ul>
             <li>统一前缀 <code>/api/v1</code>；资源 ID 放 path，过滤和 cursor 放 query。</li>
-            <li>安全读取用 GET，创建用 POST，局部修改用 PATCH，退出/改密等动作用 POST。</li>
+            <li>全部入站路由使用 POST；同一资源的多个操作通过 <code>/list</code>、<code>/update</code>、
+              <code>/delete</code> 等动作后缀区分。</li>
             <li>单资源直接返回；列表返回 <code>{ items, page }</code>；错误使用 Problem Details。</li>
             <li>DTO 拒绝未知字段；生产错误不暴露 stack、SQL、Token 或用户枚举信息。</li>
           </ul>
@@ -1450,7 +1455,8 @@ pnpm add -E \
 
   <footer>
     <div class="shell">
-      API 服务最小基础架构方案 · 2026-07-26 已实现：单一 API 进程、UserModule、AuthModule 与鉴权所需 RedisModule；
+      API 服务最小基础架构方案 · 2026-07-28 变更摘要：单一 API 进程、UserModule、AuthModule 与鉴权所需 RedisModule；
+      全部入站业务与运维路由按 ADR-0018 统一为 POST-only；
       其余业务模块、Worker、Scheduler、队列、通用缓存、实时能力及未使用依赖均未引入。
     </div>
   </footer>

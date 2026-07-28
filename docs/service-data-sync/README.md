@@ -20,10 +20,14 @@
 - [0012：行业与板块数据同步技术方案](0012-industry-and-sector-data-sync/index.html) — Proposed（明确排除分时数据）
 - [0013：板块成分股与观测历史技术方案](0013-sector-membership-history/index.html) — Proposed
 - [0014：A 股证券主数据与上市生命周期技术方案](0014-equity-instrument-master/index.html) — Proposed
-- [0015：板块 EOD 横截面快照与排行技术方案](0015-sector-eod-snapshot-ranking/index.html) — Proposed
+- [0015：板块 EOD 横截面快照与排行技术方案](0015-sector-eod-snapshot-ranking/index.html) — Accepted（核心实现已验证；生产准入待决）
 - [0016：财务报表与估值技术方案](0016-financial-statements-valuation/index.html) — Proposed
 - [0017：日频资金流向技术方案](0017-daily-money-flow/index.html) — Proposed（明确排除分钟与分时）
+- [0018：同步服务 SQLAlchemy ORM 全量迁移技术方案](0018-sqlalchemy-orm-persistence-models/index.html) — Accepted（阶段 0–2 实施中）
 
 0013–0017 按业务价值优先级排列。实施依赖顺序不同：先完成 0014 的证券身份与共享
 `source_batch` expand，再实施 0013/0015，随后实施依赖证券身份的 0016/0017；各来源通过生产准入门后
 才能打开生产同步与公开发布。
+
+0018 是持久化实现重构方案，不改变上述业务能力优先级、数据语义或生产准入状态；评审通过后按切片覆盖
+全部现有同步表与仓储。

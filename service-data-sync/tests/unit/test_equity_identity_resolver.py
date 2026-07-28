@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from typing import cast
 
 import pytest
-from sqlalchemy import Connection, Engine
+from sqlalchemy import Connection
 
 from service_data_sync.domain.equity import Exchange
 from service_data_sync.domain.equity_master import EquityIdentityResolutionStatus
@@ -50,22 +48,33 @@ class FakeConnection:
         return FakeResult(self._responses.pop(0))
 
 
-class FakeEngine:
-    """暴露解析器只读连接所需的最小引擎接口。"""
+class FakeSession(FakeConnection):
+    """暴露 ORM 只读 Session 所需的上下文接口和预置查询结果。"""
+
+    def __enter__(self) -> FakeSession:
+        """进入短生命周期 Session 上下文。"""
+        return self
+
+    def __exit__(self, *arguments: object) -> None:
+        """退出读取 Session，不吞掉测试异常。"""
+        del arguments
+
+
+class FakeDatabase:
+    """为解析器提供固定 Session，不依赖真实 Engine 或连接池。"""
 
     def __init__(self, responses: list[list[dict[str, object]]]) -> None:
-        """创建由 connect 上下文复用的假连接。"""
-        self.connection = FakeConnection(responses)
+        """创建共享候选身份结果的 Session 替身。"""
+        self.session_instance = FakeSession(responses)
 
-    @contextmanager
-    def connect(self) -> Iterator[FakeConnection]:
-        """产出不触及外部数据库的只读连接替身。"""
-        yield self.connection
+    def session(self) -> FakeSession:
+        """返回本测试调用唯一需要的短生命周期 Session。"""
+        return self.session_instance
 
 
 def test_resolver_returns_resolved_not_found_and_conflict_without_fallback() -> None:
     """标识历史只能产生确定的三类结果，多个候选绝不按任意顺序选取。"""
-    engine = FakeEngine(
+    connection = FakeConnection(
         [
             [{"security_id": 8, "identity_state": "CONFIRMED"}],
             [],
@@ -78,21 +87,21 @@ def test_resolver_returns_resolved_not_found_and_conflict_without_fallback() -> 
     known_at = datetime(2026, 7, 27, tzinfo=UTC)
 
     resolved = resolve_identity_on_connection(
-        cast(Connection, engine.connection),
+        cast(Connection, connection),
         exchange=Exchange.SSE,
         symbol="600519",
         fact_date=date(2026, 7, 26),
         known_at=known_at,
     )
     not_found = resolve_identity_on_connection(
-        cast(Connection, engine.connection),
+        cast(Connection, connection),
         exchange=Exchange.SSE,
         symbol="600520",
         fact_date=date(2026, 7, 26),
         known_at=known_at,
     )
     conflict = resolve_identity_on_connection(
-        cast(Connection, engine.connection),
+        cast(Connection, connection),
         exchange=Exchange.SSE,
         symbol="600521",
         fact_date=date(2026, 7, 26),
@@ -103,18 +112,19 @@ def test_resolver_returns_resolved_not_found_and_conflict_without_fallback() -> 
     assert resolved.security_id == 8
     assert not_found.status is EquityIdentityResolutionStatus.NOT_FOUND
     assert conflict.status is EquityIdentityResolutionStatus.CONFLICT
-    assert "effective_range @> :fact_date" in engine.connection.statements[0]
-    assert "FROM equity_instrument" not in engine.connection.statements[0]
+    assert "effective_range @> :effective_range_1" in connection.statements[0]
+    assert "equity_instrument" not in connection.statements[0]
 
 
 def test_resolver_requires_timezone_and_filters_pending_from_current_open_read() -> None:
     """历史写入必须冻结知识时刻，而当前公开读取不得返回 PENDING 占位。"""
-    engine = FakeEngine([[]])
-    resolver = SqlAlchemyEquityIdentityResolver(DatabaseClient(engine=cast(Engine, engine)))
+    connection = FakeConnection([[]])
+    database = FakeDatabase([[]])
+    resolver = SqlAlchemyEquityIdentityResolver(cast(DatabaseClient, database))
 
     with pytest.raises(ValueError, match="known_at"):
         resolve_identity_on_connection(
-            cast(Connection, engine.connection),
+            cast(Connection, connection),
             exchange=Exchange.SSE,
             symbol="600519",
             fact_date=date(2026, 7, 26),
@@ -124,4 +134,4 @@ def test_resolver_requires_timezone_and_filters_pending_from_current_open_read()
     current = resolver.resolve_current_open(exchange=Exchange.SSE, symbol="600519")
 
     assert current.status is EquityIdentityResolutionStatus.NOT_FOUND
-    assert "identity_state = 'CONFIRMED'" in engine.connection.statements[0]
+    assert "identity_state = :identity_state_1" in database.session_instance.statements[0]

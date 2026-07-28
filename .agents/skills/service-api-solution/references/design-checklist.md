@@ -9,7 +9,9 @@
 
 ## 契约
 
-- Method、path、version、request、response、status 和 Problem Details 完整。
+- 所有业务与运维 operation 均为 `POST`；path、version、request、response、status 和 Problem Details 完整。
+- 不声明 `GET`、`PUT`、`PATCH`、`DELETE`、`HEAD`、`OPTIONS`、`TRACE` 或通配 Controller 路由；
+  CORS preflight 只由框架处理。
 - 输入校验、未知字段、枚举、时间、金额和精度规则明确。
 - 分页、过滤、排序、最大 payload 和返回数量有边界。
 - 幂等键、重复请求、并发修改、ETag/version 或冲突状态明确。
@@ -36,7 +38,7 @@
 - 下游 timeout、retry safety、schema validation、503/fallback 和熔断行为明确。
 - 重试不会重复不可逆写操作；依赖失败影响范围可隔离。
 - 延迟、吞吐、错误率、连接池和 payload 预算有目标或标为待决。
-- `/health` 与 `/ready` 语义、日志、指标、trace、告警和 runbook 入口明确。
+- `POST /health` 与 `POST /ready` 语义、日志、指标、trace、告警和 runbook 入口明确。
 
 ## 验收
 

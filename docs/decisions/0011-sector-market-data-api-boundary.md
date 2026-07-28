@@ -57,7 +57,7 @@ publication；`service-api` 当前没有对应业务模块或下游 HTTP client�
 
 - `service-data-sync` 需新增内部 HTTP 层、`get/list` 读端口、cursor/dataVersion 绑定、服务鉴权和契约测试；
   现有 CLI 与数据库表不变。
-- `service-api` 需新增 SectorMarketDataModule、DTO、下游 client、Problem Details 映射、限流、OpenAPI
+- `service-api` 需新增 IndustryModule、DTO、下游 client、Problem Details 映射、限流、OpenAPI
   contract test 与可观测性；不新增 Prisma 业务表或 Redis 数据缓存。
 - 内部与公开接口均采用 `/v1`。仅新增 optional 字段可在 v1 兼容；修改 scheme、周期语义、精度、身份或
   单位需新增 v2 与消费者迁移窗口。

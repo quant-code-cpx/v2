@@ -8,14 +8,32 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from service_data_sync.bootstrap.settings import load_settings
+from service_data_sync.infrastructure.database.models.registry import Base
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# 分区和当前行索引依赖 PostgreSQL 特性，因此迁移使用显式 SQL。
-target_metadata = None
+# 模型表达当前目标 schema；历史迁移仍使用显式 SQL 管理 PostgreSQL 分区与特殊约束。
+target_metadata = Base.metadata
+_MANAGED_TABLE_NAMES = frozenset(target_metadata.tables)
+
+
+def _include_object(
+    object_: object,
+    name: str | None,
+    type_: str,
+    reflected: bool,
+    compare_to: object | None,
+) -> bool:
+    """仅比较服务逻辑表，排除迁移专属表和运行时物理分区。"""
+    del reflected, compare_to
+    if type_ == "table":
+        return name in _MANAGED_TABLE_NAMES
+
+    table = getattr(object_, "table", None)
+    return table is None or table.name in _MANAGED_TABLE_NAMES
 
 
 def _database_url() -> str:
@@ -30,6 +48,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=_include_object,
     )
 
     with context.begin_transaction():
@@ -47,7 +66,11 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=_include_object,
+        )
 
         with context.begin_transaction():
             context.run_migrations()

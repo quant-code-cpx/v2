@@ -42,6 +42,10 @@ class FakeRawPayloadStore:
         self.payloads.append(payload)
         return f"s3://test/{payload.object_key}"
 
+    def get(self, uri: str) -> bytes:
+        """成员快照未在本测试替身覆盖 raw replay；调用应立即失败。"""
+        raise AssertionError(f"unexpected raw replay read: {uri}")
+
 
 class FakeRepository:
     """提供固定 ACTIVE 集合并记录用例产生的 canonical 发布。"""

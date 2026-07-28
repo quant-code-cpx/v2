@@ -3,8 +3,12 @@
 量化数据与分析 Web SPA。独立构建、测试、运行与部署；仅通过版本化 `service-api` 契约获取数据。
 
 当前基础：Vite+ 0.2.6、pnpm 11.17.0、Node.js 24.18.0、React 19、React Router 7、MUI 7、
-TypeScript 7、TanStack Query、KLineChart 10 和 ECharts 6。页面暂用受控 fixture，未直连 API、
-数据库或供应商。
+TypeScript 7、TanStack Query、KLineChart 10 和 ECharts 6。鉴权与用户管理已接入真实
+`service-api`；个人中心、活动会话、安全审计、角色工作台与用户统计已按 Contract 0017 接入，
+市场数据页仍使用受控 fixture。前端不会直连数据库或供应商。
+
+所有 `service-api` 请求由共享传输层固定为 `POST`，业务调用方不能覆盖 method。浏览器 CORS
+preflight 由浏览器和服务端框架处理；`service-web` 自身的 `/healthz` 仍使用普通 `GET` 健康检查。
 
 ## 支持范围
 

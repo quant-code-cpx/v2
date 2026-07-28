@@ -355,7 +355,7 @@
         </div>
         <div>
           <dt>最后修改</dt>
-          <dd>2026-07-26</dd>
+          <dd>2026-07-28</dd>
         </div>
         <div>
           <dt>关联决策</dt>
@@ -364,12 +364,12 @@
       </dl>
 
       <aside class="callout">
-        <strong>2026-07-26 实施摘要</strong>
+        <strong>2026-07-28 变更摘要</strong>
         0002 已落地为自定义账号、常驻 PNG 验证码、默认拒绝、三级角色和用户管理运行时合同；已移除运行时
         Swagger 匿名面。独立 bootstrap job 仅在空用户库且没有 ACTIVE <code>SUPER_ADMIN</code> 时自动创建唯一超级管理员；
         已有 ACTIVE <code>SUPER_ADMIN</code> 则安全 no-op，非空库或禁用/删除超级管理员则安全失败。已有库使用显式
         <code>userId → account</code> 映射准备后迁移；受控提升 ACTIVE ADMIN 仅保留为恢复路径。0001 仅保留历史
-        schema/migration 参考。
+        schema/migration 参考。User/Auth 2.0 已统一为 POST-only，并以动作后缀区分更新、列表和删除。
       </aside>
     </div>
   </header>
@@ -809,7 +809,7 @@ Redis      service-api PostgreSQL
         </li>
         <li>
           删除写 <code>status=DELETED</code> 与 <code>deletedAt</code>，不物理删除。目标已是 DELETED
-          且仍在 Actor scope 时，终态优先于旧 ETag，重复 DELETE 返回 204；未知或不在 scope 内返回 404。
+          且仍在 Actor scope 时，终态优先于旧 ETag，重复删除请求返回 204；未知或不在 scope 内返回 404。
         </li>
       </ol>
 
@@ -876,7 +876,7 @@ Redis      service-api PostgreSQL
               <td>缺失/无效/已撤销 Cookie 不区分；Origin/Fetch Metadata 失败为 403</td>
             </tr>
             <tr>
-              <td><code>GET/PATCH /api/v1/users/me</code></td>
+              <td><code>POST /api/v1/users/me</code><br><code>POST /api/v1/users/me/update</code></td>
               <td>Authenticated</td>
               <td>本人、permissions；修改要求 If-Match</td>
               <td>401/412</td>
@@ -888,13 +888,13 @@ Redis      service-api PostgreSQL
               <td>401；成功使旧 access/refresh 失效，Web 返回登录页</td>
             </tr>
             <tr>
-              <td><code>GET /api/v1/users</code></td>
+              <td><code>POST /api/v1/users/list</code></td>
               <td>ADMIN / SUPER_ADMIN</td>
               <td>q、role、status、sort、opaque cursor，最多 100 条；匹配筛选时附带本人只读行</td>
               <td>默认排除 DELETED；仅 SUPER_ADMIN 可显式筛选；不枚举其他超级管理员；cursor 与筛选绑定</td>
             </tr>
             <tr>
-              <td><code>GET /api/v1/users/{id}</code></td>
+              <td><code>POST /api/v1/users/{id}</code></td>
               <td>ADMIN / SUPER_ADMIN + target</td>
               <td>200 User + ETag</td>
               <td>越出 actor scope、SUPER_ADMIN 或 DELETED 详情返回 404</td>
@@ -906,13 +906,13 @@ Redis      service-api PostgreSQL
               <td>账号重复 409；首期无 Idempotency-Key，重试后 refetch</td>
             </tr>
             <tr>
-              <td><code>PATCH /api/v1/users/{id}</code></td>
+              <td><code>POST /api/v1/users/{id}/update</code></td>
               <td>ADMIN / SUPER_ADMIN + target</td>
               <td>If-Match；资料/角色/状态；200 + 新 ETag</td>
               <td>412 并发冲突；无字段 400</td>
             </tr>
             <tr>
-              <td><code>DELETE /api/v1/users/{id}</code></td>
+              <td><code>POST /api/v1/users/{id}/delete</code></td>
               <td>ADMIN / SUPER_ADMIN + target</td>
               <td>If-Match；软删除；204</td>
               <td>已删终态优先于旧 ETag 并返回 204；未知/越权目标 404</td>
@@ -974,7 +974,7 @@ Redis      service-api PostgreSQL
                 <code>status=DELETED ⇔ deletedAt IS NOT NULL</code> CHECK；新增
                 <code>(status, role, createdAt, id)</code> 查询索引
               </td>
-              <td><code>DELETED</code> 是终态且只能由 DELETE 写入；更新、版本、安全版本与审计同事务</td>
+              <td><code>DELETED</code> 是终态且只能由删除动作写入；更新、版本、安全版本与审计同事务</td>
             </tr>
             <tr>
               <td><code>Credential</code></td>
@@ -1009,7 +1009,7 @@ Redis      service-api PostgreSQL
 
       <h3 class="mt">并发与排序</h3>
       <ul>
-        <li>资源响应返回整数 <code>version</code> 与强 ETag；PATCH/DELETE/password-reset 要求相同资源 ETag。</li>
+        <li>资源响应返回整数 <code>version</code> 与强 ETag；update/delete/password-reset 动作要求相同资源 ETag。</li>
         <li>
           事务内重读 Actor 与目标；更新条件包含 <code>id + version + actorId + actor securityVersion +
           actor ACTIVE + actor 可管理目标</code>。零行区分 404、412 与权限失效，但不泄露越权目标。
@@ -1065,8 +1065,8 @@ Redis      service-api PostgreSQL
             </tr>
             <tr>
               <td>并发覆盖或重复危险操作</td>
-              <td>ETag/If-Match、版本条件更新；DELETE 重复结果稳定</td>
-              <td>并发 PATCH/DELETE/password-reset 集成测试</td>
+              <td>ETag/If-Match、版本条件更新；重复删除结果稳定</td>
+              <td>并发 update/delete/password-reset 集成测试</td>
             </tr>
             <tr>
               <td>Redis 故障或无 TTL key</td>
@@ -1091,7 +1091,7 @@ Redis      service-api PostgreSQL
         <article class="card">
           <h3>HTTP 边界</h3>
           <p>
-            CORS 精确 origin，methods 包含 DELETE，allowed headers 包含 Authorization/Content-Type/If-Match，
+            CORS 精确 origin，应用路由 method 只包含 POST，allowed headers 包含 Authorization/Content-Type/If-Match，
             exposed headers 包含 ETag/Location/Retry-After；JSON body 设上限；启用安全头与 shutdown hooks。
             <code>TRUST_PROXY</code> 只在可信反向代理网络启用，不能无条件相信客户端转发头。
           </p>
@@ -1249,8 +1249,8 @@ cd ..
 docker build --target test --tag quant-v2/service-api:test service-api
 docker build --tag quant-v2/service-api:local service-api
 docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example --profile api up --build
-curl -fsS http://127.0.0.1:13000/health
-curl -fsS http://127.0.0.1:13000/ready</pre>
+curl -fsS -X POST http://127.0.0.1:13000/health
+curl -fsS -X POST http://127.0.0.1:13000/ready</pre>
 
       <div class="grid two mt">
         <article class="card">
@@ -1277,7 +1277,8 @@ curl -fsS http://127.0.0.1:13000/ready</pre>
 
   <footer>
     <div class="shell">
-      用户访问管理与登录安全 · Implemented：默认拒绝、常驻验证码、三级角色、目标级授权、软删除和可审计迁移。
+      用户访问管理与登录安全 · 2026-07-28 变更摘要：默认拒绝、常驻验证码、三级角色、目标级授权、
+      软删除和可审计迁移；User/Auth 2.0 全部入站路由统一为 POST-only。
     </div>
   </footer>
 </body>

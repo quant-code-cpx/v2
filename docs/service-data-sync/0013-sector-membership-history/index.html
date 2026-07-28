@@ -345,7 +345,7 @@ MembershipSyncService ── raw S3 ── quality / identity resolution
   ▼
 MembershipRepository ── PostgreSQL snapshot / observed interval / release
   ▼
-service-data-sync internal v1 ── Bearer ──▶ service-api SectorMarketDataModule
+service-data-sync internal v1 ── Bearer ──▶ service-api IndustryModule
                                                ▼
                                     authenticated /api/v1 projection
 
@@ -658,7 +658,7 @@ CREATE UNIQUE INDEX uq_sector_membership_release_current
         <li><strong>阶段 1 — shadow 采集：</strong>新增 capability/adapter/application/CLI、raw、sync/quality/snapshot/PENDING/quarantine；不更新 interval，不发布 API。</li>
         <li><strong>阶段 2 — 观测历史：</strong>启用完整快照质量门、interval 差分、月分区、repair/rebuild；连续 30 个交易日验证零伪闭合。</li>
         <li><strong>阶段 3 — internal：</strong>生成首个 100% 身份/板块基线 release，实现 0007、ETag、cursor 409、内部 contract test。</li>
-        <li><strong>阶段 4 — public：</strong>扩展 SectorMarketDataModule，实现 0008、Zod 防腐、认证/限流/503；灰度后开放。</li>
+        <li><strong>阶段 4 — public：</strong>扩展 IndustryModule，实现 0008、Zod 防腐、认证/限流/503；灰度后开放。</li>
       </ol>
 
       <h3>迁移与回滚</h3>

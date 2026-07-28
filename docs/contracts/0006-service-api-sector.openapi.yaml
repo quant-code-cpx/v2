@@ -1,13 +1,14 @@
 openapi: 3.1.1
 info:
   title: service-api sector market-data API
-  version: 1.0.0
+  version: 2.0.0
   description: |
     Implemented authenticated public API for published sector catalogs and direct
     upstream daily, weekly, and monthly bars. service-api owns this projection;
     service-data-sync remains canonical owner and is accessed only through its
     versioned internal HTTP contract.
   x-contract-status: Implemented
+x-http-method-policy: post-only
 servers:
   - url: /api/v1
 tags:
@@ -16,7 +17,7 @@ security:
   - userBearer: []
 paths:
   /market/sectors:
-    get:
+    post:
       tags: [market-sectors]
       operationId: listMarketSectors
       summary: List published sectors from one explicit classification scheme
@@ -38,8 +39,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SectorPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -52,7 +53,7 @@ paths:
           $ref: '#/components/responses/DataSyncUnavailable'
 
   /market/sectors/{scheme}/{sectorCode}/bars:
-    get:
+    post:
       tags: [market-sectors]
       operationId: listMarketSectorBars
       summary: Read direct upstream daily, weekly, or monthly bars for one sector
@@ -81,8 +82,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SectorBarPage'
-        '304':
-          description: Representation matches If-None-Match.
+        '204':
+          description: Representation matches If-None-Match; POST response has no body.
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':

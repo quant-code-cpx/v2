@@ -60,6 +60,22 @@ class Settings(BaseSettings):
         default=False,
         validation_alias="DATA_SYNC_SECTOR_MEMBERSHIP_ENABLED",
     )
+    sector_eod_enabled: bool = Field(
+        default=False,
+        validation_alias="DATA_SYNC_SECTOR_EOD_ENABLED",
+    )
+    sector_eod_publish_enabled: bool = Field(
+        default=False,
+        validation_alias="DATA_SYNC_SECTOR_EOD_PUBLISH_ENABLED",
+    )
+    sector_eod_scheduler_enabled: bool = Field(
+        default=False,
+        validation_alias="DATA_SYNC_SECTOR_EOD_SCHEDULER_ENABLED",
+    )
+    trading_calendar_enabled: bool = Field(
+        default=False,
+        validation_alias="DATA_SYNC_TRADING_CALENDAR_ENABLED",
+    )
     internal_api_bearer_token: SecretStr = Field(
         validation_alias="DATA_SYNC_INTERNAL_API_BEARER_TOKEN"
     )

@@ -2,7 +2,7 @@
 
 - 状态：Implemented
 - 日期：2026-07-25
-- 最后修改：2026-07-26
+- 最后修改：2026-07-28
 - 决策者：项目维护者
 - 变更摘要：业务范围收缩为 User/Auth；保留 Redis 安全基础设施，删除 Worker、Scheduler、队列、
   实时通信及其他未使用模块和依赖。
@@ -79,7 +79,8 @@ PostgreSQL 与 Redis。
 - refresh token 只保存不可逆摘要，会话轮换与重用检测在数据库事务内完成。
 - Redis 只保存登录/刷新限流计数、短期失败锁定和可丢失安全标记；不得成为用户、凭证或会话权威存储。
 - Redis 不可用时登录与刷新 fail closed；已认证请求仍以 PostgreSQL 用户/session 校验为准。
-- URI 主版本路径为 `/api/v1`；接口使用标准 HTTP 方法和显式状态码。
+- URI 主版本路径为 `/api/v1`；入站路由按 [ADR-0018](0018-service-api-post-only-http-method.md)
+  仅使用 POST，并使用显式状态码。
 - 成功响应直接返回资源或分页对象；错误使用 `application/problem+json`。
 - OpenAPI 契约作为编号 YAML 文件提交；运行时同时暴露 Swagger UI 与 JSON 文档。CI 校验在引入 API 工作流时补充。
 
@@ -104,6 +105,7 @@ PostgreSQL 与 Redis。
   `@nestjs/throttler`。
 - 2026-07-26：实现 User/Auth、PostgreSQL migration、Redis 安全控制、容器编排与 OpenAPI 契约；
   通过迁移、健康检查、管理员引导、登录、刷新、登出、lint、typecheck 与单元测试验证。
+- 2026-07-28：标准 HTTP method 条款由 ADR-0018 替代；全部入站业务与运维路由改为 POST-only。
 
 ## 替代关系
 

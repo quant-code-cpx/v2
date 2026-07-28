@@ -15,6 +15,16 @@ def test_settings_loads_typed_environment(configured_environment: None) -> None:
     assert settings.environment is Environment.TEST
     assert settings.log_format is LogFormat.JSON
     assert settings.s3_secret_key.get_secret_value() == "test-secret-key"
+    assert settings.trading_calendar_enabled is False
+
+
+def test_settings_loads_explicit_calendar_enablement(
+    configured_environment: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """只有显式环境变量才能启用已发布的交易日历适配器。"""
+    monkeypatch.setenv("DATA_SYNC_TRADING_CALENDAR_ENABLED", "true")
+
+    assert load_settings().trading_calendar_enabled is True
 
 
 def test_settings_hides_validation_details(monkeypatch: pytest.MonkeyPatch) -> None:

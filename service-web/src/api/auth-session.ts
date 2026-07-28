@@ -12,6 +12,7 @@ export const authSessionInvalidatedEvent = "apex-auth-session-invalidated";
 /** 描述路由与 React Provider 可观察的非敏感会话状态。 */
 export interface AuthSessionSnapshot {
   status: "checking" | "anonymous" | "authenticated";
+  anonymousReason?: "signed-out" | "session-expired" | "password-changed" | "session-revoked";
 }
 
 /** 接收一次内存会话状态变更。 */
@@ -66,6 +67,9 @@ class AuthSession {
     if (this.snapshot.status === "authenticated" && cachedUser !== undefined) {
       return cachedUser;
     }
+    if (this.snapshot.status === "anonymous" && this.snapshot.anonymousReason !== undefined) {
+      return null;
+    }
 
     if (this.refreshPromise !== undefined) {
       return this.refreshPromise;
@@ -102,7 +106,7 @@ class AuthSession {
     try {
       return await operation(accessToken);
     } catch (error: unknown) {
-      if (!isApiError(error) || error.status !== 401) {
+      if (!isApiError(error) || error.status !== 401 || error.code === "current-password-invalid") {
         throw error;
       }
 
@@ -128,18 +132,27 @@ class AuthSession {
     } catch {
       // 服务端退出失败也必须清理客户端，避免历史记录恢复受保护内容。
     } finally {
-      this.clear();
+      this.clear(false, "signed-out");
     }
   }
 
   /** 丢弃 token 与查询数据，并可通知已挂载壳层执行站内跳转。 */
-  public clear(notifyProtectedShell = false): void {
+  public clear(
+    notifyProtectedShell = false,
+    anonymousReason: AuthSessionSnapshot["anonymousReason"] = notifyProtectedShell
+      ? "session-expired"
+      : undefined,
+  ): void {
     this.accessToken = undefined;
     queryClient.removeQueries({
-      predicate: (query) => query.queryKey[0] === "auth" || query.queryKey[0] === "users",
+      predicate: (query) =>
+        query.queryKey[0] === "auth" ||
+        query.queryKey[0] === "account" ||
+        query.queryKey[0] === "users" ||
+        query.queryKey[0] === "audit-events",
     });
     // 即使本来已匿名也强制发布，避免已挂载壳层保留过期身份 UI。
-    this.setSnapshot({ status: "anonymous" }, true);
+    this.setSnapshot({ status: "anonymous", anonymousReason }, true);
     if (notifyProtectedShell && typeof window !== "undefined") {
       window.dispatchEvent(new Event(authSessionInvalidatedEvent));
     }
@@ -238,7 +251,7 @@ class AuthSession {
     throw error;
   }
 
-  /** 通过 GET /users/me 验证 token 后，才向路由或 UI 暴露身份。 */
+  /** 通过 POST /users/me 验证 token 后，才向路由或 UI 暴露身份。 */
   private async acceptAccessToken(
     accessToken: string,
     clearOnIdentityFailure = true,
