@@ -132,5 +132,5 @@ class EquityListingStatusVersion(Base):
         comment="由知识时间端点生成的半开时间范围。",
     )
     correction_approval_reference: Mapped[str | None] = mapped_column(
-        String(128), nullable=True, comment="官方更正必须携带的人工审批引用。"
+        String(128), nullable=True, comment="官方更正的来源证据引用；字段名为历史兼容名称。"
     )

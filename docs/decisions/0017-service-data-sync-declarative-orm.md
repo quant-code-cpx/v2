@@ -9,8 +9,8 @@
 
 ## 背景
 
-`service-data-sync` 已采用 SQLAlchemy 2 与 Alembic，但当前只有 `Engine`、`Connection` 和
-`text()` SQL。32 张逻辑业务表分散在 6 个历史迁移中，应用持久化层约 6,733 行，包含约
+`service-data-sync` 在本决策启动时已采用 SQLAlchemy 2 与 Alembic，但持久化实现只有 `Engine`、`Connection`
+和 `text()` SQL。当时 32 张逻辑业务表分散在 6 个历史迁移中，应用持久化层约 6,733 行，包含约
 152 个 `text()` 调用。维护者无法像阅读 `service-api` 的 Prisma schema 一样，从一个稳定目录直接看到：
 
 - 当前有哪些逻辑表；
@@ -25,10 +25,15 @@
 `JSONB`、父分区表、运行时月分区、`ON CONFLICT`、`RETURNING`、行锁和 advisory lock。迁移方案必须保留
 这些语义，不能为了 ORM 化弱化数据约束、幂等、修订历史、质量门或事务原子性。
 
-2026-07-27 事实校准：0015 板块 EOD 方案已进入 Accepted。上述统计已经包含其 4 张逻辑表和 1,703 行
+2026-07-27 事实校准：0015 板块 EOD 方案已进入 Implemented。上述迁移启动统计已经包含其 4 张逻辑表和 1,703 行
 `sector_eod_repository.py`；动态排行、raw replay、candidate/publish、lease/reaper、fencing、受控回滚与
-原子 publication 已成为回归契约。因此本 ADR 的技术选择、32 表范围和实施顺序不变。0015 尚待完成的来源许可、
+原子 publication 已成为回归契约。0015 尚待完成的来源许可、
 连续探针和生产观测准入属于生产启用条件，不阻断 ORM 模型建设，也不能作为 ORM 行为验证的替代品。
+
+2026-07-28 增量校准：0016 财务 schema expand 通过 revision `202607280002` 新增 12 张逻辑表，
+且从创建时即采用一表一 Declarative 模型、显式 registry 和 Alembic/schema parity。当前 registry 共登记
+44 张逻辑表；最初 32 表与后续 12 表受同一 ORM 约束。财务真实来源同步、canonical 发布和成功读取尚未完成，
+不因表模型已落地而改变业务方案状态。
 
 ## 候选方案
 
@@ -56,19 +61,21 @@
 
 ### 实施状态（2026-07-28）
 
-- 32 张逻辑表均有一表一文件模型，metadata 已接入 Alembic，数据库 COMMENT migration 已在独立 PostgreSQL
+- 当前 44 张逻辑表均有一表一文件模型，metadata 已接入 Alembic；数据库 COMMENT migration 与财务 schema
+  migration 已在独立 PostgreSQL
   完成升级、回滚、再升级与零意外差异校验。
 - `DatabaseClient` 提供短生命周期 `Session` 与显式事务；publication、目录、行情、主数据、membership、EOD、
-  source batch 和 identity resolver 已全部改为模型表达式。
+  source batch、identity resolver 和财务只读选择器均使用模型表达式。
 - `infrastructure/persistence/` 已无 `text()` 调用，架构测试持续约束该边界；仅 Alembic migration 与专用
   partition manager 保留受控 PostgreSQL DDL。
-- 已重建测试镜像并通过 Ruff、Pyright、203 项非集成测试；独立 PostgreSQL/Redis/MinIO 项目完成迁移、8 项集成测试、
-  schema parity 与 `alembic check` 验证。AKShare 外部 smoke 按默认策略跳过。
+- 首批 32 表收口时已重建测试镜像并通过 Ruff、Pyright、203 项非集成测试；独立 PostgreSQL/Redis/MinIO 项目
+  完成迁移、8 项集成测试、schema parity 与 `alembic check` 验证。后续 12 张财务表的迁移与 parity 验证记录
+  归属 0016；AKShare 外部 smoke 按默认策略跳过。
 
 ### 模型可读性规则
 
 - 使用 SQLAlchemy 2 `DeclarativeBase`、`Mapped[...]` 与 `mapped_column()`。
-- 每张逻辑业务表一个模型文件；模型按 provenance、execution、publication、equity、sector catalog、
+- 每张逻辑业务表一个模型文件；模型按 provenance、execution、publication、equity、financial、sector catalog、
   sector market data、sector membership 和 sector EOD 分目录。
 - 每个模型文件完整声明表名、字段、数据库类型、可空性、主键、外键、默认值、表级约束、索引、分区策略、
   中文表注释和中文字段注释。
@@ -79,7 +86,7 @@
 
 ### ORM 使用边界
 
-- 32 张现有逻辑表全部建立 Declarative class；关联表、质量表和运行账本也不省略。
+- 当前 44 张逻辑表全部建立 Declarative class；关联表、质量表和运行账本也不省略。
 - 仓储使用短生命周期同步 `Session` 和显式事务；不使用全局 Session，不跨线程、请求或 Celery task 共享。
 - 简单读写可使用 ORM entity；批量行情、快照成员和质量结果使用
   `Session.execute(insert(Model), rows)` 等 ORM-enabled bulk DML，禁止逐行 `add()` 导致吞吐退化。

@@ -16,7 +16,7 @@ from service_data_sync.application.ports.data_source import (
     SourceRequest,
 )
 from service_data_sync.application.ports.market_data import (
-    EquityMarketDataRepository,
+    EquityDailyBarRepository,
     PublishedDailyBars,
     RawPayload,
     RawPayloadStore,
@@ -43,7 +43,7 @@ class EquityDailyBarSyncService:
         self,
         *,
         source: DataSourcePort,
-        repository: EquityMarketDataRepository,
+        repository: EquityDailyBarRepository,
         raw_payload_store: RawPayloadStore,
     ) -> None:
         """从组合根接收数据源无关的来源与存储端口。"""

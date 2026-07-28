@@ -158,5 +158,30 @@ def test_container_registers_sector_adapter_only_when_both_source_policies_are_e
     assert container.source_registry.provider_ids() == {
         "akshare-eastmoney-equity-catalog",
         "akshare-eastmoney-sector",
+        "akshare-official-exchange-equity-lifecycle",
         "akshare-tencent",
+    }
+
+
+def test_registry_adds_equity_market_sources_only_with_explicit_capability_flag(
+    configured_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """个股周/月、因子、事件和概况 adapter 只在两级开关同时开启时注册。"""
+    monkeypatch.setenv("DATA_SYNC_AKSHARE_ENABLED", "true")
+    monkeypatch.setenv("DATA_SYNC_EQUITY_MARKET_ENABLED", "true")
+
+    registry = container_module.build_source_registry(load_settings())
+
+    assert {provider.provider_id for provider in registry.for_capability("equity.bar.1w.raw")} == {
+        "akshare-eastmoney-equity-period"
+    }
+    assert {
+        provider.provider_id for provider in registry.for_capability("equity.adjustment_factor")
+    } == {"akshare-sina-adjustment-factor"}
+    assert {
+        provider.provider_id for provider in registry.for_capability("equity.corporate_action")
+    } == {"akshare-eastmoney-corporate-action"}
+    assert {provider.provider_id for provider in registry.for_capability("equity.profile")} == {
+        "akshare-cninfo-company-profile"
     }

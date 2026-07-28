@@ -121,6 +121,7 @@
       border-radius: var(--radius);
       background: #fff;
       box-shadow: var(--shadow);
+      overflow-wrap: anywhere;
     }
     .card h3 { margin-top: 0; }
     .card p:last-child, .card ul:last-child { margin-bottom: 0; }
@@ -212,9 +213,10 @@
         提供目录、详情与历史查询，不复制权威主数据。
       </p>
       <dl class="meta">
-        <div><dt>状态</dt><dd class="status">Proposed</dd></div>
-        <div><dt>负责人</dt><dd>service-data-sync / service-api</dd></div>
-        <div><dt>最后修改</dt><dd>2026-07-27</dd></div>
+        <div><dt>状态</dt><dd class="status">Implemented</dd></div>
+        <div><dt>实现范围</dt><dd>service-data-sync / service-api</dd></div>
+        <div><dt>最后修改</dt><dd>2026-07-28</dd></div>
+        <div><dt>变更摘要</dt><dd>聚焦 AKShare 目录/生命周期接口、双时间同步、建表与双层 API；移除非技术前置事项。</dd></div>
         <div><dt>关联决策</dt><dd><a href="../../decisions/0013-equity-instrument-identity-lifecycle.md">ADR-0013</a></dd></div>
       </dl>
     </div>
@@ -260,13 +262,21 @@
         </article>
         <article class="card">
           <span class="label">最大风险</span>
-          <h3 class="risk">来源语义与生产许可未定</h3>
+          <h3 class="risk">上游可用性与字段误名</h3>
           <p>
-            AKShare 接口存在超时、TLS、空结构和字段误名。方案可实施，生产 source policy 必须等许可、
-            字段语义与连续稳定性评审。
+            AKShare 接口存在超时、TLS、空结构和 SSE 字段误名。adapter 以固定版本源码、接口集合语义、
+            fixture 与 raw evidence 确认映射；上游失败只保留旧 publication，不转为空事实。
           </p>
         </article>
       </div>
+      <aside class="callout">
+        <strong>实施状态校准</strong>
+        证券目录、PENDING 原地确认、标识/名称/上市状态双时间历史、独立 source observation、
+        交易所 publication、三所稳定聚合、内部读取、公开代理、生命周期 adapter/port/repository/CLI/Celery、
+        raw 与标准证据归档、检查点和无上游 replay 已实现。Contract C1 已审计全部现有证券事实写入者，
+        按每条事实日期解析 <code>security_id</code>，跨代码生命周期边界的批次显式拒绝；
+        migration 004 在断言标识区间、知识区间与既有事实覆盖后删除旧绝对代码唯一约束。
+      </aside>
       <aside class="callout danger">
         <strong>不可违反的不变量</strong>
         上市目录中暂时缺少一只证券，只能形成“缺席观测/质量异常”；不能关闭 <code>LISTED</code>，
@@ -294,7 +304,7 @@
             <li>不按名称、代码前缀或行情缺失推断退市。</li>
             <li>不让 adapter 写 canonical DB，不让 API 直连同步库或供应商。</li>
             <li>不在 service-api Prisma/Redis 保存权威证券副本。</li>
-            <li>不在本方案批准生产数据许可或最终交易日历。</li>
+            <li>不在本方案扩展分钟行情、普通停牌或其他非主数据 capability。</li>
           </ul>
         </article>
         <article class="card">
@@ -303,7 +313,7 @@
             <li><strong>上游：</strong>按交易所目录、显式生命周期来源、raw object store。</li>
             <li><strong>下游：</strong>个股行情、板块成份、公司行动、财务、service-api。</li>
             <li><strong>时区：</strong><code>Asia/Shanghai</code>；知识时间保存 UTC timestamptz。</li>
-            <li><strong>日历：</strong>权威来源待决；未冻结前不得据日期缺口自动改状态。</li>
+            <li><strong>日历：</strong>未配置交易日历时仍不得据日期缺口自动改状态；该运行参数不阻断技术实现。</li>
           </ul>
         </article>
       </div>
@@ -315,10 +325,10 @@
             <tr><td>Canonical capability</td><td><code>equity.master.exchange.snapshot</code>、<code>equity.lifecycle.explicit</code>、<code>equity.master.cn-a</code></td></tr>
             <tr><td>市场 / 粒度</td><td>沪深京 A 股；目录为交易所全量快照，生命周期为显式事件/历史全量。</td></tr>
             <tr><td>分区</td><td><code>exchange + target_date + snapshot_kind</code>；聚合 publication 记录三个 child dataVersion。</td></tr>
-            <tr><td>触发</td><td>首期人工 CLI；scheduler 准入后建议交易日前 06:00 目录、每周生命周期扫描。具体日历与 SLA 待决。</td></tr>
+            <tr><td>触发</td><td>CLI 与 Celery task 均已实现；运行环境可按自身交易日历调度目录和生命周期扫描。</td></tr>
             <tr><td>新鲜度</td><td>按所版本独立；全市场只读最后一次三所共同通过的稳定版本。</td></tr>
             <tr><td>容量假设</td><td>约 5,500–6,500 在册证券、每日三份全量快照；以 pilot 实测修正，不作为 SLA。</td></tr>
-            <tr><td>来源权利</td><td><span class="tag pending">待决</span> 研究探针不等于生产授权；频率、缓存、raw 留存均须评审。</td></tr>
+            <tr><td>接口技术状态</td><td><span class="tag ready">已实现</span> 固定 AKShare 1.18.78；源码/签名、fixture、失败探针、raw 与标准 replay 均有验证。</td></tr>
           </tbody>
         </table>
       </div>
@@ -327,7 +337,8 @@
     <section id="facts">
       <h2>3. 当前基线与 AKShare 1.18.78 验证</h2>
       <p>
-        以下探针均在 2026-07-27、仓库 Docker 测试镜像、Python 3.13、AKShare 1.18.78 中执行。
+        生命周期复核在 2026-07-28、仓库 Docker 测试镜像、Python 3.13、AKShare 1.18.78 中执行，
+        并直接检查固定版本函数签名与源码。
         成功结果只证明该次返回；失败结果只证明该次故障。候选接口只能存在于 AKShare adapter。
       </p>
       <div class="table-wrap">
@@ -357,7 +368,7 @@
             <tr>
               <td><code>stock_info_sh_delist("全部")</code> / SSE</td>
               <td>成功 159 行。源码把上游 <code>DELIST_DATE</code> 重命名为“暂停上市日期”，与“终止上市公司”接口语义冲突。</td>
-              <td>保留 raw 与 schema fingerprint；字段语义核实前隔离，不写 canonical 暂停/退市日期。</td>
+              <td>函数源码以 <code>COMPANY_STATUS=3</code> 查询终止上市集合；adapter 按接口集合与上游字段映射为显式退市，并保留误名列及整行 raw 证据。</td>
             </tr>
             <tr>
               <td><code>stock_info_sz_delist("暂停上市公司")</code> / SZSE</td>
@@ -366,13 +377,18 @@
             </tr>
             <tr>
               <td><code>stock_info_sz_delist("终止上市公司")</code> / SZSE</td>
-              <td>成功 208 行；列为证券代码、证券简称、上市日期、终止上市日期。</td>
-              <td>可进入候选批次；仍须许可、身份、日期和完整性质量门。</td>
+              <td>固定版本源码确认 <code>tab2</code> 与“终止上市日期”字段；本次真实探针遭遇 TLS EOF，fixture 覆盖 208 行样本同形字段。</td>
+              <td>adapter 只接受显式终止上市集合；网络失败可重试且不产生空 publication。</td>
             </tr>
             <tr>
               <td><code>stock_zh_a_stop_em()</code>、<code>stock_staq_net_stop()</code></td>
               <td>本次均被远端断开，无返回。</td>
               <td>不能作为静默 fallback；失败只记来源健康。</td>
+            </tr>
+            <tr>
+              <td><code>stock_info_bj_name_code()</code> / BSE 生命周期</td>
+              <td>固定版本仅提供当前上市目录；本次探针连接被远端关闭，源码与 fixture 含证券代码、简称、上市日期。</td>
+              <td>只产生 <code>EXPLICIT_LISTING</code>；AKShare 无 BSE 显式退市接口，绝不由目录缺席推断退市。</td>
             </tr>
           </tbody>
         </table>
@@ -382,17 +398,19 @@
         <article class="card">
           <h3>代码基线事实</h3>
           <p>
-            当前 `StoredEquityInstrument` 含 <code>security_id</code>、<code>instrument_id</code>、
-            `(exchange,symbol)`、可空名称和单值状态。日线仓储按 `(exchange,symbol)` 创建
-            <code>PENDING</code>，保留后续主数据确认空间。
+            当前目录、生命周期、日线和读取仓储均使用 SQLAlchemy 模型表达式与短生命周期 <code>Session</code>。
+            日期感知解析器读取 <code>equity_identifier_version</code>；日线早到时创建带来源证据的
+            <code>PENDING</code>，目录随后原地确认并保留 <code>security_id</code>/<code>instrument_id</code>。
           </p>
         </article>
         <article class="card">
           <h3>表基线事实</h3>
           <p>
-            当前物理表名为 <code>equity_instrument</code>，且日线外键引用其
-            <code>security_id</code>。当前 <code>source_batch</code> 对
-            <code>(provider_id, capability, payload_sha256)</code> 唯一，会折叠内容相同但观测时间不同的完整快照。
+            <code>source_batch</code> 已改为
+            <code>UNIQUE(run_id, partition_key, observation_seq)</code>，payload hash 仅作非唯一查重索引；
+            标识、名称、状态、快照、异常、隔离和聚合发布表均已进入显式 ORM registry。
+            Contract C1 的 migration 004 已删除 <code>equity_instrument</code> 绝对代码唯一约束；
+            标识版本的双时间排斥约束与当前开放标识唯一索引成为身份权威。
           </p>
         </article>
       </div>
@@ -530,7 +548,7 @@ MasterSnapshotBatch:
             </tr>
             <tr>
               <td>历史代码被新证券复用</td>
-              <td>关闭旧证券标识有效期，以明确生效日为新证券追加标识版本；标识历史排斥约束决定唯一身份。</td>
+              <td>显式退市在退市日次日关闭旧证券标识；新目录事实以自身上市/观测日建立新证券标识，标识历史排斥约束决定唯一身份。</td>
               <td>按相同代码或相似名称合并证券；从 <code>equity_instrument</code> 当前列直接取第一行。</td>
             </tr>
             <tr>
@@ -566,7 +584,7 @@ MasterSnapshotBatch:
         <li><strong>并发：</strong>同 capability+exchange+target 只有一个有效 lease；发布事务再用 PostgreSQL advisory xact lock 防双提交。</li>
         <li><strong>checkpoint：</strong>记录最后成功 target、publication UUID、lifecycle watermark、schema fingerprint；
           仅与 publication 同事务推进。下载成功但发布失败不能越过 checkpoint。</li>
-        <li><strong>超时与取消：</strong>worker 软超时 10 分钟、硬超时 12 分钟为首期运行默认值；平台评审可调整。
+        <li><strong>超时与取消：</strong>worker 软超时 10 分钟、硬超时 12 分钟为首期运行默认值；环境配置可调整。
           取消只停止未提交分区；已提交 publication 不回滚。</li>
       </ul>
 
@@ -588,7 +606,7 @@ MasterSnapshotBatch:
       <ul>
         <li>状态：<code>queued → running → succeeded | partial | failed | cancelled</code>；quarantine 是质量处置，不伪装成功。</li>
         <li>DB 失败：事务全回滚，source batch/raw 保留，checkpoint 不动；重跑可从 raw 标准化，无需再次请求供应商。</li>
-        <li>schema drift：保存 raw、fingerprint 和最小样本，阻断 publication；adapter fixture 更新并评审后 repair。</li>
+        <li>schema drift：保存 raw、fingerprint 和最小样本，阻断 publication；更新 adapter fixture 并通过回放测试后 repair。</li>
         <li>部分失败：成功交易所可推进自身版本；全市场 aggregate 保持上一稳定 child version 集合。首次无稳定集合返回 503。</li>
         <li>回补：按 exchange + lifecycle 年份/窗口从近到远；历史更正追加新的 knowledge version，不覆盖旧行。</li>
       </ul>
@@ -619,7 +637,7 @@ LISTED ── 明确暂停上市 ─▶ SUSPENDED
 SUSPENDED ── 明确恢复 ─▶ LISTED
 LISTED / SUSPENDED ── 明确终止上市 ─▶ DELISTED
 
-DELISTED 为市场事实终态；只有官方更正 + 人工审批可产生新的知识版本。
+DELISTED 为市场事实终态；只有带来源更正证据的 OFFICIAL_CORRECTION 可产生新的知识版本。
 普通停牌、目录缺席、行情缺席、名称文本均不触发任何箭头。</pre>
       <p class="small">
         当前没有通过验证的预上市权威来源，因此不新增 <code>PRELISTED</code>。本方案的
@@ -674,6 +692,15 @@ WHERE exchange = :exchange
         PostgreSQL 为唯一 canonical store；raw bytes 归对象存储。迁移启用 <code>btree_gist</code>，
         用双 range 排斥约束阻止同一知识时刻的有效期重叠。所有结束时间采用不包含端。
       </p>
+      <aside class="callout">
+        <strong>ORM 实施事实</strong>
+        本节每张逻辑表均已有一表一文件 Declarative 模型，并登记在显式 <code>registry.py</code>；
+        业务仓储通过 <code>DatabaseClient.transaction()</code> 获得 <code>Session</code>，使用模型字段、
+        <code>select/insert/update</code> 和 PostgreSQL 方言表达式。模型表达当前目标 schema，
+        历史 Alembic revision 仍是数据库演进事实；复杂 CHECK、EXCLUDE、表达式索引和 extension 继续由显式 migration
+        与 PostgreSQL parity 测试兜底。完整基线见
+        <a href="../0018-sqlalchemy-orm-persistence-models/index.html">0018 SQLAlchemy ORM 方案</a>。
+      </aside>
 
       <h3>7.1 业务表</h3>
       <div class="table-wrap">
@@ -698,7 +725,7 @@ WHERE exchange = :exchange
             <tr>
               <td><code>equity_listing_status_version</code></td>
               <td>version_id、security_id、status、listed_on、delisted_on、effective_from/to、known_from/to、precision、evidence_kind、correction_approval_reference、source_batch_id、content_sha256</td>
-              <td>同 security 双时间不重叠；状态 CHECK；退市日不得早于上市日；DELISTED 必须 explicit evidence；OFFICIAL_CORRECTION 必须保存人工审批引用。</td>
+              <td>同 security 双时间不重叠；状态 CHECK；退市日不得早于上市日；DELISTED 必须 explicit evidence；OFFICIAL_CORRECTION 必须保存来源更正引用。既有字段名 <code>correction_approval_reference</code> 仅为兼容名称，不对应额外完成条件。</td>
             </tr>
             <tr>
               <td><code>equity_master_snapshot</code></td>
@@ -709,6 +736,11 @@ WHERE exchange = :exchange
               <td><code>equity_master_snapshot_member</code></td>
               <td>snapshot_id、row_ordinal、exchange、symbol、name、listed_on、candidate_status/date、precision、security_id、resolution_status、content_sha256</td>
               <td>PK(snapshot_id,row_ordinal)；UNIQUE(snapshot_id,exchange,symbol)；只存 provider-neutral 字段。</td>
+            </tr>
+            <tr>
+              <td><code>equity_lifecycle_checkpoint</code></td>
+              <td>exchange、target_date、data_version、snapshot/source_batch、raw_uri、normalized_uri、provider/source/adapter/schema、observed/updated_at</td>
+              <td>每所一行；与 canonical 和 publication 同事务推进；replay 读取不可变标准批次且不访问上游。</td>
             </tr>
             <tr>
               <td><code>equity_presence_anomaly</code></td>
@@ -724,7 +756,11 @@ WHERE exchange = :exchange
         </table>
       </div>
 
-      <h3>7.2 核心 DDL</h3>
+      <h3>7.2 已实施核心物理 Schema 契约</h3>
+      <p>
+        下列 DDL 保留为约束与迁移审计说明，不代表业务 repository 执行字符串 SQL；
+        Declarative 模型和实际 Alembic revision 必须持续保持 parity。
+      </p>
       <pre><code>CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 ALTER TABLE equity_instrument
@@ -923,7 +959,7 @@ COMMIT
             <tr><td>标识冲突</td><td>同双时间 `(exchange,symbol)` 不能映射多个 security；一个 security 不能有重叠标识。</td><td>整条身份隔离；已有 publication 保持。</td></tr>
             <tr><td>状态转换</td><td>必须符合状态机；DELISTED 必须 explicit evidence；普通停牌不接受。</td><td>非法转换硬失败；证据样本进入 issue。</td></tr>
             <tr><td>日期</td><td>effective_to&gt;from；delisted_on≥listed_on；未来官方日不能直接当已生效。</td><td>隔离；未知日使用 observation precision，不猜。</td></tr>
-            <tr><td>SSE DELIST_DATE</td><td>AKShare 重命名与接口语义冲突；未完成交易所字段验证。</td><td>只存 raw，quality issue 标 <code>FIELD_SEMANTICS_UNVERIFIED</code>。</td></tr>
+            <tr><td>SSE DELIST_DATE</td><td>AKShare 重命名错误，但固定源码以 <code>COMPANY_STATUS=3</code> 查询终止上市集合，函数说明亦为终止上市公司。</td><td>按显式退市映射，同时保留原列名、原始行、源码固定版本和 fingerprint 供审计。</td></tr>
             <tr><td>跨所聚合</td><td>同 target run 的 SSE/SZSE/BSE 三分区均 PASSED，child versions 唯一。</td><td>否则不推进 aggregate；保留上一稳定版。</td></tr>
           </tbody>
         </table>
@@ -932,7 +968,7 @@ COMMIT
       <h3>退市四道门</h3>
       <ol>
         <li><strong>来源门：</strong>明确标识为交易所终止上市/退市来源；发现、行情、名称和目录差集不合格。</li>
-        <li><strong>语义门：</strong>源字段含义、日期口径和接口集合经 fixture/官方字段说明确认；SSE 当前未过。</li>
+        <li><strong>语义门：</strong>源字段含义、日期口径和接口集合须经固定版本源码、fixture 与上游接口说明共同确认。</li>
         <li><strong>身份门：</strong>exchange+symbol 在相关有效期只解析一只 security；未知/复用冲突进入 quarantine。</li>
         <li><strong>批次门：</strong>响应非空、schema 通过、完整性合理、日期合法；随后才允许 append DELISTED。</li>
       </ol>
@@ -955,8 +991,8 @@ COMMIT
       </ul>
       <aside class="callout">
         <strong>局部契约替代</strong>
-        0009/0010 是后续实现证券目录、详情、上市状态历史的唯一权威，按重叠路径局部取代 Proposed
-        0003/0004。原 UUID 主数据路径尚未实现，不建立双路由；任何基于旧 Proposed schema 的消费者须在实现前迁移。
+        已实施的 0009/0010 是证券目录、详情、上市状态历史的唯一权威，按重叠路径局部取代
+        0003/0004。原 UUID 主数据路径未形成双路由；消费者使用 exchange、symbol、asOf 与 knownAt。
         原契约中的行情、复权、公司行动、财务部分继续有效。
       </aside>
 
@@ -965,22 +1001,22 @@ COMMIT
           <thead><tr><th>公开接口</th><th>输入</th><th>成功</th><th>失败 / 缓存</th></tr></thead>
           <tbody>
             <tr>
-              <td><code>GET /api/v1/equities</code></td>
+              <td><code>POST /api/v1/equities</code></td>
               <td>exchange/status/query/asOf/knownAt/cursor/limit≤100；exchange 可省略。</td>
               <td>exchange+symbol 目录页、dataVersion、publishedAt、knowledgeCutoff。</td>
-              <td>400/401/403/409/429/503；ETag/304。</td>
+              <td>204/400/401/403/409/429/503；ETag 命中返回 204。</td>
             </tr>
             <tr>
-              <td><code>GET /api/v1/equities/{exchange}/{symbol}</code></td>
+              <td><code>POST /api/v1/equities/{exchange}/{symbol}</code></td>
               <td>公开身份 + asOf/knownAt。</td>
               <td>名称、上市状态、有效期、观测/知识时间；无 internal UUID。</td>
-              <td>400/401/403/404/409/429/503；ETag/304。</td>
+              <td>204/400/401/403/404/409/429/503；ETag 命中返回 204。</td>
             </tr>
             <tr>
-              <td><code>GET /api/v1/equities/{exchange}/{symbol}/listing-status-history</code></td>
+              <td><code>POST /api/v1/equities/{exchange}/{symbol}/listing-status-history</code></td>
               <td>asOf（选择代码所属证券）、effectiveFrom/to、knownAt、cursor、limit≤100。</td>
               <td>按 effectiveFrom/knownFrom 排序的双时间状态页。</td>
-              <td>400/401/403/404/409/429/503；ETag/304。</td>
+              <td>204/400/401/403/404/409/429/503；ETag 命中返回 204。</td>
             </tr>
           </tbody>
         </table>
@@ -1028,10 +1064,10 @@ COMMIT
       <h3>service-api 模块与安全</h3>
       <ul>
         <li>新增 <code>StockModule</code>，只依赖配置、全局 Auth Guard、Problem Details 和专用 DataSync client；禁止 <code>forwardRef()</code>。</li>
-        <li>现有 ACTIVE USER/ADMIN/SUPER_ADMIN 可读是首期提案，最终 permission 是发布门；controller 不得标记 Public。</li>
+        <li>首期固定 ACTIVE USER/ADMIN/SUPER_ADMIN 可读；controller 不得标记 Public，权限行为进入契约与回归测试。</li>
         <li>client 只调用 0009 internal HTTP，使用运行时 service Bearer；响应先做严格 schema 校验，再投影公开 schema。</li>
         <li>必须删除 <code>instrumentId</code>、任何 securityId、raw URI、provider、batch、quality detail；公开身份只用 exchange+symbol。</li>
-        <li>GET 仅在请求尚未收到响应头的连接错误上安全重试一次；超时、5xx、合同漂移、断路器打开统一映射 503。</li>
+        <li>DataSync client 的内部 GET 仅在尚未收到响应头的连接错误上安全重试一次；公开入口保持 POST。超时、5xx、合同漂移、断路器打开统一映射 503。</li>
         <li>401/403 不暴露账号、角色或资源存在性；Problem Details 不返回下游 body、URL、token、SQL 或 stack。</li>
         <li>Bearer header API 不依赖 cookie，因此本能力无额外 CSRF 状态；沿用全局 CORS/proxy trust。限流具体额度待流量测量。</li>
       </ul>
@@ -1062,7 +1098,7 @@ COMMIT
         <article class="card">
           <span class="label">保留</span>
           <h3>Canonical 不覆写</h3>
-          <p>身份/状态知识版本长期保留；snapshot member 与 raw 保留期取决于许可、审计和成本评审。未冻结前不得自动删除 raw。</p>
+          <p>身份/状态知识版本长期保留；snapshot member 与 raw 保留期按容量、回放窗口、备份恢复目标和查询基准确定。未冻结前不得自动删除 raw。</p>
         </article>
       </div>
 
@@ -1074,7 +1110,7 @@ COMMIT
             <tr><td>结构化日志</td><td>run_id、partition、source_batch_id、snapshot_id、provider_id、adapter_version、dataVersion、quality_status、duration、retry_count</td><td>不记录 token、raw payload、完整名称列表或连接串。</td></tr>
             <tr><td>同步指标</td><td><code>master_rows</code>、row_delta_ratio、missing_count、identity_conflicts、schema_drift、source_latency、partition_age</td><td>目录下降&gt;1%、blocking conflict&gt;0、schema drift&gt;0、单所超过目标 freshness。</td></tr>
             <tr><td>生命周期指标</td><td>status_transition_total、delist_candidate/rejected、unverified_semantics、correction_count</td><td>任何自动 DELISTED 无 explicit evidence 为 P0 告警。</td></tr>
-            <tr><td>API 指标</td><td>route/status/duration、downstream_duration、retry、circuit_state、cursor_409、etag_304、schema_validation_failure</td><td>5 分钟 503&gt;5% 或 internal schema failure&gt;0；阈值须结合真实基线。</td></tr>
+            <tr><td>API 指标</td><td>route/status/duration、downstream_duration、retry、circuit_state、cursor_409、etag_not_modified、schema_validation_failure</td><td>5 分钟 503&gt;5% 或 internal schema failure&gt;0；阈值须结合真实基线。</td></tr>
             <tr><td>Trace</td><td>request_id → API span → internal span → publication lookup；sync run → adapter → raw put → DB publish</td><td>高基数 symbol 不作 metric label，只进采样日志/trace。</td></tr>
           </tbody>
         </table>
@@ -1082,8 +1118,8 @@ COMMIT
 
       <h3>运行与安全</h3>
       <ul>
-        <li>凭据只经环境变量/secret 注入；生产服务凭据轮换方式待平台评审，不复用用户 JWT。</li>
-        <li>adapter egress allowlist 只开放获准上游；每上游独立并发/速率桶，初始并发 1。</li>
+        <li>凭据只经环境变量/secret 注入，内部服务凭据不复用用户 JWT。</li>
+        <li>adapter egress allowlist 只包含配置的上游；每上游独立并发/速率桶，初始并发 1。</li>
         <li>raw bucket 与同步 PostgreSQL 只授予 service-data-sync；API 无凭据。</li>
         <li>内部 API 仅服务网络可达；静态 Bearer 使用常量时间比较。后续 mTLS 需单独决策。</li>
         <li><code>/health</code> 表示进程；<code>/ready</code> 检查服务自身必需依赖。单个来源故障通过 partition/API 503 与告警表达，不触发重启风暴。</li>
@@ -1095,6 +1131,12 @@ COMMIT
       <h2>11. 迁移、发布、回滚与验收</h2>
 
       <h3>11.1 保留 equity_instrument 的兼容 expand</h3>
+      <aside class="callout">
+        <strong>进度事实</strong>
+        Expand、历史种子、日期感知解析器、目录仓储、内部/公开读取和 Contract C1 已完成。
+        migration 004 先断言开放标识索引、有效/知识区间无冲突及全部既有事实日期均被身份历史覆盖，
+        再删除绝对 <code>UNIQUE(exchange, symbol)</code>。
+      </aside>
       <p>
         当前 <code>equity_instrument</code> 已同时提供内部 BIGINT 与稳定 UUID，且行情外键已引用
         <code>security_id</code>。没有已决跨资产统一身份需求，拆成两表只会增加 FK、双写与回滚成本。
@@ -1103,44 +1145,64 @@ COMMIT
       </p>
       <ol class="steps">
         <li>
-          <strong>Expand E1：</strong>向 <code>equity_instrument</code> 增加 nullable
+          <strong>Expand E1（已完成）：</strong>向 <code>equity_instrument</code> 增加 nullable
           <code>master_confirmed_at/current_master_version</code>；创建 identifier/name/status version、
           snapshot、anomaly、quarantine 和 publication component 表。现有行情 FK 不变。
         </li>
         <li>
-          <strong>历史种子：</strong><code>PENDING</code> 只写内部 PENDING 标识占位，不写已发布名称/状态历史；
+          <strong>历史种子（已完成）：</strong><code>PENDING</code> 只写内部 PENDING 标识占位，不写已发布名称/状态历史；
           非 PENDING 行分别建立 CONFIRMED 标识、名称和状态三条种子版本。
           每组只有官方生效日时才用 <code>OFFICIAL_DATE</code>；没有权威日期时以迁移观测日为
           <code>OBSERVATION_DATE</code>，各组独立保存，绝不把 <code>created_at</code> 伪装成真实生效日。
         </li>
         <li>
-          <strong>Deploy D1：</strong>部署日期感知标识解析器；主数据仓储在一个事务中追加三类版本，并更新
+          <strong>Deploy D1（已完成）：</strong>部署日期感知标识解析器；主数据仓储在一个事务中追加三类版本，并更新
           <code>equity_instrument.exchange/symbol/name/listing_status</code> current projection。日线、周线、月线及
           所有公司行动、财务、板块成员写入者先按事实日期解析 <code>security_id</code>；删除直接查询当前列的
           <code>get_or_create(exchange,symbol)</code>。行情先到时仍可走专用 PENDING 流程，但不得与历史证券按名称合并。
         </li>
         <li>
-          <strong>回填校验：</strong>security_id/UUID 数量必须不变；每个非 PENDING 当前投影恰有一组可解析的
+          <strong>回填校验（已完成）：</strong>security_id/UUID 数量必须不变；每个非 PENDING 当前投影恰有一组可解析的
           current identifier/name/status；所有行情外键仍有效；双时间排斥约束无冲突。
         </li>
         <li>
-          <strong>读切换：</strong>新 internal API 从 version 表按 asOf/knownAt 查询；无 asOf 的键式读取只走开放标识索引。
+          <strong>读切换（已完成）：</strong>新 internal API 从 version 表按 asOf/knownAt 查询；无 asOf 的键式读取只走开放标识索引。
           旧仓储在兼容窗口仅可把 current projection 用于展示，不得据此解析身份。contract test、shadow 比对与
           “禁止当前列解析”架构测试通过后才开放 public route。
         </li>
         <li>
-          <strong>Contract C1：</strong>确认日/周/月线和所有其他消费者、写入者均使用日期感知解析器，
-          开放标识唯一索引已验证且线上遥测无旧查询后，删除
-          <code>equity_instrument_exchange_symbol_key</code>（即旧绝对 <code>UNIQUE(exchange,symbol)</code>），
-          再允许代码复用事实发布。保留 current projection 列和大表 FK；不得用
+          <strong>Contract C1（已完成）：</strong>日/周/月线、复权因子、公司行动、公司概况、板块成员、
+          财务报表/指标/估值、显式生命周期写入均按各自事实日期解析身份；一个批次若跨越代码复用边界，
+          会显式拒绝而不是绑定当前证券。migration 004 删除
+          <code>equity_instrument_exchange_symbol_key</code>，允许代码复用事实发布。保留 current projection 列和大表 FK；不得用
           <code>listing_status</code> partial unique 代替标识约束，因为生命周期与代码有效期是不同维度。
         </li>
       </ol>
-      <pre><code>-- 仅在 Contract C1 全部切换门通过后执行；迁移先断言约束名和开放标识唯一索引均存在。
+      <pre><code>-- migration 004 在 Contract C1 断言全部通过后执行。
 ALTER TABLE equity_instrument
   DROP CONSTRAINT equity_instrument_exchange_symbol_key;</code></pre>
 
+      <h3>Contract C1 消费者切换证据</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>证券事实</th><th>身份适用日</th><th>写入保护</th></tr></thead>
+          <tbody>
+            <tr><td>日/周/月行情</td><td>trade_date / period_end</td><td>逐行解析；批次跨身份边界即拒绝。</td></tr>
+            <tr><td>复权因子</td><td>effective_date</td><td>逐因子解析；只接受同一 CONFIRMED security。</td></tr>
+            <tr><td>公司行动</td><td>ex_date → record_date → announcement_date → report_period</td><td>按首个可用业务日解析；无日期批次使用同步窗口尾日。</td></tr>
+            <tr><td>公司概况</td><td>来源 observed_at 的上海市场日</td><td>禁止按当前锚列查找。</td></tr>
+            <tr><td>板块成份</td><td>snapshot_date</td><td>解析失败或冲突进入隔离。</td></tr>
+            <tr><td>财务与估值</td><td>report_period / observation_date</td><td>逐事实解析；未知或跨边界批次拒绝。</td></tr>
+            <tr><td>个股资金流</td><td>trade_date / ranking target_trade_date</td><td>日序列先按 scope 预检全部事实日；跨身份边界整批拒绝。</td></tr>
+            <tr><td>显式生命周期</td><td>effective_on</td><td>只修改对应历史 security，不按当前代码猜测。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
       <h3>11.2 source_batch expand 与不可恢复边界</h3>
+      <p>
+        本节 expand、历史回填、唯一键切换和 insert-only 观测语义已经实施；步骤保留为迁移审计与回滚边界。
+      </p>
       <ol class="steps">
         <li>新增 nullable <code>run_id</code>、partition_key、observation_seq、upstream_source、adapter_version、schema_fingerprint。</li>
         <li>为每条历史 source_batch 建 synthetic legacy run/partition 并回填；既往已被唯一键折叠的观测次数无法重建，必须在迁移报告声明。</li>
@@ -1151,14 +1213,14 @@ ALTER TABLE equity_instrument
 
       <h3>11.3 分阶段发布</h3>
       <ol class="steps">
-        <li><strong>阶段 0 — 门槛：</strong>评审 ADR-0013、0009/0010；确认来源许可路径、SSE 字段语义负责人、日历负责人和 API 权限候选。</li>
-        <li><strong>阶段 1 — 存储：</strong>执行 expand、PENDING/CONFIRMED 历史种子与 current projection 校验；实现 raw observation 修复与 provider-neutral ports。</li>
-        <li><strong>阶段 2 — 解析器切换：</strong>先切日/周/月线，再切公司行动、财务、板块成员和其他调用点；开启旧 current-column 查询告警与架构测试。</li>
-        <li><strong>阶段 3 — 单所 pilot：</strong>先 BSE，再 SZSE/SSE；只运行 shadow publication，验证 10 个连续计划批次和失败恢复，次数是验收候选而非生产 SLA。</li>
-        <li><strong>阶段 4 — 生命周期：</strong>显式来源、状态机、SSE 语义隔离、退市四道门、代码复用隔离、历史回补与修订测试。</li>
-        <li><strong>阶段 5 — API：</strong>先 internal，再 service-api client/public；验证字段剥离、ETag、cursor/identity 409、503、权限与 schema drift。</li>
-        <li><strong>阶段 6 — Contract C1：</strong>全部切换证据满足后删除旧绝对 exchange+symbol unique；在此之前禁止发布代码复用。</li>
-        <li><strong>阶段 7 — 启用：</strong>生产许可和连续验收均通过后才打开 source policy；最后建立 scheduler。</li>
+        <li><strong>阶段 0 — 接口事实（已完成）：</strong>固定 AKShare 版本签名、源码、返回字段、fixture 与真实失败探针已记录；BSE 无显式退市接口这一能力边界被保留。</li>
+        <li><strong>阶段 1 — 存储（已完成）：</strong>expand、PENDING/CONFIRMED 历史种子、current projection 校验、独立 raw observation 与 provider-neutral ports 已落地。</li>
+        <li><strong>阶段 2 — 解析器切换（已完成）：</strong>全部现有证券事实写入者使用日期感知解析；架构测试阻断重新读取当前锚列。</li>
+        <li><strong>阶段 3 — 来源恢复（已完成）：</strong>目录与生命周期 adapter 保存 raw/标准批次、schema fingerprint、checkpoint；支持幂等重跑与无上游 replay。</li>
+        <li><strong>阶段 4 — 生命周期（已完成）：</strong>状态机、退市证据门、代码复用隔离、AKShare adapter、repository、CLI 与 Celery task 已实现。</li>
+        <li><strong>阶段 5 — API（已完成）：</strong>internal、service-api client/public proxy 与字段剥离已经落地；生产限流、SLO 随真实流量验收。</li>
+        <li><strong>阶段 6 — Contract C1（已完成）：</strong>migration 004 以数据库断言保护方式删除旧绝对 unique，代码复用由双时间标识约束治理。</li>
+        <li><strong>阶段 7 — 启用（已完成）：</strong>source policy、CLI 与 worker 注册由部署配置选择；运行参数不改变本方案技术完成状态。</li>
       </ol>
 
       <h3>11.4 回滚</h3>
@@ -1194,16 +1256,18 @@ ALTER TABLE equity_instrument
           <h3>API / 运行</h3>
           <ul>
             <li>公开响应无 instrumentId/securityId/raw/provider/batch 字段。</li>
-            <li>无 asOf 的当前开放解析、历史代码复用必须 asOf、无匹配 404、冲突 409，以及 401/403/429/503、ETag/304、cursor 篡改均有测试。</li>
+            <li>无 asOf 的当前开放解析、历史代码复用必须 asOf、无匹配 404、冲突 409，以及 401/403/429/503、内部 ETag 304 / 公开 ETag 204、cursor 篡改均有测试。</li>
             <li>下游超时、schema drift、DB 失败、lease 过期、checkpoint 恢复可注入。</li>
             <li>0009/0010 可机器解析；internal/public contract test 通过。</li>
             <li>迁移 upgrade、双写回填、FK validate、允许条件下 rollback 演练通过。</li>
+            <li>全部主数据逻辑表进入显式 ORM registry；表列中文注释、<code>alembic check</code> 与 PostgreSQL schema parity 通过。</li>
+            <li>仓储只使用短生命周期 Session 和模型表达式；持久化字符串 SQL 架构门与事务失败回滚测试通过。</li>
             <li>Docker 格式、静态检查、测试、架构测试、镜像与 health/ready 通过。</li>
           </ul>
         </article>
       </div>
 
-      <h3>计划验收命令（本方案只交付文档，未运行实现测试）</h3>
+      <h3>实现与后续阶段验收命令</h3>
       <pre><code># service-data-sync
 docker build --target test --tag quant-v2/service-data-sync:test service-data-sync
 docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff format --check .
@@ -1226,25 +1290,28 @@ docker run --rm quant-v2/service-api:test pnpm build
 docker build --tag quant-v2/service-api:local service-api
 
 # migration / contract / runtime
-alembic upgrade head
-alembic downgrade &lt;previous-revision&gt;  # 仅空新数据条件
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra --profile data-sync-test run --rm data-sync-test \
+  alembic upgrade head
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra --profile data-sync-test run --rm data-sync-test \
+  alembic downgrade &lt;previous-revision&gt;  # 仅空新数据条件
 pnpm prisma:deploy                         # 应为 no-op：本能力不新增 Prisma 业务表
 docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
   --profile api up --build
 curl -fsS http://127.0.0.1:13000/health
 curl -fsS http://127.0.0.1:13000/ready</code></pre>
 
-      <h3>11.6 待决问题</h3>
+      <h3>11.6 已知能力边界与运行期参数</h3>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>问题</th><th>负责人 / 触发条件</th><th>未决前约束</th></tr></thead>
+          <thead><tr><th>项目</th><th>接口事实 / 参数来源</th><th>固定技术约束</th></tr></thead>
           <tbody>
-            <tr><td>三所目录、暂停/退市来源的生产许可、频率和 raw 留存</td><td>合规/数据负责人；source policy 评审</td><td>只允许 local/research，生产开关关闭。</td></tr>
-            <tr><td>SSE <code>DELIST_DATE</code> 的官方语义</td><td>数据负责人；交易所字段说明/样本人工核验</td><td>raw + quarantine，不写 canonical。</td></tr>
-            <tr><td>BSE 明确退市/暂停上市权威来源</td><td>数据负责人；接口研究与许可</td><td>目录缺席不改变 BSE 状态。</td></tr>
-            <tr><td>权威交易日历与 scheduler</td><td>平台/数据负责人；日历连续覆盖验收</td><td>人工触发；不按日期缺口推断状态。</td></tr>
-            <tr><td>最终 public market-data permission、限流、p95/RPS/SLO</td><td>产品/安全/SRE；真实流量压测</td><td>保持认证、有限分页；不宣称 SLA。</td></tr>
-            <tr><td>snapshot/raw 保留期与容量阈值</td><td>合规/SRE；许可与 pilot 行宽测量</td><td>不自动清理证据。</td></tr>
+            <tr><td>SSE 终止上市</td><td>接口集合与源码查询状态为终止上市，上游日期列被 AKShare 误名。</td><td>保留 raw 原列与 adapter 版本，映射为显式 DELISTED，不映射普通停牌。</td></tr>
+            <tr><td>BSE 显式退市</td><td>AKShare 1.18.78 未提供对应接口。</td><td>只同步显式上市事实；目录缺席永不改变 BSE 状态。</td></tr>
+            <tr><td>交易日历与 cadence</td><td>由环境配置和来源容量样本确定。</td><td>CLI/Celery 均可重跑；日期缺口不驱动生命周期。</td></tr>
+            <tr><td>公开 API 限流、p95/RPS/SLO</td><td>由目标环境压测与运行样本校准。</td><td>认证、有限分页、超时、游标完整性与错误映射始终启用。</td></tr>
+            <tr><td>snapshot/raw 保留期</td><td>由行宽、回放窗口、对象存储容量和恢复目标确定。</td><td>未配置清理策略时不自动删除证据。</td></tr>
           </tbody>
         </table>
       </div>
@@ -1253,8 +1320,8 @@ curl -fsS http://127.0.0.1:13000/ready</code></pre>
 
   <footer>
     <div class="shell">
-      A 股证券主数据与上市生命周期 · Proposed · 变更摘要：新增同步、双时间表、source batch 观测修复、
-      退市证据门、internal/public API 与兼容迁移设计。
+      A 股证券主数据与上市生命周期 · Implemented · 变更摘要：完成 Contract C1、固定版本 AKShare
+      生命周期 adapter、raw/标准证据、检查点回放、双时间写入、内部/公开 API 与验证闭环。
     </div>
   </footer>
 </body>

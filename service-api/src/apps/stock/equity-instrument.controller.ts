@@ -82,7 +82,7 @@ export class EquityInstrumentController {
 }
 
 /** 设置可复验缓存头、数据版本，并把下游 304 映射为合法的公开 POST 204 响应。 */
-function writeConditionalResponse<T extends VersionedBody>(
+export function writeConditionalResponse<T extends VersionedBody>(
   response: Response,
   result: ConditionalRead<T>,
 ): T | undefined {

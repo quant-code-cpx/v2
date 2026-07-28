@@ -22,7 +22,40 @@ def test_registry_explicitly_exposes_every_logical_business_table() -> None:
         "equity_master_snapshot_member",
         "equity_presence_anomaly",
         "equity_identity_quarantine",
+        "equity_lifecycle_checkpoint",
+        "equity_profile_version",
         "equity_daily_bar",
+        "equity_weekly_bar",
+        "equity_monthly_bar",
+        "equity_adjustment_factor",
+        "equity_corporate_action_version",
+        "equity_sync_checkpoint",
+        "financial_methodology",
+        "financial_metric_definition",
+        "financial_report",
+        "financial_report_revision",
+        "financial_statement_fact",
+        "provider_financial_metric_revision",
+        "derived_financial_metric_revision",
+        "valuation_observation_revision",
+        "financial_field_quarantine",
+        "financial_quality_result",
+        "financial_publication",
+        "financial_change_checkpoint",
+        "financial_derivation_input",
+        "money_flow_methodology",
+        "money_flow_methodology_version",
+        "money_flow_methodology_scope",
+        "money_flow_methodology_window",
+        "money_flow_bucket_definition",
+        "money_flow_universe_version",
+        "money_flow_series",
+        "money_flow_daily_observation",
+        "money_flow_ranking_snapshot",
+        "money_flow_ranking_item",
+        "money_flow_ranking_metric",
+        "money_flow_ranking_manifest",
+        "money_flow_quality_result",
         "sector_scheme",
         "sector_entity",
         "sector_daily_bar",
@@ -40,6 +73,13 @@ def test_registry_explicitly_exposes_every_logical_business_table() -> None:
         "sector_eod_snapshot",
         "sector_eod_quote",
         "sector_eod_quality_result",
+        "sw_sector_methodology",
+        "sw_sector_node_revision",
+        "sw_sector_closure",
+        "sw_sector_valuation_revision",
+        "sw_sector_quality_result",
+        "sw_sector_publication",
+        "sw_sector_sync_checkpoint",
     }
 
     assert len(ALL_MODELS) == len(expected_tables)
@@ -70,6 +110,44 @@ def test_partitioned_parents_keep_physical_partition_policy_visible() -> None:
         == "RANGE (trade_date)"
     )
     assert (
+        Base.metadata.tables["equity_weekly_bar"].dialect_options["postgresql"]["partition_by"]
+        == "RANGE (period_end)"
+    )
+    assert (
+        Base.metadata.tables["equity_monthly_bar"].dialect_options["postgresql"]["partition_by"]
+        == "RANGE (period_end)"
+    )
+    assert (
         Base.metadata.tables["sector_membership_item"].dialect_options["postgresql"]["partition_by"]
         == "RANGE (snapshot_date)"
+    )
+    assert (
+        Base.metadata.tables["financial_report_revision"].dialect_options["postgresql"][
+            "partition_by"
+        ]
+        == "RANGE (report_period)"
+    )
+    assert (
+        Base.metadata.tables["financial_statement_fact"].dialect_options["postgresql"][
+            "partition_by"
+        ]
+        == "RANGE (report_period)"
+    )
+    assert (
+        Base.metadata.tables["provider_financial_metric_revision"].dialect_options["postgresql"][
+            "partition_by"
+        ]
+        == "RANGE (report_period)"
+    )
+    assert (
+        Base.metadata.tables["derived_financial_metric_revision"].dialect_options["postgresql"][
+            "partition_by"
+        ]
+        == "RANGE (report_period)"
+    )
+    assert (
+        Base.metadata.tables["valuation_observation_revision"].dialect_options["postgresql"][
+            "partition_by"
+        ]
+        == "RANGE (observation_date)"
     )

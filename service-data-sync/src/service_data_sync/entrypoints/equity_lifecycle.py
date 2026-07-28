@@ -30,7 +30,7 @@ _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """运行获准来源的一所或三所显式生命周期批次，不接受目录缺席输入。"""
+    """运行已配置来源的一所或三所显式生命周期批次，不接受目录缺席输入。"""
     arguments = _parse_args(argv)
     exchanges = tuple(Exchange) if arguments.all_exchanges else (Exchange(arguments.exchange),)
     target_date = (
@@ -43,15 +43,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     container = build_container(settings)
     try:
         sources = container.source_registry.for_capability(_CAPABILITY)
-        if len(sources) != 1:
-            raise SystemExit("exactly one approved equity lifecycle provider must be enabled")
+        if not arguments.replay_last and len(sources) != 1:
+            raise SystemExit("exactly one equity lifecycle provider must be enabled")
         service = EquityLifecycleSyncService(
-            source=sources[0],
+            source=None if arguments.replay_last else sources[0],
             repository=SqlAlchemyEquityLifecycleRepository(container.database),
             raw_payload_store=S3RawPayloadStore(container.object_storage),
         )
         results = asyncio.run(
-            _sync_exchanges(service, exchanges=exchanges, target_date=target_date)
+            _sync_exchanges(
+                service,
+                exchanges=exchanges,
+                target_date=target_date,
+                replay_last=arguments.replay_last,
+            )
         )
         aggregate = (
             SqlAlchemyEquityMasterRepository(container.database).publish_cn_a_aggregate()
@@ -88,11 +93,17 @@ async def _sync_exchanges(
     *,
     exchanges: tuple[Exchange, ...],
     target_date: date,
+    replay_last: bool = False,
 ) -> tuple[EquityLifecycleSyncResult, ...]:
-    """顺序同步三所生命周期来源，避免未定许可下的并发上游访问。"""
+    """顺序同步或重放三所生命周期证据，避免并发上游请求放大故障。"""
     results: list[EquityLifecycleSyncResult] = []
     for exchange in exchanges:
-        results.append(await service.sync(exchange=exchange, target_date=target_date))
+        result = (
+            await service.replay_last(exchange=exchange)
+            if replay_last
+            else await service.sync(exchange=exchange, target_date=target_date)
+        )
+        results.append(result)
     return tuple(results)
 
 
@@ -103,4 +114,9 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     group.add_argument("--exchange", choices=[exchange.value for exchange in Exchange])
     group.add_argument("--all-exchanges", action="store_true", help="顺序同步三所并发布稳定聚合")
     parser.add_argument("--target-date", help="来源语义对应的目标市场日，格式 YYYY-MM-DD")
+    parser.add_argument(
+        "--replay-last",
+        action="store_true",
+        help="从最后成功检查点重放标准证据，不请求供应商",
+    )
     return parser.parse_args(argv)

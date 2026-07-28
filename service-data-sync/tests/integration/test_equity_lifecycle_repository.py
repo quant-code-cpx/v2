@@ -71,10 +71,29 @@ def test_repository_persists_explicit_delisting_as_bitemporal_revision() -> None
             provider_id="integration-fixture-lifecycle",
             source_payload_sha256="c" * 64,
             raw_uri="s3://integration-fixture/lifecycle.json",
+            normalized_uri="s3://integration-fixture/lifecycle.normalized.json",
             observed_at=datetime(2026, 7, 2, tzinfo=UTC),
             upstream_source="integration-fixture",
             adapter_version="test-v1",
             schema_fingerprint="d" * 64,
+        )
+        reused_publication = catalog.publish_catalog(
+            exchange=Exchange.SSE,
+            target_date=date(2026, 7, 4),
+            entries=(
+                EquityCatalogEntry(
+                    identifier=identifier,
+                    name="代码复用后的新证券",
+                    listed_on=date(2026, 7, 4),
+                ),
+            ),
+            provider_id="integration-fixture-catalog-reuse",
+            source_payload_sha256="e" * 64,
+            raw_uri="s3://integration-fixture/catalog-reuse.json",
+            observed_at=datetime(2026, 7, 4, tzinfo=UTC),
+            upstream_source="integration-fixture",
+            adapter_version="test-v1",
+            schema_fingerprint="f" * 64,
         )
         with database.engine.connect() as connection:
             rows = (
@@ -91,35 +110,117 @@ def test_repository_persists_explicit_delisting_as_bitemporal_revision() -> None
                         ORDER BY effective_from
                         """
                     ),
-                    {"instrument_id": _instrument_id(connection, identifier)},
+                    {
+                        "instrument_id": _instrument_id(
+                            connection,
+                            identifier,
+                            as_of=date(2026, 7, 1),
+                        )
+                    },
                 )
                 .mappings()
                 .all()
+            )
+            identifier_effective_to = connection.execute(
+                text(
+                    """
+                    SELECT effective_to
+                    FROM equity_identifier_version
+                    WHERE exchange = :exchange
+                      AND symbol = :symbol
+                      AND effective_range @> :as_of
+                      AND known_to IS NULL
+                    """
+                ),
+                {
+                    "exchange": identifier.exchange.value,
+                    "symbol": identifier.symbol,
+                    "as_of": date(2026, 7, 1),
+                },
+            ).scalar_one()
+            identifier_rows = (
+                connection.execute(
+                    text(
+                        """
+                        SELECT security_id, effective_from, effective_to
+                        FROM equity_identifier_version
+                        WHERE exchange = :exchange
+                          AND symbol = :symbol
+                          AND identity_state = 'CONFIRMED'
+                          AND known_to IS NULL
+                        ORDER BY effective_from
+                        """
+                    ),
+                    {
+                        "exchange": identifier.exchange.value,
+                        "symbol": identifier.symbol,
+                    },
+                )
+                .mappings()
+                .all()
+            )
+            checkpoint = (
+                connection.execute(
+                    text(
+                        """
+                        SELECT data_version, raw_uri, normalized_uri, target_date
+                        FROM equity_lifecycle_checkpoint
+                        WHERE exchange = 'SSE'
+                        """
+                    )
+                )
+                .mappings()
+                .one()
             )
     finally:
         database.close()
 
     assert publication.inserted_count == 1
+    assert reused_publication.inserted_count == 1
     assert [(row["status"], row["effective_to"]) for row in rows] == [
         ("LISTED", date(2026, 7, 2)),
         ("DELISTED", None),
     ]
     assert rows[-1]["delisted_on"] == date(2026, 7, 2)
     assert rows[-1]["evidence_kind"] == "EXPLICIT_DELISTING"
+    assert identifier_effective_to == date(2026, 7, 3)
+    assert len(identifier_rows) == 2
+    assert identifier_rows[0]["security_id"] != identifier_rows[1]["security_id"]
+    assert identifier_rows[1]["effective_from"] == date(2026, 7, 4)
+    assert identifier_rows[1]["effective_to"] is None
+    assert UUID(str(checkpoint["data_version"])) == publication.data_version
+    assert checkpoint["raw_uri"] == "s3://integration-fixture/lifecycle.json"
+    assert checkpoint["normalized_uri"].endswith("lifecycle.normalized.json")
+    assert checkpoint["target_date"] == date(2026, 7, 2)
 
 
-def _instrument_id(connection: Connection, identifier: EquityIdentifier) -> UUID:
+def _instrument_id(
+    connection: Connection,
+    identifier: EquityIdentifier,
+    *,
+    as_of: date,
+) -> UUID:
     """读取集成目录刚建立的内部 UUID，避免测试猜测自增主键。"""
     row = (
         connection.execute(
             text(
                 """
-                SELECT instrument_id
-                FROM equity_instrument
-                WHERE exchange = :exchange AND symbol = :symbol
+                SELECT instrument.instrument_id
+                FROM equity_identifier_version identifier
+                JOIN equity_instrument instrument
+                  ON instrument.security_id = identifier.security_id
+                WHERE identifier.exchange = :exchange
+                  AND identifier.symbol = :symbol
+                  AND identifier.identity_state = 'CONFIRMED'
+                  AND identifier.effective_range @> :as_of
+                  AND identifier.known_to IS NULL
                 """
             ),
-            {"exchange": identifier.exchange.value, "symbol": identifier.symbol},
+            {
+                "exchange": identifier.exchange.value,
+                "symbol": identifier.symbol,
+                "as_of": as_of,
+            },
         )
         .mappings()
         .one()

@@ -258,6 +258,11 @@
       font-size: inherit;
     }
 
+    :not(pre) > code {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
     .table-wrap {
       overflow-x: auto;
       border: 1px solid var(--line);
@@ -370,7 +375,7 @@
       <p class="eyebrow">Technical solution · service-data-sync</p>
       <h1>同步服务 SQLAlchemy ORM 全量迁移</h1>
       <p class="lede">
-        推荐把现有 32 张逻辑表全部声明为 SQLAlchemy 2 Declarative 模型，并把持久化仓储迁移到
+        当前 44 张逻辑表已全部声明为 SQLAlchemy 2 Declarative 模型，持久化仓储已迁移到
         <code>Session</code> 与 ORM-enabled SQL expressions。首要目标不是少写 SQL，而是让维护者从
         <code>models/</code> 目录直接看懂全部表、字段、类型、含义、约束、索引和业务归属。
       </p>
@@ -378,7 +383,7 @@
       <div class="meta">
         <dl>
           <dt>状态</dt>
-          <dd class="status">Implemented · 全部 32 表与全部业务仓储已迁移</dd>
+          <dd class="status">Implemented · 当前 44 表统一纳入 ORM 基线</dd>
         </dl>
         <dl>
           <dt>负责人</dt>
@@ -387,6 +392,10 @@
         <dl>
           <dt>最后修改</dt>
           <dd>2026-07-28</dd>
+        </dl>
+        <dl>
+          <dt>变更摘要</dt>
+          <dd>纳入 0016 新增 12 张财务表；当前 registry 共 44 表，并移除 ORM 验收对业务方案非技术状态的依赖。</dd>
         </dl>
         <dl>
           <dt>关联决策</dt>
@@ -429,7 +438,7 @@
           <span class="label">推荐</span>
           <h3>全量 Declarative ORM</h3>
           <p>
-            32 张逻辑表一表一模型文件，按业务能力分目录；每个字段显式声明数据库类型、可空性与中文注释；
+            当前 44 张逻辑表一表一模型文件，按业务能力分目录；每个字段显式声明数据库类型、可空性与中文注释；
             全部仓储已使用模型字段和 <code>Session</code>。
           </p>
         </article>
@@ -451,10 +460,16 @@
       </aside>
       <aside class="callout">
         <strong>0015 完成后的事实校准</strong>
-        0015 已进入 Accepted，四张 EOD 表、动态排行、raw replay、candidate/publish、lease/reaper、
-        fencing、受控回滚和原子 publication 已形成可执行基线。本文的 32 表、6 个 migration、
+        0015 已进入 Implemented，四张 EOD 表、动态排行、raw replay、candidate/publish、lease/reaper、
+        fencing、受控回滚和原子 publication 已形成可执行基线。本文迁移启动时的 32 表、6 个 migration、
         6,733 行持久化实现和 152 个 <code>text()</code> 统计已经包含该实现，因此技术选型与迁移范围不变；
         ORM 阶段必须把这些已验证行为当作回归契约，而不是重新设计 EOD。
+      </aside>
+      <aside class="callout">
+        <strong>0016 schema expand 后的事实校准</strong>
+        revision <code>202607280002</code> 新增 12 张财务逻辑表，并从创建时即采用 Declarative 模型、
+        显式 registry 和 Alembic/schema parity。当前逻辑表总数由迁移启动时的 32 张增至 44 张；
+        财务只读选择器已使用 Session，真实来源同步、canonical 发布和成功读取仍按 0016 保持 fail closed。
       </aside>
     </section>
 
@@ -476,7 +491,7 @@
           <h3>非目标</h3>
           <ul>
             <li>不重写或压平已经发布的 Alembic migration 历史。</li>
-            <li>不改变 provider、市场语义、时区、交易日历、复权、单位或来源许可。</li>
+            <li>不改变 provider、市场语义、时区、交易日历、复权、单位或 capability 技术状态。</li>
             <li>不改变 service-api 通过版本化内部 HTTP 读取的边界。</li>
             <li>不把数据库模型暴露为 API DTO 或领域对象。</li>
             <li>不依赖 <code>Base.metadata.create_all()</code> 管理生产 schema。</li>
@@ -504,7 +519,7 @@
             <tr><th>覆盖数据集</th><td>现有全部 canonical、provenance、execution、quality 与 publication 表。</td></tr>
             <tr><th>市场语义</th><td>不变；沿用现有 A 股、上海时区、交易日历、粒度、修订和 finality 决策。</td></tr>
             <tr><th>数据迁移</th><td>模型接入本身不搬数据、不改表名；仅 table/column COMMENT 需要 metadata-only revision。</td></tr>
-            <tr><th>完成定义</th><td>32 张逻辑表全部建模，全部仓储切换，持久化目录无未批准 <code>text()</code>。</td></tr>
+            <tr><th>完成定义</th><td>当前 44 张逻辑表全部建模，现有业务仓储均使用 Session 与模型表达式，持久化目录无例外字符串 SQL。</td></tr>
           </tbody>
         </table>
       </div>
@@ -531,10 +546,10 @@
         </article>
         <article class="card">
           <span class="label">Schema 事实</span>
-          <h3>32 张逻辑表</h3>
+          <h3>44 张逻辑表</h3>
           <p>
-            结构来自 6 个 migration revision；另有 Alembic 自有表、<code>btree_gist</code> extension、
-            个股年度物理分区和板块成员月度物理分区。
+            迁移启动时 32 张表来自前 6 个 revision；当前 8 个 revision 另含 ORM COMMENT 与 12 张财务表。
+            Alembic 自有表、<code>btree_gist</code> extension、年度/月度物理分区不计为独立逻辑表。
           </p>
         </article>
       </div>
@@ -587,6 +602,19 @@
               <td>按年分区的未复权个股日线修订。</td>
             </tr>
             <tr>
+              <td><code>financial/</code></td>
+              <td>12</td>
+              <td>
+                <code>financial_methodology</code>、<code>financial_metric_definition</code>、
+                <code>financial_report</code>、<code>financial_report_revision</code>、
+                <code>financial_statement_fact</code>、<code>provider_financial_metric_revision</code>、
+                <code>derived_financial_metric_revision</code>、<code>valuation_observation_revision</code>、
+                <code>financial_field_quarantine</code>、<code>financial_quality_result</code>、
+                <code>financial_publication</code>、<code>financial_change_checkpoint</code>
+              </td>
+              <td>方法学、字段字典、报表与指标双时间修订、估值、隔离、质量、发布和断点。</td>
+            </tr>
+            <tr>
               <td><code>sector/catalog/</code>、<code>sector/market_data/</code></td>
               <td>5</td>
               <td>
@@ -629,7 +657,7 @@
 
       <pre aria-label="目标模型目录树"><code>models/
 ├── base.py                         # DeclarativeBase 与当前目标 metadata
-├── registry.py                     # 显式列出全部 32 个 Model；Alembic 唯一导入入口
+├── registry.py                     # 显式列出当前全部 44 个 Model；Alembic 唯一导入入口
 ├── provenance/
 │   └── source_batch.py
 ├── execution/
@@ -651,6 +679,19 @@
 │   │   └── equity_identity_quarantine.py
 │   └── market_data/
 │       └── equity_daily_bar.py
+├── financial/
+│   ├── financial_methodology.py
+│   ├── financial_metric_definition.py
+│   ├── financial_report.py
+│   ├── financial_report_revision.py
+│   ├── financial_statement_fact.py
+│   ├── provider_financial_metric_revision.py
+│   ├── derived_financial_metric_revision.py
+│   ├── valuation_observation_revision.py
+│   ├── financial_field_quarantine.py
+│   ├── financial_quality_result.py
+│   ├── financial_publication.py
+│   └── financial_change_checkpoint.py
 └── sector/
     ├── catalog/
     │   ├── sector_scheme.py
@@ -678,8 +719,8 @@
         <article class="card">
           <h3>一表一文件</h3>
           <p>
-            每个逻辑表只有一个定义位置。文件名与数据库表名完全一致；class 使用
-            <code>PascalCase + Model</code>，避免与领域对象同名冲突。
+            每个逻辑表只有一个定义位置。文件名与数据库表名完全一致；class 使用表名对应的
+            <code>PascalCase</code>，与领域对象重名时由 repository import alias 显式消歧。
           </p>
         </article>
         <article class="card">
@@ -706,7 +747,7 @@
         PostgreSQL <code>pg_catalog</code> 与历史 migration 逐项校准实际名称和默认值。
       </p>
 
-      <pre><code>class EquityInstrumentModel(Base):
+      <pre><code>class EquityInstrument(Base):
     """标准证券身份锚点；行情和历史事实通过内部 `security_id` 关联。"""
 
     __tablename__ = "equity_instrument"
@@ -814,8 +855,9 @@
       <h2>6. 运行时与仓储全量迁移</h2>
       <h3>6.1 Session 与事务</h3>
       <p>
-        <code>DatabaseClient</code> 增加同步 <code>sessionmaker</code>。每个 repository 公开方法维持现有事务边界，
-        用显式 <code>with session_factory.begin() as session</code> 开始、提交或回滚。关闭 Session 后再返回领域对象，
+        <code>DatabaseClient</code> 持有同步 <code>sessionmaker</code>。只读 repository 使用
+        <code>with database.session() as session</code>；写入公开方法通过
+        <code>with database.transaction() as session</code> 开始事务，成功提交、异常回滚并关闭 Session。关闭后再返回领域对象，
         禁止向 application 返回 attached ORM instance。
       </p>
 
@@ -823,7 +865,7 @@
   │  调用 provider-neutral repository port
   ▼
 repository method
-  │  session_factory.begin()
+  │  DatabaseClient.transaction()
   ├─ SELECT / row lock / advisory lock
   ├─ raw provenance + canonical revision + quality + publication
   ├─ 成功：一次 commit
@@ -987,7 +1029,8 @@ Historical Alembic revisions
           <code>alembic upgrade head</code>，导出表、列、默认值、约束、索引、extension 和 partition 清单。
         </li>
         <li>
-          <strong>建立 32 个模型：</strong>按实际 catalog 名称声明，不重命名表、字段或既有约束。
+          <strong>建立首批 32 个模型：</strong>按实际 catalog 名称声明，不重命名表、字段或既有约束；
+          后续 0016 新增 12 张财务表沿用相同规则。
         </li>
         <li>
           <strong>接入 metadata：</strong><code>migrations/env.py</code> 从显式 registry 加载
@@ -1083,7 +1126,7 @@ Historical Alembic revisions
               <td>模型与现库漂移</td>
               <td>类型、默认值、约束或索引写错，未来 migration 可能误删/重建对象。</td>
               <td>空库升级、Alembic check、pg_catalog parity、禁止未审查 autogenerate。</td>
-              <td>32 表全部零意外差异。</td>
+              <td>当前 44 表全部零意外差异。</td>
             </tr>
             <tr>
               <td>表达式索引自动比较盲区</td>
@@ -1113,10 +1156,10 @@ Historical Alembic revisions
               <td>重复、并发、超时与 reaper 测试通过。</td>
             </tr>
             <tr>
-              <td>EOD 生产开关尚未启用</td>
-              <td>0015 的来源许可、连续探针和生产观测准入仍待完成，不能依赖生产流量发现 ORM 回归。</td>
-              <td>迁移复用 0015 已通过的 fixture、仓储集成、迁移、raw replay、排行、租约恢复和 rollback 测试；生产准入保持独立。</td>
-              <td>默认关闭生产开关时，EOD 新旧实现的结果、事务、锁和失败注入测试仍全部等价。</td>
+              <td>EOD 回归不得依赖真实流量</td>
+              <td>ORM 正确性必须由确定性 fixture、集成测试和故障注入证明，不能依赖线上流量偶然发现回归。</td>
+              <td>迁移复用 0015 已通过的 fixture、仓储集成、migration、raw replay、排行、租约恢复和 rollback 测试。</td>
+              <td>EOD 结果、事务、锁和失败注入测试在隔离环境中全部等价。</td>
             </tr>
             <tr>
               <td>分区不可见</td>
@@ -1149,13 +1192,14 @@ Historical Alembic revisions
 
       <ol class="steps">
         <li>
-          <strong>阶段 0 — 基线冻结：</strong>以 0015 Accepted 实现和 revision
-          <code>202607270004</code> 为既定基线；从空库升级到 head，记录 32 张逻辑表、物理分区、约束、索引，
+          <strong>阶段 0 — 基线冻结：</strong>以 0015 Implemented 实现和 revision
+          <code>202607270004</code> 为初始既定基线；从空库升级到该 revision，记录首批 32 张逻辑表、物理分区、约束、索引，
           并固化现有 EOD 仓储集成与故障测试结果。退出条件：schema 与行为基线均可重复生成。
         </li>
         <li>
-          <strong>阶段 1 — 模型全量落地（已完成）：</strong>建立 Base、registry 和 32 个一表一文件模型。
-          退出条件：模型 import、Pyright、字段注释完整性、metadata/pg_catalog parity 全过。
+          <strong>阶段 1 — 模型全量落地（已完成）：</strong>建立 Base、registry 和首批 32 个一表一文件模型；
+          0016 schema expand 按相同规则追加 12 个财务模型。当前退出条件：44 个模型 import、Pyright、字段注释完整性、
+          metadata/pg_catalog parity 全过。
         </li>
         <li>
           <strong>阶段 2 — Alembic 接入（已完成）：</strong>配置 <code>target_metadata</code>、naming convention、
@@ -1186,8 +1230,8 @@ Historical Alembic revisions
 
       <aside class="callout">
         <strong>2026-07-28 实施完成</strong>
-        32 张逻辑表均已有一表一文件 Declarative 模型，并按业务能力分目录；全部业务仓储已改为短生命周期
-        <code>Session</code> 与模型表达式。EOD 的 fencing、租约、checkpoint、raw replay、candidate/publish、
+        当前 44 张逻辑表均已有一表一文件 Declarative 模型，并按业务能力分目录；现有业务仓储均使用短生命周期
+        <code>Session</code> 与模型表达式。财务 12 表从 schema expand 起即遵循同一基线；EOD 的 fencing、租约、checkpoint、raw replay、candidate/publish、
         quarantine、动态排行和 rollback 语义保持不变；月度物理分区 DDL 收敛到专用 partition manager。
       </aside>
 
@@ -1230,9 +1274,10 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
   data-sync-worker data-sync-diagnostics --format json</code></pre>
 
       <p>
-        已重建测试镜像并通过 Ruff format、Ruff check、Pyright、203 项非集成测试和 5 项架构测试。
-        使用独立 Docker Compose 项目执行真实 PostgreSQL、Redis 与 MinIO 验证：迁移到 head、8 项集成测试、
-        schema parity 和 <code>alembic check</code> 全部通过；1 项 AKShare 外部 smoke 按默认策略跳过。
+        首批 32 表收口时已重建测试镜像并通过 Ruff format、Ruff check、Pyright、203 项非集成测试和 5 项架构测试。
+        当时使用独立 Docker Compose 项目执行真实 PostgreSQL、Redis 与 MinIO 验证：迁移到 head、8 项集成测试、
+        schema parity 和 <code>alembic check</code> 全部通过；后续 12 张财务表的迁移与 parity 验证记录归属 0016。
+        1 项 AKShare 外部 smoke 按默认策略跳过。
         <code>ix_equity_name_current_prefix</code> 的 PostgreSQL operator class 仍会触发 Alembic 已知比较警告，
         已由 schema parity 测试覆盖，未产生新的 upgrade 操作。
       </p>
@@ -1253,7 +1298,7 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
           <tbody>
             <tr>
               <td>D1</td>
-              <td><strong>接受</strong>：32 张逻辑表全部 Declarative 建模，最终仓储全量 Session 化。</td>
+              <td><strong>接受</strong>：当前 44 张逻辑表全部 Declarative 建模；新增表继续强制进入 registry，现有仓储统一 Session 化。</td>
               <td>直接满足“看得懂最高优先级”。</td>
               <td>若只建模型不迁仓储，会长期保留模型与字符串 SQL 双轨。</td>
             </tr>
@@ -1305,6 +1350,7 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
         <li><a href="../0013-sector-membership-history/index.html">0013：板块成分股与观测历史</a></li>
         <li><a href="../0014-equity-instrument-master/index.html">0014：A 股证券主数据与上市生命周期</a></li>
         <li><a href="../0015-sector-eod-snapshot-ranking/index.html">0015：板块 EOD 横截面快照与排行</a></li>
+        <li><a href="../0016-financial-statements-valuation/index.html">0016：财务报表与估值</a></li>
         <li><a href="https://docs.sqlalchemy.org/en/20/orm/declarative_styles.html">SQLAlchemy 2 Declarative Mapping</a></li>
         <li><a href="https://docs.sqlalchemy.org/en/20/orm/session_basics.html">SQLAlchemy Session Basics</a></li>
         <li><a href="https://docs.sqlalchemy.org/en/20/orm/queryguide/dml.html">SQLAlchemy ORM-enabled DML</a></li>
@@ -1318,8 +1364,9 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
   <footer>
     <div class="shell">
       同步服务 SQLAlchemy ORM 全量迁移 · Implemented ·
-      变更摘要：32 表 Declarative 模型、按能力分组 registry、数据库 COMMENT migration、全部 Session 仓储、
-      无字符串 SQL 架构门和真实 PostgreSQL 集成验证均已完成。0015 的 EOD Accepted 实现仍是既定回归基线。
+      变更摘要：当前 44 表均采用一表一 Declarative 模型、按能力分组 registry 与 Session 仓储；
+      0016 新增 12 张财务表已纳入同一 Alembic/schema parity 基线。无字符串 SQL 架构门和真实 PostgreSQL
+      集成验证继续生效，0015 的 EOD Implemented 实现仍是既定回归基线。
     </div>
   </footer>
 </body>

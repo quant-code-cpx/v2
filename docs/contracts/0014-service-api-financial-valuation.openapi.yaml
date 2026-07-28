@@ -3,7 +3,7 @@ info:
   title: service-api financial statement and valuation API
   version: 2.0.0
   description: |
-    Proposed authenticated public API for published A-share financial
+    Implemented authenticated public API for published A-share financial
     statements, governed financial metrics, and explicit valuation methodology
     series. service-api owns authentication, authorization, abuse controls, and
     public projection. It reads canonical data only through contract 0013.
@@ -13,7 +13,7 @@ info:
     valuation path. Other equity paths remain unaffected. Public responses omit
     internal instrument IDs, database keys, provider identities, source batch
     IDs, raw evidence, and quarantine details.
-  x-contract-status: Proposed
+  x-contract-status: Implemented
   x-partially-supersedes: 0004-service-api-equity.openapi.yaml
   x-replaces-paths:
     - /equities/{instrumentId}/financial-reports
@@ -72,6 +72,13 @@ paths:
                 $ref: '#/components/schemas/FinancialReportPage'
         '204':
           description: Representation matches If-None-Match; POST response has no body.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -123,6 +130,13 @@ paths:
                 $ref: '#/components/schemas/FinancialReportDetail'
         '204':
           description: Representation matches If-None-Match; POST response has no body.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -146,7 +160,16 @@ paths:
       description: |
         origin, methodologyCode, methodologyVersion, and metric are mandatory.
         Provider-reported and platform-derived values never form one implicit
-        series, even when labels match.
+        series, even when labels match. PLATFORM_DERIVED methodology
+        platform.financial-derivation version 1 publishes
+        platform.operating_revenue.single_quarter,
+        platform.operating_revenue.ttm,
+        platform.net_profit_parent.single_quarter, and
+        platform.net_profit_parent.ttm. Single-quarter Q1 equals current YTD;
+        Q2-Q4 equal current YTD minus previous-quarter YTD. TTM Q4 equals
+        current YTD; Q1-Q3 equal current YTD plus prior annual YTD minus the
+        prior-year same-quarter YTD. Every input must share unit and currency;
+        any missing dependency omits that output instead of substituting zero.
       parameters:
         - $ref: '#/components/parameters/ExchangePath'
         - $ref: '#/components/parameters/Symbol'
@@ -179,6 +202,13 @@ paths:
                 $ref: '#/components/schemas/FinancialMetricPage'
         '204':
           description: Representation matches If-None-Match; POST response has no body.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -234,6 +264,13 @@ paths:
                 $ref: '#/components/schemas/ValuationPage'
         '204':
           description: Representation matches If-None-Match; POST response has no body.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -822,6 +859,20 @@ components:
     FinancialMetric:
       type: object
       additionalProperties: false
+      allOf:
+        - if:
+            properties:
+              origin:
+                const: PLATFORM_DERIVED
+          then:
+            properties:
+              formulaVersion:
+                type: integer
+                minimum: 1
+          else:
+            properties:
+              formulaVersion:
+                type: 'null'
       required:
         - metricCode
         - label
@@ -877,6 +928,7 @@ components:
         formulaVersion:
           type: [integer, 'null']
           minimum: 1
+          description: Required for PLATFORM_DERIVED and null for PROVIDER_REPORTED.
         availableFrom:
           type: string
           format: date

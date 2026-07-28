@@ -88,9 +88,9 @@ class EquityLifecycleEntry:
                 not self.correction_approval_reference
                 or not self.correction_approval_reference.strip()
             ):
-                raise ValueError("official correction requires manual approval reference")
+                raise ValueError("official correction requires source evidence reference")
         elif self.correction_approval_reference is not None:
-            raise ValueError("only official correction may include manual approval reference")
+            raise ValueError("only official correction may include source evidence reference")
 
 
 class EquityIdentityResolutionStatus(StrEnum):

@@ -6,17 +6,39 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import Mock
 from uuid import UUID, uuid4
 
 import pytest
 
-from service_data_sync.domain.equity import EquityDailyBar, EquityIdentifier
+from service_data_sync.application.ports.market_data import (
+    EquityIdentityReadConflictError,
+    EquitySourceObservation,
+    StoredEquityInstrument,
+)
+from service_data_sync.domain.equity import (
+    EquityAdjustmentFactor,
+    EquityBarPeriod,
+    EquityCompanyProfile,
+    EquityCorporateAction,
+    EquityDailyBar,
+    EquityIdentifier,
+    EquityPeriodBar,
+)
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.models.equity.market_data.equity_weekly_bar import (
+    EquityWeeklyBar,
+)
 from service_data_sync.infrastructure.persistence.equity_market_data_repository import (
     PossibleCodeReuseError,
     SqlAlchemyEquityMarketDataRepository,
+    _action_content_hash,
     _bar_content_hash,
+    _factor_content_hash,
+    _period_bar_content_hash,
+    _security_partition_key,
 )
 
 
@@ -67,10 +89,12 @@ class FakeConnection:
         """初始化由 `begin`/`connect` 上下文共享的确定性响应队列。"""
         self._responses = responses
         self.statements: list[str] = []
+        self.statement_objects: list[object] = []
 
     def execute(self, statement: object, parameters: object = None) -> FakeResult:
         """记录 SQL 文本；调用方读取结果时才消费一项响应。"""
         self.statements.append(str(statement))
+        self.statement_objects.append(statement)
         del parameters
         response = self._responses.pop(0) if self._responses else None
         return FakeResult(response)
@@ -148,6 +172,9 @@ def test_repository_appends_changed_bar_and_advances_publication() -> None:
         "ON CONFLICT (provider_id, capability, payload_sha256)"
         not in engine.connection.statements[0]
     )
+    publication_parameters = cast(Any, engine.connection.statement_objects[-1]).compile().params
+    assert "security:1" in publication_parameters.values()
+    assert "SSE.600519" not in publication_parameters.values()
 
 
 def test_repository_keeps_current_publication_when_all_bars_are_unchanged() -> None:
@@ -279,6 +306,430 @@ def test_repository_reads_instrument_catalog_and_current_daily_bars() -> None:
     assert bars[0][1:] == (1, True)
 
 
+def test_repository_resolves_one_confirmed_security_for_the_fact_window() -> None:
+    """读取身份必须同时约束事实窗口和当前知识区间。"""
+    instrument_id = uuid4()
+    row = {**_instrument_row(instrument_id), "identity_state": "CONFIRMED"}
+    engine = FakeEngine([[row]])
+    repository = _repository(engine)
+
+    instrument = repository.get_instrument_by_identifier(
+        EquityIdentifier.parse("SSE.600519"),
+        fact_start=date(2020, 1, 1),
+        fact_end=date(2026, 7, 28),
+    )
+
+    assert instrument is not None and instrument.instrument_id == instrument_id
+    statement = engine.connection.statements[0]
+    assert "knowledge_range @>" in statement
+    assert "effective_from <=" in statement
+    assert "effective_to >" in statement
+
+
+def test_repository_rejects_reused_or_pending_identity_windows() -> None:
+    """代码复用或 PENDING 区间都不能被读取方任选一个 `security_id`。"""
+    first = {**_instrument_row(uuid4()), "identity_state": "CONFIRMED"}
+    second = {
+        **first,
+        "security_id": 2,
+        "instrument_id": uuid4(),
+    }
+    reused = _repository(FakeEngine([[first, second]]))
+    pending = _repository(FakeEngine([[{**_instrument_row(uuid4()), "identity_state": "PENDING"}]]))
+
+    with pytest.raises(EquityIdentityReadConflictError):
+        reused.get_instrument_by_identifier(
+            EquityIdentifier.parse("SSE.600519"),
+            fact_start=None,
+            fact_end=date(2026, 7, 28),
+        )
+    with pytest.raises(EquityIdentityReadConflictError):
+        pending.get_instrument_by_identifier(
+            EquityIdentifier.parse("SSE.600519"),
+            fact_start=date(2026, 7, 28),
+            fact_end=date(2026, 7, 28),
+        )
+
+
+def test_publication_prefers_security_partition_and_guards_legacy_fallback() -> None:
+    """旧代码分区只在当前知识中从未映射到第二只证券时允许兼容读取。"""
+    publication_row = {
+        "data_version": uuid4(),
+        "published_at": datetime(2026, 7, 28, tzinfo=UTC),
+    }
+    instrument = StoredEquityInstrument(
+        security_id=1,
+        instrument_id=uuid4(),
+        identifier=EquityIdentifier.parse("SSE.600519"),
+        name="贵州茅台",
+        listing_status="LISTED",
+    )
+    stable_engine = FakeEngine([publication_row])
+    legacy_engine = FakeEngine([None, [{"security_id": 1}], publication_row])
+    reused_engine = FakeEngine([None, [{"security_id": 1}, {"security_id": 2}]])
+
+    stable = _repository(stable_engine).get_current_publication(
+        dataset="equity.profile",
+        instrument=instrument,
+    )
+    legacy = _repository(legacy_engine).get_current_publication(
+        dataset="equity.profile",
+        instrument=instrument,
+    )
+    reused = _repository(reused_engine).get_current_publication(
+        dataset="equity.profile",
+        instrument=instrument,
+    )
+
+    assert _security_partition_key(1) == "security:1"
+    assert stable is not None
+    assert legacy is not None
+    assert reused is None
+    assert len(stable_engine.connection.statements) == 1
+    assert len(legacy_engine.connection.statements) == 3
+    assert len(reused_engine.connection.statements) == 2
+
+
+def test_repository_orchestrates_all_equity_extension_publications(monkeypatch) -> None:
+    """四种扩展数据在单事务内写来源、修订、发布和独立 checkpoint。"""
+    repository = _repository(FakeEngine([]))
+    instrument = StoredEquityInstrument(
+        security_id=1,
+        instrument_id=uuid4(),
+        identifier=EquityIdentifier.parse("SSE.600519"),
+        name="贵州茅台",
+        listing_status="LISTED",
+    )
+    data_version = uuid4()
+    record_source = Mock(return_value=uuid4())
+    ensure_instrument = Mock(return_value=instrument)
+    confirmed_instrument = Mock(return_value=instrument)
+    write_period = Mock(return_value=(1, 0))
+    write_factors = Mock(return_value=(1, 0))
+    write_actions = Mock(return_value=(1, 0))
+    write_profile = Mock(return_value=(1, 0))
+    publish = Mock(return_value=data_version)
+    advance = Mock()
+    monkeypatch.setattr(repository, "_record_source_batch", record_source)
+    monkeypatch.setattr(repository, "_ensure_instrument", ensure_instrument)
+    monkeypatch.setattr(repository, "_confirmed_instrument_on_connection", confirmed_instrument)
+    monkeypatch.setattr(repository, "_write_period_revisions", write_period)
+    monkeypatch.setattr(repository, "_write_factor_revisions", write_factors)
+    monkeypatch.setattr(repository, "_write_action_revisions", write_actions)
+    monkeypatch.setattr(repository, "_write_profile_revision", write_profile)
+    monkeypatch.setattr(repository, "_publish", publish)
+    monkeypatch.setattr(repository, "_advance_checkpoint", advance)
+    source = _source()
+    identifier = instrument.identifier
+
+    weekly = repository.publish_period_bars(
+        identifier=identifier,
+        period=EquityBarPeriod.WEEK_1,
+        bars=(_period_bar(EquityBarPeriod.WEEK_1, date(2026, 7, 24)),),
+        source=source,
+        window_end=date(2026, 7, 28),
+    )
+    factors = repository.publish_adjustment_factors(
+        identifier=identifier,
+        factors=(
+            EquityAdjustmentFactor(
+                effective_date=date(2026, 1, 1),
+                cumulative_factor=Decimal("2"),
+            ),
+        ),
+        source=source,
+        window_end=date(2026, 7, 28),
+    )
+    actions = repository.publish_corporate_actions(
+        identifier=identifier,
+        actions=(_action(),),
+        source=source,
+        window_end=date(2026, 7, 28),
+    )
+    profile = repository.publish_company_profile(
+        identifier=identifier,
+        profile=_profile(),
+        source=source,
+    )
+
+    assert {
+        weekly.data_version,
+        factors.data_version,
+        actions.data_version,
+        profile.data_version,
+    } == {data_version}
+    assert record_source.call_count == 4
+    assert advance.call_count == 4
+    with pytest.raises(ValueError, match="weekly or monthly"):
+        repository.publish_period_bars(
+            identifier=identifier,
+            period=EquityBarPeriod.DAY_1,
+            bars=(),
+            source=source,
+            window_end=date(2026, 7, 28),
+        )
+    with pytest.raises(ValueError, match="match requested"):
+        repository.publish_period_bars(
+            identifier=identifier,
+            period=EquityBarPeriod.MONTH_1,
+            bars=(_period_bar(EquityBarPeriod.WEEK_1, date(2026, 7, 24)),),
+            source=source,
+            window_end=date(2026, 7, 28),
+        )
+    with pytest.raises(ValueError, match="factors must not be empty"):
+        repository.publish_adjustment_factors(
+            identifier=identifier,
+            factors=(),
+            source=source,
+            window_end=date(2026, 7, 28),
+        )
+
+
+def test_repository_writes_extension_revisions_and_checkpoints() -> None:
+    """扩展修订辅助逻辑区分未变化、变化、首次写入及 checkpoint 更新。"""
+    repository = _repository(FakeEngine([]))
+    source_batch_id = uuid4()
+    observed_at = datetime(2026, 7, 28, tzinfo=UTC)
+    weekly_unchanged = _period_bar(EquityBarPeriod.WEEK_1, date(2026, 7, 17))
+    weekly_changed = _period_bar(EquityBarPeriod.WEEK_1, date(2026, 7, 24))
+    period_connection = FakeConnection(
+        [
+            {
+                "revision": 1,
+                "content_sha256": _period_bar_content_hash(weekly_unchanged),
+            },
+            {"revision": 1, "content_sha256": b"changed"},
+            None,
+            None,
+        ]
+    )
+
+    assert repository._write_period_revisions(
+        cast(Any, period_connection),
+        model=EquityWeeklyBar,
+        security_id=1,
+        bars=(weekly_unchanged, weekly_changed),
+        source_batch_id=source_batch_id,
+        observed_at=observed_at,
+    ) == (1, 1)
+
+    factor_unchanged = EquityAdjustmentFactor(
+        effective_date=date(2025, 1, 1),
+        cumulative_factor=Decimal("1"),
+    )
+    factor_changed = EquityAdjustmentFactor(
+        effective_date=date(2026, 1, 1),
+        cumulative_factor=Decimal("2"),
+    )
+    factor_connection = FakeConnection(
+        [
+            {
+                "revision": 1,
+                "content_sha256": _factor_content_hash(factor_unchanged),
+            },
+            {"revision": 2, "content_sha256": b"changed"},
+            None,
+            None,
+        ]
+    )
+    assert repository._write_factor_revisions(
+        cast(Any, factor_connection),
+        security_id=1,
+        factors=(factor_unchanged, factor_changed),
+        factor_version=uuid4(),
+        source_batch_id=source_batch_id,
+        observed_at=observed_at,
+    ) == (1, 1)
+
+    unchanged_action = _action()
+    changed_action = EquityCorporateAction(
+        source_event_key="2024",
+        report_period=date(2024, 12, 31),
+        status="实施",
+        announcement_date=None,
+        record_date=None,
+        ex_date=None,
+        cash_dividend_per_10=None,
+        bonus_shares_per_10=None,
+        transfer_shares_per_10=None,
+    )
+    action_connection = FakeConnection(
+        [
+            {
+                "revision": 1,
+                "content_sha256": _action_content_hash(unchanged_action),
+            },
+            {"revision": 1, "content_sha256": b"changed"},
+            None,
+            None,
+        ]
+    )
+    assert repository._write_action_revisions(
+        cast(Any, action_connection),
+        identifier=EquityIdentifier.parse("SSE.600519"),
+        security_id=1,
+        actions=(unchanged_action, changed_action),
+        source_batch_id=source_batch_id,
+        observed_at=observed_at,
+    ) == (1, 1)
+
+    profile_connection = FakeConnection([None, None])
+    assert repository._write_profile_revision(
+        cast(Any, profile_connection),
+        security_id=1,
+        profile=_profile(),
+        source_batch_id=source_batch_id,
+        observed_at=observed_at,
+    ) == (1, 0)
+    checkpoint_insert = FakeConnection([None, None])
+    checkpoint_update = FakeConnection(["equity.profile", None])
+    repository._advance_checkpoint(
+        cast(Any, checkpoint_insert),
+        capability="equity.profile",
+        identifier=EquityIdentifier.parse("SSE.600519"),
+        window_end=None,
+        data_version=uuid4(),
+        updated_at=observed_at,
+    )
+    repository._advance_checkpoint(
+        cast(Any, checkpoint_update),
+        capability="equity.profile",
+        identifier=EquityIdentifier.parse("SSE.600519"),
+        window_end=None,
+        data_version=uuid4(),
+        updated_at=observed_at,
+    )
+    assert "INSERT INTO equity_sync_checkpoint" in checkpoint_insert.statements[1]
+    assert "UPDATE equity_sync_checkpoint" in checkpoint_update.statements[1]
+
+
+def test_repository_reads_all_extension_resources() -> None:
+    """读取方法从各自物理表映射行情、因子、事件、概况和 publication。"""
+    data_version = uuid4()
+    published_at = datetime(2026, 7, 28, tzinfo=UTC)
+    action_id = uuid4()
+    instrument = StoredEquityInstrument(
+        security_id=1,
+        instrument_id=uuid4(),
+        identifier=EquityIdentifier.parse("SSE.600519"),
+        name="贵州茅台",
+        listing_status="LISTED",
+    )
+    profile_row = SimpleNamespace(
+        revision=2,
+        company_name="贵州茅台酒股份有限公司",
+        english_name=None,
+        industry="白酒",
+        legal_representative=None,
+        established_on=date(1999, 11, 20),
+        website=None,
+        email=None,
+        phone=None,
+        registered_address="贵州",
+        office_address=None,
+        main_business="白酒",
+        business_scope=None,
+        summary=None,
+    )
+    bar_row = {
+        "period_end": date(2026, 7, 24),
+        "open_price": Decimal("10"),
+        "high_price": Decimal("11"),
+        "low_price": Decimal("9"),
+        "close_price": Decimal("10.5"),
+        "volume_shares": 1_000,
+        "amount_cny": Decimal("10500"),
+        "turnover_rate": Decimal("0.01"),
+        "revision": 2,
+        "is_final": True,
+    }
+    engine = FakeEngine(
+        [
+            {"data_version": data_version, "published_at": published_at},
+            [bar_row],
+            [bar_row],
+            [
+                {
+                    "effective_date": date(2026, 1, 1),
+                    "cumulative_factor": Decimal("2"),
+                    "revision": 1,
+                    "factor_version": data_version,
+                }
+            ],
+            [
+                {
+                    "action_id": action_id,
+                    "revision": 1,
+                    "source_event_key": "2025",
+                    "report_period": date(2025, 12, 31),
+                    "status": "实施",
+                    "announcement_date": None,
+                    "record_date": None,
+                    "ex_date": date(2026, 6, 30),
+                    "cash_dividend_per_10": Decimal("10"),
+                    "bonus_shares_per_10": None,
+                    "transfer_shares_per_10": None,
+                }
+            ],
+            profile_row,
+            None,
+            [{"security_id": 1}],
+            None,
+            None,
+        ]
+    )
+    repository = _repository(engine)
+
+    publication = repository.get_current_publication(
+        dataset="equity.bar.1w.raw",
+        instrument=instrument,
+    )
+    weekly = repository.list_bars(
+        security_id=1,
+        period=EquityBarPeriod.WEEK_1,
+        start=date(2026, 1, 1),
+        end=date(2026, 7, 28),
+    )
+    daily = repository.list_bars(
+        security_id=1,
+        period=EquityBarPeriod.DAY_1,
+        start=date(2026, 1, 1),
+        end=date(2026, 7, 28),
+    )
+    factors = repository.list_adjustment_factors(
+        security_id=1,
+        end=date(2026, 7, 28),
+    )
+    actions = repository.list_corporate_actions(
+        security_id=1,
+        start=date(2025, 1, 1),
+        end=date(2026, 7, 28),
+    )
+    profile = repository.get_company_profile(security_id=1)
+
+    assert publication is not None and publication.data_version == data_version
+    assert cast(EquityPeriodBar, weekly[0].bar).period is EquityBarPeriod.WEEK_1
+    assert cast(EquityDailyBar, daily[0].bar).trade_date == date(2026, 7, 24)
+    assert factors[0].factor.cumulative_factor == Decimal("2")
+    assert actions[0].action_id == action_id
+    assert profile is not None and profile.profile.industry == "白酒"
+    assert (
+        repository.get_current_publication(
+            dataset="equity.profile",
+            instrument=instrument,
+        )
+        is None
+    )
+    assert repository.get_company_profile(security_id=2) is None
+    with pytest.raises(ValueError, match="start must not be after end"):
+        repository.list_bars(
+            security_id=1,
+            period=EquityBarPeriod.DAY_1,
+            start=date(2026, 7, 28),
+            end=date(2026, 1, 1),
+        )
+
+
 def _repository(engine: FakeEngine) -> SqlAlchemyEquityMarketDataRepository:
     """围绕带短 Session 边界的替身数据库构造仓储。"""
     return SqlAlchemyEquityMarketDataRepository(cast(DatabaseClient, FakeDatabase(engine)))
@@ -307,4 +758,64 @@ def _bar() -> EquityDailyBar:
         volume_shares=1_000,
         amount_cny=Decimal("10500"),
         turnover_rate=None,
+    )
+
+
+def _period_bar(period: EquityBarPeriod, period_end: date) -> EquityPeriodBar:
+    """构造一条指定周期的上游原生行情。"""
+    return EquityPeriodBar(
+        period=period,
+        period_end=period_end,
+        open_price=Decimal("10"),
+        high_price=Decimal("11"),
+        low_price=Decimal("9"),
+        close_price=Decimal("10.5"),
+        volume_shares=1_000,
+        amount_cny=Decimal("10500"),
+        turnover_rate=Decimal("0.01"),
+    )
+
+
+def _source() -> EquitySourceObservation:
+    """构造扩展同步使用的已归档来源观测。"""
+    return EquitySourceObservation(
+        provider_id="test-provider",
+        capability="equity.test",
+        source_payload_sha256="a" * 64,
+        raw_uri="s3://test/raw.json",
+        observed_at=datetime(2026, 7, 28, tzinfo=UTC),
+    )
+
+
+def _action() -> EquityCorporateAction:
+    """构造一条可修订现金分红事件。"""
+    return EquityCorporateAction(
+        source_event_key="2025",
+        report_period=date(2025, 12, 31),
+        status="实施",
+        announcement_date=date(2026, 6, 1),
+        record_date=date(2026, 6, 29),
+        ex_date=date(2026, 6, 30),
+        cash_dividend_per_10=Decimal("10"),
+        bonus_shares_per_10=None,
+        transfer_shares_per_10=None,
+    )
+
+
+def _profile() -> EquityCompanyProfile:
+    """构造一份带真实空值的公司概况。"""
+    return EquityCompanyProfile(
+        company_name="贵州茅台酒股份有限公司",
+        english_name=None,
+        industry="白酒",
+        legal_representative=None,
+        established_on=date(1999, 11, 20),
+        website=None,
+        email=None,
+        phone=None,
+        registered_address="贵州",
+        office_address=None,
+        main_business="白酒",
+        business_scope=None,
+        summary=None,
     )

@@ -21,6 +21,23 @@ class PublishedEquityLifecycle:
     unchanged_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class EquityLifecycleReplayCheckpoint:
+    """描述最后成功生命周期批次的标准证据和来源血缘，供确定性恢复使用。"""
+
+    exchange: Exchange
+    target_date: date
+    data_version: UUID
+    snapshot_id: UUID
+    raw_uri: str
+    normalized_uri: str
+    provider_id: str
+    upstream_source: str
+    adapter_version: str
+    schema_fingerprint: str
+    observed_at: datetime
+
+
 class EquityLifecycleRepository(Protocol):
     """保存显式生命周期证据、双时间状态修订和交易所发布版本。"""
 
@@ -37,6 +54,13 @@ class EquityLifecycleRepository(Protocol):
         upstream_source: str | None,
         adapter_version: str,
         schema_fingerprint: str,
+        normalized_uri: str | None = None,
     ) -> PublishedEquityLifecycle:
         """原子写入已确认身份的生命周期修订，并仅在事实变化时推进版本。"""
+        ...
+
+    def get_replay_checkpoint(
+        self, *, exchange: Exchange
+    ) -> EquityLifecycleReplayCheckpoint | None:
+        """读取一所最后成功检查点；没有发布时返回空而不猜测恢复位置。"""
         ...

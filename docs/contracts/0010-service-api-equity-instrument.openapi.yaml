@@ -3,7 +3,7 @@ info:
   title: service-api equity instrument API
   version: 2.0.0
   description: |
-    Proposed authenticated public API for published Shanghai, Shenzhen, and
+    Implemented authenticated public API for published Shanghai, Shenzhen, and
     Beijing A-share instrument catalogs and listing lifecycle history.
     service-api owns authentication, authorization, request validation, abuse
     controls, and public projection. service-data-sync remains canonical owner
@@ -12,10 +12,14 @@ info:
     Public identity is exchange plus symbol. Internal instrument UUIDs, database
     keys, raw evidence, provider fields, PENDING placeholders, and quarantine
     details are never exposed. This contract is the implementation authority for
-    the equity catalog, detail, and listing-status portions that overlap proposed
+    the equity catalog, detail, and listing-status portions that overlap
     contract 0004. Bars, adjustment factors, corporate actions, and financial
     endpoints remain governed by contract 0004.
-  x-contract-status: Proposed
+
+    Contract C1 is active downstream: a reused exchange and symbol is resolved
+    by asOf and knownAt through service-data-sync identifier history; current
+    compatibility columns never define public identity.
+  x-contract-status: Implemented
   x-partially-supersedes: 0004-service-api-equity.openapi.yaml
 x-http-method-policy: post-only
 servers:

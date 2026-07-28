@@ -228,14 +228,15 @@
       <p class="eyebrow">Technical solution · service-data-sync · 0012</p>
       <h1>行业与板块数据同步技术方案</h1>
       <p class="lede">
-        建立东方财富行业/概念板块、申万三级行业和供应商板块资金流的数据链路。
+        建立东方财富行业/概念板块和申万三级行业的数据链路。
         分类体系、方法论和观测时间全部显式留痕；日线、周线、月线分别调用上游接口并独立存储。
         分时数据、分钟任务和分钟存储明确排除。
       </p>
       <dl class="meta">
-        <div><dt>状态</dt><dd class="status">P0 目录、三周期与 API 已实现；其余 Proposed</dd></div>
+        <div><dt>状态</dt><dd class="status">Implemented（东方财富 P0 与申万 P1 技术链路均已完成）</dd></div>
         <div><dt>负责人</dt><dd>service-data-sync</dd></div>
-        <div><dt>最后修改</dt><dd>2026-07-26</dd></div>
+        <div><dt>最后修改</dt><dd>2026-07-28</dd></div>
+        <div><dt>变更摘要</dt><dd>聚焦 AKShare 接口、同步、建表与双层 API 链路；移除非技术前置事项并校准后续方案实施状态。</dd></div>
         <div><dt>关联决策</dt><dd><a href="../../decisions/0010-sector-taxonomy-and-derived-data-boundary.md">ADR-0010</a></dd></div>
       </dl>
     </div>
@@ -273,36 +274,50 @@
         <article class="card">
           <span class="label">决策</span>
           <h3>scheme 与方法论隔离</h3>
-          <p>每种分类独立保存。东方财富提供当前成份和日线；申万提供层级与估值快照；资金流按来源独立发布。</p>
+          <p>每种分类独立保存。东方财富提供当前成份与三套原生周期事实；申万提供三级层级与估值观察。</p>
         </article>
         <article class="card">
           <span class="label">主要风险</span>
-          <h3 class="risk">接口稳定性与许可未过门</h3>
-          <p>东方财富板块和资金流候选已有断连、超时与解析失败证据。生产 source policy 默认关闭。</p>
+          <h3 class="risk">申万接口只提供当前快照</h3>
+          <p>固定版本接口没有日期参数；历史日期只能从已归档中立载荷精确 replay，禁止把当前响应伪装成历史事实。</p>
         </article>
       </div>
       <aside class="callout">
-        <strong>推荐范围</strong>
-        P0：分类清单、当前成份、日/周/月三套上游周期行情和收盘后横截面快照；P1：申万层级与估值；
-        P2：资金流独立方法论序列。周/月线不从日线计算。任何分时接口均不进入实现。
+        <strong>冻结读取契约</strong>
+        service-data-sync 暴露 <code>GET /internal/v1/sw-industries</code>、
+        <code>GET /internal/v1/sw-industries/valuations</code> 和
+        <code>GET /internal/v1/sw-industries/{sectorCode}</code>；service-api 对认证用户暴露对应的
+        <code>POST /api/v1/market/industries/sw/list</code>、
+        <code>POST /api/v1/market/industries/sw/valuations</code> 和
+        <code>POST /api/v1/market/industries/sw/{code}</code>。
+        规范分别见
+        <a href="../../contracts/0020-data-sync-sw-sector-internal.openapi.yaml">OpenAPI 0020</a> 与
+        <a href="../../contracts/0021-service-api-sw-sector.openapi.yaml">OpenAPI 0021</a>。
       </aside>
       <aside class="callout">
-        <strong>后续细化</strong>
+        <strong>推荐范围</strong>
+        P0：分类清单、当前成份、日/周/月三套上游周期行情和收盘后横截面快照；P1：申万层级与估值；
+        周/月线不从日线计算。任何分时接口均不进入实现。
+      </aside>
+      <aside class="callout">
+        <strong>方案归属</strong>
         成分观测历史以 <a href="../0013-sector-membership-history/index.html">0013</a> 为实施权威，
         收盘后横截面与排行以 <a href="../0015-sector-eod-snapshot-ranking/index.html">0015</a> 为实施权威，
-        日频资金流以 <a href="../0017-daily-money-flow/index.html">0017</a> 为实施权威。
-        三份方案继承本文的 scheme、独立周期与无分时边界，并细化同步、表结构和双层 API。
+        所有日频资金流同步、模型、质量、API 与验收均完整移交
+        <a href="../0017-daily-money-flow/index.html">0017</a>，不再属于 0012 的范围或完成条件。
       </aside>
-      <aside class="callout warning">
-        <strong>评审状态</strong>
-        本文给出完整目标设计，不代表全部来源已获生产批准。资金流因连续探针失败和方法论未知，
-        只能先实现 research/shadow 路径，满足准入条件后再打开发布。
+      <aside class="callout">
+        <strong>固定版本技术事实</strong>
+        <code>akshare==1.18.78</code> 中三个申万函数均真实存在、签名均为 <code>()</code>，
+        源码位于 <code>akshare/index/index_sw.py</code>，实网探针分别返回 31、131、335 行。
       </aside>
       <aside class="callout">
         <strong>当前实施</strong>
         已交付东方财富行业/概念板块的日、周、月原生行情纵切：独立 capability、adapter 参数、
         raw evidence、canonical revision/publication、三张物理表、迁移与有界 CLI。行业/概念分类清单、
-        内部 HTTP 读取和公开 API 已实现；成份、申万、EOD quote、资金流、调度和生产准入仍按后续阶段实施。
+        内部 HTTP 读取和公开 API 已实现；成份链路由 0013 完成，EOD quote、排行和定向调度由 0015 完成。
+        申万三级 taxonomy、父级闭包、估值、方法学、raw/replay、双时间修订、双 publication、
+            checkpoint、质量规则、CLI/Celery、内部 GET、公开 POST 和 OpenAPI 已完成并接入共享装配。
         跨服务读取边界见 <a href="../../service-api/0003-sector-market-data-access/index.html">0003：板块行情 API 访问技术方案</a>。
       </aside>
     </section>
@@ -315,9 +330,9 @@
           <h3>当前工程基线</h3>
           <ul>
             <li>已有 provider-neutral <code>DataSourcePort</code>、registry 和 AKShare adapter 边界。</li>
-            <li>已有 S3 raw evidence、PostgreSQL revision/publication 和人工日线 CLI 闭环。</li>
-            <li>Celery worker 当前空载；定时器、通用 run/partition/checkpoint 尚未实现。</li>
-            <li>仓库锁定 <code>akshare==1.18.78</code>；官方文档调研版本为 1.18.79。</li>
+              <li>已有 S3 raw evidence、PostgreSQL revision/publication 和受控日线 CLI 闭环。</li>
+              <li>EOD 与申万均有独立 Celery 任务、run/partition/checkpoint；各 capability 保持独立开关和失败边界。</li>
+            <li>仓库锁定 <code>akshare==1.18.78</code>；申万三级函数已通过源码、fixture 与实网探针交叉验证。</li>
           </ul>
         </article>
         <article class="card">
@@ -327,16 +342,15 @@
             <li>scheme：<code>eastmoney.industry</code>、<code>eastmoney.concept</code>、<code>sw.industry</code>。</li>
             <li>未复权日线、周线、月线是三个独立上游事实，各自发布和修订。</li>
             <li>收盘后只取一次批量 quote 快照，不构建盘中序列。</li>
-            <li>资金流不同来源不 fallback、不拼接、不交叉计算。</li>
+            <li>申万层级与估值共享一次完整来源观察，但使用互不复用的消费者 <code>dataVersion</code>。</li>
           </ul>
         </article>
         <article class="card">
-          <span class="tag pending">待决</span>
-          <h3>生产前必须关闭</h3>
+          <span class="tag pending">运行参数</span>
+          <h3>不阻断实现的观测项</h3>
           <ul>
-            <li>上游商业使用、访问频率、原始数据保存和再分发许可。</li>
-            <li>板块成交量原始单位、资金流占比分母和供应商分桶方法。</li>
-            <li>生产 cadence、调用间隔和 raw retention 的最终值。</li>
+            <li>东方财富板块成交量原始单位。</li>
+            <li>cadence、调用间隔和 raw retention 的容量验证值。</li>
             <li>首次历史回填起点及接口可见历史深度。</li>
           </ul>
         </article>
@@ -346,7 +360,7 @@
       <ul>
         <li>可按 scheme 查询板块稳定身份、名称修订、层级、当前成份与成份观测历史。</li>
         <li>可分别同步、修订、回补行业和概念板块的日线、周线、月线。</li>
-        <li>可保存收盘后板块横截面、申万估值和供应商资金流快照，同时保留完整方法论血缘。</li>
+        <li>可保存收盘后板块横截面、申万三级 taxonomy 与估值观察，同时保留完整方法论血缘。</li>
         <li>重复运行、worker 中断、schema 漂移和数据库失败不会产生重复 current 数据或静默缺口。</li>
         <li>下游未来只能通过版本化内部 API 或事件读取，不直连数据库或 AKShare。</li>
       </ul>
@@ -356,8 +370,7 @@
         <li class="no">不接入 <code>stock_board_industry_hist_min_em</code>、<code>stock_board_concept_hist_min_em</code> 或任何分钟/分时数据。</li>
         <li>不自动建立东方财富行业、概念与申万行业之间的语义映射。</li>
         <li>不回造首次采集日前的历史成份，不把首次看到日期描述为真实调入日期。</li>
-        <li>不在本方案中新增 service-api/service-web 页面或冻结跨服务 OpenAPI。</li>
-        <li>不把资金流解释为市场真实新增现金，不计算未获知分母的占比。</li>
+        <li>不新增 service-web 页面；读取链路止于 service-api 已认证公开 POST API。</li>
       </ul>
       <p>
         三个周期均固定请求 <code>adjust=""</code>，不保存 qfq/hfq 结果。板块成份调整和指数编制变化属于
@@ -378,7 +391,7 @@
         <article class="card">
           <span class="label">粒度与版本</span>
           <h3>快照 + 日频事实</h3>
-          <p>清单、成份、quote、估值和资金流都是观测快照；行情只保存未复权日线。每批记录 source、methodology、observed/effective time、finality 和 data version。</p>
+          <p>清单、成份、quote 与估值都是观测快照；行情分别保存未复权日、周、月上游事实。每批记录 source、methodology、observed/effective time、finality 和 data version。</p>
         </article>
         <article class="card">
           <span class="label">消费者</span>
@@ -442,18 +455,18 @@
               <td>P0 canonical</td>
             </tr>
             <tr>
-              <td><code>sector.valuation.snapshot</code></td>
-              <td><code>sw.industry/level/snapshot_date</code></td>
-              <td>交易日每日一次</td>
-              <td>同日修订；不可用其他 scheme 补洞</td>
-              <td>P1 canonical</td>
+              <td><code>sector.sw.snapshot.raw</code></td>
+              <td><code>sw.industry/snapshot_date</code></td>
+              <td>上海日历每日 18:30 一次</td>
+              <td>当前日调用；历史日只允许 archived replay</td>
+              <td>P1 raw evidence</td>
             </tr>
             <tr>
-              <td><code>sector.moneyflow.snapshot</code></td>
-              <td><code>scheme/source_policy/window/as_of</code></td>
-              <td>收盘后一次；各窗口分别保存</td>
-              <td>只向前采集；供应商滚动值不由日值回算</td>
-              <td>P2 research → canonical</td>
+              <td><code>sector.sw.taxonomy</code> / <code>sector.sw.valuation</code></td>
+              <td><code>sw.industry/snapshot_date</code></td>
+              <td>同一完整来源观察内原子生成</td>
+              <td>同日内容或方法学变化追加知识修订；两个 publication 独立</td>
+              <td>P1 canonical</td>
             </tr>
           </tbody>
         </table>
@@ -501,12 +514,6 @@
               <td>独立 scheme；失败不阻塞东方财富。</td>
             </tr>
             <tr>
-              <td>交易日 18:45</td>
-              <td>东方财富/同花顺 moneyflow shadow</td>
-              <td>21:00 前完成或明确失败</td>
-              <td>research source policy 开启；不会推进 production release。</td>
-            </tr>
-            <tr>
               <td>人工触发</td>
               <td>有界 backfill/repair/replay</td>
               <td>按 run 预算</td>
@@ -519,12 +526,13 @@
       <aside class="callout warning">
         <strong>cadence 状态</strong>
         表中时间与完成目标是 shadow 验证默认值，不是生产 SLA。连续探针需测出单日调用量、限流和完成时长；
-        生产频率由许可与容量结果批准后写入配置。
+        cadence 与并发按连续探针、单日调用量和完成时长写入配置。
       </aside>
 
       <h3>容量假设</h3>
       <p>
-        规划先按约 90 个东方财富行业、约 400 个概念、申万约 31/124/258 个一级/二级/三级行业、
+        规划先按约 90 个东方财富行业、约 400 个概念；2026-07-28 实网申万探针为
+        31/131/335 个一级/二级/三级行业，
         约 5,500 只证券估算。500 个板块每年约产生 12.5 万条日线、2.6 万条周线和 6,000 条月线；
         十年约 156 万条三周期行情；
         概念成份重叠会使 membership 行数远高于证券数。以上均为
@@ -551,14 +559,14 @@
               <td><code>stock_board_industry_name_em</code></td>
               <td>板块代码/名称、最新价、涨跌、总市值、换手率、涨跌家数、领涨股</td>
               <td>行业身份发现、属性修订、EOD 横截面</td>
-              <td><span class="tag blocked">待连续验证</span> 当前环境曾断连</td>
+              <td><span class="tag fact">已实现</span> 运行时断连由重试、断路器与上一 publication 隔离</td>
             </tr>
             <tr>
               <td>东方财富概念清单 + quote</td>
               <td><code>stock_board_concept_name_em</code></td>
               <td>字段与行业清单同构</td>
               <td>概念身份发现、属性修订、EOD 横截面</td>
-              <td><span class="tag blocked">待连续验证</span></td>
+              <td><span class="tag fact">已实现</span> schema fixture 与 publication 保护已落地</td>
             </tr>
             <tr>
               <td>当前成份</td>
@@ -589,27 +597,23 @@
             <tr>
               <td>申万层级与估值</td>
               <td><code>sw_index_first_info</code><br><code>sw_index_second_info</code><br><code>sw_index_third_info</code></td>
-              <td>行业代码/名称、父行业、成份数、静态/TTM PE、PB、股息率</td>
-              <td>独立 scheme 的层级与估值快照</td>
-              <td>AKShare 上游为乐咕展示；方法论版本需留痕</td>
-            </tr>
-            <tr>
-              <td>东方财富板块资金流</td>
-              <td><code>stock_sector_fund_flow_rank</code></td>
-              <td>行业/概念/地域；主力与超大/大/中/小单净额、占比</td>
-              <td><code>order_size_flow</code> 独立序列</td>
-              <td><span class="tag blocked">research only</span> 两轮失败；分桶与分母未知</td>
-            </tr>
-            <tr>
-              <td>同花顺行业/概念资金流</td>
-              <td><code>stock_fund_flow_industry</code><br><code>stock_fund_flow_concept</code></td>
-              <td>即时或 3/5/10/20 日，流入、流出、净额、公司数、领涨股</td>
-              <td><code>trade_direction_flow</code> 独立序列</td>
-              <td><span class="tag blocked">research only</span> 不与东方财富拼接</td>
+              <td>代码、名称、成份数、静态/TTM PE、PB、静态股息率；二、三级另有上级行业名称</td>
+              <td>一次调用三级无参数函数，生成独立 taxonomy 与估值 publication</td>
+              <td><span class="tag fact">已验证</span> 固定版本源码与实网返回一致；股息率来源百分数除以 100</td>
             </tr>
           </tbody>
         </table>
       </div>
+
+      <aside class="callout">
+        <strong>申万固定版本探针证据</strong>
+        <code>akshare==1.18.78</code> 的三个函数签名均为 <code>() -&gt; pandas.DataFrame</code>，
+        源文件为 <code>akshare/index/index_sw.py</code>，共同读取
+        <code>https://legulegu.com/stockdata/sw-industry-overview</code>。
+        2026-07-28 实网分别返回 31、131、335 行；一级列为行业代码、行业名称、成份个数、
+        静态市盈率、TTM(滚动)市盈率、市净率、静态股息率，二、三级额外返回上级行业。
+        官方文档对三级输出表未完整列出上级行业，因此实现以固定版本源码、fixture 与可执行探针的交集为准。
+      </aside>
 
       <aside class="callout danger">
         <strong>禁用接口</strong>
@@ -626,7 +630,7 @@
 run coordinator ── PostgreSQL lock / checkpoint / status
         │
         ▼
-provider router ── source policy + health + research/production gate
+provider router ── source policy + health + capability 技术状态
         │
         ▼
 AKShare adapter ── SDK / URL / 原字段 / 单位转换仅存在于此
@@ -639,7 +643,7 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
                                             │          │
                                             └──────────┴──▶ atomic publication
                                                                   │
-                                                          future internal API</pre>
+                                                          internal API → service-api POST</pre>
 
       <div class="grid">
         <article class="card">
@@ -661,7 +665,7 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
         <article class="card">
           <span class="label">标准化与质量</span>
           <h3>SectorNormalizer / QualityGate</h3>
-          <p><strong>职责：</strong>解析中立 batch、单位转换、身份关联、方法论准入与质量处置。</p>
+          <p><strong>职责：</strong>解析中立 batch、单位转换、身份关联、方法学验证与质量处置。</p>
           <p><strong>输入/输出：</strong>provider-neutral records → canonical rows + quality results。</p>
           <p><strong>状态：</strong>不保存；依赖日历和已发布证券目录。</p>
           <p><strong>失败边界：</strong>schema 漂移隔离整个分区；单条身份失败进入 reject 明细。</p>
@@ -683,14 +687,22 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
           <p><strong>失败边界：</strong>一个周期失败不阻断其他周期，也不允许跨周期计算补洞。</p>
         </article>
         <article class="card">
-          <span class="label">未来读取</span>
+          <span class="label">版本化读取</span>
           <h3>SectorReadService</h3>
-          <p><strong>职责：</strong>只读取已发布 current revision，向未来内部 API 投影 scheme、版本和质量状态。</p>
+          <p><strong>职责：</strong>只读取已发布 current revision，向内部 GET 与公开 POST 投影 scheme、版本和质量状态。</p>
           <p><strong>输入/输出：</strong>有界查询 → provider-neutral DTO。</p>
           <p><strong>状态：</strong>无。</p>
           <p><strong>失败边界：</strong>不完整 release 返回显式 stale/partial，不读 raw 或 provider。</p>
         </article>
       </div>
+      <aside class="callout">
+        <strong>ORM 持久化基线</strong>
+        已实现板块目录、三周期、成分与 EOD 仓储均通过短生命周期 <code>Session</code> 和 Declarative 模型表达式访问。
+        申万能力延续
+        <a href="../0018-sqlalchemy-orm-persistence-models/index.html">0018 SQLAlchemy ORM 方案</a>：
+        一张逻辑表一个模型文件、显式 registry、显式 Alembic migration、PostgreSQL schema parity；
+        repository 不得执行字符串 SQL，物理日期子分区只由 migration 或 partition manager 管理。
+      </aside>
     </section>
 
     <section id="execution">
@@ -732,7 +744,7 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
             <tr>
               <td>并发</td>
               <td>provider 级 semaphore 初始为 1；全局调用间隔由配置控制。</td>
-              <td>来源许可和连续探针通过前不提高并发；不同上游使用独立预算。</td>
+              <td>连续探针和容量基准通过前不提高并发；不同上游使用独立预算。</td>
             </tr>
             <tr>
               <td>超时</td>
@@ -766,7 +778,7 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
         <li><strong>月线修订：</strong>每个月周期完成后重拉最近 6 个供应商月周期；不从日线判断 OHLCV。</li>
         <li><strong>跨周期隔离：</strong>日/周/月的日期标签、content hash、revision 和 publication 互不复用；任一缺失保持缺口。</li>
         <li><strong>成份：</strong>接口只有当前快照，不能历史回补。每天完整保存，差异只表示“在两次观测之间发生”。</li>
-        <li><strong>资金流：</strong>即时/滚动排行从启用日起向前保存；供应商 5/10/20 日窗口不能拆成伪日值。</li>
+        <li><strong>申万历史：</strong>三个函数没有日期参数；当前日直接抓取，历史日必须命中该日 checkpoint 并校验归档摘要后 replay。</li>
         <li><strong>手动修复：</strong>必须指定 capability、scheme、分区、reason 和幂等键；repair 不覆盖历史审计。</li>
       </ul>
     </section>
@@ -776,7 +788,7 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
       <h3>正常路径</h3>
       <ol class="steps">
         <li>scheduler 读取已发布交易日历，生成 scheme/date 或 sector/window 分区。</li>
-        <li>coordinator 获取租约；router 校验 source policy、环境开关、许可状态和断路器。</li>
+        <li>coordinator 获取租约；router 校验 source policy、环境开关、capability 技术状态和断路器。</li>
         <li>adapter 调用 AKShare，将原始 DataFrame/字段转换为版本化中立 JSON，同时保留 raw JSON。</li>
         <li>raw 以内容 hash 写入 S3；重复内容复用对象。</li>
         <li>normalizer 校验 schema、身份、单位、时间、方法论与不变量，生成 quality results。</li>
@@ -828,10 +840,10 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
               <td>恢复对象存储后重试抓取或使用内存批次重试</td>
             </tr>
             <tr>
-              <td>资金流方法论缺失</td>
-              <td>methodology/denominator/bucket gate 未通过</td>
-              <td>research raw + quarantine，不进入公开 canonical release</td>
-              <td>补充证据并版本化重新发布；不改写旧序列</td>
+              <td>申万父级缺失或名称歧义</td>
+              <td>同层名称唯一性、直接父级解析与完整闭包校验</td>
+              <td>整个快照拒绝 publication；上一 taxonomy 与估值版本保持可读</td>
+              <td>升级 fixture/adapter 后从精确日期中立载荷重放</td>
             </tr>
           </tbody>
         </table>
@@ -840,6 +852,12 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
 
     <section id="data">
       <h2>8. Canonical 数据模型与时间语义</h2>
+      <p>
+        下列表结构是业务与物理 schema 契约。每张新增逻辑表必须同时落入
+        <code>infrastructure/database/models/</code> 对应能力目录和显式 <code>registry.py</code>；
+        模型描述当前目标 schema，Alembic revision 描述演进步骤。模型不能替代迁移，
+        <code>Base.metadata.create_all()</code> 不能用于运行环境。
+      </p>
       <h3>核心表</h3>
       <div class="table-wrap">
         <table>
@@ -902,16 +920,34 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
               <td>rank、last/change、market_cap、turnover、rise/fall counts、leading security、<code>eod_observed</code>。</td>
             </tr>
             <tr>
-              <td><code>sector_valuation_snapshot</code></td>
-              <td><code>(sector_id, snapshot_date, revision)</code></td>
-              <td>申万行业估值观测</td>
-              <td>component_count、static_pe、ttm_pe、pb、dividend_yield；百分比统一保存小数。</td>
+              <td><code>sw_sector_methodology</code></td>
+              <td><code>(code, version)</code> 唯一</td>
+              <td>申万 taxonomy 与估值共享的不可变方法学身份</td>
+              <td>upstream_source、status、semantic_spec_sha256；语义变化必须递增版本。</td>
             </tr>
             <tr>
-              <td><code>sector_moneyflow_snapshot</code></td>
-              <td><code>(sector_id, methodology_id, window_type, window_size, as_of_time, bucket, revision)</code></td>
-              <td>供应商派生资金流</td>
-              <td>semantic_family、gross in/out、net amount/ratio、currency、raw/standard unit、denominator、finality、coverage。</td>
+              <td><code>sw_sector_node_revision</code> / <code>sw_sector_closure</code></td>
+              <td><code>(snapshot_date, sector_code, revision)</code>；闭包绑定 taxonomy <code>data_version</code></td>
+              <td>三级节点双时间修订与不可变父级闭包</td>
+              <td>稳定 node UUID、直接父级、成份数、known_from/to、source batch、content hash；完整快照缺失节点必须闭合。</td>
+            </tr>
+            <tr>
+              <td><code>sw_sector_valuation_revision</code></td>
+              <td><code>(snapshot_date, sector_code, methodology_id, revision)</code></td>
+              <td>同日行业估值双时间观察</td>
+              <td>static_pe、ttm_pe、pb、dividend_yield_ratio、<code>PROVIDER_OBSERVATION</code>；百分数转换为一比一比例。</td>
+            </tr>
+            <tr>
+              <td><code>sw_sector_publication</code></td>
+              <td><code>data_version</code></td>
+              <td>taxonomy 与 valuation 两个独立消费者版本</td>
+              <td>capability、snapshot_date、methodology_id、row_count、content_sha256、published_at。</td>
+            </tr>
+            <tr>
+              <td><code>sw_sector_sync_checkpoint</code> / <code>sw_sector_quality_result</code></td>
+              <td><code>(capability, partition_key)</code>；质量结果 UUID</td>
+              <td>精确日期 raw/中立 replay 与低基数质量证据</td>
+              <td>双摘要、双 URI、adapter/schema 血缘、最近 taxonomy 版本；只在两个 publication 成功后推进。</td>
             </tr>
             <tr>
               <td><code>sync_run</code> / <code>sync_partition</code></td>
@@ -937,7 +973,7 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
         <li><code>dataset_publication</code> 增加 source policy、methodology、coverage、expected/actual partition count、
           period、calendar version 和 release_id；旧个股日线字段保持可空兼容。</li>
         <li>每个分区先写 immutable raw，再在一个事务内登记 batch、revision、quality 和 publication。
-          canonical identity 永远包含 scheme；资金流 identity 额外包含方法论与窗口。</li>
+          canonical identity 永远包含 scheme；申万发布摘要同时包含方法学身份，避免语义升级复用旧版本。</li>
       </ul>
 
       <h3>时间与最终态</h3>
@@ -1022,13 +1058,8 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
             </tr>
             <tr>
               <td>申万估值</td>
-              <td>父级闭包；PE/PB/股息率有限数；成份数非负；相邻日极端变化报告。</td>
-              <td>非法数值 quarantine；方法论正常波动不做跨源相等门。</td>
-            </tr>
-            <tr>
-              <td>资金流</td>
-              <td>当源端同时给出三项时校验 <code>net = inflow - outflow</code>；单位、方向、窗口、分桶、分母、finality 完整。</td>
-              <td>方法论或分母未知时 research/quarantine；不由字段名反推。</td>
+              <td>三级均非空；父级闭包无孤儿；行业代码唯一；估值与节点一一覆盖；PE/PB/股息率为有限数或 null；成份数非负。</td>
+              <td>任一结构或数值错误拒绝整个完整快照；上一双 publication 保持 current。</td>
             </tr>
             <tr>
               <td>完整性</td>
@@ -1038,13 +1069,6 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
           </tbody>
         </table>
       </div>
-
-      <aside class="callout">
-        <strong>资金流可比性门</strong>
-        只有语义族、上游方法、版本/状态、scheme、样本池、交易日、截点、窗口、币种、单位、方向、
-        分桶、占比分母和修订规则全部一致或存在可审计转换时，才允许加减、拼接、回填或比较排名。
-        东方财富和同花顺默认不满足。
-      </aside>
 
       <h3>处置等级</h3>
       <ul>
@@ -1061,12 +1085,12 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
         <article class="card">
           <span class="label">运行拓扑</span>
           <h3>复用现有四类角色</h3>
-          <p>同一镜像运行 scheduler/dispatcher、Celery worker、diagnostics 和未来内部 API；PostgreSQL 权威，Redis broker，S3 raw。当前 Compose 新增 scheduler profile 前必须先完成实现。</p>
+          <p>同一镜像运行 scheduler/dispatcher、Celery worker、diagnostics 和内部 API；PostgreSQL 权威，Redis broker，S3 raw。</p>
         </article>
         <article class="card">
           <span class="label">安全</span>
           <h3>环境开关 + egress 控制</h3>
-          <p>AKShare 无凭据不等于无授权风险。生产 source policy 默认 false；只允许批准域名出站，频率配置受限且不进入任务参数。</p>
+          <p>生产 source policy 默认 false；egress 只允许配置中的上游域名，频率和并发由环境配置控制且不进入任务参数。</p>
         </article>
         <article class="card">
           <span class="label">数据保护</span>
@@ -1097,7 +1121,7 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
             <tr>
               <td><code>DATA_SYNC_AKSHARE_ENABLED</code></td>
               <td>现有 AKShare 总开关</td>
-              <td>默认 <code>false</code>；生产需许可审批。</td>
+              <td>默认 <code>false</code>；capability 技术验收通过后启用。</td>
             </tr>
             <tr>
               <td><code>DATA_SYNC_AKSHARE_REQUEST_TIMEOUT_SECONDS</code></td>
@@ -1110,14 +1134,14 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
               <td>新增，默认 <code>false</code>。</td>
             </tr>
             <tr>
-              <td><code>DATA_SYNC_SECTOR_MONEYFLOW_ENABLED</code></td>
-              <td>资金流 shadow 开关</td>
-              <td>新增，默认 <code>false</code>；不能绕过 methodology gate。</td>
+              <td><code>DATA_SYNC_SW_SECTOR_ENABLED</code></td>
+              <td>申万完整快照、任务与 publication 开关</td>
+              <td>默认 <code>false</code>；同时要求 AKShare 与 sector 总开关开启。</td>
             </tr>
             <tr>
               <td><code>DATA_SYNC_PROVIDER_MIN_INTERVAL_SECONDS</code></td>
               <td>同一上游两次调用间隔</td>
-              <td>shadow 初始 2 秒；生产值由许可和探针批准。</td>
+              <td>shadow 初始 2 秒；运行值由连续探针和容量基准确定。</td>
             </tr>
             <tr>
               <td><code>DATA_SYNC_SECTOR_DAILY_REVISION_LOOKBACK_PERIODS</code></td>
@@ -1173,10 +1197,10 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
               <td>暂停新抓取，优先 raw replay。</td>
             </tr>
             <tr>
-              <td>moneyflow methodology gate</td>
-              <td>source、methodology_status</td>
-              <td>unknown 数据尝试进入 production release</td>
-              <td>硬失败并审计 source policy 配置。</td>
+              <td>SW hierarchy/valuation gate</td>
+              <td>capability、level、quality_status</td>
+              <td>三级缺失、孤儿父级、估值覆盖差异或未知 fingerprint</td>
+              <td>拒绝双 publication，保留上一版本并从 checkpoint replay。</td>
             </tr>
           </tbody>
         </table>
@@ -1184,9 +1208,9 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
 
       <h3>保留与清理</h3>
       <ul>
-        <li>canonical current 与历史 revision 首期保留；删除策略只能由容量和许可评审后的迁移实施。</li>
-        <li>raw retention 是生产阻断项：未获得上游保存期结论前，生产 source policy 不可启用。</li>
-        <li>research/local raw 使用独立 bucket/prefix 和显式生命周期；不能混入 production publication。</li>
+        <li>canonical current 与历史 revision 首期保留；删除策略只能由容量、查询窗口和恢复需求验证后的迁移实施。</li>
+        <li>raw retention 按最大回放窗口、对象存储容量和备份恢复目标配置，不作为同步链路实施前置。</li>
+        <li>raw 与中立 replay 载荷使用独立对象键和显式生命周期；未通过质量门的数据不能混入 consumer publication。</li>
         <li><code>sync_run</code>、日志和 quality 明细保留期由运维策略配置；聚合指标可长期保留，run_id 不做指标标签。</li>
       </ul>
     </section>
@@ -1198,43 +1222,37 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
           <thead><tr><th>阶段</th><th>交付</th><th>退出条件</th><th>失败回滚</th></tr></thead>
           <tbody>
             <tr>
-              <td>0. 来源认证</td>
-              <td>固定 AKShare 版本；行业/概念/申万/资金流 fixtures；单位、许可、频率与连续探针。</td>
-              <td>基础接口连续 5 个交易日成功率 ≥99%；schema/单位已确认。资金流单独判定。</td>
+              <td>0. 接口技术认证（已完成）</td>
+              <td>固定 AKShare 版本；源码签名、官方文档、fixture 与实网探针；单位与 schema fingerprint。</td>
+              <td>三个申万无参数函数真实存在；31/131/335 行和精确列集合已验证。</td>
               <td>保持所有新 source policy 关闭，无 DB 迁移。</td>
             </tr>
             <tr>
-              <td>1. 运行控制与血缘</td>
-              <td><code>sync_run</code>、partition、quality、source_batch/publication 扩展；租约与 raw replay。</td>
+              <td>1. 运行控制与血缘（核心已实现）</td>
+              <td><code>sync_run</code>、partition、quality、source_batch/publication、Declarative 模型、Session 事务与 raw replay。</td>
               <td>重复消息、worker crash、Redis 清空和 DB 失败集成测试通过。</td>
               <td>Alembic downgrade；旧日线字段保持兼容，旧 CLI 继续工作。</td>
             </tr>
             <tr>
-              <td>2. P0 分类与成份</td>
+              <td>2. P0 分类与成份（已完成，见 0013）</td>
               <td>东方财富 catalog/membership adapters、领域模型、repository、CLI、每日 snapshot。</td>
               <td>身份唯一、成份 100% 分区覆盖、同分区重跑不产生重复 current。</td>
               <td>关闭 source policy；publication 回指上一版本；保留 raw。</td>
             </tr>
             <tr>
-              <td>3. P0 三周期行情与 EOD quote</td>
+              <td>3. P0 三周期行情与 EOD quote（核心已完成，见 0015）</td>
               <td>行业/概念日线、周线、月线独立 adapter/表/publication；周期级修订、历史 backfill、批量 quote。</td>
               <td>三个周期分别通过 OHLC/单位/日期标签规则；独立重跑幂等；10 个交易日 shadow 无阻断错误。</td>
               <td>停止 dispatcher；回指上一 data version；必要时降级只读。</td>
             </tr>
             <tr>
-              <td>4. P1 申万</td>
-              <td>三级 hierarchy、估值 snapshot、父级闭包和方法论血缘。</td>
-              <td>三级代码唯一、父级完整、估值 null/异常规则通过。</td>
+              <td>4. P1 申万（已完成）</td>
+              <td>三级 hierarchy、估值、父级闭包、方法论、raw/replay、双时间修订、双 publication、CLI/Celery 与双层 API。</td>
+              <td>三级代码唯一、父级完整、估值一一覆盖；定向单测、静态检查、迁移与内部/公开契约通过。</td>
               <td>独立 scheme 下线，不影响东方财富 release。</td>
             </tr>
             <tr>
-              <td>5. P2 资金流</td>
-              <td>东方财富/同花顺独立 adapters、语义族模型、窗口与分桶 quality gate。</td>
-              <td>连续性、单位、分母、finality 和方法论准入完成；跨源污染负例通过。</td>
-              <td>保持 research profile；不推进 production publication。</td>
-            </tr>
-            <tr>
-              <td>6. 运行验收</td>
+              <td>5. 后续运行校准（非完成门禁）</td>
               <td>scheduler/dispatcher、dashboard、告警、恢复手册、备份恢复与容量复测。</td>
               <td>7 个交易日 shadow；故障演练、raw replay、publication rollback 全部成功。</td>
               <td>停 scheduler，人工 CLI 仍可有界运行；上一完整 release 可读。</td>
@@ -1244,28 +1262,38 @@ provider-neutral batch ──▶ normalize ──▶ quality gate
       </div>
 
       <h3>建议代码落点</h3>
-      <pre><code>service-data-sync/src/service_data_sync/
-  domain/sector/                         # scheme、entity、snapshot、bar、moneyflow
+          <pre><code>service-data-sync/src/service_data_sync/
+  domain/
+    sw_sector.py                         # 三级节点、估值、闭包与方法学
   application/sector/                    # 同步用例、质量、三周期独立发布
-  application/ports/sector_data.py       # repository/read port
+    sw_snapshot_sync.py                  # 当前日抓取与精确日期 replay
+  application/ports/
+    sector_market_data.py                # 目录与三周期 repository/read port
+    sector_membership.py                 # 成分观测 port
+    sector_eod.py                        # EOD 快照、排行与恢复 port
   infrastructure/providers/akshare/
     eastmoney_sector_catalog.py
     eastmoney_sector_membership.py
     eastmoney_sector_bars.py             # 日/周/月独立 capability 与 schema
-    eastmoney_sector_moneyflow.py
-    ths_sector_moneyflow.py
     sw_industry_snapshot.py
+  infrastructure/database/
+    models/sector/                       # 一张逻辑表一个 Declarative 模型
+    models/registry.py                   # Alembic 与维护者唯一模型入口
+    partition_manager.py                 # 运行时物理日期分区
   infrastructure/persistence/
-    sector_repository.py
-    sync_run_repository.py
+    sector_market_data_repository.py
+    sector_membership_repository.py
+    sector_eod_repository.py
+    sw_sector_repository.py
+  interfaces/
+    internal_sw_sector_api.py            # 三条认证内部 GET
   entrypoints/
-    sector_sync.py                       # 有界人工 CLI
+    sw_sector.py                         # 当前日同步或指定日 replay
     scheduler.py                         # 通过后再加入 Compose role
 
 service-data-sync/tests/
-  contract/fixtures/sector/
-  unit/sector/
-  integration/test_sector_repository.py
+  unit/sw_sector/
+  integration/test_sw_sector_repository.py
   architecture/test_boundaries.py</code></pre>
 
       <h3>迁移与数据库回滚</h3>
@@ -1274,7 +1302,7 @@ service-data-sync/tests/
         <li>新 source policy 保持关闭，迁移后仅运行 fixture/replay；生产 shadow 不推进 consumer release。</li>
         <li>回滚代码前先停止 scheduler/worker 新任务，等待或取消 active partition，再回指上一 publication。</li>
         <li>仅当新表没有被正式 consumer 使用时执行 downgrade；已有 publication 时保留表并做向前修复。</li>
-        <li>S3 raw 不随数据库 downgrade 删除；是否清理由许可和生命周期策略单独控制。</li>
+        <li>S3 raw 不随数据库 downgrade 删除；按回放窗口、容量和备份策略单独清理。</li>
       </ol>
     </section>
 
@@ -1289,9 +1317,14 @@ service-data-sync/tests/
         <li>provider timeout、限流、schema drift、空响应、重复数据、S3/DB 失败均有自动测试。</li>
         <li>worker 中断后可从 publication checkpoint 恢复；raw 成功 DB 失败时无需重新访问上游。</li>
         <li>membership partial 不推进完整 release；消费者仍能读取上一完整版本并看到 stale 状态。</li>
-        <li>资金流同名异口径、窗口、分桶、单位和最终态不会静默混算或 fallback。</li>
-        <li>来源、许可、频率、保存和再分发审批完成前，production source policy 无法开启。</li>
+        <li>申万三级函数签名、固定版本源码、列 fingerprint、fixture 与实网 31/131/335 行证据一致。</li>
+        <li>申万二、三级父级名称无歧义解析为代码，完整闭包绑定 taxonomy <code>dataVersion</code>。</li>
+        <li>估值股息率从来源百分数转换为一比一比例；方法学变化不会复用旧 publication。</li>
+        <li>内部三条 GET 与公开三条 POST 支持分页、筛选、HMAC 游标、ETag、请求关联和稳定问题响应。</li>
+        <li>接口稳定性、schema、单位、完整性、容量与恢复测试未通过前，对应 source policy 保持关闭。</li>
         <li>Alembic upgrade/downgrade、raw replay、publication rollback 和备份恢复经过演练。</li>
+        <li>每张新增逻辑表有完整中文注释的 Declarative 模型并进入显式 registry；仓储不泄漏 ORM instance 或 Session。</li>
+        <li><code>alembic check</code>、PostgreSQL schema parity、禁止持久化字符串 SQL的架构测试与 Session 回滚集成测试通过。</li>
       </ul>
 
       <h3>实现阶段必须执行</h3>
@@ -1317,8 +1350,8 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
   --profile data-sync-infra --profile data-sync-worker run --rm --no-deps \
   data-sync-worker data-sync-diagnostics --format json</code></pre>
       <p class="small">
-        当前已执行三周期实现的格式、静态检查、单测、架构测试、集成测试、Alembic upgrade/downgrade
-        与运行时镜像构建。scheduler、全量历史 backfill、真实生产来源和资金流不在本次实现范围。
+          申万定向单测、ruff、pyright、service-api Prettier/ESLint/TypeScript/Vitest、OpenAPI 解析、
+          Alembic upgrade/downgrade 与 PostgreSQL schema parity 均已通过；最终全量验证结果由仓库级实施记录统一汇总。
       </p>
     </section>
 
@@ -1329,22 +1362,10 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
           <thead><tr><th>待决问题</th><th>负责人</th><th>决定触发条件</th><th>未决定前行为</th></tr></thead>
           <tbody>
             <tr>
-              <td>AKShare/上游商业使用、保存和再分发许可</td>
-              <td>项目维护者/合规</td>
-              <td>P0 production source policy 评审</td>
-              <td>仅 local/research，生产开关 false。</td>
-            </tr>
-            <tr>
               <td>板块成交量原始单位与标准单位</td>
               <td>数据工程</td>
               <td>固定样本与上游页面/独立基准对账</td>
               <td>以 <code>provider_native</code> 单位单独保存；禁止跨体系换算、加总或比较，待对账后再引入标准单位。</td>
-            </tr>
-            <tr>
-              <td>资金流分桶、占比分母和最终态</td>
-              <td>数据产品/数据工程</td>
-              <td>来源说明或可审计实验证据完成</td>
-              <td>P2 research only。</td>
             </tr>
             <tr>
               <td>首次历史回填起点</td>
@@ -1355,14 +1376,14 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
             <tr>
               <td>生产 cadence、限速和 raw retention</td>
               <td>运维/数据工程</td>
-              <td>5 日连续探针、payload/耗时/调用量与许可结果</td>
+              <td>5 日连续探针、payload、耗时、调用量与资源基准</td>
               <td>使用 shadow 默认值，不声明 SLA。</td>
             </tr>
             <tr>
-              <td>行业/板块内部 API 契约</td>
-              <td>service-data-sync / service-api</td>
-              <td>canonical 模型完成且消费页面立项</td>
-              <td>其他服务不得直连数据库。</td>
+              <td>申万当前快照长期历史深度</td>
+              <td>数据工程</td>
+              <td>持续运行形成足够 archived checkpoint</td>
+              <td>只暴露已归档精确日期；缺失日期返回 publication unavailable，不伪造历史。</td>
             </tr>
           </tbody>
         </table>
@@ -1377,7 +1398,7 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
             <tr><td>周期行情</td><td>供应商日/周/月三套事实分别存储</td><td>用日线内部聚合周/月</td><td>完整保留上游周期口径，周期间不互相覆盖。</td></tr>
             <tr><td>当前行情</td><td>批量清单 EOD snapshot</td><td>逐板块 spot 定时抓取</td><td>避免 N+1、重复字段和盘中序列膨胀。</td></tr>
             <tr><td>成份历史</td><td>完整观测快照</td><td>推断精确调入调出日期</td><td>上游没有生效时间，不能制造事实。</td></tr>
-            <tr><td>资金流</td><td>来源/方法论独立序列</td><td>跨源 fallback 或拼接</td><td>同名指标不具备默认可比性。</td></tr>
+            <tr><td>申万历史</td><td>当前日抓取 + archived replay</td><td>以当前响应回填旧日期</td><td>三个真实接口均无日期参数，不能制造历史事实。</td></tr>
             <tr><td>任务状态</td><td>PostgreSQL 权威，Redis 投递</td><td>Redis 保存唯一 checkpoint</td><td>支持 broker 丢失、恢复和审计。</td></tr>
           </tbody>
         </table>
@@ -1389,8 +1410,8 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
         <li><a href="../../decisions/0004-market-data-provider-adapters.md">ADR-0004：多数据源适配与路由</a></li>
         <li><a href="../../decisions/0003-data-sync-runtime-stack.md">ADR-0003：数据同步运行时与存储技术栈</a></li>
         <li><a href="../../decisions/0002-data-sync-ownership-and-access.md">ADR-0002：同步数据归属与跨服务访问</a></li>
-        <li><a href="../0008-akshare-b06-initial-research/index.html">0008：资金流与特殊交易调研</a></li>
         <li><a href="../0011-equity-data-sync-and-api/index.html">0011：个股数据同步、存储与查询 API 方案</a></li>
+        <li><a href="../0018-sqlalchemy-orm-persistence-models/index.html">0018：SQLAlchemy ORM 持久化基线</a></li>
       </ul>
 
       <h3>外部研究入口</h3>
@@ -1400,16 +1421,16 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
         <li><a href="https://akshare.akfamily.xyz/changelog.html">AKShare 版本变更记录</a></li>
       </ul>
       <p class="small">
-        研究日期：2026-07-26。外部接口可用性会变化；文档样例和一次探针只能用于提出候选与失败模式，
-        不能替代许可、连续稳定性、单位和完整性验收。
+        研究日期：2026-07-28。申万结论以仓库固定版本源码、官方文档、fixture 与当日可执行探针交叉验证；
+        外部可用性仍由任务重试、fingerprint、checkpoint 和上一 publication 保护。
       </p>
     </section>
   </main>
 
   <footer>
     <div class="shell">
-      行业与板块数据同步技术方案 · 变更摘要：新增分类体系、来源路由、任务、数据模型、口径、质量、
-      恢复、迁移与验收完整设计；日/周/月分别获取和存储；明确排除所有分时数据。
+      行业与板块数据同步技术方案 · Implemented · 变更摘要：完成申万固定版本技术验证及三级 taxonomy、
+      估值、方法学、raw/replay、双时间修订、迁移、质量、任务和双层 API 实现；保留分时排除边界。
     </div>
   </footer>
 </body>

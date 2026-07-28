@@ -22,6 +22,10 @@ from ..database.models.equity.identity.equity_identifier_version import (
 )
 
 
+class EquityIdentityWriteConflictError(ValueError):
+    """表示事实日期集合无法唯一绑定到同一已确认证券，调用方必须隔离整批写入。"""
+
+
 class SqlAlchemyEquityIdentityResolver(EquityIdentityResolver):
     """在服务自有 PostgreSQL 上执行只读的双时间证券标识查询。"""
 
@@ -88,6 +92,44 @@ def resolve_identity_on_connection(
     )
     rows = connection.execute(statement).mappings().all()
     return _resolution(rows)
+
+
+def require_single_confirmed_identity_on_connection(
+    connection: Session,
+    *,
+    exchange: Exchange,
+    symbol: str,
+    fact_dates: Sequence[date],
+    known_at: datetime,
+) -> int:
+    """逐事实日解析身份，并拒绝未确认、缺失、冲突或跨越代码复用边界的批次。"""
+    dates = tuple(sorted(set(fact_dates)))
+    if not dates:
+        raise ValueError("fact_dates must not be empty")
+    security_ids: set[int] = set()
+    for fact_date in dates:
+        resolution = resolve_identity_on_connection(
+            connection,
+            exchange=exchange,
+            symbol=symbol,
+            fact_date=fact_date,
+            known_at=known_at,
+        )
+        if (
+            resolution.status is not EquityIdentityResolutionStatus.RESOLVED
+            or resolution.identity_state != "CONFIRMED"
+            or resolution.security_id is None
+        ):
+            raise EquityIdentityWriteConflictError(
+                f"confirmed equity identity is unavailable on {fact_date.isoformat()}"
+            )
+        security_ids.add(resolution.security_id)
+    if len(security_ids) != 1:
+        # 同一请求跨越代码复用边界时必须拆分，禁止把两只证券写进一个 publication。
+        raise EquityIdentityWriteConflictError(
+            "fact dates cross a canonical equity identity boundary"
+        )
+    return next(iter(security_ids))
 
 
 def _resolution(rows: Sequence[Mapping[Any, Any]]) -> EquityIdentityResolution:

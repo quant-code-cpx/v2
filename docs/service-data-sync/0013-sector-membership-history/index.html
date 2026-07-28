@@ -200,8 +200,9 @@
       <dl class="meta">
         <div><dt>状态</dt><dd class="status">Implemented</dd></div>
         <div><dt>负责人</dt><dd>service-data-sync / service-api</dd></div>
-        <div><dt>最后修改</dt><dd>2026-07-27</dd></div>
-        <div><dt>关联决策</dt><dd><a href="../../decisions/0012-sector-membership-temporal-model.md">ADR-0012</a></dd></div>
+        <div><dt>最后修改</dt><dd>2026-07-28</dd></div>
+        <div><dt>变更摘要</dt><dd>聚焦已实现 AKShare 成分接口、同步、8 表持久化与双层 API 链路；移除非技术前置事项。</dd></div>
+        <div><dt>关联决策</dt><dd><a href="../../decisions/0012-sector-membership-temporal-model.md">ADR-0012</a> · <a href="../../decisions/0017-service-data-sync-declarative-orm.md">ADR-0017</a></dd></div>
       </dl>
     </div>
   </header>
@@ -249,9 +250,14 @@
         <code>PENDING</code> 与 quarantine 永不进入内部消费投影或公开 API。
       </aside>
       <aside class="callout warning">
-        <strong>生产准入待决</strong>
-        AKShare/东方财富的商业使用、调用频率、原始数据保存期和再分发许可尚未批准。
-        所有生产开关默认关闭；本文 cadence 与容量均为显式工程假设，不是已获授权事实。
+        <strong>运行参数待校准</strong>
+        生产开关默认关闭；cadence、并发、raw retention 和容量阈值由连续样本、接口页数、
+        payload 大小、完成时长与恢复窗口校准，不阻塞已完成链路的技术验收。
+      </aside>
+      <aside class="callout">
+        <strong>持久化实现基线</strong>
+        本能力的 8 张逻辑表均已采用一表一 SQLAlchemy Declarative 模型并进入显式 registry；
+        仓储通过短生命周期 <code>Session</code> 和模型表达式访问。业务语义、质量门和发布边界不因 ORM 化改变。
       </aside>
     </section>
 
@@ -343,7 +349,7 @@ AKShare EastMoney adapter ── stock_board_*_cons_em
   ▼
 MembershipSyncService ── raw S3 ── quality / identity resolution
   ▼
-MembershipRepository ── PostgreSQL snapshot / observed interval / release
+MembershipRepository ── SQLAlchemy Session ── PostgreSQL snapshot / observed interval / release
   ▼
 service-data-sync internal v1 ── Bearer ──▶ service-api IndustryModule
                                                ▼
@@ -398,7 +404,7 @@ service-data-sync internal v1 ── Bearer ──▶ service-api IndustryModule
           <tbody>
             <tr><td>市场/时间</td><td>中国 A 股；业务时区 <code>Asia/Shanghai</code>，数据库存 UTC。</td><td>只在已发布交易日历确认开市后自动生成日分区。</td></tr>
             <tr><td>逻辑分区</td><td><code>scheme/sector_code/observation_date</code>；scheme run 冻结 ACTIVE 板块集合。</td><td>目录未发布时不猜板块集合。</td></tr>
-            <tr><td>cadence</td><td><span class="tag pending">假设</span> research 每个开市日 18:30 后一次；生产待许可与探针批准。</td><td>生产开关默认 false；不采盘中序列。</td></tr>
+            <tr><td>cadence</td><td><span class="tag pending">初始值</span> 每个开市日 18:30 后一次；连续探针后按完成时长校准。</td><td>开关默认 false；不采盘中序列。</td></tr>
             <tr><td>幂等键</td><td><code>capability|scheme|sector|date|sourcePolicy|schemaVersion</code> 的 SHA-256。</td><td>active 部分唯一索引；重复消息返回已有 partition/snapshot。</td></tr>
             <tr><td>并发/锁</td><td>provider semaphore=1；partition lease；提交时按 sector 获取 PostgreSQL advisory xact lock。</td><td>过期 lease 可回收；Redis 不保存权威锁或 checkpoint。</td></tr>
             <tr><td>重试</td><td>SDK 已有每页 3 次；外层 UNAVAILABLE 只额外重排 1 次，延迟 60 秒。</td><td>SCHEMA/空响应/身份 quarantine 不重试；防止分页重试乘法放大。</td></tr>
@@ -447,6 +453,14 @@ missing  = previous - current  → observed_to   = snapshot.observed_at
         migration 基于 <code>202607260002</code> 之后，且必须晚于 0014 的 <code>source_batch</code> expand。
         PostgreSQL 为唯一 canonical owner；S3 只保存不可变 raw。月份分区均预建未来 3 个月并保留 default 分区。
       </p>
+      <p>
+        本节 8 张 membership 逻辑表分别位于
+        <code>infrastructure/database/models/sector/membership/</code>，并由
+        <code>models/registry.py</code> 显式登记。仓储只通过
+        <code>DatabaseClient.session()</code> 或 <code>DatabaseClient.transaction()</code>
+        获取短生命周期 Session；月度物理分区是同一父表的存储切片，不建立独立 ORM class，继续由 Alembic 与专用
+        partition manager 管理。
+      </p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>表</th><th>字段与键</th><th>约束、索引、职责</th></tr></thead>
@@ -492,7 +506,7 @@ missing  = previous - current  → observed_to   = snapshot.observed_at
               <td>沿用 0012 通用设计；active 幂等键部分唯一。状态、租约和 checkpoint 只在 PostgreSQL 权威保存。</td>
             </tr>
             <tr>
-              <td><code>quality_result</code></td>
+              <td><code>sector_membership_quality_result</code></td>
               <td>partition FK、rule code、severity、actual/expected、disposition、sample、created_at。</td>
               <td><code>PK(partition_id,rule_code)</code>；sample 不含完整 payload、token 或 raw URI。</td>
             </tr>
@@ -520,8 +534,10 @@ CREATE UNIQUE INDEX uq_sector_membership_release_current
       <h3>事务边界</h3>
       <ul>
         <li>raw put 先于 DB；S3 失败禁止 canonical 写入。DB 失败保留 raw，checkpoint 不动，可按 batch 重放。</li>
-        <li>完整快照头、items、interval 差分、quality 与 partition checkpoint 在单一事务内提交。</li>
-        <li>release、manifest rows、旧 release superseded 与 <code>dataset_publication</code> 指针在另一单一事务内提交。</li>
+        <li>完整快照头、items、interval 差分、quality 与 partition checkpoint 通过
+          <code>DatabaseClient.transaction()</code> 在单一 Session 事务内提交。</li>
+        <li>release、manifest rows、旧 release superseded 与 <code>dataset_publication</code> 指针在另一单一
+          Session 事务内提交。</li>
         <li>隔离级别采用 <code>SERIALIZABLE</code> 或 sector advisory xact lock + <code>READ COMMITTED</code>；
           首实现选后者并依靠 exclusion/unique 约束兜底。</li>
         <li>相同 idempotency key/content 重跑返回已有 snapshot；相同集合的新日期仍创建新观测，不创建重复 interval。</li>
@@ -553,7 +569,7 @@ CREATE UNIQUE INDEX uq_sector_membership_release_current
       <ul>
         <li>当前接口无历史参数，不能回补首次观测前成分；所谓 backfill 只可从已存 raw 重放或修复漏处理分区。</li>
         <li>adapter/schema 修复后从 raw 重放；若影响既有区间，从最早受影响完整快照顺序重建，发布新 dataVersion。</li>
-        <li>snapshot/interval/release 为审计数据不自动删除；raw 保存期、压缩、归档和再分发边界待许可决定，未决定前禁止生产启用。</li>
+        <li>snapshot/interval/release 不自动删除；raw 保存期、压缩与归档按最大回放窗口、容量和备份恢复目标配置。</li>
         <li>不跨来源 fallback，不用名称相近板块或另一 scheme 补洞。</li>
       </ul>
     </section>
@@ -574,16 +590,16 @@ CREATE UNIQUE INDEX uq_sector_membership_release_current
           <thead><tr><th>公开接口</th><th>查询语义</th><th>成功结果</th><th>错误</th></tr></thead>
           <tbody>
             <tr>
-              <td><code>GET /api/v1/market/sectors/{scheme}/{sectorCode}/constituents</code></td>
+              <td><code>POST /api/v1/market/sectors/{scheme}/{sectorCode}/constituents</code></td>
               <td>可选 RFC3339 <code>asOf</code>；limit≤500；cursor。</td>
               <td>仅 VERIFIED 成分、观测区间、snapshotObservedAt、release、coverage、dataVersion。</td>
-              <td>400/401/403/404/409/429/503；ETag/304。</td>
+              <td>204/400/401/403/404/409/429/503；ETag 命中返回 204。</td>
             </tr>
             <tr>
-              <td><code>GET /api/v1/market/equities/{exchange}/{symbol}/sectors</code></td>
+              <td><code>POST /api/v1/market/equities/{exchange}/{symbol}/sectors</code></td>
               <td>必填 scheme；可选 <code>asOf</code>；同一响应仅一个 release。</td>
               <td>该证券在 manifest 中出现的板块；已知但无归属返回空页。</td>
-              <td>400/401/403/404/409/429/503；ETag/304。</td>
+              <td>204/400/401/403/404/409/429/503；ETag 命中返回 204。</td>
             </tr>
           </tbody>
         </table>
@@ -591,7 +607,7 @@ CREATE UNIQUE INDEX uq_sector_membership_release_current
       <ul>
         <li><strong>asOf：</strong>选择 <code>release_as_of ≤ requested asOf</code> 的最近 release；省略时取 current。早于 coverageStart 返回 404，不伪造空集合。</li>
         <li><strong>游标：</strong>绑定 route、scheme、身份、asOf、排序键和 dataVersion；发布切换后旧游标返回 409，调用方从第一页重启。</li>
-        <li><strong>缓存：</strong>强 ETag；<code>private, max-age=0, must-revalidate</code>；304 无响应体。</li>
+        <li><strong>缓存：</strong>强 ETag；<code>private, max-age=0, must-revalidate</code>；公开 POST 命中条件请求返回 204 且无响应体。</li>
         <li><strong>鉴权：</strong>internal 使用现有专用静态 Bearer 和常量时间比较；public 使用现有全局 JWT/ACTIVE 会话，禁止 <code>@Public()</code>。只读能力不改变 <code>securityVersion</code> 规则。</li>
         <li><strong>隐私/最小化：</strong>公开响应删除 instrumentId/sectorId、raw、source batch、PENDING、quarantine、质量样本与内部错误。</li>
       </ul>
@@ -607,9 +623,9 @@ CREATE UNIQUE INDEX uq_sector_membership_release_current
 无 data-sync PostgreSQL/S3/AKShare 访问
 无 AuthModule 反向依赖或 forwardRef()</pre>
       <p>
-        扩展现有 Zod 严格 schema、DTO 与 client 两个 GET 方法。下游 404/409/429按冻结映射；
+        扩展现有 Zod 严格 schema、DTO 与 client 两个内部 GET 方法；Controller 对外仅声明 POST。下游 404/409/429 按冻结映射；
         连接失败、超时、5xx、鉴权异常或 schema drift 统一映射公开 503 Problem Details，不转发下游响应体。
-        安全 GET 只有在未收到响应时最多重试一次；透传 <code>X-Request-Id</code>，不记录 token。
+        内部安全 GET 只有在未收到响应时最多重试一次；透传 <code>X-Request-Id</code>，不记录 token。
       </p>
     </section>
 
@@ -623,7 +639,7 @@ CREATE UNIQUE INDEX uq_sector_membership_release_current
             <tr><td>板块/成分</td><td>≤1,000 ACTIVE 板块；平均 200、单板块上限 2,000 成分。</td><td>30 日 shadow 分布；超界时阻断而非截断。</td></tr>
             <tr><td>明细增长</td><td>约 20 万行/日，压力上限 50 万行/日；7300 万–1.825 亿行/年。</td><td>月分区大小、索引膨胀、VACUUM 与真实压缩率基准。</td></tr>
             <tr><td>API</td><td>page≤500、JSON≤1 MiB；internal p95≤150 ms、public p95≤250 ms。</td><td>EXPLAIN ANALYZE、k6/等价容器压测；数值为待验证 SLO。</td></tr>
-            <tr><td>采集</td><td>provider 并发 1；scheme run 目标 90 分钟内完成。</td><td>接口页数/断连率测量后决定是否调整；许可优先。</td></tr>
+            <tr><td>采集</td><td>provider 并发 1；scheme run 目标 90 分钟内完成。</td><td>接口页数、断连率、CPU/内存和完成时长测量后调整。</td></tr>
           </tbody>
         </table>
       </div>
@@ -654,7 +670,7 @@ CREATE UNIQUE INDEX uq_sector_membership_release_current
     <section id="delivery">
       <h2>10. 实施、迁移、回滚与验收</h2>
       <ol class="steps">
-        <li><strong>阶段 0 — 前置：</strong>评审 ADR-0012；落地 0014 证券主数据和每次观测独立 <code>source_batch</code> expand；冻结许可、raw retention、cadence。</li>
+        <li><strong>阶段 0 — 前置：</strong>评审 ADR-0012；落地 0014 证券主数据和每次观测独立 <code>source_batch</code> expand；冻结接口版本、raw retention 初值与 cadence。</li>
         <li><strong>阶段 1 — shadow 采集：</strong>新增 capability/adapter/application/CLI、raw、sync/quality/snapshot/PENDING/quarantine；不更新 interval，不发布 API。</li>
         <li><strong>阶段 2 — 观测历史：</strong>启用完整快照质量门、interval 差分、月分区、repair/rebuild；连续 30 个交易日验证零伪闭合。</li>
         <li><strong>阶段 3 — internal：</strong>生成首个 100% 身份/板块基线 release，实现 0007、ETag、cursor 409、内部 contract test。</li>
@@ -663,7 +679,7 @@ CREATE UNIQUE INDEX uq_sector_membership_release_current
 
       <h3>迁移与回滚</h3>
       <ul>
-        <li><strong>Expand：</strong>0014 先修改 source batch 观测唯一性；0013 再创建 <code>btree_gist</code>、snapshot/items 月分区、PENDING staging、quarantine、interval、release/manifest 和索引。生产应用不自动迁移。</li>
+        <li><strong>Expand：</strong>0014 先修改 source batch 观测唯一性；0013 的 8 张逻辑表先建立 Declarative 模型并登记显式 registry，再由 Alembic 创建 <code>btree_gist</code>、snapshot/items 月分区、PENDING staging、quarantine、interval、release/manifest 和索引。生产应用不自动迁移。</li>
         <li><strong>兼容：</strong>先部署 migration 与 writer，再 internal，最后 public；0005/0006 保持不变。旧服务忽略新表，新 API 在无 release 时返回 404/503。</li>
         <li><strong>回滚：</strong>先关 public/internal 与 publication flag，指针切回上一 release，再回滚应用。只有确认无消费者和已备份 raw/DB 后，Alembic 才按 manifest→release→interval→quarantine→PENDING staging→item partitions→snapshot 顺序删除；<code>btree_gist</code> 仅在无其他依赖时删除。</li>
         <li><strong>不可回滚共享前置：</strong>0014 的 source_batch expand 属于共享兼容迁移，不由 0013 downgrade 反向收紧，避免再次折叠其他数据集观测。</li>
@@ -680,7 +696,7 @@ docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test pytest 
 docker build --tag quant-v2/service-data-sync:local service-data-sync
 
 # 迁移与集成：upgrade → downgrade → upgrade；重复分区、断连、空响应、schema drift、
-# 身份 quarantine、DB/S3 失败、迟到快照、cursor 409、ETag 304 全部故障注入
+# 身份 quarantine、DB/S3 失败、迟到快照、cursor 409、内部 ETag 304 / 公开 ETag 204 全部故障注入
 docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
   --profile data-sync-infra up -d
 docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
@@ -693,7 +709,7 @@ docker run --rm quant-v2/service-api:test pnpm lint
 docker run --rm quant-v2/service-api:test pnpm typecheck
 docker run --rm quant-v2/service-api:test pnpm test
 docker build --tag quant-v2/service-api:local service-api</code></pre>
-      <p class="small">已实现 migration、受控 adapter、run/partition 账本、完整快照/区间/release、internal v1 与 service-api 公开代理；生产来源许可、长期 raw 留存、定时 cadence 与真实环境集成仍受下方待决项约束。</p>
+      <p class="small">已实现 migration、受控 adapter、run/partition 账本、完整快照/区间/release、internal v1 与 service-api 公开代理；长期 raw 留存、定时 cadence、阈值和真实环境容量仍需用连续样本校准。</p>
 
       <div class="grid two">
         <article class="card">
@@ -704,12 +720,13 @@ docker build --tag quant-v2/service-api:local service-api</code></pre>
             <li>板块→成分与证券→板块在同一 dataVersion 可复验。</li>
             <li>PENDING/quarantine 在 internal consumer/public 响应中均为零。</li>
             <li>API、adapter、DB 所有权与依赖方向通过架构测试。</li>
+            <li>8 张逻辑表均进入显式 registry；Alembic check、PostgreSQL schema parity、Session 回滚和持久化字符串 SQL 架构门通过。</li>
           </ul>
         </article>
         <article class="card">
           <h3>待决问题</h3>
           <ul>
-            <li>来源商业许可、频率、raw 保存期与再分发范围 — 生产准入负责人。</li>
+            <li>接口频率、raw 保存期与回放窗口 — 数据工程/运维容量基准。</li>
             <li>交易所代码规则与 PENDING 提升流程 — 0014 评审。</li>
             <li>30 日后数量/churn/carry 阈值和最终 SLO — 数据质量/平台。</li>
             <li>长期月分区归档、备份 RPO/RTO 与成本预算 — DBA/平台。</li>
@@ -720,7 +737,7 @@ docker build --tag quant-v2/service-api:local service-api</code></pre>
   </main>
 
   <footer>
-    <div class="shell">板块成分股与观测历史 · Implemented · 变更摘要：落地同步运行账本、时态表、质量门、固定 release 及双向 API。</div>
+    <div class="shell">板块成分股与观测历史 · Implemented · 变更摘要：落地同步运行账本、时态表、质量门、固定 release 及双向 API；补齐 8 表 Declarative 模型、显式 registry、Session 仓储与迁移一致性基线。</div>
   </footer>
 </body>
 </html>

@@ -18,11 +18,19 @@ from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.messaging.redis_client import RedisClient
 from service_data_sync.infrastructure.object_storage.client import ObjectStorageClient
 from service_data_sync.infrastructure.providers.akshare import (
+    AkshareCninfoCompanyProfileAdapter,
+    AkshareEastmoneyCorporateActionsAdapter,
     AkshareEastmoneyEquityCatalogAdapter,
+    AkshareEastmoneyEquityPeriodBarsAdapter,
+    AkshareEastmoneyFinancialAdapter,
+    AkshareEastmoneyMoneyFlowAdapter,
     AkshareEastmoneySectorBarsAdapter,
     AkshareEastmoneySectorEodAdapter,
     AkshareEastmoneySectorMembershipAdapter,
+    AkshareExchangeEquityLifecycleAdapter,
+    AkshareSinaAdjustmentFactorsAdapter,
     AkshareTencentDailyBarsAdapter,
+    AkshareThsMoneyFlowAdapter,
 )
 
 
@@ -47,6 +55,19 @@ class ServiceContainer:
 
 def build_container(settings: Settings) -> ServiceContainer:
     """根据策略配置组合基础设施客户端和获准适配器。"""
+    registry = build_source_registry(settings)
+    return ServiceContainer(
+        settings=settings,
+        database=DatabaseClient.from_settings(settings),
+        broker=RedisClient.from_settings(settings),
+        object_storage=ObjectStorageClient.from_settings(settings),
+        source_registry=registry,
+        trading_calendar=_trading_calendar_for_settings(settings),
+    )
+
+
+def build_source_registry(settings: Settings) -> SourceRegistry:
+    """只按开关组合来源适配器，不创建数据库、消息或对象存储客户端。"""
     registry = SourceRegistry()
     if settings.akshare_enabled:
         registry.register(
@@ -59,6 +80,53 @@ def build_container(settings: Settings) -> ServiceContainer:
                 request_timeout_seconds=settings.akshare_request_timeout_seconds
             )
         )
+        registry.register(
+            AkshareExchangeEquityLifecycleAdapter(
+                request_timeout_seconds=settings.akshare_request_timeout_seconds
+            )
+        )
+        if settings.equity_market_enabled:
+            registry.register(
+                AkshareEastmoneyEquityPeriodBarsAdapter(
+                    request_timeout_seconds=settings.akshare_request_timeout_seconds
+                )
+            )
+            registry.register(
+                AkshareSinaAdjustmentFactorsAdapter(
+                    request_timeout_seconds=settings.akshare_request_timeout_seconds
+                )
+            )
+            registry.register(
+                AkshareEastmoneyCorporateActionsAdapter(
+                    request_timeout_seconds=settings.akshare_request_timeout_seconds
+                )
+            )
+            registry.register(
+                AkshareCninfoCompanyProfileAdapter(
+                    request_timeout_seconds=settings.akshare_request_timeout_seconds
+                )
+            )
+        # 财务 source policy 必须精确指向东财 adapter，其他策略不允许静默复用该来源。
+        if settings.financial_enabled and settings.financial_source_policy == "akshare-eastmoney":
+            registry.register(
+                AkshareEastmoneyFinancialAdapter(
+                    request_timeout_seconds=(
+                        settings.financial_request_timeout_seconds
+                        or settings.akshare_request_timeout_seconds
+                    )
+                )
+            )
+        if settings.money_flow_enabled:
+            registry.register(
+                AkshareEastmoneyMoneyFlowAdapter(
+                    request_timeout_seconds=settings.akshare_request_timeout_seconds
+                )
+            )
+            registry.register(
+                AkshareThsMoneyFlowAdapter(
+                    request_timeout_seconds=settings.akshare_request_timeout_seconds
+                )
+            )
         if settings.sector_enabled:
             registry.register(
                 AkshareEastmoneySectorBarsAdapter(
@@ -77,14 +145,7 @@ def build_container(settings: Settings) -> ServiceContainer:
                         request_timeout_seconds=settings.akshare_request_timeout_seconds
                     )
                 )
-    return ServiceContainer(
-        settings=settings,
-        database=DatabaseClient.from_settings(settings),
-        broker=RedisClient.from_settings(settings),
-        object_storage=ObjectStorageClient.from_settings(settings),
-        source_registry=registry,
-        trading_calendar=_trading_calendar_for_settings(settings),
-    )
+    return registry
 
 
 def _trading_calendar_for_settings(settings: Settings) -> TradingCalendarPort:

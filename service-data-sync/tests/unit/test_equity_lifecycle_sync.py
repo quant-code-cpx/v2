@@ -18,7 +18,10 @@ from service_data_sync.application.ports.data_source import (
     ProviderError,
     SourceRequest,
 )
-from service_data_sync.application.ports.equity_lifecycle import PublishedEquityLifecycle
+from service_data_sync.application.ports.equity_lifecycle import (
+    EquityLifecycleReplayCheckpoint,
+    PublishedEquityLifecycle,
+)
 from service_data_sync.application.ports.market_data import RawPayload
 from service_data_sync.domain.equity import Exchange
 
@@ -69,15 +72,18 @@ class FakeRawPayloadStore:
     def __init__(self) -> None:
         """初始化尚未写入对象的内存替身。"""
         self.payloads: list[RawPayload] = []
+        self.objects: dict[str, bytes] = {}
 
     def put(self, payload: RawPayload) -> str:
         """保存证据并返回稳定的伪对象地址。"""
         self.payloads.append(payload)
-        return f"s3://test/{payload.object_key}"
+        uri = f"s3://test/{payload.object_key}"
+        self.objects[uri] = payload.payload
+        return uri
 
     def get(self, uri: str) -> bytes:
-        """生命周期同步未声明 replay；读取 raw 即表示测试路径错误。"""
-        raise AssertionError(f"unexpected raw replay read: {uri}")
+        """返回已归档对象，模拟恢复路径完全绕过供应商。"""
+        return self.objects[uri]
 
 
 class FakeRepository:
@@ -86,6 +92,7 @@ class FakeRepository:
     def __init__(self) -> None:
         """初始化未收到发布调用的替身状态。"""
         self.kwargs: dict[str, object] = {}
+        self.checkpoint: EquityLifecycleReplayCheckpoint | None = None
 
     def publish_lifecycle(self, **kwargs: object) -> PublishedEquityLifecycle:
         """捕获发布参数并返回最小稳定摘要。"""
@@ -96,6 +103,13 @@ class FakeRepository:
             inserted_count=1,
             unchanged_count=0,
         )
+
+    def get_replay_checkpoint(
+        self, *, exchange: Exchange
+    ) -> EquityLifecycleReplayCheckpoint | None:
+        """普通同步替身默认没有恢复检查点。"""
+        del exchange
+        return self.checkpoint
 
 
 def test_sync_archives_raw_evidence_and_publishes_explicit_lifecycle() -> None:
@@ -114,8 +128,65 @@ def test_sync_archives_raw_evidence_and_publishes_explicit_lifecycle() -> None:
     assert result.exchange is Exchange.SSE
     assert result.inserted_count == 1
     assert raw_store.payloads[0].payload == b'{"source":"explicit"}'
+    assert raw_store.payloads[1].payload.startswith(
+        b'{"schema":"quant-v2.equity-lifecycle-explicit.v1"'
+    )
     assert repository.kwargs["upstream_source"] == "test-exchange"
     assert repository.kwargs["entries"]
+
+
+def test_replay_uses_checkpoint_without_provider_fetch() -> None:
+    """恢复从标准对象重放并复用原始证据，完全不需要已注册 provider。"""
+    repository = FakeRepository()
+    raw_store = FakeRawPayloadStore()
+    normalized_payload = asyncio.run(
+        FakeSource().fetch(
+            SourceRequest(
+                capability="equity.lifecycle.explicit",
+                parameters=(("exchange", "SSE"), ("targetDate", "2026-07-02")),
+            )
+        )
+    ).payload
+    normalized_uri = raw_store.put(
+        RawPayload(
+            object_key="normalized/lifecycle.json",
+            content_sha256="a" * 64,
+            content_type="application/json",
+            payload=normalized_payload,
+        )
+    )
+    raw_uri = raw_store.put(
+        RawPayload(
+            object_key="raw/lifecycle.json",
+            content_sha256="b" * 64,
+            content_type="application/json",
+            payload=b'{"source":"explicit"}',
+        )
+    )
+    repository.checkpoint = EquityLifecycleReplayCheckpoint(
+        exchange=Exchange.SSE,
+        target_date=date(2026, 7, 2),
+        data_version=uuid4(),
+        snapshot_id=uuid4(),
+        raw_uri=raw_uri,
+        normalized_uri=normalized_uri,
+        provider_id="fake-lifecycle",
+        upstream_source="test-exchange",
+        adapter_version="test-v1",
+        schema_fingerprint="a" * 64,
+        observed_at=datetime(2026, 7, 2, tzinfo=UTC),
+    )
+
+    result = asyncio.run(
+        EquityLifecycleSyncService(
+            source=None,
+            repository=repository,
+            raw_payload_store=raw_store,
+        ).replay_last(exchange=Exchange.SSE)
+    )
+
+    assert result.inserted_count == 1
+    assert repository.kwargs["normalized_uri"] == normalized_uri
 
 
 def test_decode_lifecycle_rejects_non_explicit_delisting_and_duplicate_fact() -> None:
@@ -140,8 +211,8 @@ def test_decode_lifecycle_rejects_non_explicit_delisting_and_duplicate_fact() ->
         decode_equity_lifecycle_batch(payload, exchange=Exchange.SSE)
 
 
-def test_decode_lifecycle_requires_approval_for_official_correction() -> None:
-    """官方更正必须带人工审批引用，不能仅由来源适配器自行放行。"""
+def test_decode_lifecycle_requires_evidence_for_official_correction() -> None:
+    """官方更正必须带来源证据引用，不能由无证据的 adapter 自行放行。"""
     payload = json.dumps(
         {
             "schema": "quant-v2.equity-lifecycle-explicit.v1",

@@ -1,4 +1,4 @@
-"""记录上市生命周期官方更正所需的人工审批证据。
+"""记录上市生命周期官方更正所需的来源证据引用。
 
 Revision ID: 202607270002
 Revises: 202607270001
@@ -18,7 +18,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    """为官方更正追加可审计的人工审批引用与数据库约束。"""
+    """为官方更正追加可审计的来源证据引用与数据库约束。"""
     op.execute(
         """
         ALTER TABLE equity_listing_status_version
@@ -38,7 +38,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """仅在没有官方更正事实时移除审批引用列，避免丢失审计证据。"""
+    """仅在没有官方更正事实时移除历史兼容引用列，避免丢失证据。"""
     bind = op.get_bind()
     has_correction = bind.execute(
         text(

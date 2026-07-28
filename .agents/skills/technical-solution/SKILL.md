@@ -1,6 +1,6 @@
 ---
 name: technical-solution
-description: Create, review, or revise repository technical方案、技术设计、架构方案 and implementation proposals as concise, polished, self-contained HTML documents. Use when work asks for a technical proposal, solution design, architecture design, module design, API or data design, implementation plan, technology comparison, rollout design, or updates to an existing document under docs/.
+description: Create, review, or revise repository technical方案、技术设计、架构方案 and implementation proposals as concise, polished, self-contained, PC-desktop-only HTML documents. Use when work asks for a technical proposal, solution design, architecture design, module design, API or data design, implementation plan, technology comparison, rollout design, or updates to an existing document under docs/.
 ---
 
 # Technical Solution
@@ -18,7 +18,7 @@ Create reviewable technical proposals that make scope, responsibilities, flows, 
 4. For cross-service, deployment, contract, or hard-to-reverse decisions, create or update an ADR before finalizing the proposal.
 5. Use `assets/index.template.html` as structural and visual starting point. Produce `index.html` as canonical document. Remove irrelevant template sections instead of filling them with noise.
 6. Keep machine-readable contracts such as OpenAPI, AsyncAPI, JSON Schema, SQL, or Proto in separate files and link them from `index.html`.
-7. Validate content, local links, responsive layout, print layout, overflow, and accessibility. Render at desktop and mobile sizes when browser tooling is available.
+7. Validate content, local links, desktop layout, print layout, overflow, and accessibility. Technical proposal HTML is PC-desktop-only: do not require mobile compatibility or mobile rendering. When browser tooling is available, render at 1440×900 and the 1280×720 minimum supported desktop viewport unless the repository specifies stricter desktop sizes.
 8. Report output path, decision status, unresolved questions, and validation performed.
 
 ## Editing Existing Proposals
@@ -35,3 +35,4 @@ Create reviewable technical proposals that make scope, responsibilities, flows, 
 - Do not duplicate identical content between HTML and Markdown.
 - Do not embed secrets, production credentials, private endpoints, or real account data.
 - Do not initialize application frameworks or dependencies unless user separately requests implementation.
+- Do not add mobile breakpoints or spend validation effort on narrow-screen/mobile compatibility unless the user explicitly expands the scope.

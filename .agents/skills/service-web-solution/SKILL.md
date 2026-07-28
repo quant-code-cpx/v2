@@ -15,7 +15,7 @@ Turn understood business needs into reviewable page architecture, visual prototy
 4. Place the canonical proposal under `docs/service-web/<NNNN>-<topic>/`.
 5. Use available `mui` and `vercel-react-best-practices` skills when MUI implementation or React performance is in scope.
 6. When the design changes an API or data-sync boundary, also load that service's solution skill and keep one named owning proposal plus linked impact/contract changes.
-7. Treat service-web as PC-desktop-only, with `1440×900` as the default prototype and visual-review viewport. Do not design, prototype, implement, render, or test mobile, tablet, touch, or narrow-screen behavior. This overrides mobile/narrow-screen validation in the base solution skill for service-web work.
+7. Treat service-web as PC-desktop-only, with `1440×900` as the default prototype and visual-review viewport. Do not design, prototype, implement, render, or test mobile, tablet, touch, or narrow-screen behavior. Proposal HTML follows the base skill's desktop-only validation; prototype visual review uses `1440×900`.
 
 ## Workflow
 

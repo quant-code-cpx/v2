@@ -1,0 +1,294 @@
+openapi: 3.1.0
+info:
+  title: service-api equity market data public API
+  version: 1.0.0
+  description: |
+    Implemented authenticated public contract for scheme 0011. Every application route
+    uses POST. service-api calls service-data-sync through internal HTTP and never reads
+    its PostgreSQL schema.
+x-contract-status: Implemented
+x-http-method-policy: post-only
+x-implemented-by:
+  - service-api/src/apps/stock/equity-market-data.controller.ts
+servers:
+  - url: /api/v1
+security:
+  - bearerSession: []
+paths:
+  /equities/{exchange}/{symbol}/bars:
+    post:
+      operationId: listEquityMarketBars
+      summary: Read direct upstream daily, weekly, or monthly bars
+      parameters:
+        - $ref: '#/components/parameters/ExchangePath'
+        - $ref: '#/components/parameters/SymbolPath'
+        - name: period
+          in: query
+          required: false
+          schema:
+            $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/BarPeriod'
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: adjust
+          in: query
+          required: false
+          schema:
+            $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/AdjustmentMode'
+        - name: adjustAsOf
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - $ref: '#/components/parameters/Cursor'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 2000
+            default: 500
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Published bar window
+          content:
+            application/json:
+              schema:
+                $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/EquityBarPage'
+        '204':
+          description: If-None-Match matched the current representation
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /equities/{exchange}/{symbol}/adjustment-factors:
+    post:
+      operationId: listEquityAdjustmentFactorsV1
+      summary: Read sparse cumulative adjustment factors
+      parameters:
+        - $ref: '#/components/parameters/ExchangePath'
+        - $ref: '#/components/parameters/SymbolPath'
+        - name: start
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - $ref: '#/components/parameters/Cursor'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 500
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Published factors
+          content:
+            application/json:
+              schema:
+                $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/AdjustmentFactorPage'
+        '204':
+          description: If-None-Match matched the current representation
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /equities/{exchange}/{symbol}/corporate-actions:
+    post:
+      operationId: listEquityCorporateActionsV1
+      summary: Read current corporate-action revisions
+      parameters:
+        - $ref: '#/components/parameters/ExchangePath'
+        - $ref: '#/components/parameters/SymbolPath'
+        - name: start
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - $ref: '#/components/parameters/Cursor'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Published corporate actions
+          content:
+            application/json:
+              schema:
+                $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/CorporateActionPage'
+        '204':
+          description: If-None-Match matched the current representation
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /equities/{exchange}/{symbol}/company-profile:
+    post:
+      operationId: getEquityCompanyProfileV1
+      summary: Read the current published company profile
+      parameters:
+        - $ref: '#/components/parameters/ExchangePath'
+        - $ref: '#/components/parameters/SymbolPath'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Published company profile
+          content:
+            application/json:
+              schema:
+                $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/CompanyProfileResponse'
+        '204':
+          description: If-None-Match matched the current representation
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+components:
+  securitySchemes:
+    bearerSession:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ExchangePath:
+      name: exchange
+      in: path
+      required: true
+      schema:
+        $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/Exchange'
+    SymbolPath:
+      name: symbol
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9]{6}$'
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor returned by the previous page for the same query.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+  responses:
+    BadRequest:
+      description: Invalid query
+      content:
+        application/problem+json:
+          schema:
+            $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing or invalid user session
+      content:
+        application/problem+json:
+          schema:
+            $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/Problem'
+    NotFound:
+      description: Instrument or resource is not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/Problem'
+    Conflict:
+      description: Adjustment coverage, snapshot, or public identity-resolution conflict
+      content:
+        application/problem+json:
+          schema:
+            $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/Problem'
+    RateLimited:
+      description: Authenticated user exceeded the read budget
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/Problem'
+    Unavailable:
+      description: service-data-sync or required publication is unavailable
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/Problem'

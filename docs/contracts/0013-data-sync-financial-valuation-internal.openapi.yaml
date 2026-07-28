@@ -3,7 +3,7 @@ info:
   title: service-data-sync financial statement and valuation internal API
   version: 1.0.0
   description: |
-    Proposed service-to-service read contract for published A-share financial
+    Implemented service-to-service read contract for published A-share financial
     statements, governed financial metrics, and valuation observations.
     service-data-sync owns canonical revisions and point-in-time semantics.
 
@@ -13,7 +13,7 @@ info:
     corporate actions remain governed by their existing or more specific
     contracts. Raw object URIs, provider payloads, quarantined fields, and
     database keys are not exposed.
-  x-contract-status: Proposed
+  x-contract-status: Implemented
   x-partially-supersedes: 0003-data-sync-equity-internal.openapi.yaml
   x-replaces-paths:
     - /internal/v1/equities/{instrumentId}/financial-reports
@@ -73,6 +73,13 @@ paths:
                 $ref: '#/components/schemas/InternalFinancialReportPage'
         '304':
           description: Representation matches If-None-Match.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -122,6 +129,13 @@ paths:
                 $ref: '#/components/schemas/InternalFinancialReportDetail'
         '304':
           description: Representation matches If-None-Match.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -144,6 +158,15 @@ paths:
         origin, methodologyCode, methodologyVersion, and metric are mandatory.
         A provider metric and a derived metric with the same display label are
         distinct series. One page never combines methodologies or versions.
+        PLATFORM_DERIVED methodology platform.financial-derivation version 1
+        publishes platform.operating_revenue.single_quarter,
+        platform.operating_revenue.ttm,
+        platform.net_profit_parent.single_quarter, and
+        platform.net_profit_parent.ttm. Single-quarter Q1 equals current YTD;
+        Q2-Q4 equal current YTD minus previous-quarter YTD. TTM Q4 equals
+        current YTD; Q1-Q3 equal current YTD plus prior annual YTD minus the
+        prior-year same-quarter YTD. Every input must share unit and currency;
+        any missing dependency omits that output instead of substituting zero.
       parameters:
         - $ref: '#/components/parameters/ExchangePath'
         - $ref: '#/components/parameters/Symbol'
@@ -176,6 +199,13 @@ paths:
                 $ref: '#/components/schemas/InternalFinancialMetricPage'
         '304':
           description: Representation matches If-None-Match.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -229,6 +259,13 @@ paths:
                 $ref: '#/components/schemas/InternalValuationPage'
         '304':
           description: Representation matches If-None-Match.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/PrivateRevalidate'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/ValidationProblem'
         '401':
@@ -849,6 +886,20 @@ components:
     InternalFinancialMetric:
       type: object
       additionalProperties: false
+      allOf:
+        - if:
+            properties:
+              origin:
+                const: PLATFORM_DERIVED
+          then:
+            properties:
+              formulaVersion:
+                type: integer
+                minimum: 1
+          else:
+            properties:
+              formulaVersion:
+                type: 'null'
       required:
         - metricCode
         - label
@@ -906,6 +957,7 @@ components:
         formulaVersion:
           type: [integer, 'null']
           minimum: 1
+          description: Required for PLATFORM_DERIVED and null for PROVIDER_REPORTED.
         effectiveFrom:
           type: string
           format: date

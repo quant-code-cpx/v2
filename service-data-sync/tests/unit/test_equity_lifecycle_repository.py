@@ -9,6 +9,7 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.orm import Session
 
 from service_data_sync.domain.equity import EquityIdentifier, Exchange
 from service_data_sync.domain.equity_master import (
@@ -115,7 +116,7 @@ def test_repository_appends_explicit_delisting_and_advances_exchange_version() -
             None,
             {"source_batch_id": uuid4()},
             None,
-            [{"security_id": 8}],
+            [{"security_id": 8, "identity_state": "CONFIRMED"}],
             {
                 "version_id": uuid4(),
                 "status": "LISTED",
@@ -127,6 +128,12 @@ def test_repository_appends_explicit_delisting_and_advances_exchange_version() -
             },
             None,
             None,
+            None,
+            {
+                "version_id": uuid4(),
+                "effective_from": date(2001, 8, 27),
+                "effective_to": None,
+            },
             None,
             None,
             {"data_version": previous_version},
@@ -155,16 +162,18 @@ def test_repository_appends_explicit_delisting_and_advances_exchange_version() -
     assert "INSERT INTO equity_master_snapshot" in joined
     assert "status" in joined
     assert "evidence_kind" in joined
+    assert "UPDATE equity_identifier_version SET effective_to" in joined
+    assert "INSERT INTO equity_lifecycle_checkpoint" in joined
 
 
 def test_repository_rejects_delisted_to_listed_without_official_correction() -> None:
-    """退市是终态；没有更正审批时不得用普通 LISTED 事件恢复。"""
+    """退市是终态；没有官方更正证据时不得用普通 LISTED 事件恢复。"""
     engine = FakeEngine(
         [
             None,
             {"source_batch_id": uuid4()},
             None,
-            [{"security_id": 8}],
+            [{"security_id": 8, "identity_state": "CONFIRMED"}],
             {
                 "version_id": uuid4(),
                 "status": "DELISTED",
@@ -199,15 +208,15 @@ def test_repository_rejects_delisted_to_listed_without_official_correction() -> 
         )
 
 
-def test_repository_accepts_approved_official_correction_of_delisting() -> None:
-    """已审批官方更正可关闭退市知识版本并重建同日 LISTED 事实。"""
+def test_repository_accepts_evidenced_official_correction_of_delisting() -> None:
+    """带来源证据的官方更正可关闭退市知识版本并重建同日 LISTED 事实。"""
     previous_version = uuid4()
     engine = FakeEngine(
         [
             None,
             {"source_batch_id": uuid4()},
             None,
-            [{"security_id": 8}],
+            [{"security_id": 8, "identity_state": "CONFIRMED"}],
             {
                 "version_id": uuid4(),
                 "status": "DELISTED",
@@ -218,6 +227,12 @@ def test_repository_accepts_approved_official_correction_of_delisting() -> None:
                 "evidence_kind": "EXPLICIT_DELISTING",
             },
             None,
+            None,
+            None,
+            {
+                "version_id": uuid4(),
+                "effective_to": date(2026, 7, 2),
+            },
             None,
             None,
             None,
@@ -233,7 +248,7 @@ def test_repository_accepts_approved_official_correction_of_delisting() -> None:
         effective_on=date(2026, 7, 1),
         evidence_kind=EquityLifecycleEvidenceKind.OFFICIAL_CORRECTION,
         listed_on=date(2001, 8, 27),
-        correction_approval_reference="equity-master-approval-42",
+        correction_approval_reference="exchange-correction-notice-42",
     )
 
     publication = repository.publish_lifecycle(
@@ -253,17 +268,46 @@ def test_repository_accepts_approved_official_correction_of_delisting() -> None:
     assert any("SET known_to" in statement for statement in engine.connection.statements)
     joined = "\n".join(engine.connection.statements)
     assert "correction_approval_reference" in joined
+    assert "UPDATE equity_identifier_version SET effective_to" in joined
 
 
-def test_official_correction_requires_manual_approval_reference() -> None:
-    """官方更正没有人工审批引用时不得进入持久化层。"""
-    with pytest.raises(ValueError, match="manual approval"):
+def test_official_correction_requires_source_evidence_reference() -> None:
+    """官方更正没有来源证据引用时不得进入持久化层。"""
+    with pytest.raises(ValueError, match="source evidence"):
         EquityLifecycleEntry(
             identifier=EquityIdentifier.parse("SSE.600519"),
             status=EquityLifecycleStatus.LISTED,
             effective_on=date(2026, 7, 1),
             evidence_kind=EquityLifecycleEvidenceKind.OFFICIAL_CORRECTION,
             listed_on=date(2001, 8, 27),
+        )
+
+
+def test_official_correction_cannot_reopen_an_identifier_after_code_reuse() -> None:
+    """另一证券已复用代码时，错误退市更正不得覆盖新身份区间。"""
+    connection = FakeConnection(
+        [
+            {
+                "version_id": uuid4(),
+                "effective_to": date(2026, 7, 2),
+            },
+            uuid4(),
+        ]
+    )
+    entry = EquityLifecycleEntry(
+        identifier=EquityIdentifier.parse("SSE.600519"),
+        status=EquityLifecycleStatus.LISTED,
+        effective_on=date(2026, 7, 1),
+        evidence_kind=EquityLifecycleEvidenceKind.OFFICIAL_CORRECTION,
+        listed_on=date(2001, 8, 27),
+        correction_approval_reference="exchange-correction-notice-43",
+    )
+
+    with pytest.raises(EquityLifecycleTransitionError, match="reused identifier"):
+        SqlAlchemyEquityLifecycleRepository._reopen_identifier_after_correction(
+            cast(Session, connection),
+            security_id=8,
+            entry=entry,
         )
 
 

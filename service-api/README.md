@@ -1,7 +1,7 @@
 # service-api
 
 NestJS 11 单进程 API。当前包含 `UserModule`、`AuthModule`、`AuditModule`、`StockModule`、
-`IndustryModule`、`DataSyncModule`、Redis 和 PostgreSQL 持久化。
+`IndustryModule`、`MoneyFlowModule`、`DataSyncModule`、Redis 和 PostgreSQL 持久化。
 
 技术方案：[API 服务基础架构与技术方案](../docs/service-api/0001-service-api-foundation/index.html)。
 决策记录：[ADR-0005](../docs/decisions/0005-service-api-runtime-and-architecture.md)。
@@ -15,9 +15,12 @@ NestJS 11 单进程 API。当前包含 `UserModule`、`AuthModule`、`AuditModul
 - `AuditModule`：仅向 `SUPER_ADMIN` 提供 action registry 驱动的脱敏审计列表与详情。
 - PostgreSQL：用户、凭证、会话、审计的唯一权威存储。
 - Redis：登录/刷新限流、失败锁定、重放标记；不保存权威业务状态。
-- `StockModule`：提供证券目录、详情与上市生命周期查询。
+- `StockModule`：提供证券目录、详情、上市生命周期，以及个股日/周/月原生行情、复权因子、公司行动、公司概况、
+  财务报表、来源与平台派生指标和历史估值查询。
 - `IndustryModule`：提供行业/概念目录、日/周/月原生 K 线、固定 release 的板块成分观测，
-  以及 `post_close_observation` EOD 横截面与排行。
+  `post_close_observation` EOD 横截面与排行，以及申万三级 taxonomy、父级闭包和估值观察。
+- `MoneyFlowModule`：提供已发布方法学目录、个股/板块/市场日频序列和供应商滚动排行；不可发布的
+  research 方法学 fail-closed。
 - `DataSyncModule`：集中装配 `service-data-sync` 内部 HTTP Client 与运行时合同校验；不包含同步任务、
   供应商 SDK 或权威数据持久化。
 - 不含 Worker、Scheduler、队列、实时通信或其他业务模块。
@@ -66,6 +69,22 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env \
 和
 [`docs/contracts/0017-service-api-account-security-operations.openapi.yaml`](../docs/contracts/0017-service-api-account-security-operations.openapi.yaml)
 为准。
+
+方案 0011 个股市场数据公开路由均为 POST：
+
+- `/api/v1/equities/{exchange}/{symbol}/bars`
+- `/api/v1/equities/{exchange}/{symbol}/adjustment-factors`
+- `/api/v1/equities/{exchange}/{symbol}/corporate-actions`
+- `/api/v1/equities/{exchange}/{symbol}/company-profile`
+
+前三条列表路由支持最长 1024 字符的不透明游标；游标与同一发布版本和查询范围绑定。机器契约见
+[`0019-service-api-equity-market-data.openapi.yaml`](../docs/contracts/0019-service-api-equity-market-data.openapi.yaml)。
+
+方案 0012、0016、0017 的公开 POST 契约分别为：
+
+- [`0021-service-api-sw-sector.openapi.yaml`](../docs/contracts/0021-service-api-sw-sector.openapi.yaml)：3 条申万读取路径。
+- [`0014-service-api-financial-valuation.openapi.yaml`](../docs/contracts/0014-service-api-financial-valuation.openapi.yaml)：4 条财务与估值路径。
+- [`0016-service-api-daily-money-flow.openapi.yaml`](../docs/contracts/0016-service-api-daily-money-flow.openapi.yaml)：5 条资金流路径。
 
 POST-only 方法与动作路径规则见
 [ADR-0018](../docs/decisions/0018-service-api-post-only-http-method.md)。读取类 POST 命中

@@ -47,7 +47,7 @@ class EquityLifecycleSyncService:
     def __init__(
         self,
         *,
-        source: DataSourcePort,
+        source: DataSourcePort | None,
         repository: EquityLifecycleRepository,
         raw_payload_store: RawPayloadStore,
     ) -> None:
@@ -58,7 +58,7 @@ class EquityLifecycleSyncService:
 
     async def sync(self, *, exchange: Exchange, target_date: date) -> EquityLifecycleSyncResult:
         """下载、归档、校验并发布一所交易所的显式生命周期批次。"""
-        if _CAPABILITY not in self._source.capabilities():
+        if self._source is None or _CAPABILITY not in self._source.capabilities():
             raise ProviderError(
                 ProviderErrorCode.INVALID_REQUEST, "unsupported capability", retryable=False
             )
@@ -88,6 +88,18 @@ class EquityLifecycleSyncService:
                 payload=raw_payload,
             )
         )
+        normalized_digest = hashlib.sha256(batch.payload).hexdigest()
+        normalized_uri = self._raw_payload_store.put(
+            RawPayload(
+                object_key=(
+                    f"normalized/{_CAPABILITY}/{batch.provider_id}/"
+                    f"{batch.observed_at:%Y/%m/%d}/{normalized_digest}.json"
+                ),
+                content_sha256=normalized_digest,
+                content_type=batch.content_type,
+                payload=batch.payload,
+            )
+        )
         publication = self._repository.publish_lifecycle(
             exchange=exchange,
             target_date=target_date,
@@ -95,10 +107,34 @@ class EquityLifecycleSyncService:
             provider_id=batch.provider_id,
             source_payload_sha256=raw_digest,
             raw_uri=raw_uri,
+            normalized_uri=normalized_uri,
             observed_at=batch.observed_at,
             upstream_source=batch.upstream_source,
             adapter_version=batch.adapter_version,
             schema_fingerprint=batch.schema_fingerprint or schema_fingerprint,
+        )
+        return _result(exchange, publication)
+
+    async def replay_last(self, *, exchange: Exchange) -> EquityLifecycleSyncResult:
+        """从最后成功检查点重放标准证据，不再次访问供应商或改变原始观测时间。"""
+        checkpoint = self._repository.get_replay_checkpoint(exchange=exchange)
+        if checkpoint is None:
+            raise ValueError("equity lifecycle replay checkpoint is unavailable")
+        normalized_payload = self._raw_payload_store.get(checkpoint.normalized_uri)
+        entries, _ = decode_equity_lifecycle_batch(normalized_payload, exchange=exchange)
+        raw_payload = self._raw_payload_store.get(checkpoint.raw_uri)
+        publication = self._repository.publish_lifecycle(
+            exchange=exchange,
+            target_date=checkpoint.target_date,
+            entries=entries,
+            provider_id=checkpoint.provider_id,
+            source_payload_sha256=hashlib.sha256(raw_payload).hexdigest(),
+            raw_uri=checkpoint.raw_uri,
+            normalized_uri=checkpoint.normalized_uri,
+            observed_at=checkpoint.observed_at,
+            upstream_source=checkpoint.upstream_source,
+            adapter_version=checkpoint.adapter_version,
+            schema_fingerprint=checkpoint.schema_fingerprint,
         )
         return _result(exchange, publication)
 
@@ -186,7 +222,7 @@ def _optional_date(row: dict[str, object], key: str) -> date | None:
 
 
 def _optional_string(row: dict[str, object], key: str) -> str | None:
-    """读取可空字符串字段，空白值不能绕过人工审批引用校验。"""
+    """读取可空字符串字段，空白值不能绕过来源更正证据校验。"""
     value = row.get(key)
     return None if value is None else str(value)
 

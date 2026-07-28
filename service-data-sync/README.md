@@ -1,8 +1,9 @@
 # service-data-sync
 
-财经与股票基础数据同步服务。当前包含工程基础设施、P0 个股未复权日线、行业/概念板块三周期行情，以及
-A 股证券主数据和显式上市生命周期的受控同步闭环：provider-neutral port、独立 adapter、S3 raw evidence、
-PostgreSQL canonical revision 和人工 CLI。
+财经与股票基础数据同步服务。当前包含工程基础设施、个股日/周/月独立行情、复权因子、公司行动、公司概况、
+行业/概念板块三周期行情、申万三级行业与估值、A 股证券主数据和显式上市生命周期、财务与估值、日频资金流。
+各链路经 provider-neutral port、独立 adapter、S3 raw evidence、PostgreSQL canonical revision、
+publication、CLI 与 Celery 任务闭环。
 
 技术方案见 [0001：同步服务工程基础设施](../docs/service-data-sync/0001-data-sync-foundation/index.html)。
 板块跨服务读取与 API 路径见
@@ -15,18 +16,43 @@ PostgreSQL canonical revision 和人工 CLI。
   `GET /internal/v1/equities`、`GET /internal/v1/equities/{exchange}/{symbol}` 和
   `GET /internal/v1/equities/{exchange}/{symbol}/listing-status-history`。路由仅接受
   `DATA_SYNC_INTERNAL_API_BEARER_TOKEN`，不暴露 raw、供应商字段、数据库键或 `PENDING` 身份。
-- 已有 P0 Alembic revision：证券占位身份、source batch、按年分区的日线修订和 publication 元数据。
+- 方案 0011 已实现个股市场扩展迁移：`equity_weekly_bar`、`equity_monthly_bar`、
+  `equity_adjustment_factor`、`equity_corporate_action_version`、`equity_profile_version` 和
+  `equity_sync_checkpoint`。周/月线各自按年分区并独立发布。
 - 已实现 AKShare 腾讯未复权日线 adapter；默认关闭，只有设置 `DATA_SYNC_AKSHARE_ENABLED=true` 才会注册。
+- 已实现 AKShare 东财周/月线直采 adapter、新浪累计后复权因子、东财公司行动和巨潮公司概况 adapter。
+  周/月分别调用 `stock_zh_a_hist(period="weekly"|"monthly")`，只写各自物理表，不读取日线生成。
+  设置 `DATA_SYNC_AKSHARE_ENABLED=true` 与 `DATA_SYNC_EQUITY_MARKET_ENABLED=true` 后注册这些能力；
+  `DATA_SYNC_EQUITY_SCHEDULER_ENABLED=true` 再开启六类独立调度。单证券任务按每 worker 30 次/分钟
+  限速；adapter 标记的瞬时失败最多重试 3 次，失败不推进 checkpoint。
+- 已实现方案 0011 内部读取路由：`GET /internal/v1/equities/{exchange}/{symbol}/bars`、
+  `adjustment-factors`、`corporate-actions` 和 `company-profile`。列表使用与 publication 和查询范围绑定的
+  HMAC 游标，支持 ETag 304 与 `X-Data-Version`。
 - 已实现东财行业/概念板块的日线、周线、月线 adapter；三个周期分别调用上游参数、分别存入
   `sector_daily_bar`、`sector_weekly_bar`、`sector_monthly_bar`，绝不由日线计算。除 `DATA_SYNC_AKSHARE_ENABLED=true`
   外，还必须显式设置 `DATA_SYNC_SECTOR_ENABLED=true`。
 - 已实现行业/概念目录 CLI；目录快照写入 raw evidence 后会激活带名称的 `ACTIVE` 身份。行情先创建的 `PENDING` 身份会保留 UUID 后升级；已实现板块成分当前快照、观测区间、固定 release、双向 internal 读取与手动 CLI。
-- 已实现行业/概念板块 EOD 完整横截面 adapter、raw evidence、revision、质量门、内部读取、受控手工 CLI、shadow scheduler、租约 reaper、publication rollback、结构化任务日志与 2026 沪深公告交易日历。它只保存 `post_close_observation`，不宣称官方终态；全部 EOD 开关默认关闭。2026 年以外日期安全阻断，且许可、单位对账、连续探针与生产观测验收仍未完成；仓内未选择或引入监控平台。
-- 默认日线 CLI 只拉最近 31 个自然日；首次回填、复权、财务和定时调度尚未实现。
+- 已实现行业/概念板块 EOD 完整横截面 adapter、raw evidence、revision、质量门、内部读取、受控手工 CLI、shadow scheduler、租约 reaper、publication rollback、结构化任务日志与 2026 沪深公告交易日历。它只保存 `post_close_observation`，不宣称官方终态；全部 EOD 开关默认关闭。2026 年以外日期安全阻断，且单位对账、连续探针与生产观测验收仍未完成；仓内未选择或引入监控平台。
+- 个股行情 CLI 默认拉最近 31 个自然日；传 `--full-history` 从 1990-12-19 回填。`--period 1w` 和
+  `--period 1mo` 始终走上游独立周期接口。
 - 已实现证券目录、双时间身份/名称/上市状态、交易所独立 publication、全市场稳定聚合、内部读取和公开 API
   代理。目录缺席、空响应和行情缺席不会改变生命周期；显式退市、暂停和恢复只能经专用生命周期 port 发布。
-- 生命周期 CLI 已实现，但当前没有获准的生命周期来源 adapter；`data-sync-equity-lifecycle` 会拒绝空注册表。
-  东财目录 adapter 仅限 research/pilot，不构成生产来源许可。
+- 已实现固定 AKShare 版本的交易所生命周期 adapter，直接读取沪深北交易所显式上市或退市事实；每批保留
+  raw/normalized evidence、schema fingerprint、双时间 revision、checkpoint、publication 和离线 replay。
+  所有行情、资金流、财务及板块成分证券写入均按业务日期解析不可变 `security_id`，代码复用冲突返回 409。
+- 已实现申万一、二、三级 taxonomy、父级闭包和估值观察：固定版本 adapter、方法学血缘、raw/replay、
+  canonical revision、质量门、checkpoint、publication、受控 backfill、CLI/Celery 与三条内部读取路径。
+  资金流不属于该链路，完整归属方案 0017。
+- 0016 财务与估值已实现 AKShare 东财三表、报告期指标和历史估值 adapter，完整 raw evidence、canonical
+  双时态 revision、独立 publication、平台派生指标、受控单证券 CLI 与无 beat schedule 的 Celery 任务。仅
+  `DATA_SYNC_FINANCIAL_SOURCE_POLICY=akshare-eastmoney` 会注册该 adapter；其他策略保持未注册。
+- 0016 的四条财务内部读取路径均在存在精确 production publication 时返回冻结双时态视图、HMAC 续页游标、
+  ETag 200/304 与 `X-Data-Version`。缺失、已替代或不可读时统一返回
+  `financial-publication-unavailable`（503）；任何路径均不暴露 research、raw、quarantine、内部数据库键或
+  半成品 revision。
+- 已实现方案 0017 的个股、板块、市场日频资金流及供应商排行 adapter、raw evidence、显式方法学、
+  canonical revision、质量门、checkpoint、publication、恢复、CLI/Celery 和五条内部读取路径。
+  固定版本在线探针未通过完整性门禁的方法学保持 research，production 读取统一 fail-closed。
 - 所有未来外部数据只能通过 provider-neutral port 与独立 adapter 获取。
 - application、task、质量、持久化代码禁止直接调用数据源 SDK、HTTP 或具体 adapter。
 
@@ -34,7 +60,7 @@ PostgreSQL canonical revision 和人工 CLI。
 
 同步服务当前数据库定义以
 [`models/registry.py`](src/service_data_sync/infrastructure/database/models/registry.py) 为唯一入口：它显式登记全部
-32 张逻辑表。每张表各有一个模型文件，字段、PostgreSQL 类型、可空性、中文含义、主外键、约束和索引都写在
+已登记逻辑表。每张表各有一个模型文件，字段、PostgreSQL 类型、可空性、中文含义、主外键、约束和索引都写在
 该文件中；模型按 `execution`、`provenance`、`publication`、`equity`、`sector/catalog`、`sector/market_data`、
 `sector/membership` 和 `sector/eod` 分组。物理分区不是独立业务表，规则见
 [`partition_manager.py`](src/service_data_sync/infrastructure/database/partition_manager.py)。
@@ -58,7 +84,7 @@ service-data-sync/
 禁止在 `src/service_data_sync/` 生产源码旁平铺 `test_*.py`。新增细分功能域时，在对应测试分类下建立
 同名功能子目录；只有跨功能模块的集成与架构测试保留在服务级分类根部。
 
-## P0 最近一个月同步
+## 个股日/周/月、复权与公司资料同步
 
 先启动本地数据同步基础设施并完成迁移，再显式开启研究来源：
 
@@ -69,11 +95,22 @@ docker build --target test --tag quant-v2/service-data-sync:test service-data-sy
 docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
   --profile data-sync-infra --profile data-sync-test run --rm data-sync-test \
   /bin/sh -ec 'alembic upgrade head && DATA_SYNC_AKSHARE_ENABLED=true \
-  data-sync-equity-bars --instrument SSE.600519'
+  DATA_SYNC_EQUITY_MARKET_ENABLED=true \
+  data-sync-equity-bars --instrument SSE.600519 --period 1w --full-history'
 ~~~
 
 未传 `--start` 与 `--end` 时，CLI 从当日向前取 31 个自然日。`--start`、`--end` 均为包含端 ISO 日期；
-重复同一窗口只记录新的 raw 观测，不会创建重复 canonical revision 或新的 publication version。
+重复同一窗口只记录新的 raw 观测，不会创建重复 canonical revision 或新的 publication version。参考数据使用：
+
+~~~sh
+DATA_SYNC_AKSHARE_ENABLED=true DATA_SYNC_EQUITY_MARKET_ENABLED=true \
+data-sync-equity-reference --instrument SSE.600519 --dataset all --full-history
+~~~
+
+`--dataset` 可选 `factor`、`action`、`profile` 或 `all`。内部机器契约见
+[`0018-data-sync-equity-market-data-internal.openapi.yaml`](../docs/contracts/0018-data-sync-equity-market-data-internal.openapi.yaml)；
+service-api 公开 POST 契约见
+[`0019-service-api-equity-market-data.openapi.yaml`](../docs/contracts/0019-service-api-equity-market-data.openapi.yaml)。
 
 ## P0 板块三周期同步
 
@@ -92,7 +129,7 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
   --start 2026-06-01 --end 2026-06-30'
 ~~~
 
-上例只适用于获准的 local/research 来源。生产开关继续保持关闭，直到许可、频率、留存和连续稳定性完成评审。
+环境开关默认关闭；在目标环境完成单位、schema、频率与连续稳定性验证后按 capability 开启。
 
 ## 板块 EOD 横截面同步
 
@@ -110,8 +147,8 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
   data-sync-sector-eod --scheme eastmoney.industry --trade-date 2026-07-27'
 ~~~
 
-该命令默认只写 `candidate`，只能用于获准的 local/research/shadow。2026 年可在显式开启
-`DATA_SYNC_TRADING_CALENDAR_ENABLED=true` 后使用沪深公告日历；其他年份、来源许可、单位与连续稳定性仍未获批准，
+该命令默认只写 `candidate`。2026 年可在显式开启
+`DATA_SYNC_TRADING_CALENDAR_ENABLED=true` 后使用沪深公告日历；其他年份、单位与连续稳定性尚未完成技术验证，
 缺少或未知日历时命令会在访问 provider 前停止。只有 `DATA_SYNC_SECTOR_EOD_PUBLISH_ENABLED=true` 且显式传入
 `--publish` 才会推进 `dataset_publication`，生产开关必须保持关闭。
 
@@ -153,8 +190,8 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
 
 ## 板块成分观测历史
 
-成分 CLI 只接受单一、已显式开启的来源；默认 `DATA_SYNC_SECTOR_MEMBERSHIP_ENABLED=false`，且 AKShare/东方财富
-许可、频率、raw 留存与再分发边界尚未获生产批准。完整快照才会更新 observed 区间；PENDING、quarantine、空响应、
+成分 CLI 只接受单一、已显式开启的来源；默认 `DATA_SYNC_SECTOR_MEMBERSHIP_ENABLED=false`。完整快照才会更新
+observed 区间；PENDING、quarantine、空响应、
 结构异常或质量阻断不会关闭任何关系。公开读取只经固定 release，`observedFrom`/`observedTo` 不是实际调入或调出日期。
 
 ~~~sh
@@ -183,9 +220,9 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
   data-sync-equity-catalog --all-exchanges'
 ~~~
 
-`data-sync-equity-lifecycle --exchange SSE --target-date YYYY-MM-DD` 仅在平台注册一个已经过来源、字段语义、
-频率和留存审批的显式生命周期 adapter 后可运行。退市后状态反转只能使用 `OFFICIAL_CORRECTION`，并且标准
-证据必须携带人工审批引用；代码复用候选会被隔离，不能绑定到已退市证券。
+`data-sync-equity-lifecycle --exchange SSE --target-date YYYY-MM-DD` 使用固定版本交易所显式事实 adapter；
+可通过 replay 模式从最后成功 checkpoint 恢复而不再次访问上游。退市后状态反转只能使用
+`OFFICIAL_CORRECTION` 并携带可追溯来源证据引用；代码复用候选会被隔离，不能绑定到已退市证券。
 
 ## 前置条件
 
@@ -257,3 +294,46 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env --profile dat
 
 容器内使用 Compose service DNS；宿主机诊断使用 .env 中的 127.0.0.1 endpoint。
 生产环境只接受 `DATA_SYNC_IMAGE_REF` immutable digest，PostgreSQL、Redis 和 MinIO 不发布宿主机端口。
+
+## 财务与估值 dark launch
+
+`DATA_SYNC_FINANCIAL_ENABLED=false` 与 `DATA_SYNC_FINANCIAL_SOURCE_POLICY=disabled` 是默认状态。启用东财财务
+同步时，设置 `DATA_SYNC_AKSHARE_ENABLED=true`、`DATA_SYNC_FINANCIAL_ENABLED=true`、
+`DATA_SYNC_FINANCIAL_SOURCE_POLICY=akshare-eastmoney`，并同时提供
+`DATA_SYNC_FINANCIAL_MAX_CONCURRENCY`、`DATA_SYNC_FINANCIAL_REQUESTS_PER_MINUTE` 与
+`DATA_SYNC_FINANCIAL_REQUEST_TIMEOUT_SECONDS`；缺少任一项时服务拒绝启动。
+
+worker 注册 `service_data_sync.financial.probe` 和受控的
+`service_data_sync.financial.sync_security(exchange, symbol)`，没有 beat schedule。手工同步使用：
+
+```bash
+data-sync-financial --exchange SSE --symbol 600519
+```
+
+同步依次归档三表、指标和估值的 raw evidence；三项标准载荷均成功后才分别推进各自的 canonical 与
+publication。平台派生指标使用独立输入 publication 和公式版本，可执行：
+
+```bash
+data-sync-financial-derived --exchange SSE --symbol 600519
+```
+
+## 申万行业与日频资金流
+
+申万同步默认关闭；启用 `DATA_SYNC_AKSHARE_ENABLED=true`、`DATA_SYNC_SECTOR_ENABLED=true` 与
+`DATA_SYNC_SW_SECTOR_ENABLED=true` 后，可运行：
+
+```bash
+data-sync-sw-sector --snapshot-date 2026-07-28
+```
+
+日频资金流默认关闭；启用 `DATA_SYNC_AKSHARE_ENABLED=true` 与 `DATA_SYNC_MONEY_FLOW_ENABLED=true`
+后，可按 CLI 帮助选择个股、板块、市场或供应商排行分区：
+
+```bash
+data-sync-money-flow --help
+```
+
+申万机器契约见
+[`0020-data-sync-sw-sector-internal.openapi.yaml`](../docs/contracts/0020-data-sync-sw-sector-internal.openapi.yaml)；
+资金流机器契约见
+[`0015-data-sync-daily-money-flow-internal.openapi.yaml`](../docs/contracts/0015-data-sync-daily-money-flow-internal.openapi.yaml)。

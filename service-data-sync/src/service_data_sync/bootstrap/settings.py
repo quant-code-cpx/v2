@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import Field, SecretStr, ValidationError, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from service_data_sync.bootstrap.errors import ConfigurationError
@@ -55,6 +55,14 @@ class Settings(BaseSettings):
         validation_alias="DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS",
     )
     akshare_enabled: bool = Field(default=False, validation_alias="DATA_SYNC_AKSHARE_ENABLED")
+    equity_market_enabled: bool = Field(
+        default=False,
+        validation_alias="DATA_SYNC_EQUITY_MARKET_ENABLED",
+    )
+    equity_scheduler_enabled: bool = Field(
+        default=False,
+        validation_alias="DATA_SYNC_EQUITY_SCHEDULER_ENABLED",
+    )
     sector_enabled: bool = Field(default=False, validation_alias="DATA_SYNC_SECTOR_ENABLED")
     sector_membership_enabled: bool = Field(
         default=False,
@@ -71,6 +79,37 @@ class Settings(BaseSettings):
     sector_eod_scheduler_enabled: bool = Field(
         default=False,
         validation_alias="DATA_SYNC_SECTOR_EOD_SCHEDULER_ENABLED",
+    )
+    sw_sector_enabled: bool = Field(
+        default=False,
+        validation_alias="DATA_SYNC_SW_SECTOR_ENABLED",
+    )
+    financial_enabled: bool = Field(
+        default=False,
+        validation_alias="DATA_SYNC_FINANCIAL_ENABLED",
+    )
+    money_flow_enabled: bool = Field(
+        default=False,
+        validation_alias="DATA_SYNC_MONEY_FLOW_ENABLED",
+    )
+    financial_source_policy: str = Field(
+        default="disabled",
+        validation_alias="DATA_SYNC_FINANCIAL_SOURCE_POLICY",
+    )
+    financial_max_concurrency: int | None = Field(
+        default=None,
+        ge=1,
+        validation_alias="DATA_SYNC_FINANCIAL_MAX_CONCURRENCY",
+    )
+    financial_requests_per_minute: int | None = Field(
+        default=None,
+        ge=1,
+        validation_alias="DATA_SYNC_FINANCIAL_REQUESTS_PER_MINUTE",
+    )
+    financial_request_timeout_seconds: int | None = Field(
+        default=None,
+        ge=1,
+        validation_alias="DATA_SYNC_FINANCIAL_REQUEST_TIMEOUT_SECONDS",
     )
     trading_calendar_enabled: bool = Field(
         default=False,
@@ -118,6 +157,15 @@ class Settings(BaseSettings):
             raise ValueError("must not be blank")
         return normalized
 
+    @field_validator("financial_source_policy")
+    @classmethod
+    def validate_financial_source_policy(cls, value: str) -> str:
+        """规范化财务来源策略标识；它必须是可审计配置名而非空白开关。"""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("financial source policy must not be blank")
+        return "disabled" if normalized.lower() == "disabled" else normalized
+
     @field_validator("internal_api_bearer_token")
     @classmethod
     def validate_internal_api_bearer_token(cls, value: SecretStr) -> SecretStr:
@@ -125,6 +173,35 @@ class Settings(BaseSettings):
         if len(value.get_secret_value().strip()) < 32:
             raise ValueError("must contain at least 32 characters")
         return value
+
+    @model_validator(mode="after")
+    def validate_financial_dark_launch_settings(self) -> Settings:
+        """启用财务能力前强制声明来源策略和资源预算，缺项时拒绝启动。"""
+        if self.equity_scheduler_enabled and not self.equity_market_enabled:
+            raise ValueError(
+                "DATA_SYNC_EQUITY_SCHEDULER_ENABLED requires DATA_SYNC_EQUITY_MARKET_ENABLED"
+            )
+        if self.sw_sector_enabled and (not self.akshare_enabled or not self.sector_enabled):
+            raise ValueError(
+                "DATA_SYNC_SW_SECTOR_ENABLED requires DATA_SYNC_AKSHARE_ENABLED "
+                "and DATA_SYNC_SECTOR_ENABLED"
+            )
+        if self.money_flow_enabled and not self.akshare_enabled:
+            raise ValueError("DATA_SYNC_MONEY_FLOW_ENABLED requires DATA_SYNC_AKSHARE_ENABLED")
+        if not self.financial_enabled:
+            return self
+        missing: list[str] = []
+        if self.financial_source_policy == "disabled":
+            missing.append("DATA_SYNC_FINANCIAL_SOURCE_POLICY")
+        if self.financial_max_concurrency is None:
+            missing.append("DATA_SYNC_FINANCIAL_MAX_CONCURRENCY")
+        if self.financial_requests_per_minute is None:
+            missing.append("DATA_SYNC_FINANCIAL_REQUESTS_PER_MINUTE")
+        if self.financial_request_timeout_seconds is None:
+            missing.append("DATA_SYNC_FINANCIAL_REQUEST_TIMEOUT_SECONDS")
+        if missing:
+            raise ValueError(f"financial dark launch requires: {', '.join(missing)}")
+        return self
 
 
 def load_settings() -> Settings:

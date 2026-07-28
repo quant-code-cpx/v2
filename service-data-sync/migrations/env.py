@@ -18,6 +18,31 @@ if config.config_file_name is not None:
 # 模型表达当前目标 schema；历史迁移仍使用显式 SQL 管理 PostgreSQL 分区与特殊约束。
 target_metadata = Base.metadata
 _MANAGED_TABLE_NAMES = frozenset(target_metadata.tables)
+_PARTITION_PROPAGATED_FOREIGN_KEYS = frozenset(
+    {
+        ("financial_statement_fact", frozenset({"report_period", "revision_id"})),
+        (
+            "financial_derivation_input",
+            frozenset({"derived_report_period", "derived_metric_revision_id"}),
+        ),
+        (
+            "financial_derivation_input",
+            frozenset({"input_report_period", "input_revision_id"}),
+        ),
+        (
+            "money_flow_ranking_item",
+            frozenset({"target_trade_date", "snapshot_id"}),
+        ),
+        (
+            "money_flow_ranking_manifest",
+            frozenset({"target_trade_date", "snapshot_id"}),
+        ),
+        (
+            "money_flow_ranking_metric",
+            frozenset({"target_trade_date", "snapshot_id", "supplier_position"}),
+        ),
+    }
+)
 
 
 def _include_object(
@@ -28,11 +53,21 @@ def _include_object(
     compare_to: object | None,
 ) -> bool:
     """仅比较服务逻辑表，排除迁移专属表和运行时物理分区。"""
-    del reflected, compare_to
+    del compare_to
     if type_ == "table":
         return name in _MANAGED_TABLE_NAMES
 
     table = getattr(object_, "table", None)
+    if type_ == "foreign_key_constraint" and table is not None:
+        constrained_columns = frozenset(
+            element.parent.name for element in getattr(object_, "elements", ())
+        )
+        if (table.name, constrained_columns) in _PARTITION_PROPAGATED_FOREIGN_KEYS:
+            # PostgreSQL 会把指向分区父表的复合外键反射为每个物理子表各一条。
+            # 这些约束由 integration schema parity 逐项断言，避免 autogenerate 误报删除。
+            return False
+
+    del reflected
     return table is None or table.name in _MANAGED_TABLE_NAMES
 
 

@@ -1,8 +1,8 @@
 # 0015：财务点时模型与估值序列边界
 
-- 状态：Proposed
-- 日期：2026-07-27
-- 决策者：项目维护者（待评审）
+- 状态：Implemented
+- 日期：2026-07-28
+- 决策者：项目维护者
 - 关联方案：[财务报表与估值技术方案](../service-data-sync/0016-financial-statements-valuation/index.html)
 - 关联决策：[ADR-0009](0009-equity-data-source-and-serving-boundary.md)
 - 关联契约：
@@ -16,16 +16,16 @@
 估值时序又分别拥有不同方法学、单位与修订行为；把它们塞进同一张“财务指标”表会制造前视偏差和
 不可审计的口径混用。
 
-AKShare 1.18.78 提供东方财富三表、主要指标以及百度估值候选，也有新浪三表候选。现有探针只证明
-候选函数及短时响应，不证明许可、持续稳定、历史修订、公告时点或字段语义。ADR-0009 已明确本项目
-不采用 Tushare，并要求每项 capability 独立准入。
+AKShare 1.18.78 提供东方财富三表、主要指标及历史估值函数，也有其他供应商候选。0016 选用东方财富
+三表、报告期主要指标和历史估值作为初始技术实现；所有 SDK 参数和字段留在独立 adapter，其他候选不参与
+运行时 fallback 或数据拼接。
 
 ## 约束
 
 - `service-data-sync` 是财务 canonical 数据、原始证据和发布版本的唯一所有者。
 - 外部 SDK、URL、参数和供应商字段只能存在于 adapter；adapter 不得写 canonical 数据库。
 - `service-api` 只能调用版本化内部 HTTP API，不得读取同步库、对象存储或供应商。
-- 当前没有财务或估值新增来源获得生产批准；生产启用受许可、稳定性、语义和点时性门禁阻塞。
+- 财务 source policy 精确为 `akshare-eastmoney` 时才注册东财 adapter；默认关闭，且没有自动调度。
 - 金额、比率和估值使用 PostgreSQL `NUMERIC` 与 API 十进制字符串，不使用二进制浮点。
 
 ## 候选方案
@@ -103,26 +103,19 @@ AKShare 1.18.78 提供东方财富三表、主要指标以及百度估值候选�
 schema fingerprint、样例摘要和批次引用；不会被丢弃，也不会写入未治理 JSON/EAV 列。字典变更需要
 fixture、单位、符号和适用报表类型评审后，以 migration 或受控种子版本发布。
 
-### 5. 来源准入
+### 5. 来源实现
 
-继承 ADR-0009：不采用 Tushare。AKShare 1.18.78 候选只允许 local/research shadow：
+初始实现使用 AKShare 1.18.78 的东方财富函数，且一个 adapter 同时提供三项独立 capability：
 
-- 东方财富：
-  `stock_balance_sheet_by_report_em`、`stock_profit_sheet_by_report_em`、
-  `stock_cash_flow_sheet_by_report_em` 及三个 `*_by_report_delisted_em`；
-  `stock_financial_analysis_indicator_em(..., "按报告期"|"按单季度")`。
-- 百度股市通：`stock_zh_valuation_baidu(symbol, indicator, period)`。
-- 新浪：`stock_financial_report_sina` 只保留研究候选，不是获批主源。
+- 三表：`stock_balance_sheet_by_report_em`、`stock_profit_sheet_by_report_em`、
+  `stock_cash_flow_sheet_by_report_em(symbol='SH600519')`；
+- 报告期指标：`stock_financial_analysis_indicator_em(symbol='600519.SH', indicator='按报告期')`；
+- 历史估值：`stock_value_em(symbol='600519')`，固定投影总市值、`PE(TTM)`、`PE(静)`、市净率和市现率。
 
-任一 capability 进入生产前必须分别通过：
-
-1. 上游许可、商业使用、请求频率、缓存与留存批准。
-2. 至少 5 个连续交易日的稳定性门禁；正式评审目标为 30 个交易日，并覆盖沪深北、正常与退市样本。
-3. 字段、单位、累计/单季、合并范围、公告/更新时间、修订和空值语义 fixture。
-4. 点时性门禁：能证明公告时间，或明确接受保守 `observedAt`、禁止历史可见性声明。
-5. 独立 source policy 评审；不因同名字段自动 fallback 或跨源拼接。
-
-未通过时可以实现 schema、任务和 shadow 质量报告，但不得创建生产 publication。
+只有 `DATA_SYNC_AKSHARE_ENABLED=true`、`DATA_SYNC_FINANCIAL_ENABLED=true` 和
+`DATA_SYNC_FINANCIAL_SOURCE_POLICY=akshare-eastmoney` 同时成立时，来源注册表才暴露上述能力。同步按单证券
+手工 CLI 或显式 Celery task 触发；无 beat schedule。三个 capability 独立归档 raw、追加 revision 和发布，
+不得自动 fallback、跨源拼接或借由一个能力失败伪造整套成功。
 
 ### 6. 服务边界
 
@@ -163,8 +156,6 @@ payload hash 非唯一，只用于查询重复内容和复用内容寻址 raw �
 
 ## 待决
 
-- 各候选来源的生产许可、请求预算、缓存和 raw retention。
 - 东方财富公告/更新字段在正常、修订、退市和金融行业样本上的精确定义。
-- 百度估值总市值单位、日期截点、复权/股本口径与修订行为。
 - 首批平台派生指标清单、公式版本和会计准则差异处理。
-- 30 个交易日验收是否作为正式生产硬门槛；当前最低门槛仍为 ADR-0009 的 5 个交易日。
+- 退市报表路由、全市场调度 cadence 与 service-api 对外读取边界。

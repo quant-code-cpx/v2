@@ -16,6 +16,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 
 from service_data_sync.application.ports.equity_master_read import EquityMasterReadRepository
+from service_data_sync.application.ports.financial_read import FinancialReadRepository
+from service_data_sync.application.ports.market_data import EquityMarketDataRepository
+from service_data_sync.application.ports.money_flow import MoneyFlowReadRepository
 from service_data_sync.application.ports.sector_eod import SectorEodRepository
 from service_data_sync.application.ports.sector_market_data import (
     DatasetPublication,
@@ -23,11 +26,21 @@ from service_data_sync.application.ports.sector_market_data import (
     StoredSector,
 )
 from service_data_sync.application.ports.sector_membership import SectorMembershipRepository
+from service_data_sync.application.ports.sw_sector import SwSectorRepository
 from service_data_sync.bootstrap.container import ServiceContainer, build_container
 from service_data_sync.bootstrap.settings import Settings, load_settings
 from service_data_sync.domain.sector import SectorBar, SectorIdentifier, SectorPeriod, SectorScheme
+from service_data_sync.infrastructure.persistence.equity_market_data_repository import (
+    SqlAlchemyEquityMarketDataRepository,
+)
 from service_data_sync.infrastructure.persistence.equity_master_read_repository import (
     SqlAlchemyEquityMasterReadRepository,
+)
+from service_data_sync.infrastructure.persistence.financial_read_repository import (
+    SqlAlchemyFinancialReadRepository,
+)
+from service_data_sync.infrastructure.persistence.money_flow_read_repository import (
+    SqlAlchemyMoneyFlowReadRepository,
 )
 from service_data_sync.infrastructure.persistence.sector_eod_repository import (
     SqlAlchemySectorEodRepository,
@@ -37,6 +50,9 @@ from service_data_sync.infrastructure.persistence.sector_market_data_repository 
 )
 from service_data_sync.infrastructure.persistence.sector_membership_repository import (
     SqlAlchemySectorMembershipRepository,
+)
+from service_data_sync.infrastructure.persistence.sw_sector_repository import (
+    SqlAlchemySwSectorRepository,
 )
 
 _CATALOG_DATASET = "sector.catalog.raw"
@@ -60,9 +76,13 @@ def create_app(
     repository: SectorMarketDataRepository | None = None,
     eod_repository: SectorEodRepository | None = None,
     equity_repository: EquityMasterReadRepository | None = None,
+    equity_market_repository: EquityMarketDataRepository | None = None,
     membership_repository: SectorMembershipRepository | None = None,
+    financial_repository: FinancialReadRepository | None = None,
+    sw_repository: SwSectorRepository | None = None,
+    money_flow_repository: MoneyFlowReadRepository | None = None,
 ) -> FastAPI:
-    """构造共享只读内部应用；运行时独占 canonical 数据读取与服务凭据校验。"""
+    """构造共享只读内部应用；运行时独占 `canonical` 数据读取与服务凭据校验。"""
     resolved_settings = settings or load_settings()
     container: ServiceContainer | None = None
     if repository is None:
@@ -72,8 +92,19 @@ def create_app(
             eod_repository = SqlAlchemySectorEodRepository(container.database)
         if equity_repository is None:
             equity_repository = SqlAlchemyEquityMasterReadRepository(container.database)
+        if equity_market_repository is None:
+            equity_market_repository = SqlAlchemyEquityMarketDataRepository(container.database)
         if membership_repository is None:
             membership_repository = SqlAlchemySectorMembershipRepository(container.database)
+        if financial_repository is None:
+            financial_repository = SqlAlchemyFinancialReadRepository(container.database)
+        if sw_repository is None:
+            sw_repository = SqlAlchemySwSectorRepository(container.database)
+        if money_flow_repository is None:
+            money_flow_repository = SqlAlchemyMoneyFlowReadRepository(
+                container.database,
+                cursor_secret=resolved_settings.internal_api_bearer_token.get_secret_value().encode(),
+            )
     credential = resolved_settings.internal_api_bearer_token.get_secret_value()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -130,6 +161,100 @@ def create_app(
         """返回进程存活状态；该探针仅位于内部网络且不读取业务数据。"""
         return {"status": "ok"}
 
+    def financial_unavailable_problem() -> InternalProblem:
+        """返回未发布财务数据的脱敏依赖失败，绝不把 `research` 或隔离数据降级暴露。"""
+        return InternalProblem(
+            status=503,
+            code="financial-publication-unavailable",
+            detail="Financial data is not published",
+        )
+
+    def financial_validation_problem(detail: str) -> InternalProblem:
+        """将财务暗发布的业务范围校验统一映射为 `v1` 参数问题。"""
+        return InternalProblem(status=400, code="validation-error", detail=detail)
+
+    def financial_report_not_found_problem() -> InternalProblem:
+        """返回已发布视图中不可见报表的脱敏缺失问题，不暴露 revision 或质量细节。"""
+        return InternalProblem(
+            status=404,
+            code="financial-report-not-found",
+            detail="Financial report is not found",
+        )
+
+    def financial_cursor_problem() -> InternalProblem:
+        """将财务游标与当前请求不一致统一映射为不可续页问题。"""
+        return InternalProblem(
+            status=409,
+            code="cursor-mismatch",
+            detail="Financial cursor does not match request",
+        )
+
+    def money_flow_unavailable_problem() -> InternalProblem:
+        """返回没有可消费技术发布的资金流依赖失败。"""
+        return InternalProblem(
+            status=503,
+            code="money-flow-publication-unavailable",
+            detail="Money-flow data is not published",
+        )
+
+    def money_flow_not_found_problem() -> InternalProblem:
+        """返回当前发布中不存在的资金流资源。"""
+        return InternalProblem(
+            status=404,
+            code="money-flow-not-found",
+            detail="Money-flow resource is not found",
+        )
+
+    def money_flow_validation_problem(detail: str) -> InternalProblem:
+        """把资金流查询范围错误映射为稳定参数问题。"""
+        return InternalProblem(status=400, code="validation-error", detail=detail)
+
+    def money_flow_conflict_problem(detail: str) -> InternalProblem:
+        """把游标不匹配或证券身份边界映射为稳定冲突。"""
+        return InternalProblem(status=409, code="query-conflict", detail=detail)
+
+    from service_data_sync.interfaces.internal_money_flow_api import (
+        register_money_flow_routes,
+    )
+
+    register_money_flow_routes(
+        app,
+        require_service_bearer=require_service_bearer,
+        unavailable_problem=money_flow_unavailable_problem,
+        not_found_problem=money_flow_not_found_problem,
+        validation_problem=money_flow_validation_problem,
+        conflict_problem=money_flow_conflict_problem,
+        repository=money_flow_repository,
+    )
+
+    # 财务路由只在精确 `publication` 已存在时读取，
+    # 避免消费者误读 `research` 或半成品 `revision`。
+    from service_data_sync.interfaces.internal_financial_api import register_financial_routes
+
+    register_financial_routes(
+        app,
+        require_service_bearer=require_service_bearer,
+        unavailable_problem=financial_unavailable_problem,
+        not_found_problem=financial_report_not_found_problem,
+        validation_problem=financial_validation_problem,
+        cursor_problem=financial_cursor_problem,
+        # 内部认证凭据只作为游标完整性密钥，游标本身不承载认证能力。
+        cursor_secret=credential.encode(),
+        repository=financial_repository,
+    )
+
+    if sw_repository is not None:
+        from service_data_sync.interfaces.internal_sw_sector_api import (
+            register_sw_sector_routes,
+        )
+
+        register_sw_sector_routes(
+            app,
+            repository=sw_repository,
+            require_service_bearer=require_service_bearer,
+            cursor_secret=credential.encode(),
+        )
+
     if equity_repository is not None:
         # 延迟导入避免证券路由模块在应用工厂完成定义前反向加载本模块。
         from service_data_sync.interfaces.internal_equity_api import register_equity_routes
@@ -137,6 +262,19 @@ def create_app(
         register_equity_routes(
             app,
             repository=equity_repository,
+            require_service_bearer=require_service_bearer,
+            cursor_secret=credential.encode(),
+        )
+
+    if equity_market_repository is not None:
+        # 行情、因子、事件和概况独立于主数据双时态路由注册，但共用服务认证。
+        from service_data_sync.interfaces.internal_equity_market_api import (
+            register_equity_market_routes,
+        )
+
+        register_equity_market_routes(
+            app,
+            repository=equity_market_repository,
             require_service_bearer=require_service_bearer,
             cursor_secret=credential.encode(),
         )

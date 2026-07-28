@@ -3,7 +3,7 @@ info:
   title: service-data-sync equity instrument internal API
   version: 1.0.0
   description: |
-    Proposed service-to-service read contract for published Shanghai, Shenzhen,
+    Implemented service-to-service read contract for published Shanghai, Shenzhen,
     and Beijing A-share instrument master data. service-data-sync owns canonical
     identity, bitemporal names and listing lifecycle. Raw evidence, provider
     fields, PENDING placeholders, quarantined conflicts, and database keys are
@@ -11,10 +11,14 @@ info:
     removed by service-api before any public response.
 
     This contract is the implementation authority for the equity catalog,
-    equity detail, and listing-status history portions that overlap proposed
+    equity detail, and listing-status history portions that overlap
     contract 0003. Bars, adjustment factors, corporate actions, and financial
     data remain governed by contract 0003.
-  x-contract-status: Proposed
+
+    Contract C1 is active: exchange and symbol are resolved from bitemporal
+    identifier versions at each fact date and knowledge time. The compatibility
+    columns on equity_instrument are display projections, not identity authority.
+  x-contract-status: Implemented
   x-partially-supersedes: 0003-data-sync-equity-internal.openapi.yaml
 servers:
   - url: http://service-data-sync:8000

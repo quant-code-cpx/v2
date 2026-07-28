@@ -3,11 +3,11 @@ info:
   title: service-api daily money-flow API
   version: 2.0.0
   description: |
-    Proposed authenticated projection of published vendor-derived daily
+    Implemented authenticated projection of published vendor-derived daily
     money-flow series and supplier ranking snapshots. Methodology discovery is
     mandatory. The API exposes no ambiguous generic money-flow value and never
     combines providers, methodologies, daily observations, or rolling windows.
-  x-contract-status: Proposed
+  x-contract-status: Implemented
 x-http-method-policy: post-only
 servers:
   - url: /api/v1
@@ -25,8 +25,8 @@ paths:
       summary: Discover published money-flow methodologies
       description: |
         Returns only API-eligible methodology versions. If no source has passed
-        production approval, no public publication exists and the route returns
-        503 rather than exposing research candidates.
+        the technical publication gates, no public publication exists and the
+        route returns 503 rather than exposing research candidates.
       parameters:
         - $ref: '#/components/parameters/SemanticFamily'
         - $ref: '#/components/parameters/MethodologyStatus'

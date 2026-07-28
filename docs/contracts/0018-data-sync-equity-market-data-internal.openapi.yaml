@@ -1,0 +1,580 @@
+openapi: 3.1.0
+info:
+  title: service-data-sync equity market data internal API
+  version: 1.0.0
+  description: |
+    Implemented internal read contract for scheme 0011. Daily, weekly, and monthly bars
+    come from three independent canonical tables. Weekly and monthly responses are never
+    aggregated from daily bars.
+x-contract-status: Implemented
+x-implemented-by:
+  - service-data-sync/src/service_data_sync/interfaces/internal_equity_market_api.py
+servers:
+  - url: http://service-data-sync:8000
+security:
+  - serviceBearer: []
+paths:
+  /internal/v1/equities/{exchange}/{symbol}/bars:
+    get:
+      operationId: listInternalEquityMarketBars
+      summary: Read direct upstream daily, weekly, or monthly bars
+      parameters:
+        - $ref: '#/components/parameters/ExchangePath'
+        - $ref: '#/components/parameters/SymbolPath'
+        - name: period
+          in: query
+          schema:
+            $ref: '#/components/schemas/BarPeriod'
+          required: false
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: adjust
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/AdjustmentMode'
+        - name: adjustAsOf
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - $ref: '#/components/parameters/Cursor'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 2000
+            default: 500
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Published bar window
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquityBarPage'
+        '304':
+          description: Representation is unchanged
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /internal/v1/equities/{exchange}/{symbol}/adjustment-factors:
+    get:
+      operationId: listInternalEquityAdjustmentFactors
+      summary: Read the sparse cumulative adjustment-factor series
+      parameters:
+        - $ref: '#/components/parameters/ExchangePath'
+        - $ref: '#/components/parameters/SymbolPath'
+        - name: start
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - $ref: '#/components/parameters/Cursor'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 500
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Published cumulative factors
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdjustmentFactorPage'
+        '304':
+          description: Representation is unchanged
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /internal/v1/equities/{exchange}/{symbol}/corporate-actions:
+    get:
+      operationId: listInternalEquityCorporateActions
+      summary: Read current dividend and share-transfer event revisions
+      parameters:
+        - $ref: '#/components/parameters/ExchangePath'
+        - $ref: '#/components/parameters/SymbolPath'
+        - name: start
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - $ref: '#/components/parameters/Cursor'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Published corporate actions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorporateActionPage'
+        '304':
+          description: Representation is unchanged
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /internal/v1/equities/{exchange}/{symbol}/company-profile:
+    get:
+      operationId: getInternalEquityCompanyProfile
+      summary: Read the current published company profile
+      parameters:
+        - $ref: '#/components/parameters/ExchangePath'
+        - $ref: '#/components/parameters/SymbolPath'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Published company profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanyProfileResponse'
+        '304':
+          description: Representation is unchanged
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+components:
+  securitySchemes:
+    serviceBearer:
+      type: http
+      scheme: bearer
+  parameters:
+    ExchangePath:
+      name: exchange
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Exchange'
+    SymbolPath:
+      name: symbol
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9]{6}$'
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: HMAC-protected cursor bound to the same publication and query range.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+  headers:
+    ETag:
+      schema:
+        type: string
+    DataVersion:
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    Exchange:
+      type: string
+      enum: [SSE, SZSE, BSE]
+    BarPeriod:
+      type: string
+      enum: [1d, 1w, 1mo]
+      default: 1d
+    AdjustmentMode:
+      type: string
+      enum: [none, qfq, hfq]
+      default: none
+    DecimalString:
+      type: string
+      pattern: '^-?[0-9]+(?:\.[0-9]+)?$'
+    NonNegativeDecimalString:
+      type: string
+      pattern: '^[0-9]+(?:\.[0-9]+)?$'
+    Publication:
+      type: object
+      required:
+        - exchange
+        - symbol
+        - dataVersion
+        - publishedAt
+        - qualityStatus
+        - stale
+      properties:
+        exchange:
+          $ref: '#/components/schemas/Exchange'
+        symbol:
+          type: string
+          pattern: '^[0-9]{6}$'
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        qualityStatus:
+          type: string
+          const: passed
+        stale:
+          type: boolean
+          const: false
+    EquityBar:
+      type: object
+      additionalProperties: false
+      required:
+        - periodEnd
+        - open
+        - high
+        - low
+        - close
+        - volumeShares
+        - amountCny
+        - turnoverRate
+        - isFinal
+        - revision
+      properties:
+        periodEnd:
+          type: string
+          format: date
+        open:
+          $ref: '#/components/schemas/NonNegativeDecimalString'
+        high:
+          $ref: '#/components/schemas/NonNegativeDecimalString'
+        low:
+          $ref: '#/components/schemas/NonNegativeDecimalString'
+        close:
+          $ref: '#/components/schemas/NonNegativeDecimalString'
+        volumeShares:
+          type: string
+          pattern: '^[0-9]+$'
+        amountCny:
+          $ref: '#/components/schemas/NonNegativeDecimalString'
+        turnoverRate:
+          oneOf:
+            - $ref: '#/components/schemas/NonNegativeDecimalString'
+            - type: 'null'
+        isFinal:
+          type: boolean
+        revision:
+          type: integer
+          minimum: 1
+    EquityBarPage:
+      allOf:
+        - $ref: '#/components/schemas/Publication'
+        - type: object
+          required:
+            - period
+            - adjustmentMode
+            - adjustAsOf
+            - factorVersion
+            - formulaVersion
+            - items
+            - nextCursor
+          properties:
+            period:
+              $ref: '#/components/schemas/BarPeriod'
+            adjustmentMode:
+              $ref: '#/components/schemas/AdjustmentMode'
+            adjustAsOf:
+              type: [string, 'null']
+              format: date
+            factorVersion:
+              type: [string, 'null']
+              format: uuid
+            formulaVersion:
+              type: [string, 'null']
+              enum: [cumulative-hfq-v1, null]
+            items:
+              type: array
+              maxItems: 2000
+              items:
+                $ref: '#/components/schemas/EquityBar'
+            nextCursor:
+              type: [string, 'null']
+              maxLength: 1024
+    AdjustmentFactor:
+      type: object
+      additionalProperties: false
+      required: [effectiveDate, cumulativeFactor, revision]
+      properties:
+        effectiveDate:
+          type: string
+          format: date
+        cumulativeFactor:
+          $ref: '#/components/schemas/NonNegativeDecimalString'
+        revision:
+          type: integer
+          minimum: 1
+    AdjustmentFactorPage:
+      allOf:
+        - $ref: '#/components/schemas/Publication'
+        - type: object
+          required: [factorVersion, items, nextCursor]
+          properties:
+            factorVersion:
+              type: string
+              format: uuid
+            items:
+              type: array
+              maxItems: 500
+              items:
+                $ref: '#/components/schemas/AdjustmentFactor'
+            nextCursor:
+              type: [string, 'null']
+              maxLength: 1024
+    CorporateAction:
+      type: object
+      additionalProperties: false
+      required:
+        - actionId
+        - revision
+        - reportPeriod
+        - status
+        - announcementDate
+        - recordDate
+        - exDate
+        - cashDividendPer10
+        - bonusSharesPer10
+        - transferSharesPer10
+      properties:
+        actionId:
+          type: string
+          format: uuid
+        revision:
+          type: integer
+          minimum: 1
+        reportPeriod:
+          type: string
+          format: date
+        status:
+          type: string
+          minLength: 1
+          maxLength: 80
+        announcementDate:
+          type: [string, 'null']
+          format: date
+        recordDate:
+          type: [string, 'null']
+          format: date
+        exDate:
+          type: [string, 'null']
+          format: date
+        cashDividendPer10:
+          oneOf:
+            - $ref: '#/components/schemas/NonNegativeDecimalString'
+            - type: 'null'
+        bonusSharesPer10:
+          oneOf:
+            - $ref: '#/components/schemas/NonNegativeDecimalString'
+            - type: 'null'
+        transferSharesPer10:
+          oneOf:
+            - $ref: '#/components/schemas/NonNegativeDecimalString'
+            - type: 'null'
+    CorporateActionPage:
+      allOf:
+        - $ref: '#/components/schemas/Publication'
+        - type: object
+          required: [items, nextCursor]
+          properties:
+            items:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/CorporateAction'
+            nextCursor:
+              type: [string, 'null']
+              maxLength: 1024
+    CompanyProfile:
+      type: object
+      additionalProperties: false
+      required:
+        - companyName
+        - englishName
+        - industry
+        - legalRepresentative
+        - establishedOn
+        - website
+        - email
+        - phone
+        - registeredAddress
+        - officeAddress
+        - mainBusiness
+        - businessScope
+        - summary
+      properties:
+        companyName:
+          type: string
+          minLength: 1
+          maxLength: 300
+        englishName:
+          type: [string, 'null']
+          maxLength: 500
+        industry:
+          type: [string, 'null']
+          maxLength: 300
+        legalRepresentative:
+          type: [string, 'null']
+          maxLength: 160
+        establishedOn:
+          type: [string, 'null']
+          format: date
+        website:
+          type: [string, 'null']
+          maxLength: 1000
+        email:
+          type: [string, 'null']
+          maxLength: 500
+        phone:
+          type: [string, 'null']
+          maxLength: 300
+        registeredAddress:
+          type: [string, 'null']
+        officeAddress:
+          type: [string, 'null']
+        mainBusiness:
+          type: [string, 'null']
+        businessScope:
+          type: [string, 'null']
+        summary:
+          type: [string, 'null']
+    CompanyProfileResponse:
+      allOf:
+        - $ref: '#/components/schemas/Publication'
+        - type: object
+          required: [revision, profile]
+          properties:
+            revision:
+              type: integer
+              minimum: 1
+            profile:
+              $ref: '#/components/schemas/CompanyProfile'
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code, detail, requestId]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        detail:
+          type: string
+        requestId:
+          type: string
+  responses:
+    BadRequest:
+      description: Invalid query
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Invalid service credential
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Instrument or resource is not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: Adjustment coverage, snapshot, or date-aware identity boundary conflict
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unavailable:
+      description: Required publication is unavailable
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'

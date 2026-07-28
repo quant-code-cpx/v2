@@ -38,3 +38,69 @@ def test_models_cover_every_migrated_logical_table_and_column() -> None:
             }
     finally:
         database.close()
+
+
+@pytest.mark.integration
+def test_financial_statement_fact_keeps_partitioned_revision_foreign_key() -> None:
+    """保证报表事实不能脱离同一报告期的报表 revision，即使 PostgreSQL 将约束下推到子分区。"""
+    database = DatabaseClient.from_settings(load_settings())
+    inspector = inspect(database.engine)
+    try:
+        foreign_keys = inspector.get_foreign_keys("financial_statement_fact", schema="public")
+        assert any(
+            set(foreign_key["constrained_columns"]) == {"report_period", "revision_id"}
+            and foreign_key["referred_table"].startswith("financial_report_revision")
+            for foreign_key in foreign_keys
+        )
+    finally:
+        database.close()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("table_name", "constrained_columns", "referred_table_prefix"),
+    (
+        (
+            "financial_derivation_input",
+            {"derived_report_period", "derived_metric_revision_id"},
+            "derived_financial_metric_revision",
+        ),
+        (
+            "financial_derivation_input",
+            {"input_report_period", "input_revision_id"},
+            "financial_report_revision",
+        ),
+        (
+            "money_flow_ranking_item",
+            {"target_trade_date", "snapshot_id"},
+            "money_flow_ranking_snapshot",
+        ),
+        (
+            "money_flow_ranking_manifest",
+            {"target_trade_date", "snapshot_id"},
+            "money_flow_ranking_snapshot",
+        ),
+        (
+            "money_flow_ranking_metric",
+            {"target_trade_date", "snapshot_id", "supplier_position"},
+            "money_flow_ranking_item",
+        ),
+    ),
+)
+def test_partition_backed_composite_foreign_keys_remain_enforced(
+    table_name: str,
+    constrained_columns: set[str],
+    referred_table_prefix: str,
+) -> None:
+    """保证 Alembic 忽略的分区传播噪声仍由 PostgreSQL 真实外键约束。"""
+    database = DatabaseClient.from_settings(load_settings())
+    inspector = inspect(database.engine)
+    try:
+        foreign_keys = inspector.get_foreign_keys(table_name, schema="public")
+        assert any(
+            set(foreign_key["constrained_columns"]) == constrained_columns
+            and foreign_key["referred_table"].startswith(referred_table_prefix)
+            for foreign_key in foreign_keys
+        )
+    finally:
+        database.close()

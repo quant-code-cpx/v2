@@ -42,7 +42,10 @@ class DatasetPublication(Base):
         String(240), nullable=False, comment="数据集内的可见分区键。"
     )
     data_version: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, comment="消费者缓存和重试绑定的不可变数据版本。"
+        PG_UUID(as_uuid=True),
+        unique=True,
+        nullable=False,
+        comment="消费者缓存和重试绑定的不可变数据版本。",
     )
     quality_status: Mapped[str] = mapped_column(
         String(16), nullable=False, comment="发布时通过的质量级别。"

@@ -27,6 +27,71 @@ def test_settings_loads_explicit_calendar_enablement(
     assert load_settings().trading_calendar_enabled is True
 
 
+def test_equity_scheduler_requires_market_capability_enablement(
+    configured_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """定时调度不能在个股市场能力关闭时单独启动。"""
+    monkeypatch.setenv("DATA_SYNC_EQUITY_SCHEDULER_ENABLED", "true")
+
+    with pytest.raises(ConfigurationError):
+        load_settings()
+
+
+def test_equity_market_and_scheduler_load_together(
+    configured_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """显式同时开启个股市场能力与调度时配置可用。"""
+    monkeypatch.setenv("DATA_SYNC_EQUITY_MARKET_ENABLED", "true")
+    monkeypatch.setenv("DATA_SYNC_EQUITY_SCHEDULER_ENABLED", "true")
+
+    settings = load_settings()
+
+    assert settings.equity_market_enabled is True
+    assert settings.equity_scheduler_enabled is True
+
+
+def test_financial_dark_launch_stays_disabled_by_default(configured_environment: None) -> None:
+    """默认财务开关和来源策略必须共同保持关闭，避免意外访问未获批来源。"""
+    settings = load_settings()
+
+    assert settings.financial_enabled is False
+    assert settings.financial_source_policy == "disabled"
+    assert settings.financial_max_concurrency is None
+
+
+def test_financial_dark_launch_requires_policy_and_budgets_when_enabled(
+    configured_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """启用财务能力缺少任一来源策略或预算时，启动必须 fail closed。"""
+    monkeypatch.setenv("DATA_SYNC_FINANCIAL_ENABLED", "true")
+
+    with pytest.raises(ConfigurationError, match="invalid service-data-sync configuration"):
+        load_settings()
+
+
+def test_financial_dark_launch_loads_explicit_policy_and_budgets(
+    configured_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """只在显式给出策略名和全部预算后接受 dark-launch 配置。"""
+    monkeypatch.setenv("DATA_SYNC_FINANCIAL_ENABLED", "true")
+    monkeypatch.setenv("DATA_SYNC_FINANCIAL_SOURCE_POLICY", "research-policy-pending")
+    monkeypatch.setenv("DATA_SYNC_FINANCIAL_MAX_CONCURRENCY", "1")
+    monkeypatch.setenv("DATA_SYNC_FINANCIAL_REQUESTS_PER_MINUTE", "1")
+    monkeypatch.setenv("DATA_SYNC_FINANCIAL_REQUEST_TIMEOUT_SECONDS", "1")
+
+    settings = load_settings()
+
+    assert settings.financial_enabled is True
+    assert settings.financial_source_policy == "research-policy-pending"
+    assert settings.financial_max_concurrency == 1
+    assert settings.financial_requests_per_minute == 1
+    assert settings.financial_request_timeout_seconds == 1
+
+
 def test_settings_hides_validation_details(monkeypatch: pytest.MonkeyPatch) -> None:
     """将原始 Pydantic 错误替换为安全的配置领域错误。"""
     monkeypatch.delenv("DATA_SYNC_DATABASE_URL", raising=False)

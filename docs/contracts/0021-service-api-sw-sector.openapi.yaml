@@ -1,0 +1,238 @@
+openapi: 3.1.0
+info:
+  title: quant-v2 申万行业公开 POST API
+  version: 1.0.0
+  x-contract-status: Implemented
+  description: >-
+    service-api 对已认证用户公开申万三级 taxonomy、父级闭包与供应商估值观察。
+    service-api 仅经 0020 内部合同读取，不访问同步数据库或 AKShare。
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+paths:
+  /market/industries/sw/list:
+    post:
+      operationId: listSwIndustries
+      summary: 分页读取申万 taxonomy
+      parameters:
+        - $ref: '#/components/parameters/SnapshotDate'
+        - $ref: '#/components/parameters/Level'
+        - $ref: '#/components/parameters/ParentCode'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: taxonomy 分页
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '0020-data-sync-sw-sector-internal.openapi.yaml#/components/schemas/SwIndustryPage'
+        '204':
+          description: If-None-Match 命中；公开 POST 不返回 304
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /market/industries/sw/valuations:
+    post:
+      operationId: listSwIndustryValuations
+      summary: 分页读取申万行业估值观察
+      parameters:
+        - $ref: '#/components/parameters/SnapshotDate'
+        - $ref: '#/components/parameters/Level'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: 估值观察分页
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '0020-data-sync-sw-sector-internal.openapi.yaml#/components/schemas/SwValuationPage'
+        '204':
+          description: If-None-Match 命中；公开 POST 不返回 304
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /market/industries/sw/{code}:
+    post:
+      operationId: getSwIndustry
+      summary: 读取一个节点及其父级闭包
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            $ref: '0020-data-sync-sw-sector-internal.openapi.yaml#/components/schemas/SwCode'
+        - $ref: '#/components/parameters/SnapshotDate'
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: 节点与祖先闭包
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '0020-data-sync-sw-sector-internal.openapi.yaml#/components/schemas/SwIndustryResource'
+        '204':
+          description: If-None-Match 命中；公开 POST 不返回 304
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    SnapshotDate:
+      name: snapshotDate
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+    Level:
+      name: level
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 3
+    ParentCode:
+      name: parentCode
+      in: query
+      required: false
+      schema:
+        $ref: '0020-data-sync-sw-sector-internal.openapi.yaml#/components/schemas/SwCode'
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: 绑定 dataVersion 与筛选范围的不透明 HMAC 游标
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: 最长 128 字符的调用链关联标识
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  headers:
+    ETag:
+      description: 表示范围与 dataVersion 共同生成的强校验标签
+      schema:
+        type: string
+    DataVersion:
+      description: 本响应绑定的不可变消费者版本
+      schema:
+        type: string
+        format: uuid
+    RequestId:
+      description: service-api 复用或生成的关联标识
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  responses:
+    Problem:
+      description: 公开 Problem Details，不透传下游正文
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            required: [type, title, status, detail, code, requestId]
+            properties:
+              type:
+                type: string
+                format: uri
+              title:
+                type: string
+              status:
+                type: integer
+              detail:
+                type: string
+              code:
+                type: string
+              requestId:
+                type: string

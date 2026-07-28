@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, Index, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, Index, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,7 +23,6 @@ class EquityInstrument(Base):
             "listing_status IN ('PENDING', 'LISTED', 'SUSPENDED', 'DELISTED')",
             name="ck_equity_instrument_listing_status",
         ),
-        UniqueConstraint("exchange", "symbol"),
         Index("ix_equity_instrument_exchange_symbol", "exchange", "symbol"),
         {"comment": "证券内部永久身份与当前兼容投影；不以名称或状态作为永久身份。"},
     )

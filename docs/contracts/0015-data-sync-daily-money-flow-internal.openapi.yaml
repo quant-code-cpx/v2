@@ -3,11 +3,11 @@ info:
   title: service-data-sync daily money-flow internal API
   version: 1.0.0
   description: |
-    Proposed read-only contract for published vendor-derived daily money-flow
+    Implemented read-only contract for published vendor-derived daily money-flow
     series and supplier ranking snapshots. Consumers must discover methodology
     first. Daily source observations and supplier rolling windows are separate
     resources and can never fill or derive one another.
-  x-contract-status: Proposed
+  x-contract-status: Implemented
 servers:
   - url: http://service-data-sync:8000
     description: Compose service network
@@ -25,7 +25,8 @@ paths:
       summary: List published money-flow methodologies before requesting values
       description: |
         Returns governed methodology versions. Research entries may be visible
-        internally, but productionEnabled remains false until source approval.
+        internally, but productionEnabled remains false until the technical
+        source, schema, unit, completeness, and methodology gates pass.
         A cursor is bound to filters and dataVersion.
       parameters:
         - $ref: '#/components/parameters/SemanticFamily'

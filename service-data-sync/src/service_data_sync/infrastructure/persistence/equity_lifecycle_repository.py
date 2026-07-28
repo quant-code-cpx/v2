@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -13,6 +13,7 @@ from sqlalchemy import func, insert, literal, select, update
 from sqlalchemy.orm import Session
 
 from service_data_sync.application.ports.equity_lifecycle import (
+    EquityLifecycleReplayCheckpoint,
     EquityLifecycleRepository,
     PublishedEquityLifecycle,
 )
@@ -23,6 +24,9 @@ from service_data_sync.domain.equity_master import (
     EquityLifecycleStatus,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.persistence.equity_identity_resolver import (
+    require_single_confirmed_identity_on_connection,
+)
 from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 
 from ..database.models.equity.identity.equity_identifier_version import (
@@ -30,6 +34,9 @@ from ..database.models.equity.identity.equity_identifier_version import (
 )
 from ..database.models.equity.identity.equity_instrument import (
     EquityInstrument,
+)
+from ..database.models.equity.identity.equity_lifecycle_checkpoint import (
+    EquityLifecycleCheckpoint,
 )
 from ..database.models.equity.identity.equity_listing_status_version import (
     EquityListingStatusVersion,
@@ -72,6 +79,7 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
         upstream_source: str | None,
         adapter_version: str,
         schema_fingerprint: str,
+        normalized_uri: str | None = None,
     ) -> PublishedEquityLifecycle:
         """在交易所锁内写入完整显式证据批次并在事实变化时推进发布版本。"""
         if not entries:
@@ -133,11 +141,62 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
                 published_at=now,
                 business_changed=inserted_count > 0,
             )
+            self._advance_checkpoint(
+                session,
+                exchange=exchange,
+                target_date=target_date,
+                data_version=data_version,
+                snapshot_id=snapshot_id,
+                source_batch_id=source_batch_id,
+                raw_uri=raw_uri,
+                normalized_uri=normalized_uri or raw_uri,
+                provider_id=provider_id,
+                upstream_source=upstream_source or provider_id,
+                adapter_version=adapter_version,
+                schema_fingerprint=schema_fingerprint,
+                observed_at=observed_at,
+                updated_at=now,
+            )
         return PublishedEquityLifecycle(
             snapshot_id=snapshot_id,
             data_version=data_version,
             inserted_count=inserted_count,
             unchanged_count=unchanged_count,
+        )
+
+    def get_replay_checkpoint(
+        self, *, exchange: Exchange
+    ) -> EquityLifecycleReplayCheckpoint | None:
+        """读取最后成功检查点的标准证据位置和来源血缘。"""
+        statement = select(
+            EquityLifecycleCheckpoint.exchange,
+            EquityLifecycleCheckpoint.target_date,
+            EquityLifecycleCheckpoint.data_version,
+            EquityLifecycleCheckpoint.snapshot_id,
+            EquityLifecycleCheckpoint.raw_uri,
+            EquityLifecycleCheckpoint.normalized_uri,
+            EquityLifecycleCheckpoint.provider_id,
+            EquityLifecycleCheckpoint.upstream_source,
+            EquityLifecycleCheckpoint.adapter_version,
+            EquityLifecycleCheckpoint.schema_fingerprint,
+            EquityLifecycleCheckpoint.observed_at,
+        ).where(EquityLifecycleCheckpoint.exchange == exchange.value)
+        with self._database.session() as session:
+            row = session.execute(statement).mappings().one_or_none()
+        if row is None:
+            return None
+        return EquityLifecycleReplayCheckpoint(
+            exchange=Exchange(str(row["exchange"])),
+            target_date=row["target_date"],
+            data_version=UUID(str(row["data_version"])),
+            snapshot_id=UUID(str(row["snapshot_id"])),
+            raw_uri=str(row["raw_uri"]),
+            normalized_uri=str(row["normalized_uri"]),
+            provider_id=str(row["provider_id"]),
+            upstream_source=str(row["upstream_source"]),
+            adapter_version=str(row["adapter_version"]),
+            schema_fingerprint=str(row["schema_fingerprint"]),
+            observed_at=row["observed_at"],
         )
 
     def _lock_exchange(self, connection: Session, exchange: Exchange) -> None:
@@ -189,25 +248,18 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
         now: datetime,
     ) -> tuple[int, bool]:
         """解析唯一确认身份、校验状态机并追加或复用生命周期事实。"""
-        identity_rows = (
-            connection.execute(
-                select(EquityIdentifierVersion.security_id)
-                .where(
-                    EquityIdentifierVersion.exchange == entry.identifier.exchange.value,
-                    EquityIdentifierVersion.symbol == entry.identifier.symbol,
-                    EquityIdentifierVersion.identity_state == "CONFIRMED",
-                    EquityIdentifierVersion.effective_range.op("@>")(entry.effective_on),
-                    EquityIdentifierVersion.knowledge_range.op("@>")(now),
-                )
-                .order_by(EquityIdentifierVersion.security_id)
-                .with_for_update()
+        try:
+            security_id = require_single_confirmed_identity_on_connection(
+                connection,
+                exchange=entry.identifier.exchange,
+                symbol=entry.identifier.symbol,
+                fact_dates=(entry.effective_on,),
+                known_at=now,
             )
-            .mappings()
-            .all()
-        )
-        if len(identity_rows) != 1:
-            raise EquityLifecycleTransitionError("lifecycle identity is not uniquely confirmed")
-        security_id = int(identity_rows[0]["security_id"])
+        except ValueError as error:
+            raise EquityLifecycleTransitionError(
+                "lifecycle identity is not uniquely confirmed"
+            ) from error
         current = (
             connection.execute(
                 select(
@@ -234,6 +286,12 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
             raise EquityLifecycleTransitionError("confirmed identity has no current listing status")
         current_status = EquityLifecycleStatus(str(current["status"]))
         if _matches_current_entry(current, entry):
+            if entry.status is EquityLifecycleStatus.DELISTED:
+                self._close_identifier_after_delisting(
+                    connection,
+                    security_id=security_id,
+                    entry=entry,
+                )
             return security_id, False
         current_effective_from = current["effective_from"]
         if not isinstance(current_effective_from, date):
@@ -297,7 +355,127 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
                 updated_at=now,
             )
         )
+        if entry.status is EquityLifecycleStatus.DELISTED:
+            self._close_identifier_after_delisting(
+                connection,
+                security_id=security_id,
+                entry=entry,
+            )
+        elif (
+            current_status is EquityLifecycleStatus.DELISTED
+            and entry.status is EquityLifecycleStatus.LISTED
+            and is_knowledge_correction
+        ):
+            self._reopen_identifier_after_correction(
+                connection,
+                security_id=security_id,
+                entry=entry,
+            )
         return security_id, True
+
+    @staticmethod
+    def _close_identifier_after_delisting(
+        connection: Session,
+        *,
+        security_id: int,
+        entry: EquityLifecycleEntry,
+    ) -> None:
+        """在退市日次日关闭旧代码，保留退市事实日本身仍可解析到旧证券。"""
+        if entry.delisted_on is None:
+            raise EquityLifecycleTransitionError("delisting identifier boundary is unavailable")
+        try:
+            boundary = entry.delisted_on + timedelta(days=1)
+        except OverflowError as error:
+            raise EquityLifecycleTransitionError(
+                "delisting identifier boundary exceeds date range"
+            ) from error
+        current = (
+            connection.execute(
+                select(
+                    EquityIdentifierVersion.version_id,
+                    EquityIdentifierVersion.effective_from,
+                    EquityIdentifierVersion.effective_to,
+                )
+                .where(
+                    EquityIdentifierVersion.security_id == security_id,
+                    EquityIdentifierVersion.exchange == entry.identifier.exchange.value,
+                    EquityIdentifierVersion.symbol == entry.identifier.symbol,
+                    EquityIdentifierVersion.identity_state == "CONFIRMED",
+                    EquityIdentifierVersion.known_to.is_(None),
+                )
+                .order_by(EquityIdentifierVersion.known_from.desc())
+                .with_for_update()
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if current is None or current["effective_from"] >= boundary:
+            raise EquityLifecycleTransitionError("delisting cannot close identifier history")
+        if current["effective_to"] is None:
+            connection.execute(
+                update(EquityIdentifierVersion)
+                .where(EquityIdentifierVersion.version_id == current["version_id"])
+                .values(effective_to=boundary)
+            )
+        elif current["effective_to"] != boundary:
+            raise EquityLifecycleTransitionError(
+                "delisting conflicts with existing identifier boundary"
+            )
+
+    @staticmethod
+    def _reopen_identifier_after_correction(
+        connection: Session,
+        *,
+        security_id: int,
+        entry: EquityLifecycleEntry,
+    ) -> None:
+        """撤销错误退市边界；若代码已被另一证券复用则拒绝覆盖历史。"""
+        current = (
+            connection.execute(
+                select(
+                    EquityIdentifierVersion.version_id,
+                    EquityIdentifierVersion.effective_to,
+                )
+                .where(
+                    EquityIdentifierVersion.security_id == security_id,
+                    EquityIdentifierVersion.exchange == entry.identifier.exchange.value,
+                    EquityIdentifierVersion.symbol == entry.identifier.symbol,
+                    EquityIdentifierVersion.identity_state == "CONFIRMED",
+                    EquityIdentifierVersion.known_to.is_(None),
+                )
+                .order_by(EquityIdentifierVersion.known_from.desc())
+                .with_for_update()
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if current is None:
+            raise EquityLifecycleTransitionError("corrected identifier history is unavailable")
+        if current["effective_to"] is None:
+            return
+        conflict = connection.execute(
+            select(EquityIdentifierVersion.version_id)
+            .where(
+                EquityIdentifierVersion.security_id != security_id,
+                EquityIdentifierVersion.exchange == entry.identifier.exchange.value,
+                EquityIdentifierVersion.symbol == entry.identifier.symbol,
+                EquityIdentifierVersion.identity_state == "CONFIRMED",
+                EquityIdentifierVersion.known_to.is_(None),
+                EquityIdentifierVersion.effective_range.op("&&")(
+                    func.daterange(current["effective_to"], None, "[)")
+                ),
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        if conflict is not None:
+            raise EquityLifecycleTransitionError(
+                "official correction conflicts with a reused identifier"
+            )
+        connection.execute(
+            update(EquityIdentifierVersion)
+            .where(EquityIdentifierVersion.version_id == current["version_id"])
+            .values(effective_to=None)
+        )
 
     def _insert_snapshot_member(
         self,
@@ -324,6 +502,58 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
                 resolution_status="resolved",
                 content_sha256=_entry_hash(entry),
             )
+        )
+
+    def _advance_checkpoint(
+        self,
+        connection: Session,
+        *,
+        exchange: Exchange,
+        target_date: date,
+        data_version: UUID,
+        snapshot_id: UUID,
+        source_batch_id: UUID,
+        raw_uri: str,
+        normalized_uri: str,
+        provider_id: str,
+        upstream_source: str,
+        adapter_version: str,
+        schema_fingerprint: str,
+        observed_at: datetime,
+        updated_at: datetime,
+    ) -> None:
+        """与 lifecycle 修订和 publication 同事务推进恢复位置，失败时不越过旧证据。"""
+        values = {
+            "target_date": target_date,
+            "data_version": data_version,
+            "snapshot_id": snapshot_id,
+            "source_batch_id": source_batch_id,
+            "raw_uri": raw_uri,
+            "normalized_uri": normalized_uri,
+            "provider_id": provider_id,
+            "upstream_source": upstream_source,
+            "adapter_version": adapter_version,
+            "schema_fingerprint": schema_fingerprint,
+            "observed_at": observed_at,
+            "updated_at": updated_at,
+        }
+        exists = connection.execute(
+            select(EquityLifecycleCheckpoint.exchange).where(
+                EquityLifecycleCheckpoint.exchange == exchange.value
+            )
+        ).scalar_one_or_none()
+        if exists is None:
+            connection.execute(
+                insert(EquityLifecycleCheckpoint).values(
+                    exchange=exchange.value,
+                    **values,
+                )
+            )
+            return
+        connection.execute(
+            update(EquityLifecycleCheckpoint)
+            .where(EquityLifecycleCheckpoint.exchange == exchange.value)
+            .values(**values)
         )
 
     def _publish_exchange_version(
@@ -376,7 +606,7 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
 def _is_transition_allowed(
     current: EquityLifecycleStatus, target: EquityLifecycleStatus, is_knowledge_correction: bool
 ) -> bool:
-    """约束生命周期状态机，仅允许带审批的官方更正逆转终态。"""
+    """约束生命周期状态机，仅允许带来源证据的官方更正逆转终态。"""
     if (
         is_knowledge_correction
         and current is EquityLifecycleStatus.DELISTED

@@ -1,0 +1,427 @@
+openapi: 3.1.0
+info:
+  title: quant-v2 申万行业内部读取 API
+  version: 1.0.0
+  x-contract-status: Implemented
+  description: >-
+    service-data-sync 拥有的申万三级 taxonomy、父级闭包与供应商估值观察读取。
+    所有列表游标均经 HMAC-SHA256 签名并绑定 dataVersion 与筛选范围。
+servers:
+  - url: http://data-sync-api:8000
+security:
+  - serviceBearer: []
+paths:
+  /internal/v1/sw-industries:
+    get:
+      operationId: listSwIndustriesInternal
+      summary: 读取申万三级 taxonomy
+      parameters:
+        - $ref: '#/components/parameters/SnapshotDate'
+        - $ref: '#/components/parameters/Level'
+        - $ref: '#/components/parameters/ParentCode'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: 同一不可变 taxonomy 发布中的稳定分页
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwIndustryPage'
+        '304':
+          description: If-None-Match 命中，响应无正文
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /internal/v1/sw-industries/valuations:
+    get:
+      operationId: listSwIndustryValuationsInternal
+      summary: 读取申万行业估值观察
+      parameters:
+        - $ref: '#/components/parameters/SnapshotDate'
+        - $ref: '#/components/parameters/Level'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: 同一不可变估值发布中的稳定分页
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwValuationPage'
+        '304':
+          description: If-None-Match 命中，响应无正文
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /internal/v1/sw-industries/{sectorCode}:
+    get:
+      operationId: getSwIndustryInternal
+      summary: 读取一个节点及根到直接父级闭包
+      parameters:
+        - name: sectorCode
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/SwCode'
+        - $ref: '#/components/parameters/SnapshotDate'
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: 节点与冻结 dataVersion 的祖先闭包
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwIndustryResource'
+        '304':
+          description: If-None-Match 命中，响应无正文
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+components:
+  securitySchemes:
+    serviceBearer:
+      type: http
+      scheme: bearer
+  parameters:
+    SnapshotDate:
+      name: snapshotDate
+      in: query
+      required: false
+      description: 精确已发布观测日；省略时选择最新日期
+      schema:
+        type: string
+        format: date
+    Level:
+      name: level
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 3
+    ParentCode:
+      name: parentCode
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/SwCode'
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: 绑定发布和筛选范围的 HMAC-SHA256 不透明游标
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: 跨 service-api 与同步服务复用的有界关联标识
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  headers:
+    ETag:
+      description: dataVersion 与响应表示范围共同生成的强校验标签
+      schema:
+        type: string
+    DataVersion:
+      description: 本响应绑定的不可变消费者版本
+      schema:
+        type: string
+        format: uuid
+    RequestId:
+      description: 复用调用方合法值或由服务生成的关联标识
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  responses:
+    Problem:
+      description: RFC 9457 Problem Details
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    SwCode:
+      type: string
+      pattern: '^[0-9]{6}\.SI$'
+    DecimalString:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    Methodology:
+      type: object
+      additionalProperties: false
+      required: [code, version, status, upstreamSource, semanticSpecSha256]
+      properties:
+        code:
+          type: string
+          maxLength: 80
+        version:
+          type: integer
+          minimum: 1
+        status:
+          const: source_reported
+        upstreamSource:
+          type: string
+          maxLength: 120
+        semanticSpecSha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+    Release:
+      type: object
+      additionalProperties: false
+      required:
+        [snapshotDate, dataVersion, publishedAt, qualityStatus, rowCount, methodology]
+      properties:
+        snapshotDate:
+          type: string
+          format: date
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        qualityStatus:
+          enum: [passed, warned]
+        rowCount:
+          type: integer
+          minimum: 1
+        methodology:
+          $ref: '#/components/schemas/Methodology'
+    Industry:
+      type: object
+      additionalProperties: false
+      required: [code, name, level, parentCode, componentCount, revision]
+      properties:
+        code:
+          $ref: '#/components/schemas/SwCode'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        level:
+          type: integer
+          minimum: 1
+          maximum: 3
+        parentCode:
+          oneOf:
+            - $ref: '#/components/schemas/SwCode'
+            - type: 'null'
+        componentCount:
+          type: integer
+          minimum: 0
+        revision:
+          type: integer
+          minimum: 1
+    SwIndustryPage:
+      type: object
+      additionalProperties: false
+      required: [scheme, release, items, nextCursor]
+      properties:
+        scheme:
+          const: sw.industry
+        release:
+          $ref: '#/components/schemas/Release'
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/Industry'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 1024
+    SwIndustryResource:
+      type: object
+      additionalProperties: false
+      required: [scheme, release, industry, ancestors]
+      properties:
+        scheme:
+          const: sw.industry
+        release:
+          $ref: '#/components/schemas/Release'
+        industry:
+          $ref: '#/components/schemas/Industry'
+        ancestors:
+          type: array
+          maxItems: 2
+          items:
+            $ref: '#/components/schemas/Industry'
+    Valuation:
+      allOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - code
+            - name
+            - level
+            - parentCode
+            - componentCount
+            - snapshotDate
+            - staticPe
+            - ttmPe
+            - pb
+            - dividendYieldRatio
+            - finality
+            - valuationRevision
+          properties:
+            code:
+              $ref: '#/components/schemas/SwCode'
+            name:
+              type: string
+            level:
+              type: integer
+              minimum: 1
+              maximum: 3
+            parentCode:
+              oneOf:
+                - $ref: '#/components/schemas/SwCode'
+                - type: 'null'
+            componentCount:
+              type: integer
+              minimum: 0
+            snapshotDate:
+              type: string
+              format: date
+            staticPe:
+              oneOf:
+                - $ref: '#/components/schemas/DecimalString'
+                - type: 'null'
+            ttmPe:
+              oneOf:
+                - $ref: '#/components/schemas/DecimalString'
+                - type: 'null'
+            pb:
+              oneOf:
+                - $ref: '#/components/schemas/DecimalString'
+                - type: 'null'
+            dividendYieldRatio:
+              oneOf:
+                - $ref: '#/components/schemas/DecimalString'
+                - type: 'null'
+            finality:
+              const: PROVIDER_OBSERVATION
+            valuationRevision:
+              type: integer
+              minimum: 1
+    SwValuationPage:
+      type: object
+      additionalProperties: false
+      required: [scheme, release, items, nextCursor]
+      properties:
+        scheme:
+          const: sw.industry
+        release:
+          $ref: '#/components/schemas/Release'
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/Valuation'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 1024
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail, code, requestId]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        code:
+          type: string
+        requestId:
+          type: string

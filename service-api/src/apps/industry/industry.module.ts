@@ -4,11 +4,13 @@ import { DataSyncModule } from '../../data-sync/data-sync.module.js';
 import { EquitySectorMembershipController } from './equity-sector-membership.controller.js';
 import { SectorMarketDataController } from './sector-market-data.controller.js';
 import { SectorMarketDataService } from './sector-market-data.service.js';
+import { SwIndustryController } from './sw-industry.controller.js';
+import { SwIndustryService } from './sw-industry.service.js';
 
 /** 封装服务间板块数据读取，禁止此模块持久化同步服务的权威数据。 */
 @Module({
   imports: [DataSyncModule],
-  controllers: [SectorMarketDataController, EquitySectorMembershipController],
-  providers: [SectorMarketDataService],
+  controllers: [SectorMarketDataController, EquitySectorMembershipController, SwIndustryController],
+  providers: [SectorMarketDataService, SwIndustryService],
 })
 export class IndustryModule {}

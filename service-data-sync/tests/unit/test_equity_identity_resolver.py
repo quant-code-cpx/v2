@@ -12,7 +12,9 @@ from service_data_sync.domain.equity import Exchange
 from service_data_sync.domain.equity_master import EquityIdentityResolutionStatus
 from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.persistence.equity_identity_resolver import (
+    EquityIdentityWriteConflictError,
     SqlAlchemyEquityIdentityResolver,
+    require_single_confirmed_identity_on_connection,
     resolve_identity_on_connection,
 )
 
@@ -135,3 +137,36 @@ def test_resolver_requires_timezone_and_filters_pending_from_current_open_read()
 
     assert current.status is EquityIdentityResolutionStatus.NOT_FOUND
     assert "identity_state = :identity_state_1" in database.session_instance.statements[0]
+
+
+def test_fact_window_requires_one_confirmed_identity_on_every_date() -> None:
+    """窗口内两个事实日若解析到不同证券，写入者必须显式拒绝代码复用边界。"""
+    connection = FakeConnection(
+        [
+            [{"security_id": 8, "identity_state": "CONFIRMED"}],
+            [{"security_id": 9, "identity_state": "CONFIRMED"}],
+        ]
+    )
+
+    with pytest.raises(EquityIdentityWriteConflictError, match="identity boundary"):
+        require_single_confirmed_identity_on_connection(
+            cast(Session, connection),
+            exchange=Exchange.SSE,
+            symbol="600519",
+            fact_dates=(date(2020, 1, 1), date(2026, 1, 1)),
+            known_at=datetime(2026, 7, 28, tzinfo=UTC),
+        )
+
+
+def test_fact_window_rejects_pending_identity() -> None:
+    """财务、因子等已发布事实不能把 PENDING 占位当成已确认证券。"""
+    connection = FakeConnection([[{"security_id": 8, "identity_state": "PENDING"}]])
+
+    with pytest.raises(EquityIdentityWriteConflictError, match="unavailable"):
+        require_single_confirmed_identity_on_connection(
+            cast(Session, connection),
+            exchange=Exchange.SSE,
+            symbol="600519",
+            fact_dates=(date(2026, 1, 1),),
+            known_at=datetime(2026, 7, 28, tzinfo=UTC),
+        )
