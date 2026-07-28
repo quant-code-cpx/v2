@@ -1,4 +1,4 @@
-"""使用 SQLAlchemy Core 实现的个股标准日线版本化仓储。"""
+"""使用 ORM-enabled 表达式实现的个股标准日线版本化仓储。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,8 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Connection, Engine, text
+from sqlalchemy import func, insert, or_, select, update
+from sqlalchemy.orm import Session
 
 from service_data_sync.application.ports.market_data import (
     EquityMarketDataRepository,
@@ -25,6 +26,18 @@ from service_data_sync.infrastructure.persistence.equity_identity_resolver impor
 )
 from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 
+from ..database.models.equity.identity.equity_identifier_version import (
+    EquityIdentifierVersion,
+)
+from ..database.models.equity.identity.equity_instrument import EquityInstrument
+from ..database.models.equity.identity.equity_listing_status_version import (
+    EquityListingStatusVersion,
+)
+from ..database.models.equity.market_data.equity_daily_bar import (
+    EquityDailyBar as EquityDailyBarModel,
+)
+from ..database.models.publication.dataset_publication import DatasetPublication
+
 _DATASET = "equity.bar.1d.raw"
 
 
@@ -36,8 +49,8 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
     """持久化带来源链接的日线，采用追加修订和原子发布切换。"""
 
     def __init__(self, database: DatabaseClient) -> None:
-        """使用服务自有的 SQLAlchemy 引擎，不向应用调用方暴露它。"""
-        self._engine: Engine = database.engine
+        """使用服务私有 Session 工厂，不向应用调用方暴露它。"""
+        self._database = database
 
     def publish_daily_bars(
         self,
@@ -53,7 +66,7 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         if not bars:
             raise ValueError("bars must not be empty")
         now = datetime.now(UTC)
-        with self._engine.begin() as connection:
+        with self._database.transaction() as connection:
             source_batch_id = self._record_source_batch(
                 connection,
                 provider_id=provider_id,
@@ -93,45 +106,46 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
 
     def get_instrument(self, instrument_id: UUID) -> StoredEquityInstrument | None:
         """按公开 UUID 读取一只证券，不关联供应商专有表。"""
-        statement = text(
-            """
-            SELECT security_id, instrument_id, exchange, symbol, name, listing_status
-            FROM equity_instrument
-            WHERE instrument_id = :instrument_id
-            """
-        )
-        with self._engine.connect() as connection:
-            row = (
-                connection.execute(statement, {"instrument_id": instrument_id})
-                .mappings()
-                .one_or_none()
-            )
+        statement = select(
+            EquityInstrument.security_id,
+            EquityInstrument.instrument_id,
+            EquityInstrument.exchange,
+            EquityInstrument.symbol,
+            EquityInstrument.name,
+            EquityInstrument.listing_status,
+        ).where(EquityInstrument.instrument_id == instrument_id)
+        with self._database.session() as connection:
+            row = connection.execute(statement).mappings().one_or_none()
         return None if row is None else _stored_instrument(row)
 
     def list_instruments(
         self, *, query: str | None, limit: int
     ) -> Sequence[StoredEquityInstrument]:
         """返回有上限且按交易所、代码排序的证券，供内部目录读取。"""
-        statement = text(
-            """
-            SELECT security_id, instrument_id, exchange, symbol, name, listing_status
-            FROM equity_instrument
-            WHERE :query IS NULL
-               OR symbol LIKE :prefix
-               OR COALESCE(name, '') ILIKE :name_prefix
-            ORDER BY exchange, symbol, instrument_id
-            LIMIT :limit
-            """
-        )
         normalized = query.strip() if query is not None else None
-        parameters = {
-            "query": normalized or None,
-            "prefix": f"{normalized}%" if normalized else None,
-            "name_prefix": f"{normalized}%" if normalized else None,
-            "limit": limit,
-        }
-        with self._engine.connect() as connection:
-            rows = connection.execute(statement, parameters).mappings().all()
+        statement = select(
+            EquityInstrument.security_id,
+            EquityInstrument.instrument_id,
+            EquityInstrument.exchange,
+            EquityInstrument.symbol,
+            EquityInstrument.name,
+            EquityInstrument.listing_status,
+        )
+        if normalized:
+            pattern = f"{normalized}%"
+            statement = statement.where(
+                or_(
+                    EquityInstrument.symbol.like(pattern),
+                    func.coalesce(EquityInstrument.name, "").ilike(pattern),
+                )
+            )
+        statement = statement.order_by(
+            EquityInstrument.exchange,
+            EquityInstrument.symbol,
+            EquityInstrument.instrument_id,
+        ).limit(limit)
+        with self._database.session() as connection:
+            rows = connection.execute(statement).mappings().all()
         return tuple(_stored_instrument(row) for row in rows)
 
     def list_daily_bars(
@@ -142,28 +156,33 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         end: date,
     ) -> Sequence[tuple[EquityDailyBar, int, bool]]:
         """按交易日升序读取一只证券有界窗口内的当前修订。"""
-        statement = text(
-            """
-            SELECT bar.trade_date, bar.open_price, bar.high_price, bar.low_price, bar.close_price,
-                   bar.volume_shares, bar.amount_cny, bar.turnover_rate, bar.revision, bar.is_final
-            FROM equity_daily_bar AS bar
-            INNER JOIN equity_instrument AS instrument ON instrument.security_id = bar.security_id
-            WHERE instrument.instrument_id = :instrument_id
-              AND bar.trade_date >= :start
-              AND bar.trade_date <= :end
-              AND bar.valid_to IS NULL
-            ORDER BY bar.trade_date ASC
-            """
-        )
-        with self._engine.connect() as connection:
-            rows = (
-                connection.execute(
-                    statement,
-                    {"instrument_id": instrument_id, "start": start, "end": end},
-                )
-                .mappings()
-                .all()
+        statement = (
+            select(
+                EquityDailyBarModel.trade_date,
+                EquityDailyBarModel.open_price,
+                EquityDailyBarModel.high_price,
+                EquityDailyBarModel.low_price,
+                EquityDailyBarModel.close_price,
+                EquityDailyBarModel.volume_shares,
+                EquityDailyBarModel.amount_cny,
+                EquityDailyBarModel.turnover_rate,
+                EquityDailyBarModel.revision,
+                EquityDailyBarModel.is_final,
             )
+            .join(
+                EquityInstrument,
+                EquityInstrument.security_id == EquityDailyBarModel.security_id,
+            )
+            .where(
+                EquityInstrument.instrument_id == instrument_id,
+                EquityDailyBarModel.trade_date >= start,
+                EquityDailyBarModel.trade_date <= end,
+                EquityDailyBarModel.valid_to.is_(None),
+            )
+            .order_by(EquityDailyBarModel.trade_date)
+        )
+        with self._database.session() as connection:
+            rows = connection.execute(statement).mappings().all()
         return tuple(
             (
                 EquityDailyBar(
@@ -186,7 +205,7 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
 
     def _ensure_instrument(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         identifier: EquityIdentifier,
         fact_date: date,
@@ -215,14 +234,14 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
                 raise PossibleCodeReuseError("possible code reuse after delisting")
             existing = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT security_id, instrument_id, exchange, symbol, name, listing_status
-                        FROM equity_instrument
-                        WHERE security_id = :security_id
-                        """
-                    ),
-                    {"security_id": resolution.security_id},
+                    select(
+                        EquityInstrument.security_id,
+                        EquityInstrument.instrument_id,
+                        EquityInstrument.exchange,
+                        EquityInstrument.symbol,
+                        EquityInstrument.name,
+                        EquityInstrument.listing_status,
+                    ).where(EquityInstrument.security_id == resolution.security_id)
                 )
                 .mappings()
                 .one_or_none()
@@ -232,20 +251,25 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
             return _stored_instrument(existing)
         pending = (
             connection.execute(
-                text(
-                    """
-                SELECT security_id, instrument_id, exchange, symbol, name, listing_status
-                FROM equity_instrument AS instrument
-                INNER JOIN equity_identifier_version AS identifier
-                  ON identifier.security_id = instrument.security_id
-                WHERE identifier.exchange = :exchange
-                  AND identifier.symbol = :symbol
-                  AND identifier.identity_state = 'PENDING'
-                  AND identifier.known_to IS NULL
-                ORDER BY instrument.security_id
-                """
-                ),
-                {"exchange": identifier.exchange.value, "symbol": identifier.symbol},
+                select(
+                    EquityInstrument.security_id,
+                    EquityInstrument.instrument_id,
+                    EquityInstrument.exchange,
+                    EquityInstrument.symbol,
+                    EquityInstrument.name,
+                    EquityInstrument.listing_status,
+                )
+                .join(
+                    EquityIdentifierVersion,
+                    EquityIdentifierVersion.security_id == EquityInstrument.security_id,
+                )
+                .where(
+                    EquityIdentifierVersion.exchange == identifier.exchange.value,
+                    EquityIdentifierVersion.symbol == identifier.symbol,
+                    EquityIdentifierVersion.identity_state == "PENDING",
+                    EquityIdentifierVersion.known_to.is_(None),
+                )
+                .order_by(EquityInstrument.security_id)
             )
             .mappings()
             .one_or_none()
@@ -256,57 +280,37 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         instrument_id = uuid4()
         # 主数据同步会补全该占位证券。
         # 行情同步绝不能自行猜测名称或上市状态。
-        created = (
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO equity_instrument (
-                      instrument_id, exchange, symbol, listing_status, created_at, updated_at
-                    ) VALUES (
-                      :instrument_id, :exchange, :symbol, 'PENDING', :created_at, :updated_at
-                    )
-                    RETURNING security_id
-                    """
-                ),
-                {
-                    "instrument_id": instrument_id,
-                    "exchange": identifier.exchange.value,
-                    "symbol": identifier.symbol,
-                    "created_at": now,
-                    "updated_at": now,
-                },
+        security_id = connection.execute(
+            insert(EquityInstrument)
+            .values(
+                instrument_id=instrument_id,
+                exchange=identifier.exchange.value,
+                symbol=identifier.symbol,
+                listing_status="PENDING",
+                created_at=now,
+                updated_at=now,
             )
-            .mappings()
-            .one()
-        )
+            .returning(EquityInstrument.security_id)
+        ).scalar_one()
         # PENDING 版本只为历史写入保留稳定锚点；主数据确认前绝不对 API 发布。
         connection.execute(
-            text(
-                """
-                INSERT INTO equity_identifier_version (
-                  version_id, security_id, exchange, symbol, identity_state,
-                  effective_from, effective_to, known_from, known_to,
-                  effective_date_precision, source_batch_id, content_sha256
-                ) VALUES (
-                  :version_id, :security_id, :exchange, :symbol, 'PENDING',
-                  :effective_from, NULL, :known_from, NULL,
-                  'OBSERVATION_DATE', :source_batch_id, :content_sha256
-                )
-                """
-            ),
-            {
-                "version_id": uuid4(),
-                "security_id": created["security_id"],
-                "exchange": identifier.exchange.value,
-                "symbol": identifier.symbol,
-                "effective_from": fact_date,
-                "known_from": now,
-                "source_batch_id": source_batch_id,
-                "content_sha256": _pending_identity_content_hash(identifier, fact_date),
-            },
+            insert(EquityIdentifierVersion).values(
+                version_id=uuid4(),
+                security_id=security_id,
+                exchange=identifier.exchange.value,
+                symbol=identifier.symbol,
+                identity_state="PENDING",
+                effective_from=fact_date,
+                effective_to=None,
+                known_from=now,
+                known_to=None,
+                effective_date_precision="OBSERVATION_DATE",
+                source_batch_id=source_batch_id,
+                content_sha256=_pending_identity_content_hash(identifier, fact_date),
+            )
         )
         return StoredEquityInstrument(
-            security_id=created["security_id"],
+            security_id=int(security_id),
             instrument_id=instrument_id,
             identifier=identifier,
             name=None,
@@ -315,7 +319,7 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
 
     def _is_delisted_on_fact_date(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         security_id: int | None,
         fact_date: date,
@@ -324,32 +328,19 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         """检查已解析身份在事实日是否已有明确退市状态，不以当前投影替代历史。"""
         if security_id is None:
             raise ValueError("resolved equity identity must include security_id")
-        row = (
-            connection.execute(
-                text(
-                    """
-                    SELECT 1
-                    FROM equity_listing_status_version
-                    WHERE security_id = :security_id
-                      AND status = 'DELISTED'
-                      AND effective_range @> :fact_date
-                      AND knowledge_range @> :known_at
-                    """
-                ),
-                {
-                    "security_id": security_id,
-                    "fact_date": fact_date,
-                    "known_at": known_at,
-                },
+        row = connection.execute(
+            select(EquityListingStatusVersion.version_id).where(
+                EquityListingStatusVersion.security_id == security_id,
+                EquityListingStatusVersion.status == "DELISTED",
+                EquityListingStatusVersion.effective_range.op("@>")(fact_date),
+                EquityListingStatusVersion.knowledge_range.op("@>")(known_at),
             )
-            .mappings()
-            .one_or_none()
-        )
+        ).scalar_one_or_none()
         return row is not None
 
     def _record_source_batch(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         provider_id: str,
         source_payload_sha256: str,
@@ -370,7 +361,7 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
 
     def _write_revisions(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         security_id: int,
         bars: Sequence[EquityDailyBar],
@@ -384,16 +375,14 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
             content_hash = _bar_content_hash(bar)
             current = (
                 connection.execute(
-                    text(
-                        """
-                    SELECT revision, content_sha256
-                    FROM equity_daily_bar
-                    WHERE security_id = :security_id
-                      AND trade_date = :trade_date
-                      AND valid_to IS NULL
-                    """
-                    ),
-                    {"security_id": security_id, "trade_date": bar.trade_date},
+                    select(
+                        EquityDailyBarModel.revision,
+                        EquityDailyBarModel.content_sha256,
+                    ).where(
+                        EquityDailyBarModel.security_id == security_id,
+                        EquityDailyBarModel.trade_date == bar.trade_date,
+                        EquityDailyBarModel.valid_to.is_(None),
+                    )
                 )
                 .mappings()
                 .one_or_none()
@@ -407,59 +396,39 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
                 # 已发布观测永不覆盖。
                 # 必须先关闭旧版本，再插入后继修订。
                 connection.execute(
-                    text(
-                        """
-                        UPDATE equity_daily_bar
-                        SET valid_to = :valid_to
-                        WHERE security_id = :security_id
-                          AND trade_date = :trade_date
-                          AND valid_to IS NULL
-                        """
-                    ),
-                    {
-                        "valid_to": observed_at,
-                        "security_id": security_id,
-                        "trade_date": bar.trade_date,
-                    },
+                    update(EquityDailyBarModel)
+                    .where(
+                        EquityDailyBarModel.security_id == security_id,
+                        EquityDailyBarModel.trade_date == bar.trade_date,
+                        EquityDailyBarModel.valid_to.is_(None),
+                    )
+                    .values(valid_to=observed_at)
                 )
             connection.execute(
-                text(
-                    """
-                    INSERT INTO equity_daily_bar (
-                      security_id, trade_date, revision, open_price, high_price,
-                      low_price, close_price, volume_shares, amount_cny,
-                      turnover_rate, is_final, content_sha256,
-                      source_batch_id, valid_from, valid_to
-                    ) VALUES (
-                      :security_id, :trade_date, :revision, :open_price, :high_price,
-                      :low_price, :close_price, :volume_shares, :amount_cny,
-                      :turnover_rate, TRUE, :content_sha256,
-                      :source_batch_id, :valid_from, NULL
-                    )
-                    """
-                ),
-                {
-                    "security_id": security_id,
-                    "trade_date": bar.trade_date,
-                    "revision": revision,
-                    "open_price": bar.open_price,
-                    "high_price": bar.high_price,
-                    "low_price": bar.low_price,
-                    "close_price": bar.close_price,
-                    "volume_shares": bar.volume_shares,
-                    "amount_cny": bar.amount_cny,
-                    "turnover_rate": bar.turnover_rate,
-                    "content_sha256": content_hash,
-                    "source_batch_id": source_batch_id,
-                    "valid_from": observed_at,
-                },
+                insert(EquityDailyBarModel).values(
+                    security_id=security_id,
+                    trade_date=bar.trade_date,
+                    revision=revision,
+                    open_price=bar.open_price,
+                    high_price=bar.high_price,
+                    low_price=bar.low_price,
+                    close_price=bar.close_price,
+                    volume_shares=bar.volume_shares,
+                    amount_cny=bar.amount_cny,
+                    turnover_rate=bar.turnover_rate,
+                    is_final=True,
+                    content_sha256=content_hash,
+                    source_batch_id=source_batch_id,
+                    valid_from=observed_at,
+                    valid_to=None,
+                )
             )
             inserted_count += 1
         return inserted_count, unchanged_count
 
     def _publish(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         identifier: EquityIdentifier,
         inserted_count: int,
@@ -469,56 +438,38 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         partition_key = identifier.qualified_symbol
         if inserted_count == 0:
             # 幂等重放不得创建虚假数据版本，从而使 API/客户端缓存失效。
-            existing = (
-                connection.execute(
-                    text(
-                        """
-                    SELECT data_version FROM dataset_publication
-                    WHERE dataset = :dataset
-                      AND partition_key = :partition_key
-                      AND superseded_at IS NULL
-                    """
-                    ),
-                    {"dataset": _DATASET, "partition_key": partition_key},
+            existing = connection.execute(
+                select(DatasetPublication.data_version).where(
+                    DatasetPublication.dataset == _DATASET,
+                    DatasetPublication.partition_key == partition_key,
+                    DatasetPublication.superseded_at.is_(None),
                 )
-                .mappings()
-                .one_or_none()
-            )
+            ).scalar_one_or_none()
             if existing is not None:
-                return existing["data_version"]
+                return UUID(str(existing))
         # 每个数据集分区仅有一条当前记录，读取方才能原子选择版本。
         connection.execute(
-            text(
-                """
-                UPDATE dataset_publication
-                SET superseded_at = :published_at
-                WHERE dataset = :dataset
-                  AND partition_key = :partition_key
-                  AND superseded_at IS NULL
-                """
-            ),
-            {"published_at": published_at, "dataset": _DATASET, "partition_key": partition_key},
+            update(DatasetPublication)
+            .where(
+                DatasetPublication.dataset == _DATASET,
+                DatasetPublication.partition_key == partition_key,
+                DatasetPublication.superseded_at.is_(None),
+            )
+            .values(superseded_at=published_at)
         )
         data_version = uuid4()
         connection.execute(
-            text(
-                """
-                INSERT INTO dataset_publication (
-                  publication_id, dataset, partition_key, data_version, quality_status,
-                  published_at, superseded_at
-                ) VALUES (
-                  :publication_id, :dataset, :partition_key, :data_version, 'passed',
-                  :published_at, NULL
-                )
-                """
-            ),
-            {
-                "publication_id": uuid4(),
-                "dataset": _DATASET,
-                "partition_key": partition_key,
-                "data_version": data_version,
-                "published_at": published_at,
-            },
+            insert(DatasetPublication).values(
+                publication_id=uuid4(),
+                dataset=_DATASET,
+                partition_key=partition_key,
+                data_version=data_version,
+                quality_status="passed",
+                published_at=published_at,
+                superseded_at=None,
+                effective_as_of=None,
+                knowledge_cutoff=None,
+            )
         )
         return data_version
 

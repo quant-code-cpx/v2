@@ -30,6 +30,18 @@ PostgreSQL canonical revision 和人工 CLI。
 - 所有未来外部数据只能通过 provider-neutral port 与独立 adapter 获取。
 - application、task、质量、持久化代码禁止直接调用数据源 SDK、HTTP 或具体 adapter。
 
+## 数据模型导览
+
+同步服务当前数据库定义以
+[`models/registry.py`](src/service_data_sync/infrastructure/database/models/registry.py) 为唯一入口：它显式登记全部
+32 张逻辑表。每张表各有一个模型文件，字段、PostgreSQL 类型、可空性、中文含义、主外键、约束和索引都写在
+该文件中；模型按 `execution`、`provenance`、`publication`、`equity`、`sector/catalog`、`sector/market_data`、
+`sector/membership` 和 `sector/eod` 分组。物理分区不是独立业务表，规则见
+[`partition_manager.py`](src/service_data_sync/infrastructure/database/partition_manager.py)。
+
+完整取舍、边界和验证结果见
+[0018：SQLAlchemy ORM 全量迁移](../docs/service-data-sync/0018-sqlalchemy-orm-persistence-models/index.html)。
+
 ## 测试归属
 
 `service-data-sync` 作为独立 Python 功能模块，测试与生产包隔离在服务级 `tests/`：

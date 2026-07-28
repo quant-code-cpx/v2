@@ -10,7 +10,6 @@ from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import Engine
 
 from service_data_sync.domain.equity import EquityDailyBar, EquityIdentifier
 from service_data_sync.infrastructure.database.connection import DatabaseClient
@@ -35,8 +34,16 @@ class FakeResult:
     def scalar_one(self) -> object:
         """模拟 ORM-enabled `RETURNING` 的单一标量结果。"""
         if isinstance(self._value, dict):
-            return self._value["source_batch_id"]
+            for key in ("source_batch_id", "security_id", "data_version"):
+                if key in self._value:
+                    return self._value[key]
         return self._value
+
+    def scalar_one_or_none(self) -> object | None:
+        """模拟可无结果的 ORM 标量查询。"""
+        if self._value is None:
+            return None
+        return self.scalar_one()
 
     def one_or_none(self) -> object:
         """为允许无匹配的 SELECT 返回可选排队行。"""
@@ -85,6 +92,26 @@ class FakeEngine:
     def connect(self) -> Iterator[FakeConnection]:
         """产出读取形连接，但不打开真实套接字。"""
         yield self.connection
+
+
+class FakeDatabase:
+    """以短生命周期 Session 接口模拟 `DatabaseClient`。"""
+
+    def __init__(self, engine: FakeEngine) -> None:
+        """保存承载测试响应队列的连接替身。"""
+        self._engine = engine
+
+    @contextmanager
+    def transaction(self) -> Iterator[FakeConnection]:
+        """提供一次原子写入使用的模拟 Session。"""
+        with self._engine.begin() as connection:
+            yield connection
+
+    @contextmanager
+    def session(self) -> Iterator[FakeConnection]:
+        """提供一次只读调用使用的模拟 Session。"""
+        with self._engine.connect() as connection:
+            yield connection
 
 
 def test_repository_appends_changed_bar_and_advances_publication() -> None:
@@ -182,7 +209,7 @@ def test_repository_creates_pending_identity_version_for_unknown_daily_bar() -> 
 
     assert publication.instrument.listing_status == "PENDING"
     assert "identity_state" in engine.connection.statements[4]
-    assert "'PENDING'" in engine.connection.statements[4]
+    assert "effective_date_precision" in engine.connection.statements[4]
     assert len(engine.connection.statements) == 9
 
 
@@ -253,8 +280,8 @@ def test_repository_reads_instrument_catalog_and_current_daily_bars() -> None:
 
 
 def _repository(engine: FakeEngine) -> SqlAlchemyEquityMarketDataRepository:
-    """围绕类型转换后的替身引擎构造仓储，不加载运行时配置。"""
-    return SqlAlchemyEquityMarketDataRepository(DatabaseClient(engine=cast(Engine, engine)))
+    """围绕带短 Session 边界的替身数据库构造仓储。"""
+    return SqlAlchemyEquityMarketDataRepository(cast(DatabaseClient, FakeDatabase(engine)))
 
 
 def _instrument_row(instrument_id: UUID) -> dict[str, Any]:

@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy import case, func, insert, select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.orm import Session
 
 from service_data_sync.application.ports.sector_eod import (
     SECTOR_EOD_QUALITY_POLICY_VERSION,
@@ -34,23 +34,33 @@ from service_data_sync.domain.sector import (
     sector_eod_snapshot_content_sha256,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.models.execution.sync_partition import SyncPartition
+from service_data_sync.infrastructure.database.models.execution.sync_run import SyncRun
+from service_data_sync.infrastructure.database.models.provenance.source_batch import SourceBatch
+from service_data_sync.infrastructure.database.models.publication.dataset_publication import (
+    DatasetPublication,
+)
+from service_data_sync.infrastructure.database.models.sector.catalog.sector_entity import (
+    SectorEntity,
+)
+from service_data_sync.infrastructure.database.models.sector.eod.sector_eod_quality_result import (
+    SectorEodQualityResult as SectorEodQualityResultModel,
+)
+from service_data_sync.infrastructure.database.models.sector.eod.sector_eod_quote import (
+    SectorEodQuote as SectorEodQuoteModel,
+)
+from service_data_sync.infrastructure.database.models.sector.eod.sector_eod_snapshot import (
+    SectorEodSnapshot as SectorEodSnapshotModel,
+)
+from service_data_sync.infrastructure.database.models.sector.eod.sector_eod_sync_partition import (
+    SectorEodSyncPartition,
+)
 from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 
 _DATASET = "sector.quote.eod.snapshot"
 _CAPABILITY = "sector.quote.eod.snapshot.raw"
 _NORMALIZER_VERSION = "sector-eod-v1"
 _LEASE_DURATION = timedelta(minutes=5)
-_SORT_COLUMNS = {
-    SectorEodSort.CHANGE_PERCENT: "quote.change_percent",
-    SectorEodSort.TURNOVER_PERCENT: "quote.turnover_percent",
-    SectorEodSort.MARKET_VALUE: "quote.market_value",
-    SectorEodSort.LATEST_VALUE: "quote.latest_value",
-    SectorEodSort.ADVANCERS: "quote.advancers",
-    SectorEodSort.DECLINERS: "quote.decliners",
-    SectorEodSort.LEADER_CHANGE_PERCENT: "quote.leader_change_percent",
-    SectorEodSort.CODE: 'sector.sector_code COLLATE "C"',
-}
-_SORT_DIRECTIONS = {SortOrder.ASC: "ASC", SortOrder.DESC: "DESC"}
 
 
 class SqlAlchemySectorEodRepository(SectorEodRepository):
@@ -68,18 +78,19 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
         partition_key = _partition_key(scheme, trade_date)
         request_key = f"sector-eod:{partition_key}"
         lease_token = uuid4()
-        with self._database.engine.begin() as connection:
+        with self._database.transaction() as connection:
             existing = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT status, lease_expires_at, last_source_batch_id
-                        FROM sector_eod_sync_partition
-                        WHERE scheme = :scheme AND trade_date = :trade_date
-                        FOR UPDATE
-                        """
-                    ),
-                    {"scheme": scheme.value, "trade_date": trade_date},
+                    select(
+                        SectorEodSyncPartition.status,
+                        SectorEodSyncPartition.lease_expires_at,
+                        SectorEodSyncPartition.last_source_batch_id,
+                    )
+                    .where(
+                        SectorEodSyncPartition.scheme == scheme.value,
+                        SectorEodSyncPartition.trade_date == trade_date,
+                    )
+                    .with_for_update()
                 )
                 .mappings()
                 .one_or_none()
@@ -95,96 +106,96 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
                 if existing is None or existing["last_source_batch_id"] is None:
                     raise ValueError("sector eod replay requires an archived source observation")
                 last_source_batch_id = existing["last_source_batch_id"]
-            run_row = (
-                connection.execute(
-                    text(
-                        """
-                        INSERT INTO sync_run (
-                          run_id, capability, mode, request_key, target_date, status,
-                          requested_at, started_at, finished_at, created_at
-                        ) VALUES (
-                          :run_id, :capability, 'manual', :request_key, :trade_date, 'running',
-                          :now, :now, NULL, :now
-                        )
-                        ON CONFLICT (request_key) DO UPDATE
-                        SET status = 'running', started_at = EXCLUDED.started_at, finished_at = NULL
-                        RETURNING run_id
-                        """
-                    ),
-                    {
-                        "run_id": uuid4(),
-                        "capability": _CAPABILITY,
-                        "request_key": request_key,
-                        "trade_date": trade_date,
-                        "now": now,
-                    },
-                )
-                .mappings()
-                .one()
+            insert_run = postgresql_insert(SyncRun).values(
+                run_id=uuid4(),
+                capability=_CAPABILITY,
+                mode="manual",
+                request_key=request_key,
+                target_date=trade_date,
+                status="running",
+                requested_at=now,
+                started_at=now,
+                finished_at=None,
+                created_at=now,
             )
-            run_id = UUID(str(run_row["run_id"]))
+            run_id = UUID(
+                str(
+                    connection.execute(
+                        insert_run.on_conflict_do_update(
+                            index_elements=[SyncRun.request_key],
+                            set_={
+                                "status": "running",
+                                "started_at": insert_run.excluded.started_at,
+                                "finished_at": None,
+                            },
+                        ).returning(SyncRun.run_id)
+                    ).scalar_one()
+                )
+            )
             owner = f"sector-eod:{run_id}:{lease_token}"
             lease_expires_at = now + _LEASE_DURATION
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO sync_partition (
-                      run_id, partition_key, status, attempt, lease_owner, lease_until,
-                      heartbeat_at, next_retry_at, checkpoint_json, error_code, updated_at
-                    ) VALUES (
-                      :run_id, :partition_key, 'running', 1, :owner, :lease_expires_at,
-                      :now, NULL, :checkpoint, NULL, :now
-                    )
-                    ON CONFLICT (run_id, partition_key) DO UPDATE
-                    SET status = 'running', attempt = sync_partition.attempt + 1,
-                        lease_owner = EXCLUDED.lease_owner, lease_until = EXCLUDED.lease_until,
-                        heartbeat_at = EXCLUDED.heartbeat_at, next_retry_at = NULL,
-                        checkpoint_json = EXCLUDED.checkpoint_json, error_code = NULL,
-                        updated_at = EXCLUDED.updated_at
-                    """
-                ),
-                {
-                    "run_id": run_id,
-                    "partition_key": partition_key,
-                    "owner": owner,
-                    "lease_expires_at": lease_expires_at,
-                    "now": now,
-                    "checkpoint": json.dumps(
-                        {"stage": "raw_archived" if reuse_archived_raw else "requested"},
-                        separators=(",", ":"),
-                    ),
-                },
+            insert_partition = postgresql_insert(SyncPartition).values(
+                run_id=run_id,
+                partition_key=partition_key,
+                status="running",
+                attempt=1,
+                lease_owner=owner,
+                lease_until=lease_expires_at,
+                heartbeat_at=now,
+                next_retry_at=None,
+                checkpoint_json={"stage": "raw_archived" if reuse_archived_raw else "requested"},
+                error_code=None,
+                updated_at=now,
             )
             connection.execute(
-                text(
-                    """
-                    INSERT INTO sector_eod_sync_partition (
-                      scheme, trade_date, run_id, status, stage, attempt, lease_owner, lease_token,
-                      lease_expires_at, last_source_batch_id, last_error_code, updated_at
-                    ) VALUES (
-                      :scheme, :trade_date, :run_id, 'running', :stage, 1, :owner, :lease_token,
-                      :lease_expires_at, :last_source_batch_id, NULL, :now
-                    )
-                    ON CONFLICT (scheme, trade_date) DO UPDATE
-                    SET run_id = EXCLUDED.run_id, status = 'running', stage = EXCLUDED.stage,
-                        attempt = sector_eod_sync_partition.attempt + 1,
-                        lease_owner = EXCLUDED.lease_owner, lease_token = EXCLUDED.lease_token,
-                        lease_expires_at = EXCLUDED.lease_expires_at,
-                        last_source_batch_id = EXCLUDED.last_source_batch_id,
-                        last_error_code = NULL, updated_at = EXCLUDED.updated_at
-                    """
-                ),
-                {
-                    "scheme": scheme.value,
-                    "trade_date": trade_date,
-                    "run_id": run_id,
-                    "stage": "raw_archived" if reuse_archived_raw else "requested",
-                    "owner": owner,
-                    "lease_token": lease_token,
-                    "lease_expires_at": lease_expires_at,
-                    "last_source_batch_id": last_source_batch_id,
-                    "now": now,
-                },
+                insert_partition.on_conflict_do_update(
+                    index_elements=[SyncPartition.run_id, SyncPartition.partition_key],
+                    set_={
+                        "status": "running",
+                        "attempt": SyncPartition.attempt + 1,
+                        "lease_owner": insert_partition.excluded.lease_owner,
+                        "lease_until": insert_partition.excluded.lease_until,
+                        "heartbeat_at": insert_partition.excluded.heartbeat_at,
+                        "next_retry_at": None,
+                        "checkpoint_json": insert_partition.excluded.checkpoint_json,
+                        "error_code": None,
+                        "updated_at": insert_partition.excluded.updated_at,
+                    },
+                )
+            )
+            insert_eod_partition = postgresql_insert(SectorEodSyncPartition).values(
+                scheme=scheme.value,
+                trade_date=trade_date,
+                run_id=run_id,
+                status="running",
+                stage="raw_archived" if reuse_archived_raw else "requested",
+                attempt=1,
+                lease_owner=owner,
+                lease_token=lease_token,
+                lease_expires_at=lease_expires_at,
+                last_source_batch_id=last_source_batch_id,
+                last_error_code=None,
+                updated_at=now,
+            )
+            connection.execute(
+                insert_eod_partition.on_conflict_do_update(
+                    index_elements=[
+                        SectorEodSyncPartition.scheme,
+                        SectorEodSyncPartition.trade_date,
+                    ],
+                    set_={
+                        "run_id": insert_eod_partition.excluded.run_id,
+                        "status": "running",
+                        "stage": insert_eod_partition.excluded.stage,
+                        "attempt": SectorEodSyncPartition.attempt + 1,
+                        "lease_owner": insert_eod_partition.excluded.lease_owner,
+                        "lease_token": insert_eod_partition.excluded.lease_token,
+                        "lease_expires_at": insert_eod_partition.excluded.lease_expires_at,
+                        "last_source_batch_id": insert_eod_partition.excluded.last_source_batch_id,
+                        "last_error_code": None,
+                        "updated_at": insert_eod_partition.excluded.updated_at,
+                    },
+                )
             )
         return SectorEodRun(
             run_id=run_id,
@@ -207,7 +218,7 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
     ) -> ArchivedSectorEodObservation:
         """登记 S3 已完成的 raw 观察并推进 checkpoint，供 DB 故障后重放。"""
         now = datetime.now(UTC)
-        with self._database.engine.begin() as connection:
+        with self._database.transaction() as connection:
             _assert_active_run(connection, run=run, now=now)
             source_batch_id = record_source_observation(
                 connection,
@@ -244,27 +255,28 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
     def get_archived_observation(self, *, run: SectorEodRun) -> ArchivedSectorEodObservation:
         """读取 checkpoint 指向的唯一 raw 来源观察，replay 绝不重访 provider。"""
         now = datetime.now(UTC)
-        with self._database.engine.begin() as connection:
+        with self._database.transaction() as connection:
             _assert_active_run(connection, run=run, now=now)
             row = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT batch.source_batch_id, batch.raw_uri, batch.provider_id,
-                               batch.observed_at, batch.adapter_version, batch.schema_fingerprint
-                        FROM sector_eod_sync_partition checkpoint
-                        JOIN source_batch batch
-                          ON batch.source_batch_id = checkpoint.last_source_batch_id
-                        WHERE checkpoint.scheme = :scheme
-                          AND checkpoint.trade_date = :trade_date
-                          AND checkpoint.lease_token = :lease_token
-                        """
-                    ),
-                    {
-                        "scheme": run.scheme.value,
-                        "trade_date": run.trade_date,
-                        "lease_token": run.lease_token,
-                    },
+                    select(
+                        SourceBatch.source_batch_id,
+                        SourceBatch.raw_uri,
+                        SourceBatch.provider_id,
+                        SourceBatch.observed_at,
+                        SourceBatch.adapter_version,
+                        SourceBatch.schema_fingerprint,
+                    )
+                    .select_from(SectorEodSyncPartition)
+                    .join(
+                        SourceBatch,
+                        SourceBatch.source_batch_id == SectorEodSyncPartition.last_source_batch_id,
+                    )
+                    .where(
+                        SectorEodSyncPartition.scheme == run.scheme.value,
+                        SectorEodSyncPartition.trade_date == run.trade_date,
+                        SectorEodSyncPartition.lease_token == run.lease_token,
+                    )
                 )
                 .mappings()
                 .one_or_none()
@@ -282,20 +294,17 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
 
     def has_archived_observation(self, *, scheme: SectorScheme, trade_date: date) -> bool:
         """只检查 checkpoint 是否已绑定 source batch，任务恢复前不读取 raw 内容或触发 provider。"""
-        with self._database.engine.connect() as connection:
+        with self._database.session() as connection:
             value = connection.execute(
-                text(
-                    """
-                    SELECT EXISTS (
-                      SELECT 1
-                      FROM sector_eod_sync_partition
-                      WHERE scheme = :scheme
-                        AND trade_date = :trade_date
-                        AND last_source_batch_id IS NOT NULL
+                select(
+                    select(SectorEodSyncPartition.scheme)
+                    .where(
+                        SectorEodSyncPartition.scheme == scheme.value,
+                        SectorEodSyncPartition.trade_date == trade_date,
+                        SectorEodSyncPartition.last_source_batch_id.is_not(None),
                     )
-                    """
-                ),
-                {"scheme": scheme.value, "trade_date": trade_date},
+                    .exists()
+                )
             ).scalar_one()
         return bool(value)
 
@@ -303,22 +312,22 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
         self, *, scheme: SectorScheme, before_trade_date: date
     ) -> SectorEodHistoricalReference | None:
         """读取目标日之前最近 current published 快照及市值字段，隔离跨日质量查询。"""
-        with self._database.engine.connect() as connection:
+        with self._database.session() as connection:
             snapshot = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT snapshot_id, trade_date, content_sha256
-                        FROM sector_eod_snapshot
-                        WHERE scheme = :scheme
-                          AND trade_date < :before_trade_date
-                          AND state = 'published'
-                          AND superseded_at IS NULL
-                        ORDER BY trade_date DESC
-                        LIMIT 1
-                        """
-                    ),
-                    {"scheme": scheme.value, "before_trade_date": before_trade_date},
+                    select(
+                        SectorEodSnapshotModel.snapshot_id,
+                        SectorEodSnapshotModel.trade_date,
+                        SectorEodSnapshotModel.content_sha256,
+                    )
+                    .where(
+                        SectorEodSnapshotModel.scheme == scheme.value,
+                        SectorEodSnapshotModel.trade_date < before_trade_date,
+                        SectorEodSnapshotModel.state == "published",
+                        SectorEodSnapshotModel.superseded_at.is_(None),
+                    )
+                    .order_by(SectorEodSnapshotModel.trade_date.desc())
+                    .limit(1)
                 )
                 .mappings()
                 .one_or_none()
@@ -327,15 +336,10 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
                 return None
             quote_rows = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT sector.sector_code, quote.market_value
-                        FROM sector_eod_quote quote
-                        JOIN sector_entity sector ON sector.sector_key = quote.sector_key
-                        WHERE quote.snapshot_id = :snapshot_id
-                        """
-                    ),
-                    {"snapshot_id": snapshot["snapshot_id"]},
+                    select(SectorEntity.sector_code, SectorEodQuoteModel.market_value)
+                    .select_from(SectorEodQuoteModel)
+                    .join(SectorEntity, SectorEntity.sector_key == SectorEodQuoteModel.sector_key)
+                    .where(SectorEodQuoteModel.snapshot_id == snapshot["snapshot_id"])
                 )
                 .mappings()
                 .all()
@@ -351,7 +355,7 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
     def mark_normalized(self, *, run: SectorEodRun) -> None:
         """在标准载荷已成功解析后推进 checkpoint，旧 fencing token 无法覆盖新 owner。"""
         now = datetime.now(UTC)
-        with self._database.engine.begin() as connection:
+        with self._database.transaction() as connection:
             _assert_active_run(connection, run=run, now=now)
             _update_run_checkpoint(
                 connection,
@@ -366,7 +370,7 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
     def mark_fetched(self, *, run: SectorEodRun) -> None:
         """记录 provider 已返回，后续 raw 归档失败可从稳定失败码重新调度。"""
         now = datetime.now(UTC)
-        with self._database.engine.begin() as connection:
+        with self._database.transaction() as connection:
             _assert_active_run(connection, run=run, now=now)
             _update_run_checkpoint(
                 connection,
@@ -382,65 +386,57 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
         """仅允许当前 fencing token 延长未过期租约，避免旧 worker 在接管后继续落库。"""
         now = datetime.now(UTC)
         lease_expires_at = now + _LEASE_DURATION
-        with self._database.engine.begin() as connection:
+        with self._database.transaction() as connection:
             result = connection.execute(
-                text(
-                    """
-                    UPDATE sector_eod_sync_partition
-                    SET lease_expires_at = :lease_expires_at, updated_at = :now
-                    WHERE scheme = :scheme
-                      AND trade_date = :trade_date
-                      AND run_id = :run_id
-                      AND lease_token = :lease_token
-                      AND status = 'running'
-                      AND lease_expires_at > :now
-                    """
-                ),
-                {
-                    "lease_expires_at": lease_expires_at,
-                    "now": now,
-                    "scheme": run.scheme.value,
-                    "trade_date": run.trade_date,
-                    "run_id": run.run_id,
-                    "lease_token": run.lease_token,
-                },
+                update(SectorEodSyncPartition)
+                .where(
+                    SectorEodSyncPartition.scheme == run.scheme.value,
+                    SectorEodSyncPartition.trade_date == run.trade_date,
+                    SectorEodSyncPartition.run_id == run.run_id,
+                    SectorEodSyncPartition.lease_token == run.lease_token,
+                    SectorEodSyncPartition.status == "running",
+                    SectorEodSyncPartition.lease_expires_at > now,
+                )
+                .values(lease_expires_at=lease_expires_at, updated_at=now)
             )
             if getattr(result, "rowcount", 1) == 0:
                 raise RuntimeError("sector eod lease is no longer active")
             connection.execute(
-                text(
-                    """
-                    UPDATE sync_partition
-                    SET lease_until = :lease_expires_at, heartbeat_at = :now, updated_at = :now
-                    WHERE run_id = :run_id AND partition_key = :partition_key
-                    """
-                ),
-                {
-                    "lease_expires_at": lease_expires_at,
-                    "now": now,
-                    "run_id": run.run_id,
-                    "partition_key": _partition_key(run.scheme, run.trade_date),
-                },
+                update(SyncPartition)
+                .where(
+                    SyncPartition.run_id == run.run_id,
+                    SyncPartition.partition_key == _partition_key(run.scheme, run.trade_date),
+                )
+                .values(lease_until=lease_expires_at, heartbeat_at=now, updated_at=now)
             )
 
     def requeue_expired_leases(self, *, now: datetime) -> int:
         """将崩溃 worker 遗留的分区改回 queued，原始 checkpoint 和 source batch 保持不变。"""
         if now.tzinfo is None:
             raise ValueError("sector eod reaper time must include a timezone")
-        with self._database.engine.begin() as connection:
+        with self._database.transaction() as connection:
             expired_rows = (
                 connection.execute(
-                    text(
-                        """
-                        UPDATE sector_eod_sync_partition
-                        SET status = 'queued', lease_owner = NULL, lease_token = NULL,
-                            lease_expires_at = NULL, last_error_code = 'lease-expired',
-                            updated_at = :now
-                        WHERE status = 'running' AND lease_expires_at < :now
-                        RETURNING run_id, scheme, trade_date, stage, last_source_batch_id
-                        """
-                    ),
-                    {"now": now},
+                    update(SectorEodSyncPartition)
+                    .where(
+                        SectorEodSyncPartition.status == "running",
+                        SectorEodSyncPartition.lease_expires_at < now,
+                    )
+                    .values(
+                        status="queued",
+                        lease_owner=None,
+                        lease_token=None,
+                        lease_expires_at=None,
+                        last_error_code="lease-expired",
+                        updated_at=now,
+                    )
+                    .returning(
+                        SectorEodSyncPartition.run_id,
+                        SectorEodSyncPartition.scheme,
+                        SectorEodSyncPartition.trade_date,
+                        SectorEodSyncPartition.stage,
+                        SectorEodSyncPartition.last_source_batch_id,
+                    )
                 )
                 .mappings()
                 .all()
@@ -452,59 +448,42 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
                     row["trade_date"],
                 )
                 connection.execute(
-                    text(
-                        """
-                        UPDATE sync_partition
-                        SET status = 'queued', lease_owner = NULL, lease_until = NULL,
-                            heartbeat_at = :now, next_retry_at = :now,
-                            checkpoint_json = :checkpoint, error_code = 'lease-expired',
-                            updated_at = :now
-                        WHERE run_id = :run_id AND partition_key = :partition_key
-                        """
-                    ),
-                    {
-                        "now": now,
-                        "checkpoint": json.dumps(
-                            {
-                                "stage": str(row["stage"]),
-                                "sourceBatchId": (
-                                    None
-                                    if row["last_source_batch_id"] is None
-                                    else str(row["last_source_batch_id"])
-                                ),
-                                "errorCode": "lease-expired",
-                            },
-                            separators=(",", ":"),
-                        ),
-                        "run_id": run_id,
-                        "partition_key": partition_key,
-                    },
+                    update(SyncPartition)
+                    .where(
+                        SyncPartition.run_id == run_id, SyncPartition.partition_key == partition_key
+                    )
+                    .values(
+                        status="queued",
+                        lease_owner=None,
+                        lease_until=None,
+                        heartbeat_at=now,
+                        next_retry_at=now,
+                        checkpoint_json={
+                            "stage": str(row["stage"]),
+                            "sourceBatchId": None
+                            if row["last_source_batch_id"] is None
+                            else str(row["last_source_batch_id"]),
+                            "errorCode": "lease-expired",
+                        },
+                        error_code="lease-expired",
+                        updated_at=now,
+                    )
                 )
                 connection.execute(
-                    text(
-                        """
-                        UPDATE sync_run
-                        SET status = 'queued', finished_at = NULL
-                        WHERE run_id = :run_id
-                        """
-                    ),
-                    {"run_id": run_id},
+                    update(SyncRun)
+                    .where(SyncRun.run_id == run_id)
+                    .values(status="queued", finished_at=None)
                 )
         return len(expired_rows)
 
     def list_queued_runs(self) -> Sequence[QueuedSectorEodRun]:
         """读取当前 queued 分区的稳定 scheme/date，reaper 不直接解释 checkpoint 或来源字段。"""
-        with self._database.engine.connect() as connection:
+        with self._database.session() as connection:
             rows = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT scheme, trade_date
-                        FROM sector_eod_sync_partition
-                        WHERE status = 'queued'
-                        ORDER BY trade_date ASC, scheme ASC
-                        """
-                    )
+                    select(SectorEodSyncPartition.scheme, SectorEodSyncPartition.trade_date)
+                    .where(SectorEodSyncPartition.status == "queued")
+                    .order_by(SectorEodSyncPartition.trade_date, SectorEodSyncPartition.scheme)
                 )
                 .mappings()
                 .all()
@@ -520,7 +499,7 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
     def mark_failed(self, *, run: SectorEodRun, error_code: str) -> None:
         """保存稳定错误码并释放当前租约，raw archived 后可由新 owner 接管。"""
         now = datetime.now(UTC)
-        with self._database.engine.begin() as connection:
+        with self._database.transaction() as connection:
             _update_run_checkpoint(
                 connection,
                 run=run,
@@ -532,14 +511,9 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
                 release_lease=True,
             )
             connection.execute(
-                text(
-                    """
-                    UPDATE sync_run
-                    SET status = 'failed', finished_at = :now
-                    WHERE run_id = :run_id
-                    """
-                ),
-                {"run_id": run.run_id, "now": now},
+                update(SyncRun)
+                .where(SyncRun.run_id == run.run_id)
+                .values(status="failed", finished_at=now)
             )
 
     def store_quarantined_snapshot(
@@ -569,7 +543,7 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
             schema_fingerprint=schema_fingerprint,
         )
         _validate_quarantined_quality_results(quality_results)
-        with self._database.engine.begin() as connection:
+        with self._database.transaction() as connection:
             _assert_active_run(connection, run=run, now=datetime.now(UTC))
             _ensure_source_batch_belongs_to_run(
                 connection, source_batch_id=source_batch_id, run=run
@@ -578,36 +552,27 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
             _require_complete_coverage(active_sectors=active_sectors, quotes=quotes)
             snapshot_id = uuid4()
             connection.execute(
-                text(
-                    """
-                    INSERT INTO sector_eod_snapshot (
-                      snapshot_id, data_version, scheme, trade_date, revision, source_cutoff_at,
-                      observed_at, finality, state, quality_status, record_count, expected_count,
-                      coverage_ratio, normalizer_version, content_sha256, source_batch_id,
-                      created_at, published_at, superseded_at
-                    ) VALUES (
-                      :snapshot_id, :data_version, :scheme, :trade_date, :revision,
-                      :source_cutoff_at, :observed_at, 'post_close_observation', 'quarantined',
-                      'quarantined', :record_count, :expected_count, 1, :normalizer_version,
-                      :content_sha256, :source_batch_id, :created_at, NULL, NULL
-                    )
-                    """
-                ),
-                {
-                    "snapshot_id": snapshot_id,
-                    "data_version": uuid4(),
-                    "scheme": scheme.value,
-                    "trade_date": trade_date,
-                    "revision": _next_revision(connection, scheme=scheme, trade_date=trade_date),
-                    "source_cutoff_at": source_cutoff_at,
-                    "observed_at": observed_at,
-                    "record_count": len(quotes),
-                    "expected_count": len(active_sectors),
-                    "normalizer_version": _NORMALIZER_VERSION,
-                    "content_sha256": _snapshot_content_hash(quotes),
-                    "source_batch_id": source_batch_id,
-                    "created_at": observed_at,
-                },
+                insert(SectorEodSnapshotModel).values(
+                    snapshot_id=snapshot_id,
+                    data_version=uuid4(),
+                    scheme=scheme.value,
+                    trade_date=trade_date,
+                    revision=_next_revision(connection, scheme=scheme, trade_date=trade_date),
+                    source_cutoff_at=source_cutoff_at,
+                    observed_at=observed_at,
+                    finality="post_close_observation",
+                    state="quarantined",
+                    quality_status="quarantined",
+                    record_count=len(quotes),
+                    expected_count=len(active_sectors),
+                    coverage_ratio=1,
+                    normalizer_version=_NORMALIZER_VERSION,
+                    content_sha256=_snapshot_content_hash(quotes),
+                    source_batch_id=source_batch_id,
+                    created_at=observed_at,
+                    published_at=None,
+                    superseded_at=None,
+                )
             )
             _insert_quotes(
                 connection,
@@ -653,7 +618,7 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
         _validate_quality_results(status=quality_status, results=quality_results)
         if source_batch_id is None:
             # 兼容旧手工调用；生产运行先由 checkpoint 登记 raw，再传入 source batch。
-            with self._database.engine.begin() as connection:
+            with self._database.transaction() as connection:
                 source_batch_id = record_source_observation(
                     connection,
                     provider_id=provider_id,
@@ -668,7 +633,7 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
                 )
         elif run is None:
             raise ValueError("sector eod source batch requires a fenced run")
-        with self._database.engine.begin() as connection:
+        with self._database.transaction() as connection:
             if run is not None:
                 _assert_active_run(connection, run=run, now=datetime.now(UTC))
                 _ensure_source_batch_belongs_to_run(
@@ -712,38 +677,27 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
                     superseded_at=published_at,
                 )
             connection.execute(
-                text(
-                    """
-                    INSERT INTO sector_eod_snapshot (
-                      snapshot_id, data_version, scheme, trade_date, revision, source_cutoff_at,
-                      observed_at, finality, state, quality_status, record_count, expected_count,
-                      coverage_ratio, normalizer_version, content_sha256, source_batch_id,
-                      created_at, published_at, superseded_at
-                    ) VALUES (
-                      :snapshot_id, :data_version, :scheme, :trade_date, :revision,
-                      :source_cutoff_at, :observed_at, 'post_close_observation', 'published',
-                      :quality_status, :record_count, :expected_count, 1, :normalizer_version,
-                      :content_sha256, :source_batch_id, :created_at, :published_at, NULL
-                    )
-                    """
-                ),
-                {
-                    "snapshot_id": snapshot_id,
-                    "data_version": data_version,
-                    "scheme": scheme.value,
-                    "trade_date": trade_date,
-                    "revision": revision,
-                    "source_cutoff_at": source_cutoff_at,
-                    "observed_at": observed_at,
-                    "quality_status": quality_status,
-                    "record_count": len(quotes),
-                    "expected_count": len(active_sectors),
-                    "normalizer_version": _NORMALIZER_VERSION,
-                    "content_sha256": content_sha256,
-                    "source_batch_id": source_batch_id,
-                    "created_at": published_at,
-                    "published_at": published_at,
-                },
+                insert(SectorEodSnapshotModel).values(
+                    snapshot_id=snapshot_id,
+                    data_version=data_version,
+                    scheme=scheme.value,
+                    trade_date=trade_date,
+                    revision=revision,
+                    source_cutoff_at=source_cutoff_at,
+                    observed_at=observed_at,
+                    finality="post_close_observation",
+                    state="published",
+                    quality_status=quality_status,
+                    record_count=len(quotes),
+                    expected_count=len(active_sectors),
+                    coverage_ratio=1,
+                    normalizer_version=_NORMALIZER_VERSION,
+                    content_sha256=content_sha256,
+                    source_batch_id=source_batch_id,
+                    created_at=published_at,
+                    published_at=published_at,
+                    superseded_at=None,
+                )
             )
             _insert_quotes(
                 connection,
@@ -811,7 +765,7 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
             schema_fingerprint=schema_fingerprint,
         )
         _validate_quality_results(status=quality_status, results=quality_results)
-        with self._database.engine.begin() as connection:
+        with self._database.transaction() as connection:
             _assert_active_run(connection, run=run, now=datetime.now(UTC))
             _ensure_source_batch_belongs_to_run(
                 connection, source_batch_id=source_batch_id, run=run
@@ -841,37 +795,27 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
             snapshot_id = uuid4()
             data_version = uuid4()
             connection.execute(
-                text(
-                    """
-                    INSERT INTO sector_eod_snapshot (
-                      snapshot_id, data_version, scheme, trade_date, revision, source_cutoff_at,
-                      observed_at, finality, state, quality_status, record_count, expected_count,
-                      coverage_ratio, normalizer_version, content_sha256, source_batch_id,
-                      created_at, published_at, superseded_at
-                    ) VALUES (
-                      :snapshot_id, :data_version, :scheme, :trade_date, :revision,
-                      :source_cutoff_at, :observed_at, 'post_close_observation', 'candidate',
-                      :quality_status, :record_count, :expected_count, 1, :normalizer_version,
-                      :content_sha256, :source_batch_id, :created_at, NULL, NULL
-                    )
-                    """
-                ),
-                {
-                    "snapshot_id": snapshot_id,
-                    "data_version": data_version,
-                    "scheme": scheme.value,
-                    "trade_date": trade_date,
-                    "revision": _next_revision(connection, scheme=scheme, trade_date=trade_date),
-                    "source_cutoff_at": source_cutoff_at,
-                    "observed_at": observed_at,
-                    "quality_status": quality_status,
-                    "record_count": len(quotes),
-                    "expected_count": len(active_sectors),
-                    "normalizer_version": _NORMALIZER_VERSION,
-                    "content_sha256": content_sha256,
-                    "source_batch_id": source_batch_id,
-                    "created_at": observed_at,
-                },
+                insert(SectorEodSnapshotModel).values(
+                    snapshot_id=snapshot_id,
+                    data_version=data_version,
+                    scheme=scheme.value,
+                    trade_date=trade_date,
+                    revision=_next_revision(connection, scheme=scheme, trade_date=trade_date),
+                    source_cutoff_at=source_cutoff_at,
+                    observed_at=observed_at,
+                    finality="post_close_observation",
+                    state="candidate",
+                    quality_status=quality_status,
+                    record_count=len(quotes),
+                    expected_count=len(active_sectors),
+                    coverage_ratio=1,
+                    normalizer_version=_NORMALIZER_VERSION,
+                    content_sha256=content_sha256,
+                    source_batch_id=source_batch_id,
+                    created_at=observed_at,
+                    published_at=None,
+                    superseded_at=None,
+                )
             )
             _insert_quotes(
                 connection,
@@ -906,29 +850,27 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
         self, *, scheme: SectorScheme, trade_date: date | None
     ) -> SectorEodSnapshot | None:
         """读取最新或精确日期的当前 published 快照，不在指定日期缺失时回退。"""
-        date_filter = "AND trade_date = :trade_date" if trade_date is not None else ""
-        order = "" if trade_date is not None else "ORDER BY trade_date DESC"
-        with self._database.engine.connect() as connection:
-            row = (
-                connection.execute(
-                    text(
-                        f"""
-                        SELECT snapshot_id, data_version, scheme, trade_date, source_cutoff_at,
-                               observed_at, finality, quality_status, published_at
-                        FROM sector_eod_snapshot
-                        WHERE scheme = :scheme
-                          AND state = 'published'
-                          AND superseded_at IS NULL
-                          {date_filter}
-                        {order}
-                        LIMIT 1
-                        """
-                    ),
-                    {"scheme": scheme.value, "trade_date": trade_date},
-                )
-                .mappings()
-                .one_or_none()
-            )
+        statement = select(
+            SectorEodSnapshotModel.snapshot_id,
+            SectorEodSnapshotModel.data_version,
+            SectorEodSnapshotModel.scheme,
+            SectorEodSnapshotModel.trade_date,
+            SectorEodSnapshotModel.source_cutoff_at,
+            SectorEodSnapshotModel.observed_at,
+            SectorEodSnapshotModel.finality,
+            SectorEodSnapshotModel.quality_status,
+            SectorEodSnapshotModel.published_at,
+        ).where(
+            SectorEodSnapshotModel.scheme == scheme.value,
+            SectorEodSnapshotModel.state == "published",
+            SectorEodSnapshotModel.superseded_at.is_(None),
+        )
+        if trade_date is None:
+            statement = statement.order_by(SectorEodSnapshotModel.trade_date.desc())
+        else:
+            statement = statement.where(SectorEodSnapshotModel.trade_date == trade_date)
+        with self._database.session() as connection:
+            row = connection.execute(statement.limit(1)).mappings().one_or_none()
         return None if row is None else _snapshot(row)
 
     def rollback_published_snapshot(
@@ -938,7 +880,7 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
         if revision < 1:
             raise ValueError("sector eod rollback revision must be positive")
         now = datetime.now(UTC)
-        with self._database.engine.begin() as connection:
+        with self._database.transaction() as connection:
             current = _current_snapshot_for_update(
                 connection,
                 scheme=scheme,
@@ -948,25 +890,27 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
                 raise ValueError("sector eod rollback requires a current published snapshot")
             target = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT snapshot_id, data_version, scheme, trade_date, source_cutoff_at,
-                               observed_at, finality, quality_status, published_at,
-                               normalizer_version, content_sha256
-                        FROM sector_eod_snapshot
-                        WHERE scheme = :scheme
-                          AND trade_date = :trade_date
-                          AND revision = :revision
-                          AND state = 'superseded'
-                          AND quality_status IN ('passed', 'warned')
-                        FOR UPDATE
-                        """
-                    ),
-                    {
-                        "scheme": scheme.value,
-                        "trade_date": trade_date,
-                        "revision": revision,
-                    },
+                    select(
+                        SectorEodSnapshotModel.snapshot_id,
+                        SectorEodSnapshotModel.data_version,
+                        SectorEodSnapshotModel.scheme,
+                        SectorEodSnapshotModel.trade_date,
+                        SectorEodSnapshotModel.source_cutoff_at,
+                        SectorEodSnapshotModel.observed_at,
+                        SectorEodSnapshotModel.finality,
+                        SectorEodSnapshotModel.quality_status,
+                        SectorEodSnapshotModel.published_at,
+                        SectorEodSnapshotModel.normalizer_version,
+                        SectorEodSnapshotModel.content_sha256,
+                    )
+                    .where(
+                        SectorEodSnapshotModel.scheme == scheme.value,
+                        SectorEodSnapshotModel.trade_date == trade_date,
+                        SectorEodSnapshotModel.revision == revision,
+                        SectorEodSnapshotModel.state == "superseded",
+                        SectorEodSnapshotModel.quality_status.in_(["passed", "warned"]),
+                    )
+                    .with_for_update()
                 )
                 .mappings()
                 .one_or_none()
@@ -981,30 +925,18 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
                 superseded_at=now,
             )
             connection.execute(
-                text(
-                    """
-                    UPDATE sector_eod_snapshot
-                    SET state = 'published', superseded_at = NULL
-                    WHERE snapshot_id = :snapshot_id
-                    """
-                ),
-                {"snapshot_id": target["snapshot_id"]},
+                update(SectorEodSnapshotModel)
+                .where(SectorEodSnapshotModel.snapshot_id == target["snapshot_id"])
+                .values(state="published", superseded_at=None)
             )
             connection.execute(
-                text(
-                    """
-                    UPDATE dataset_publication
-                    SET superseded_at = NULL
-                    WHERE dataset = :dataset
-                      AND partition_key = :partition_key
-                      AND data_version = :data_version
-                    """
-                ),
-                {
-                    "dataset": _DATASET,
-                    "partition_key": _partition_key(scheme, trade_date),
-                    "data_version": target["data_version"],
-                },
+                update(DatasetPublication)
+                .where(
+                    DatasetPublication.dataset == _DATASET,
+                    DatasetPublication.partition_key == _partition_key(scheme, trade_date),
+                    DatasetPublication.data_version == target["data_version"],
+                )
+                .values(superseded_at=None)
             )
         return _snapshot(target)
 
@@ -1018,57 +950,65 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
         limit: int,
     ) -> Sequence[RankedSectorEodQuote]:
         """使用封闭字段映射计算 null-last、competition rank 和稳定页面位置。"""
-        sort_column = _SORT_COLUMNS[sort]
-        direction = _SORT_DIRECTIONS[order]
-        rank_expression = (
-            f"RANK() OVER (ORDER BY {sort_column} {direction} NULLS LAST)"
-            if sort is SectorEodSort.CODE
-            else (
-                f"CASE WHEN {sort_column} IS NULL THEN NULL ELSE "
-                f"RANK() OVER (ORDER BY {sort_column} {direction} NULLS LAST) END"
-            )
+        sort_column = {
+            SectorEodSort.CHANGE_PERCENT: SectorEodQuoteModel.change_percent,
+            SectorEodSort.TURNOVER_PERCENT: SectorEodQuoteModel.turnover_percent,
+            SectorEodSort.MARKET_VALUE: SectorEodQuoteModel.market_value,
+            SectorEodSort.LATEST_VALUE: SectorEodQuoteModel.latest_value,
+            SectorEodSort.ADVANCERS: SectorEodQuoteModel.advancers,
+            SectorEodSort.DECLINERS: SectorEodQuoteModel.decliners,
+            SectorEodSort.LEADER_CHANGE_PERCENT: SectorEodQuoteModel.leader_change_percent,
+            SectorEodSort.CODE: SectorEntity.sector_code.collate("C"),
+        }[sort]
+        ordered = (
+            sort_column.asc().nulls_last()
+            if order is SortOrder.ASC
+            else sort_column.desc().nulls_last()
         )
-        with self._database.engine.connect() as connection:
+        rank_value = func.rank().over(order_by=ordered)
+        rank = (
+            rank_value
+            if sort is SectorEodSort.CODE
+            else case((sort_column.is_(None), None), else_=rank_value)
+        )
+        ranked = (
+            select(
+                SectorEntity.sector_id,
+                SectorEntity.scheme,
+                SectorEntity.sector_code,
+                SectorEodQuoteModel.sector_name,
+                SectorEodQuoteModel.latest_value,
+                SectorEodQuoteModel.change_value,
+                SectorEodQuoteModel.change_percent,
+                SectorEodQuoteModel.market_value,
+                SectorEodQuoteModel.turnover_percent,
+                SectorEodQuoteModel.advancers,
+                SectorEodQuoteModel.decliners,
+                SectorEodQuoteModel.leader_name,
+                SectorEodQuoteModel.leader_change_percent,
+                rank.label("rank"),
+                func.row_number()
+                .over(
+                    order_by=(
+                        ordered,
+                        SectorEntity.sector_code.collate("C").asc(),
+                        SectorEntity.sector_id.asc(),
+                    )
+                )
+                .label("position"),
+            )
+            .select_from(SectorEodQuoteModel)
+            .join(SectorEntity, SectorEntity.sector_key == SectorEodQuoteModel.sector_key)
+            .where(SectorEodQuoteModel.snapshot_id == snapshot_id)
+            .cte("ranked")
+        )
+        with self._database.session() as connection:
             rows = (
                 connection.execute(
-                    text(
-                        f"""
-                        WITH ranked AS (
-                          SELECT
-                            sector.sector_id,
-                            sector.scheme,
-                            sector.sector_code,
-                            quote.sector_name,
-                            quote.latest_value,
-                            quote.change_value,
-                            quote.change_percent,
-                            quote.market_value,
-                            quote.turnover_percent,
-                            quote.advancers,
-                            quote.decliners,
-                            quote.leader_name,
-                            quote.leader_change_percent,
-                            {rank_expression} AS rank,
-                            ROW_NUMBER() OVER (
-                              ORDER BY {sort_column} {direction} NULLS LAST,
-                                       sector.sector_code COLLATE "C" ASC,
-                                       sector.sector_id ASC
-                            ) AS position
-                          FROM sector_eod_quote quote
-                          JOIN sector_entity sector ON sector.sector_key = quote.sector_key
-                          WHERE quote.snapshot_id = :snapshot_id
-                        )
-                        SELECT * FROM ranked
-                        WHERE position > :after_position
-                        ORDER BY position ASC
-                        LIMIT :limit
-                        """
-                    ),
-                    {
-                        "snapshot_id": snapshot_id,
-                        "after_position": after_position or 0,
-                        "limit": limit,
-                    },
+                    select(ranked)
+                    .where(ranked.c.position > (after_position or 0))
+                    .order_by(ranked.c.position)
+                    .limit(limit)
                 )
                 .mappings()
                 .all()
@@ -1079,28 +1019,31 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
         self, *, snapshot_id: UUID, identifier: SectorIdentifier
     ) -> RankedSectorEodQuote | None:
         """读取快照中一个板块的原始报价；单资源响应不引入排名字段。"""
-        with self._database.engine.connect() as connection:
+        with self._database.session() as connection:
             row = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT
-                          sector.sector_id, sector.scheme, sector.sector_code, quote.sector_name,
-                          quote.latest_value, quote.change_value, quote.change_percent,
-                          quote.market_value, quote.turnover_percent, quote.advancers,
-                          quote.decliners, quote.leader_name, quote.leader_change_percent
-                        FROM sector_eod_quote quote
-                        JOIN sector_entity sector ON sector.sector_key = quote.sector_key
-                        WHERE quote.snapshot_id = :snapshot_id
-                          AND sector.scheme = :scheme
-                          AND sector.sector_code = :sector_code
-                        """
-                    ),
-                    {
-                        "snapshot_id": snapshot_id,
-                        "scheme": identifier.scheme.value,
-                        "sector_code": identifier.code,
-                    },
+                    select(
+                        SectorEntity.sector_id,
+                        SectorEntity.scheme,
+                        SectorEntity.sector_code,
+                        SectorEodQuoteModel.sector_name,
+                        SectorEodQuoteModel.latest_value,
+                        SectorEodQuoteModel.change_value,
+                        SectorEodQuoteModel.change_percent,
+                        SectorEodQuoteModel.market_value,
+                        SectorEodQuoteModel.turnover_percent,
+                        SectorEodQuoteModel.advancers,
+                        SectorEodQuoteModel.decliners,
+                        SectorEodQuoteModel.leader_name,
+                        SectorEodQuoteModel.leader_change_percent,
+                    )
+                    .select_from(SectorEodQuoteModel)
+                    .join(SectorEntity, SectorEntity.sector_key == SectorEodQuoteModel.sector_key)
+                    .where(
+                        SectorEodQuoteModel.snapshot_id == snapshot_id,
+                        SectorEntity.scheme == identifier.scheme.value,
+                        SectorEntity.sector_code == identifier.code,
+                    )
                 )
                 .mappings()
                 .one_or_none()
@@ -1108,29 +1051,19 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
         return None if row is None else _quote_from_row(row, rank=None, position=1)
 
 
-def _assert_active_run(connection: Connection, *, run: SectorEodRun, now: datetime) -> None:
+def _assert_active_run(connection: Session, *, run: SectorEodRun, now: datetime) -> None:
     """验证 scheme/date、fencing token 与未过期租约，阻止僵尸 worker 提交。"""
     row = (
         connection.execute(
-            text(
-                """
-                SELECT run_id
-                FROM sector_eod_sync_partition
-                WHERE scheme = :scheme
-                  AND trade_date = :trade_date
-                  AND run_id = :run_id
-                  AND lease_token = :lease_token
-                  AND lease_expires_at > :now
-                FOR UPDATE
-                """
-            ),
-            {
-                "scheme": run.scheme.value,
-                "trade_date": run.trade_date,
-                "run_id": run.run_id,
-                "lease_token": run.lease_token,
-                "now": now,
-            },
+            select(SectorEodSyncPartition.run_id)
+            .where(
+                SectorEodSyncPartition.scheme == run.scheme.value,
+                SectorEodSyncPartition.trade_date == run.trade_date,
+                SectorEodSyncPartition.run_id == run.run_id,
+                SectorEodSyncPartition.lease_token == run.lease_token,
+                SectorEodSyncPartition.lease_expires_at > now,
+            )
+            .with_for_update()
         )
         .mappings()
         .one_or_none()
@@ -1140,25 +1073,16 @@ def _assert_active_run(connection: Connection, *, run: SectorEodRun, now: dateti
 
 
 def _ensure_source_batch_belongs_to_run(
-    connection: Connection, *, source_batch_id: UUID, run: SectorEodRun
+    connection: Session, *, source_batch_id: UUID, run: SectorEodRun
 ) -> None:
     """确认待发布证据属于当前 run/partition，避免跨分区 raw 注入或错误 replay。"""
     row = (
         connection.execute(
-            text(
-                """
-                SELECT source_batch_id
-                FROM source_batch
-                WHERE source_batch_id = :source_batch_id
-                  AND run_id = :run_id
-                  AND partition_key = :partition_key
-                """
-            ),
-            {
-                "source_batch_id": source_batch_id,
-                "run_id": run.run_id,
-                "partition_key": _partition_key(run.scheme, run.trade_date),
-            },
+            select(SourceBatch.source_batch_id).where(
+                SourceBatch.source_batch_id == source_batch_id,
+                SourceBatch.run_id == run.run_id,
+                SourceBatch.partition_key == _partition_key(run.scheme, run.trade_date),
+            )
         )
         .mappings()
         .one_or_none()
@@ -1168,7 +1092,7 @@ def _ensure_source_batch_belongs_to_run(
 
 
 def _update_run_checkpoint(
-    connection: Connection,
+    connection: Session,
     *,
     run: SectorEodRun,
     stage: str | None,
@@ -1179,74 +1103,50 @@ def _update_run_checkpoint(
     release_lease: bool = False,
 ) -> None:
     """以 fencing token 原子更新专用与通用 checkpoint，防止旧 worker 覆盖接管者。"""
+    values: dict[str, object] = {"status": status, "last_error_code": error_code, "updated_at": now}
+    if stage is not None:
+        values["stage"] = stage
+    if source_batch_id is not None:
+        values["last_source_batch_id"] = source_batch_id
+    if release_lease:
+        values.update(lease_owner=None, lease_token=None, lease_expires_at=None)
     result = connection.execute(
-        text(
-            """
-            UPDATE sector_eod_sync_partition
-            SET status = :status,
-                stage = COALESCE(:stage, stage),
-                lease_owner = CASE WHEN :release_lease THEN NULL ELSE lease_owner END,
-                lease_token = CASE WHEN :release_lease THEN NULL ELSE lease_token END,
-                lease_expires_at = CASE WHEN :release_lease THEN NULL ELSE lease_expires_at END,
-                last_source_batch_id = COALESCE(:source_batch_id, last_source_batch_id),
-                last_error_code = :error_code,
-                updated_at = :now
-            WHERE scheme = :scheme
-              AND trade_date = :trade_date
-              AND run_id = :run_id
-              AND lease_token = :lease_token
-            """
-        ),
-        {
-            "status": status,
-            "stage": stage,
-            "release_lease": release_lease,
-            "source_batch_id": source_batch_id,
-            "error_code": error_code,
-            "now": now,
-            "scheme": run.scheme.value,
-            "trade_date": run.trade_date,
-            "run_id": run.run_id,
-            "lease_token": run.lease_token,
-        },
+        update(SectorEodSyncPartition)
+        .where(
+            SectorEodSyncPartition.scheme == run.scheme.value,
+            SectorEodSyncPartition.trade_date == run.trade_date,
+            SectorEodSyncPartition.run_id == run.run_id,
+            SectorEodSyncPartition.lease_token == run.lease_token,
+        )
+        .values(**values)
     )
     if getattr(result, "rowcount", 1) == 0:
         return
-    connection.execute(
-        text(
-            """
-            UPDATE sync_partition
-            SET status = :status,
-                lease_owner = CASE WHEN :release_lease THEN NULL ELSE lease_owner END,
-                lease_until = CASE WHEN :release_lease THEN NULL ELSE lease_until END,
-                heartbeat_at = :now,
-                checkpoint_json = :checkpoint,
-                error_code = :error_code,
-                updated_at = :now
-            WHERE run_id = :run_id AND partition_key = :partition_key
-            """
-        ),
-        {
-            "status": status,
-            "release_lease": release_lease,
-            "now": now,
-            "checkpoint": json.dumps(
-                {
-                    "stage": stage,
-                    "sourceBatchId": None if source_batch_id is None else str(source_batch_id),
-                    "errorCode": error_code,
-                },
-                separators=(",", ":"),
-            ),
-            "error_code": error_code,
-            "run_id": run.run_id,
-            "partition_key": _partition_key(run.scheme, run.trade_date),
+    partition_values: dict[str, object] = {
+        "status": status,
+        "heartbeat_at": now,
+        "checkpoint_json": {
+            "stage": stage,
+            "sourceBatchId": None if source_batch_id is None else str(source_batch_id),
+            "errorCode": error_code,
         },
+        "error_code": error_code,
+        "updated_at": now,
+    }
+    if release_lease:
+        partition_values.update(lease_owner=None, lease_until=None)
+    connection.execute(
+        update(SyncPartition)
+        .where(
+            SyncPartition.run_id == run.run_id,
+            SyncPartition.partition_key == _partition_key(run.scheme, run.trade_date),
+        )
+        .values(**partition_values)
     )
 
 
 def _complete_run(
-    connection: Connection, *, run: SectorEodRun, now: datetime, stage: str = "published"
+    connection: Session, *, run: SectorEodRun, now: datetime, stage: str = "published"
 ) -> None:
     """在 candidate 或 canonical 写入事务末尾关闭 checkpoint 与 run，保留真实完成阶段。"""
     _update_run_checkpoint(
@@ -1260,14 +1160,9 @@ def _complete_run(
         release_lease=True,
     )
     connection.execute(
-        text(
-            """
-            UPDATE sync_run
-            SET status = 'succeeded', finished_at = :now
-            WHERE run_id = :run_id
-            """
-        ),
-        {"run_id": run.run_id, "now": now},
+        update(SyncRun)
+        .where(SyncRun.run_id == run.run_id)
+        .values(status="succeeded", finished_at=now)
     )
 
 
@@ -1312,19 +1207,17 @@ def _validate_quarantined_quality_results(results: Sequence[SectorEodQualityResu
         raise ValueError("sector eod quarantine requires a blocking quality result")
 
 
-def _active_sectors_for_update(connection: Connection, *, scheme: SectorScheme) -> dict[str, int]:
+def _active_sectors_for_update(connection: Session, *, scheme: SectorScheme) -> dict[str, int]:
     """冻结运行开始时的 ACTIVE 目录，阻止 EOD 用行情行猜测新增或退役。"""
     rows = (
         connection.execute(
-            text(
-                """
-                SELECT sector_key, sector_code
-                FROM sector_entity
-                WHERE scheme = :scheme AND status = 'ACTIVE' AND name IS NOT NULL
-                FOR SHARE
-                """
-            ),
-            {"scheme": scheme.value},
+            select(SectorEntity.sector_key, SectorEntity.sector_code)
+            .where(
+                SectorEntity.scheme == scheme.value,
+                SectorEntity.status == "ACTIVE",
+                SectorEntity.name.is_not(None),
+            )
+            .with_for_update(read=True)
         )
         .mappings()
         .all()
@@ -1344,24 +1237,31 @@ def _require_complete_coverage(
 
 
 def _current_snapshot_for_update(
-    connection: Connection, *, scheme: SectorScheme, trade_date: date
+    connection: Session, *, scheme: SectorScheme, trade_date: date
 ) -> Mapping[Any, Any] | None:
     """锁定分区当前版本，使同日修订仅能串行替换一次。"""
     return (
         connection.execute(
-            text(
-                """
-                SELECT snapshot_id, data_version, scheme, trade_date, source_cutoff_at, observed_at,
-                       finality, quality_status, published_at, normalizer_version, content_sha256
-                FROM sector_eod_snapshot
-                WHERE scheme = :scheme
-                  AND trade_date = :trade_date
-                  AND state = 'published'
-                  AND superseded_at IS NULL
-                FOR UPDATE
-                """
-            ),
-            {"scheme": scheme.value, "trade_date": trade_date},
+            select(
+                SectorEodSnapshotModel.snapshot_id,
+                SectorEodSnapshotModel.data_version,
+                SectorEodSnapshotModel.scheme,
+                SectorEodSnapshotModel.trade_date,
+                SectorEodSnapshotModel.source_cutoff_at,
+                SectorEodSnapshotModel.observed_at,
+                SectorEodSnapshotModel.finality,
+                SectorEodSnapshotModel.quality_status,
+                SectorEodSnapshotModel.published_at,
+                SectorEodSnapshotModel.normalizer_version,
+                SectorEodSnapshotModel.content_sha256,
+            )
+            .where(
+                SectorEodSnapshotModel.scheme == scheme.value,
+                SectorEodSnapshotModel.trade_date == trade_date,
+                SectorEodSnapshotModel.state == "published",
+                SectorEodSnapshotModel.superseded_at.is_(None),
+            )
+            .with_for_update()
         )
         .mappings()
         .one_or_none()
@@ -1369,7 +1269,7 @@ def _current_snapshot_for_update(
 
 
 def _shadow_snapshot_for_update(
-    connection: Connection,
+    connection: Session,
     *,
     scheme: SectorScheme,
     trade_date: date,
@@ -1378,50 +1278,48 @@ def _shadow_snapshot_for_update(
     """锁定相同内容的候选，避免 shadow 重试为同一观察制造伪 revision。"""
     return (
         connection.execute(
-            text(
-                """
-                SELECT snapshot_id, data_version, scheme, trade_date, source_cutoff_at, observed_at,
-                       finality, quality_status, published_at, normalizer_version, content_sha256
-                FROM sector_eod_snapshot
-                WHERE scheme = :scheme
-                  AND trade_date = :trade_date
-                  AND state = 'candidate'
-                  AND normalizer_version = :normalizer_version
-                  AND content_sha256 = :content_sha256
-                ORDER BY revision DESC
-                LIMIT 1
-                FOR UPDATE
-                """
-            ),
-            {
-                "scheme": scheme.value,
-                "trade_date": trade_date,
-                "normalizer_version": _NORMALIZER_VERSION,
-                "content_sha256": content_sha256,
-            },
+            select(
+                SectorEodSnapshotModel.snapshot_id,
+                SectorEodSnapshotModel.data_version,
+                SectorEodSnapshotModel.scheme,
+                SectorEodSnapshotModel.trade_date,
+                SectorEodSnapshotModel.source_cutoff_at,
+                SectorEodSnapshotModel.observed_at,
+                SectorEodSnapshotModel.finality,
+                SectorEodSnapshotModel.quality_status,
+                SectorEodSnapshotModel.published_at,
+                SectorEodSnapshotModel.normalizer_version,
+                SectorEodSnapshotModel.content_sha256,
+            )
+            .where(
+                SectorEodSnapshotModel.scheme == scheme.value,
+                SectorEodSnapshotModel.trade_date == trade_date,
+                SectorEodSnapshotModel.state == "candidate",
+                SectorEodSnapshotModel.normalizer_version == _NORMALIZER_VERSION,
+                SectorEodSnapshotModel.content_sha256 == content_sha256,
+            )
+            .order_by(SectorEodSnapshotModel.revision.desc())
+            .limit(1)
+            .with_for_update()
         )
         .mappings()
         .one_or_none()
     )
 
 
-def _next_revision(connection: Connection, *, scheme: SectorScheme, trade_date: date) -> int:
+def _next_revision(connection: Session, *, scheme: SectorScheme, trade_date: date) -> int:
     """分配目标分区下一个单调 revision，不复用已 superseded 历史编号。"""
     value = connection.execute(
-        text(
-            """
-            SELECT COALESCE(MAX(revision), 0) + 1
-            FROM sector_eod_snapshot
-            WHERE scheme = :scheme AND trade_date = :trade_date
-            """
-        ),
-        {"scheme": scheme.value, "trade_date": trade_date},
+        select(func.coalesce(func.max(SectorEodSnapshotModel.revision), 0) + 1).where(
+            SectorEodSnapshotModel.scheme == scheme.value,
+            SectorEodSnapshotModel.trade_date == trade_date,
+        )
     ).scalar_one()
     return int(value)
 
 
 def _supersede_current_snapshot(
-    connection: Connection,
+    connection: Session,
     *,
     existing_snapshot_id: UUID,
     scheme: SectorScheme,
@@ -1430,35 +1328,23 @@ def _supersede_current_snapshot(
 ) -> None:
     """关闭旧快照和旧 publication；错误 revision 与 raw 均保留供审计和回滚。"""
     connection.execute(
-        text(
-            """
-            UPDATE sector_eod_snapshot
-            SET state = 'superseded', superseded_at = :superseded_at
-            WHERE snapshot_id = :snapshot_id
-            """
-        ),
-        {"snapshot_id": existing_snapshot_id, "superseded_at": superseded_at},
+        update(SectorEodSnapshotModel)
+        .where(SectorEodSnapshotModel.snapshot_id == existing_snapshot_id)
+        .values(state="superseded", superseded_at=superseded_at)
     )
     connection.execute(
-        text(
-            """
-            UPDATE dataset_publication
-            SET superseded_at = :superseded_at
-            WHERE dataset = :dataset
-              AND partition_key = :partition_key
-              AND superseded_at IS NULL
-            """
-        ),
-        {
-            "superseded_at": superseded_at,
-            "dataset": _DATASET,
-            "partition_key": _partition_key(scheme, trade_date),
-        },
+        update(DatasetPublication)
+        .where(
+            DatasetPublication.dataset == _DATASET,
+            DatasetPublication.partition_key == _partition_key(scheme, trade_date),
+            DatasetPublication.superseded_at.is_(None),
+        )
+        .values(superseded_at=superseded_at)
     )
 
 
 def _insert_quotes(
-    connection: Connection,
+    connection: Session,
     *,
     snapshot_id: UUID,
     quotes: Sequence[SectorEodQuote],
@@ -1468,40 +1354,28 @@ def _insert_quotes(
     for quote in quotes:
         row_sha256 = _quote_content_hash(quote)
         connection.execute(
-            text(
-                """
-                INSERT INTO sector_eod_quote (
-                  snapshot_id, sector_key, sector_name, latest_value, latest_value_unit,
-                  change_value, change_percent, market_value, market_value_unit, turnover_percent,
-                  advancers, decliners, leader_name, leader_change_percent, row_sha256
-                ) VALUES (
-                  :snapshot_id, :sector_key, :sector_name, :latest_value, 'provider_native',
-                  :change_value, :change_percent, :market_value, 'provider_native',
-                  :turnover_percent, :advancers, :decliners, :leader_name,
-                  :leader_change_percent, :row_sha256
-                )
-                """
-            ),
-            {
-                "snapshot_id": snapshot_id,
-                "sector_key": active_sectors[quote.identifier.code],
-                "sector_name": quote.name,
-                "latest_value": quote.latest_value,
-                "change_value": quote.change_value,
-                "change_percent": quote.change_percent,
-                "market_value": quote.market_value,
-                "turnover_percent": quote.turnover_percent,
-                "advancers": quote.advancers,
-                "decliners": quote.decliners,
-                "leader_name": quote.leader_name,
-                "leader_change_percent": quote.leader_change_percent,
-                "row_sha256": row_sha256,
-            },
+            insert(SectorEodQuoteModel).values(
+                snapshot_id=snapshot_id,
+                sector_key=active_sectors[quote.identifier.code],
+                sector_name=quote.name,
+                latest_value=quote.latest_value,
+                latest_value_unit="provider_native",
+                change_value=quote.change_value,
+                change_percent=quote.change_percent,
+                market_value=quote.market_value,
+                market_value_unit="provider_native",
+                turnover_percent=quote.turnover_percent,
+                advancers=quote.advancers,
+                decliners=quote.decliners,
+                leader_name=quote.leader_name,
+                leader_change_percent=quote.leader_change_percent,
+                row_sha256=row_sha256,
+            )
         )
 
 
 def _insert_quality_results(
-    connection: Connection,
+    connection: Session,
     *,
     snapshot_id: UUID,
     extra_results: Sequence[SectorEodQualityResult],
@@ -1535,54 +1409,43 @@ def _insert_quality_results(
     unique_results = {result.rule_code: result for result in (*baseline_results, *extra_results)}
     for result in unique_results.values():
         connection.execute(
-            text(
-                """
-                INSERT INTO sector_eod_quality_result (
-                  quality_result_id, snapshot_id, rule_code, severity, passed, actual, threshold,
-                  created_at
-                ) VALUES (
-                  :quality_result_id, :snapshot_id, :rule_code, :severity, :passed,
-                  :actual, :threshold, CURRENT_TIMESTAMP
-                )
-                """
-            ),
-            {
-                "quality_result_id": uuid4(),
-                "snapshot_id": snapshot_id,
-                "rule_code": result.rule_code,
-                "severity": result.severity,
-                "passed": result.passed,
-                "actual": json.dumps(result.actual),
-                "threshold": json.dumps(result.threshold),
-            },
+            insert(SectorEodQualityResultModel).values(
+                quality_result_id=uuid4(),
+                snapshot_id=snapshot_id,
+                rule_code=result.rule_code,
+                severity=result.severity,
+                passed=result.passed,
+                actual=result.actual,
+                threshold=result.threshold,
+                created_at=func.current_timestamp(),
+            )
         )
 
 
-def _record_noop_quality(connection: Connection, *, snapshot_id: UUID) -> None:
+def _record_noop_quality(connection: Session, *, snapshot_id: UUID) -> None:
     """同内容重放只记录观察已复验，避免创建新的 canonical revision 或 dataVersion。"""
+    insert_quality = postgresql_insert(SectorEodQualityResultModel).values(
+        quality_result_id=uuid4(),
+        snapshot_id=snapshot_id,
+        rule_code="repeat-content",
+        severity="info",
+        passed=True,
+        actual={"result": "same-content"},
+        threshold={"required": "no-new-revision"},
+        created_at=func.current_timestamp(),
+    )
     connection.execute(
-        text(
-            """
-            INSERT INTO sector_eod_quality_result (
-              quality_result_id, snapshot_id, rule_code, severity, passed, actual, threshold,
-              created_at
-            ) VALUES (
-              :quality_result_id, :snapshot_id, 'repeat-content', 'info', TRUE,
-              :actual, :threshold, CURRENT_TIMESTAMP
-            ) ON CONFLICT (snapshot_id, rule_code) DO NOTHING
-            """
-        ),
-        {
-            "quality_result_id": uuid4(),
-            "snapshot_id": snapshot_id,
-            "actual": json.dumps({"result": "same-content"}),
-            "threshold": json.dumps({"required": "no-new-revision"}),
-        },
+        insert_quality.on_conflict_do_nothing(
+            index_elements=[
+                SectorEodQualityResultModel.snapshot_id,
+                SectorEodQualityResultModel.rule_code,
+            ]
+        )
     )
 
 
 def _publish_dataset(
-    connection: Connection,
+    connection: Session,
     *,
     scheme: SectorScheme,
     trade_date: date,
@@ -1592,44 +1455,26 @@ def _publish_dataset(
 ) -> None:
     """推进当前 dataset publication，使消费者只读到完整的新 EOD 版本。"""
     connection.execute(
-        text(
-            """
-            UPDATE dataset_publication
-            SET superseded_at = :published_at
-            WHERE dataset = :dataset
-              AND partition_key = :partition_key
-              AND superseded_at IS NULL
-            """
-        ),
-        {
-            "published_at": published_at,
-            "dataset": _DATASET,
-            "partition_key": _partition_key(scheme, trade_date),
-        },
+        update(DatasetPublication)
+        .where(
+            DatasetPublication.dataset == _DATASET,
+            DatasetPublication.partition_key == _partition_key(scheme, trade_date),
+            DatasetPublication.superseded_at.is_(None),
+        )
+        .values(superseded_at=published_at)
     )
     connection.execute(
-        text(
-            """
-            INSERT INTO dataset_publication (
-              publication_id, dataset, partition_key, data_version, quality_status, published_at,
-              superseded_at, effective_as_of, knowledge_cutoff
-            ) VALUES (
-              :publication_id, :dataset, :partition_key, :data_version, :quality_status,
-              :published_at,
-              NULL, :effective_as_of, :knowledge_cutoff
-            )
-            """
-        ),
-        {
-            "publication_id": uuid4(),
-            "dataset": _DATASET,
-            "partition_key": _partition_key(scheme, trade_date),
-            "data_version": data_version,
-            "quality_status": quality_status,
-            "published_at": published_at,
-            "effective_as_of": trade_date,
-            "knowledge_cutoff": published_at,
-        },
+        insert(DatasetPublication).values(
+            publication_id=uuid4(),
+            dataset=_DATASET,
+            partition_key=_partition_key(scheme, trade_date),
+            data_version=data_version,
+            quality_status=quality_status,
+            published_at=published_at,
+            superseded_at=None,
+            effective_as_of=trade_date,
+            knowledge_cutoff=published_at,
+        )
     )
 
 

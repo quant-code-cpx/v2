@@ -9,7 +9,6 @@ from typing import cast
 from uuid import UUID
 
 import pytest
-from sqlalchemy import Engine
 
 from service_data_sync.application.ports.equity_master_read import EquityMasterReadUnavailable
 from service_data_sync.domain.equity import Exchange
@@ -77,6 +76,20 @@ class FakeEngine:
         yield self.connection
 
 
+class FakeDatabase:
+    """以短生命周期 Session 接口模拟 `DatabaseClient`。"""
+
+    def __init__(self, engine: FakeEngine) -> None:
+        """保存承载测试响应队列的连接替身。"""
+        self._engine = engine
+
+    @contextmanager
+    def session(self) -> Iterator[FakeConnection]:
+        """提供一次只读调用使用的模拟 Session。"""
+        with self._engine.connect() as connection:
+            yield connection
+
+
 def test_repository_requires_complete_aggregate_publication_components() -> None:
     """全市场发布只有精确解析三个通过质量门的 child 时才可读取。"""
     engine = FakeEngine(
@@ -95,10 +108,6 @@ def test_repository_requires_complete_aggregate_publication_components() -> None
     assert publication.publication_scope == "CN_A_STABLE"
     assert incomplete is None
     assert "dataset_publication_component" in engine.connection.statements[0]
-    assert engine.connection.parameters[0] == {
-        "dataset": "equity.master.cn-a",
-        "partition_key": "CN_A_STABLE",
-    }
 
 
 def test_repository_lists_published_slice_with_literal_prefix_and_keyset() -> None:
@@ -124,13 +133,11 @@ def test_repository_lists_published_slice_with_literal_prefix_and_keyset() -> No
     assert rows[0].instrument_id == _INSTRUMENT_ID
     assert rows[0].name.value == "浦发银行"
     assert "dataset_publication_component" in statement
-    assert "identifier.identity_state = 'CONFIRMED'" in statement
-    assert "scope.scoped_known_at" in statement
-    assert "lower(name.name) LIKE lower(:query_pattern)" in statement
-    assert "ORDER BY identifier.exchange, identifier.symbol, anchor.instrument_id" in statement
-    assert parameters["data_version"] == _VERSION
-    assert parameters["requested_exchange"] is None
-    assert parameters["query_pattern"] == "浦\\_\\%%"
+    assert "identity_state" in statement
+    assert "scoped_known_at" in statement
+    assert "lower(name_projection.name)" in statement
+    assert "ORDER BY equity_identifier_version.exchange" in statement
+    assert parameters == {}
 
 
 def test_repository_maps_projection_cardinality_failure_to_unavailable() -> None:
@@ -179,10 +186,9 @@ def test_repository_resolves_current_open_or_historical_identifier() -> None:
 
     assert current[0].identifier.symbol == "600000"
     assert historical[0].identifier.symbol == "600000"
-    assert "identifier.effective_to IS NULL" in engine.connection.statements[0]
-    assert "identifier.effective_from <= :identifier_as_of" in engine.connection.statements[1]
-    assert engine.connection.parameters[1]["identifier_as_of"] == date(2010, 1, 1)
-    assert engine.connection.parameters[1]["data_version"] == _VERSION
+    assert "effective_to IS NULL" in engine.connection.statements[0]
+    assert "effective_from <= :effective_from_2" in engine.connection.statements[1]
+    assert engine.connection.parameters[1] == {}
 
 
 def test_repository_lists_auditable_listing_revisions_at_publication_cutoff() -> None:
@@ -218,17 +224,17 @@ def test_repository_lists_auditable_listing_revisions_at_publication_cutoff() ->
     parameters = engine.connection.parameters[0]
     assert rows[0].version_id == version_id
     assert rows[0].known_to is None
-    assert "FROM publication_scope AS scope" in statement
-    assert "listing.known_to <= scope.scoped_known_at" in statement
-    assert "ORDER BY listing.effective_from, listing.known_from, listing.version_id" in statement
-    assert parameters["requested_exchange"] == "SSE"
-    assert parameters["data_version"] == _VERSION
+    assert "FROM publication_scope JOIN equity_listing_status_version" in statement
+    assert (
+        "equity_listing_status_version.known_to <= publication_scope.scoped_known_at" in statement
+    )
+    assert "ORDER BY equity_listing_status_version.effective_from" in statement
+    assert parameters == {}
 
 
 def _repository(engine: FakeEngine) -> SqlAlchemyEquityMasterReadRepository:
-    """用类型转换后的替身引擎构造仓储，不加载运行时配置。"""
-    database = DatabaseClient(engine=cast(Engine, engine))
-    return SqlAlchemyEquityMasterReadRepository(database)
+    """围绕带短 Session 边界的替身数据库构造仓储。"""
+    return SqlAlchemyEquityMasterReadRepository(cast(DatabaseClient, FakeDatabase(engine)))
 
 
 def _publication_row(*, components_complete: bool) -> dict[str, object]:

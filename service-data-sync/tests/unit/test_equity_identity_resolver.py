@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime
 from typing import cast
 
 import pytest
-from sqlalchemy import Connection
+from sqlalchemy.orm import Session
 
 from service_data_sync.domain.equity import Exchange
 from service_data_sync.domain.equity_master import EquityIdentityResolutionStatus
@@ -87,21 +87,21 @@ def test_resolver_returns_resolved_not_found_and_conflict_without_fallback() -> 
     known_at = datetime(2026, 7, 27, tzinfo=UTC)
 
     resolved = resolve_identity_on_connection(
-        cast(Connection, connection),
+        cast(Session, connection),
         exchange=Exchange.SSE,
         symbol="600519",
         fact_date=date(2026, 7, 26),
         known_at=known_at,
     )
     not_found = resolve_identity_on_connection(
-        cast(Connection, connection),
+        cast(Session, connection),
         exchange=Exchange.SSE,
         symbol="600520",
         fact_date=date(2026, 7, 26),
         known_at=known_at,
     )
     conflict = resolve_identity_on_connection(
-        cast(Connection, connection),
+        cast(Session, connection),
         exchange=Exchange.SSE,
         symbol="600521",
         fact_date=date(2026, 7, 26),
@@ -124,7 +124,7 @@ def test_resolver_requires_timezone_and_filters_pending_from_current_open_read()
 
     with pytest.raises(ValueError, match="known_at"):
         resolve_identity_on_connection(
-            cast(Connection, connection),
+            cast(Session, connection),
             exchange=Exchange.SSE,
             symbol="600519",
             fact_date=date(2026, 7, 26),

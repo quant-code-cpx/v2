@@ -1,4 +1,4 @@
-"""使用 SQLAlchemy 保存板块三周期行情、血缘与版本化发布。"""
+"""使用 ORM-enabled 表达式保存板块三周期行情、血缘与版本化发布。"""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from typing import Any
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Engine, text
-from sqlalchemy.engine import Connection
+from sqlalchemy import insert, or_, select, update
+from sqlalchemy.orm import Session
 
 from service_data_sync.application.ports.sector_market_data import (
     DatasetPublication,
@@ -31,10 +31,18 @@ from service_data_sync.domain.sector import (
 from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 
-_TABLE_BY_PERIOD = {
-    SectorPeriod.DAY_1: "sector_daily_bar",
-    SectorPeriod.WEEK_1: "sector_weekly_bar",
-    SectorPeriod.MONTH_1: "sector_monthly_bar",
+from ..database.models.publication.dataset_publication import (
+    DatasetPublication as DatasetPublicationModel,
+)
+from ..database.models.sector.catalog.sector_entity import SectorEntity
+from ..database.models.sector.market_data.sector_daily_bar import SectorDailyBar
+from ..database.models.sector.market_data.sector_monthly_bar import SectorMonthlyBar
+from ..database.models.sector.market_data.sector_weekly_bar import SectorWeeklyBar
+
+_MODEL_BY_PERIOD = {
+    SectorPeriod.DAY_1: SectorDailyBar,
+    SectorPeriod.WEEK_1: SectorWeeklyBar,
+    SectorPeriod.MONTH_1: SectorMonthlyBar,
 }
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _CATALOG_DATASET = "sector.catalog.raw"
@@ -44,8 +52,8 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
     """用独立物理表保存日、周、月上游行情，追加修订后原子发布。"""
 
     def __init__(self, database: DatabaseClient) -> None:
-        """使用服务自有 SQLAlchemy 引擎，不向应用调用方泄漏数据库实现。"""
-        self._engine: Engine = database.engine
+        """使用服务自有 Session 工厂，不向应用调用方泄漏数据库实现。"""
+        self._database = database
 
     def publish_bars(
         self,
@@ -64,7 +72,7 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
         if observed_at.tzinfo is None:
             raise ValueError("observed_at must include a timezone")
         now = datetime.now(UTC)
-        with self._engine.begin() as connection:
+        with self._database.transaction() as connection:
             sector = self._ensure_sector(connection, identifier=identifier, now=now)
             source_batch_id = self._record_source_batch(
                 connection,
@@ -115,7 +123,7 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
         if any(entry.identifier.scheme is not scheme for entry in entries):
             raise ValueError("catalog entries must use the requested scheme")
         now = datetime.now(UTC)
-        with self._engine.begin() as connection:
+        with self._database.transaction() as connection:
             self._record_source_batch(
                 connection,
                 provider_id=provider_id,
@@ -143,35 +151,33 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
 
     def get_sector(self, sector_id: UUID) -> StoredSector | None:
         """按公开 UUID 返回一个标准板块身份，不连接供应商专有表。"""
-        statement = text(
-            """
-            SELECT sector_key, sector_id, scheme, sector_code, name, status
-            FROM sector_entity
-            WHERE sector_id = :sector_id
-            """
-        )
-        with self._engine.connect() as connection:
-            row = connection.execute(statement, {"sector_id": sector_id}).mappings().one_or_none()
+        statement = select(
+            SectorEntity.sector_key,
+            SectorEntity.sector_id,
+            SectorEntity.scheme,
+            SectorEntity.sector_code,
+            SectorEntity.name,
+            SectorEntity.status,
+        ).where(SectorEntity.sector_id == sector_id)
+        with self._database.session() as connection:
+            row = connection.execute(statement).mappings().one_or_none()
         return None if row is None else _stored_sector(row)
 
     def get_sector_by_identifier(self, identifier: SectorIdentifier) -> StoredSector | None:
         """按分类体系和代码返回一个标准板块身份，不连接供应商专有表。"""
-        statement = text(
-            """
-            SELECT sector_key, sector_id, scheme, sector_code, name, status
-            FROM sector_entity
-            WHERE scheme = :scheme AND sector_code = :sector_code
-            """
+        statement = select(
+            SectorEntity.sector_key,
+            SectorEntity.sector_id,
+            SectorEntity.scheme,
+            SectorEntity.sector_code,
+            SectorEntity.name,
+            SectorEntity.status,
+        ).where(
+            SectorEntity.scheme == identifier.scheme.value,
+            SectorEntity.sector_code == identifier.code,
         )
-        with self._engine.connect() as connection:
-            row = (
-                connection.execute(
-                    statement,
-                    {"scheme": identifier.scheme.value, "sector_code": identifier.code},
-                )
-                .mappings()
-                .one_or_none()
-            )
+        with self._database.session() as connection:
+            row = connection.execute(statement).mappings().one_or_none()
         return None if row is None else _stored_sector(row)
 
     def list_active_sectors(
@@ -191,56 +197,54 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
         normalized_query = None if query is None else query.strip()
         if normalized_query == "":
             normalized_query = None
-        statement = text(
-            """
-            SELECT sector_key, sector_id, scheme, sector_code, name, status
-            FROM sector_entity
-            WHERE scheme = :scheme
-              AND status = 'ACTIVE'
-              AND (
-                :query_pattern IS NULL
-                OR sector_code ILIKE :query_pattern
-                OR name ILIKE :query_pattern
-              )
-              AND (
-                :after_code IS NULL
-                OR sector_code > :after_code
-                OR (sector_code = :after_code AND sector_id > :after_sector_id)
-              )
-            ORDER BY sector_code ASC, sector_id ASC
-            LIMIT :limit
-            """
+        statement = select(
+            SectorEntity.sector_key,
+            SectorEntity.sector_id,
+            SectorEntity.scheme,
+            SectorEntity.sector_code,
+            SectorEntity.name,
+            SectorEntity.status,
+        ).where(
+            SectorEntity.scheme == scheme.value,
+            SectorEntity.status == "ACTIVE",
         )
-        parameters = {
-            "scheme": scheme.value,
-            "query_pattern": None if normalized_query is None else f"{normalized_query}%",
-            "after_code": after_code,
-            "after_sector_id": after_sector_id,
-            "limit": limit,
-        }
-        with self._engine.connect() as connection:
-            rows = connection.execute(statement, parameters).mappings().all()
+        if normalized_query is not None:
+            pattern = f"{normalized_query}%"
+            statement = statement.where(
+                or_(
+                    SectorEntity.sector_code.ilike(pattern),
+                    SectorEntity.name.ilike(pattern),
+                )
+            )
+        if after_code is not None and after_sector_id is not None:
+            statement = statement.where(
+                or_(
+                    SectorEntity.sector_code > after_code,
+                    (SectorEntity.sector_code == after_code)
+                    & (SectorEntity.sector_id > after_sector_id),
+                )
+            )
+        statement = statement.order_by(SectorEntity.sector_code, SectorEntity.sector_id).limit(
+            limit
+        )
+        with self._database.session() as connection:
+            rows = connection.execute(statement).mappings().all()
         return tuple(_stored_sector(row) for row in rows)
 
     def get_current_publication(
         self, *, dataset: str, partition_key: str
     ) -> DatasetPublication | None:
         """读取未被替代的数据集发布；不存在时不把未发布数据暴露给读取方。"""
-        statement = text(
-            """
-            SELECT data_version, published_at
-            FROM dataset_publication
-            WHERE dataset = :dataset
-              AND partition_key = :partition_key
-              AND superseded_at IS NULL
-            """
+        statement = select(
+            DatasetPublicationModel.data_version,
+            DatasetPublicationModel.published_at,
+        ).where(
+            DatasetPublicationModel.dataset == dataset,
+            DatasetPublicationModel.partition_key == partition_key,
+            DatasetPublicationModel.superseded_at.is_(None),
         )
-        with self._engine.connect() as connection:
-            row = (
-                connection.execute(statement, {"dataset": dataset, "partition_key": partition_key})
-                .mappings()
-                .one_or_none()
-            )
+        with self._database.session() as connection:
+            row = connection.execute(statement).mappings().one_or_none()
         if row is None:
             return None
         return DatasetPublication(
@@ -258,31 +262,35 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
         """按周期结束日升序读取指定物理表中的当前修订。"""
         if start > end:
             raise ValueError("start must not be after end")
-        table = _table_for_period(period)
-        statement = text(
-            f"""
-            SELECT bar.period_end, bar.open_price, bar.high_price, bar.low_price,
-                   bar.close_price, bar.volume_value, bar.volume_unit, bar.amount_cny,
-                   bar.amplitude_percent, bar.change_percent, bar.change_amount,
-                   bar.turnover_percent, bar.revision, bar.is_final
-            FROM {table} AS bar
-            INNER JOIN sector_entity AS sector ON sector.sector_key = bar.sector_key
-            WHERE sector.sector_id = :sector_id
-              AND bar.period_end >= :start
-              AND bar.period_end <= :end
-              AND bar.valid_to IS NULL
-            ORDER BY bar.period_end ASC
-            """
-        )
-        with self._engine.connect() as connection:
-            rows = (
-                connection.execute(
-                    statement,
-                    {"sector_id": sector_id, "start": start, "end": end},
-                )
-                .mappings()
-                .all()
+        model = _model_for_period(period)
+        statement = (
+            select(
+                model.period_end,
+                model.open_price,
+                model.high_price,
+                model.low_price,
+                model.close_price,
+                model.volume_value,
+                model.volume_unit,
+                model.amount_cny,
+                model.amplitude_percent,
+                model.change_percent,
+                model.change_amount,
+                model.turnover_percent,
+                model.revision,
+                model.is_final,
             )
+            .join(SectorEntity, SectorEntity.sector_key == model.sector_key)
+            .where(
+                SectorEntity.sector_id == sector_id,
+                model.period_end >= start,
+                model.period_end <= end,
+                model.valid_to.is_(None),
+            )
+            .order_by(model.period_end)
+        )
+        with self._database.session() as connection:
+            rows = connection.execute(statement).mappings().all()
         return tuple(
             (
                 SectorBar(
@@ -307,7 +315,7 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
 
     def _ensure_sector(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         identifier: SectorIdentifier,
         now: datetime,
@@ -315,14 +323,17 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
         """在目录同步前以 `PENDING` 身份创建最小板块占位记录。"""
         existing = (
             connection.execute(
-                text(
-                    """
-                    SELECT sector_key, sector_id, scheme, sector_code, name, status
-                    FROM sector_entity
-                    WHERE scheme = :scheme AND sector_code = :sector_code
-                    """
-                ),
-                {"scheme": identifier.scheme.value, "sector_code": identifier.code},
+                select(
+                    SectorEntity.sector_key,
+                    SectorEntity.sector_id,
+                    SectorEntity.scheme,
+                    SectorEntity.sector_code,
+                    SectorEntity.name,
+                    SectorEntity.status,
+                ).where(
+                    SectorEntity.scheme == identifier.scheme.value,
+                    SectorEntity.sector_code == identifier.code,
+                )
             )
             .mappings()
             .one_or_none()
@@ -332,33 +343,26 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
         sector_id = uuid4()
         # 行情输入只有稳定代码；目录任务才有权确认名称、状态或分类层级。
         connection.execute(
-            text(
-                """
-                INSERT INTO sector_entity (
-                  sector_id, scheme, sector_code, status, created_at, updated_at
-                ) VALUES (
-                  :sector_id, :scheme, :sector_code, 'PENDING', :created_at, :updated_at
-                )
-                """
-            ),
-            {
-                "sector_id": sector_id,
-                "scheme": identifier.scheme.value,
-                "sector_code": identifier.code,
-                "created_at": now,
-                "updated_at": now,
-            },
+            insert(SectorEntity).values(
+                sector_id=sector_id,
+                scheme=identifier.scheme.value,
+                sector_code=identifier.code,
+                name=None,
+                status="PENDING",
+                created_at=now,
+                updated_at=now,
+            )
         )
         created = (
             connection.execute(
-                text(
-                    """
-                    SELECT sector_key, sector_id, scheme, sector_code, name, status
-                    FROM sector_entity
-                    WHERE sector_id = :sector_id
-                    """
-                ),
-                {"sector_id": sector_id},
+                select(
+                    SectorEntity.sector_key,
+                    SectorEntity.sector_id,
+                    SectorEntity.scheme,
+                    SectorEntity.sector_code,
+                    SectorEntity.name,
+                    SectorEntity.status,
+                ).where(SectorEntity.sector_id == sector_id)
             )
             .mappings()
             .one()
@@ -367,7 +371,7 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
 
     def _activate_catalog_entries(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         entries: Sequence[SectorCatalogEntry],
         now: datetime,
@@ -378,41 +382,29 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
         for entry in entries:
             existing = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT sector_key, name, status
-                        FROM sector_entity
-                        WHERE scheme = :scheme AND sector_code = :sector_code
-                        """
-                    ),
-                    {
-                        "scheme": entry.identifier.scheme.value,
-                        "sector_code": entry.identifier.code,
-                    },
+                    select(
+                        SectorEntity.sector_key,
+                        SectorEntity.name,
+                        SectorEntity.status,
+                    ).where(
+                        SectorEntity.scheme == entry.identifier.scheme.value,
+                        SectorEntity.sector_code == entry.identifier.code,
+                    )
                 )
                 .mappings()
                 .one_or_none()
             )
             if existing is None:
                 connection.execute(
-                    text(
-                        """
-                        INSERT INTO sector_entity (
-                          sector_id, scheme, sector_code, name, status, created_at, updated_at
-                        ) VALUES (
-                          :sector_id, :scheme, :sector_code, :name, 'ACTIVE', :created_at,
-                          :updated_at
-                        )
-                        """
-                    ),
-                    {
-                        "sector_id": uuid4(),
-                        "scheme": entry.identifier.scheme.value,
-                        "sector_code": entry.identifier.code,
-                        "name": entry.name,
-                        "created_at": now,
-                        "updated_at": now,
-                    },
+                    insert(SectorEntity).values(
+                        sector_id=uuid4(),
+                        scheme=entry.identifier.scheme.value,
+                        sector_code=entry.identifier.code,
+                        name=entry.name,
+                        status="ACTIVE",
+                        created_at=now,
+                        updated_at=now,
+                    )
                 )
                 inserted_count += 1
                 continue
@@ -421,21 +413,16 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
                 continue
             # 行情先创建的 PENDING 身份保留 UUID，只提升目录确认后的名称与状态。
             connection.execute(
-                text(
-                    """
-                    UPDATE sector_entity
-                    SET name = :name, status = 'ACTIVE', updated_at = :updated_at
-                    WHERE sector_key = :sector_key
-                    """
-                ),
-                {"name": entry.name, "updated_at": now, "sector_key": existing["sector_key"]},
+                update(SectorEntity)
+                .where(SectorEntity.sector_key == existing["sector_key"])
+                .values(name=entry.name, status="ACTIVE", updated_at=now)
             )
             inserted_count += 1
         return inserted_count, unchanged_count
 
     def _record_source_batch(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         provider_id: str,
         capability: str,
@@ -457,7 +444,7 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
 
     def _write_revisions(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         sector_key: int,
         period: SectorPeriod,
@@ -466,7 +453,7 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
         observed_at: datetime,
     ) -> tuple[int, int]:
         """仅为值或终态变化的周期结束日关闭当前行并追加后继修订。"""
-        table = _table_for_period(period)
+        model = _model_for_period(period)
         inserted_count = 0
         unchanged_count = 0
         observed_date = observed_at.astimezone(_SHANGHAI).date()
@@ -476,16 +463,11 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
             content_hash = _bar_content_hash(bar, is_final=is_final)
             current = (
                 connection.execute(
-                    text(
-                        f"""
-                        SELECT revision, content_sha256
-                        FROM {table}
-                        WHERE sector_key = :sector_key
-                          AND period_end = :period_end
-                          AND valid_to IS NULL
-                        """
-                    ),
-                    {"sector_key": sector_key, "period_end": bar.period_end},
+                    select(model.revision, model.content_sha256).where(
+                        model.sector_key == sector_key,
+                        model.period_end == bar.period_end,
+                        model.valid_to.is_(None),
+                    )
                 )
                 .mappings()
                 .one_or_none()
@@ -497,64 +479,43 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
             if current is not None:
                 # 已发布观测绝不覆盖；先闭合旧行才能保持单一当前修订不变量。
                 connection.execute(
-                    text(
-                        f"""
-                        UPDATE {table}
-                        SET valid_to = :valid_to
-                        WHERE sector_key = :sector_key
-                          AND period_end = :period_end
-                          AND valid_to IS NULL
-                        """
-                    ),
-                    {
-                        "valid_to": observed_at,
-                        "sector_key": sector_key,
-                        "period_end": bar.period_end,
-                    },
+                    update(model)
+                    .where(
+                        model.sector_key == sector_key,
+                        model.period_end == bar.period_end,
+                        model.valid_to.is_(None),
+                    )
+                    .values(valid_to=observed_at)
                 )
             connection.execute(
-                text(
-                    f"""
-                    INSERT INTO {table} (
-                      sector_key, period_end, revision, open_price, high_price, low_price,
-                      close_price, volume_value, volume_unit, amount_cny, amplitude_percent,
-                      change_percent, change_amount, turnover_percent, is_final, content_sha256,
-                      source_batch_id, valid_from, valid_to
-                    ) VALUES (
-                      :sector_key, :period_end, :revision, :open_price, :high_price, :low_price,
-                      :close_price, :volume_value, :volume_unit, :amount_cny, :amplitude_percent,
-                      :change_percent, :change_amount, :turnover_percent, :is_final,
-                      :content_sha256, :source_batch_id, :valid_from, NULL
-                    )
-                    """
-                ),
-                {
-                    "sector_key": sector_key,
-                    "period_end": bar.period_end,
-                    "revision": revision,
-                    "open_price": bar.open_price,
-                    "high_price": bar.high_price,
-                    "low_price": bar.low_price,
-                    "close_price": bar.close_price,
-                    "volume_value": bar.volume_value,
-                    "volume_unit": bar.volume_unit,
-                    "amount_cny": bar.amount_cny,
-                    "amplitude_percent": bar.amplitude_percent,
-                    "change_percent": bar.change_percent,
-                    "change_amount": bar.change_amount,
-                    "turnover_percent": bar.turnover_percent,
-                    "is_final": is_final,
-                    "content_sha256": content_hash,
-                    "source_batch_id": source_batch_id,
-                    "valid_from": observed_at,
-                },
+                insert(model).values(
+                    sector_key=sector_key,
+                    period_end=bar.period_end,
+                    revision=revision,
+                    open_price=bar.open_price,
+                    high_price=bar.high_price,
+                    low_price=bar.low_price,
+                    close_price=bar.close_price,
+                    volume_value=bar.volume_value,
+                    volume_unit=bar.volume_unit,
+                    amount_cny=bar.amount_cny,
+                    amplitude_percent=bar.amplitude_percent,
+                    change_percent=bar.change_percent,
+                    change_amount=bar.change_amount,
+                    turnover_percent=bar.turnover_percent,
+                    is_final=is_final,
+                    content_sha256=content_hash,
+                    source_batch_id=source_batch_id,
+                    valid_from=observed_at,
+                    valid_to=None,
+                )
             )
             inserted_count += 1
         return inserted_count, unchanged_count
 
     def _publish(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         identifier: SectorIdentifier,
         period: SectorPeriod,
@@ -572,7 +533,7 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
 
     def _publish_dataset(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         dataset: str,
         partition_key: str,
@@ -581,62 +542,46 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
     ) -> UUID:
         """仅在某个数据集分区当前视图变化时推进其发布版本。"""
         if changed_count == 0:
-            existing = (
-                connection.execute(
-                    text(
-                        """
-                        SELECT data_version FROM dataset_publication
-                        WHERE dataset = :dataset
-                          AND partition_key = :partition_key
-                          AND superseded_at IS NULL
-                        """
-                    ),
-                    {"dataset": dataset, "partition_key": partition_key},
+            existing = connection.execute(
+                select(DatasetPublicationModel.data_version).where(
+                    DatasetPublicationModel.dataset == dataset,
+                    DatasetPublicationModel.partition_key == partition_key,
+                    DatasetPublicationModel.superseded_at.is_(None),
                 )
-                .mappings()
-                .one_or_none()
-            )
+            ).scalar_one_or_none()
             if existing is not None:
-                return UUID(str(existing["data_version"]))
+                return UUID(str(existing))
         connection.execute(
-            text(
-                """
-                UPDATE dataset_publication
-                SET superseded_at = :published_at
-                WHERE dataset = :dataset
-                  AND partition_key = :partition_key
-                  AND superseded_at IS NULL
-                """
-            ),
-            {"published_at": published_at, "dataset": dataset, "partition_key": partition_key},
+            update(DatasetPublicationModel)
+            .where(
+                DatasetPublicationModel.dataset == dataset,
+                DatasetPublicationModel.partition_key == partition_key,
+                DatasetPublicationModel.superseded_at.is_(None),
+            )
+            .values(superseded_at=published_at)
         )
         data_version = uuid4()
         connection.execute(
-            text(
-                """
-                INSERT INTO dataset_publication (
-                  publication_id, dataset, partition_key, data_version, quality_status,
-                  published_at, superseded_at
-                ) VALUES (
-                  :publication_id, :dataset, :partition_key, :data_version, 'passed',
-                  :published_at, NULL
-                )
-                """
-            ),
-            {
-                "publication_id": uuid4(),
-                "dataset": dataset,
-                "partition_key": partition_key,
-                "data_version": data_version,
-                "published_at": published_at,
-            },
+            insert(DatasetPublicationModel).values(
+                publication_id=uuid4(),
+                dataset=dataset,
+                partition_key=partition_key,
+                data_version=data_version,
+                quality_status="passed",
+                published_at=published_at,
+                superseded_at=None,
+                effective_as_of=None,
+                knowledge_cutoff=None,
+            )
         )
         return data_version
 
 
-def _table_for_period(period: SectorPeriod) -> str:
-    """从封闭枚举映射选择 SQL 表名，杜绝外部输入插入 SQL 标识符。"""
-    return _TABLE_BY_PERIOD[period]
+def _model_for_period(
+    period: SectorPeriod,
+) -> type[SectorDailyBar | SectorWeeklyBar | SectorMonthlyBar]:
+    """从封闭枚举选择对应 ORM 模型，杜绝外部输入插入 SQL 标识符。"""
+    return _MODEL_BY_PERIOD[period]
 
 
 def _stored_sector(row: Mapping[Any, Any]) -> StoredSector:

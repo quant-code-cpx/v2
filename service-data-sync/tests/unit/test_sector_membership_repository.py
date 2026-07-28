@@ -8,7 +8,7 @@ from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
 
 from service_data_sync.application.ports.sector_market_data import StoredSector
 from service_data_sync.domain.equity import Exchange
@@ -48,6 +48,14 @@ class FakeResult:
         assert len(self._rows) == 1
         return self._rows[0]
 
+    def scalar_one(self) -> object:
+        """返回 ORM `RETURNING` 或单列查询要求的唯一标量。"""
+        row = self.one()
+        for key in ("run_id", "quality_status"):
+            if key in row:
+                return row[key]
+        return row
+
 
 class FakeConnection(AbstractContextManager["FakeConnection"]):
     """按调用顺序消费预置 SQL 结果，同时记录写入语句。"""
@@ -71,20 +79,20 @@ class FakeConnection(AbstractContextManager["FakeConnection"]):
         return self._responses.pop(0) if self._responses else FakeResult([])
 
 
-class FakeEngine:
-    """提供仓储读取和事务发布所需的 connect/begin 上下文。"""
+class FakeDatabase:
+    """以短生命周期 Session 接口模拟 `DatabaseClient`。"""
 
     def __init__(self, connection: FakeConnection) -> None:
-        """将同一确定性连接用于测试中的所有数据库调用。"""
-        self.connection = connection
+        """保存所有测试调用共用的确定性连接。"""
+        self._connection = connection
 
-    def connect(self) -> FakeConnection:
-        """返回只读查询使用的连接。"""
-        return self.connection
+    def session(self) -> FakeConnection:
+        """返回只读路径所需的模拟 Session。"""
+        return self._connection
 
-    def begin(self) -> FakeConnection:
-        """返回事务写入使用的连接。"""
-        return self.connection
+    def transaction(self) -> FakeConnection:
+        """返回写入路径所需的模拟 Session。"""
+        return self._connection
 
 
 def test_repository_reads_only_rows_pinned_by_release_manifest() -> None:
@@ -289,7 +297,7 @@ def test_start_run_rejects_an_unexpired_partition_lease() -> None:
         )
 
     statements = "\n".join(str(statement) for statement, _ in connection.executions)
-    assert "lease_until > :now" in statements
+    assert "lease_until > :lease_until" in statements
     assert "INSERT INTO sync_run" not in statements
 
 
@@ -806,15 +814,15 @@ def test_run_ledger_reclaims_partitions_and_records_checkpoint_failure_and_final
 
 
 def _repository(connection: FakeConnection) -> SqlAlchemySectorMembershipRepository:
-    """构造只替换引擎的仓储实例，避免单元测试连接真实 PostgreSQL。"""
+    """构造只替换数据库会话边界的仓储实例，避免连接真实 PostgreSQL。"""
     repository = object.__new__(SqlAlchemySectorMembershipRepository)
-    repository._engine = FakeEngine(connection)  # type: ignore[assignment]
+    repository._database = FakeDatabase(connection)  # type: ignore[assignment]
     return repository
 
 
-def _as_connection(connection: FakeConnection) -> Connection:
+def _as_connection(connection: FakeConnection) -> Session:
     """把仅实现测试所需协议的伪连接显式收窄为仓储内部 SQL 端口。"""
-    return cast(Connection, connection)
+    return cast(Session, connection)
 
 
 def _sector(code: str, key: int) -> StoredSector:

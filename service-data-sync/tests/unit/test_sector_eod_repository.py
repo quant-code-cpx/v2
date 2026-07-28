@@ -6,11 +6,11 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import cast
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.orm import Session
 
 from service_data_sync.application.ports.sector_eod import (
     SectorEodQualityResult,
@@ -57,11 +57,18 @@ class FakeResult:
 
     def scalar_one(self) -> object:
         """返回聚合 SQL 的单个标量结果。"""
+        if isinstance(self._value, dict):
+            assert len(self._value) == 1
+            return next(iter(self._value.values()))
+        return self._value
+
+    def scalar_one_or_none(self) -> object:
+        """返回可空单个标量结果。"""
         return self._value
 
 
 class FakeConnection:
-    """顺序返回预置 SQL 结果，并保存语句与参数供断言。"""
+    """顺序返回预置 ORM 执行结果，并保存语句与参数供断言。"""
 
     def __init__(self, responses: list[object]) -> None:
         """初始化共享响应队列和执行记录。"""
@@ -70,9 +77,11 @@ class FakeConnection:
         self.parameters: list[object] = []
 
     def execute(self, statement: object, parameters: object = None) -> FakeResult:
-        """记录 SQL 并取出下一项模拟结果，未预置时返回 `None`。"""
+        """记录 ORM 语句并取出下一项模拟结果，未预置时返回 `None`。"""
         self.statements.append(str(statement))
-        self.parameters.append(parameters)
+        self.parameters.append(
+            parameters if parameters is not None else _statement_parameters(statement)
+        )
         return FakeResult(self.responses.pop(0) if self.responses else None)
 
 
@@ -92,6 +101,24 @@ class FakeEngine:
     def connect(self) -> Iterator[FakeConnection]:
         """模拟只读连接上下文。"""
         yield self.connection
+
+
+class FakeDatabase:
+    """为仓储提供显式 Session 与事务边界，不让单测伪造 SQLAlchemy Engine 协议。"""
+
+    def __init__(self, connection: FakeConnection) -> None:
+        """复用测试预置的执行记录和结果队列。"""
+        self._connection = connection
+
+    @contextmanager
+    def session(self) -> Iterator[FakeConnection]:
+        """返回只读 Session 替身。"""
+        yield self._connection
+
+    @contextmanager
+    def transaction(self) -> Iterator[FakeConnection]:
+        """返回自动提交语义由测试替身承载的事务 Session。"""
+        yield self._connection
 
 
 def test_publish_requires_exact_active_catalog_coverage_after_recording_source(
@@ -195,9 +222,10 @@ def test_failed_run_releases_only_the_current_fenced_lease() -> None:
     _repository(engine).mark_failed(run=run, error_code="schema")
 
     statements = "\n".join(engine.connection.statements)
-    assert "lease_token = CASE WHEN :release_lease THEN NULL" in statements
-    assert "SET status = 'failed'" in statements
-    assert "WHERE scheme = :scheme" in statements
+    assert "UPDATE sector_eod_sync_partition" in statements
+    assert "UPDATE sync_run" in statements
+    assert _has_parameter(engine.connection, "failed")
+    assert _has_parameter(engine.connection, run.lease_token)
 
 
 def test_renewal_and_reaper_preserve_fencing_and_requeue_expired_checkpoint() -> None:
@@ -213,8 +241,8 @@ def test_renewal_and_reaper_preserve_fencing_and_requeue_expired_checkpoint() ->
     _repository(renewal_engine).renew_lease(run=run)
 
     renewal_sql = "\n".join(renewal_engine.connection.statements)
-    assert "lease_token = :lease_token" in renewal_sql
-    assert "lease_expires_at > :now" in renewal_sql
+    assert "UPDATE sector_eod_sync_partition" in renewal_sql
+    assert _has_parameter(renewal_engine.connection, run.lease_token)
     reaper_engine = FakeEngine(
         [
             [
@@ -235,9 +263,10 @@ def test_renewal_and_reaper_preserve_fencing_and_requeue_expired_checkpoint() ->
 
     reaper_sql = "\n".join(reaper_engine.connection.statements)
     assert count == 1
-    assert "status = 'queued'" in reaper_sql
-    assert '"stage":"raw_archived"' in str(reaper_engine.connection.parameters)
-    assert 'errorCode":"lease-expired' in str(reaper_engine.connection.parameters)
+    assert "UPDATE sector_eod_sync_partition" in reaper_sql
+    assert _has_parameter(reaper_engine.connection, "queued")
+    assert _has_nested_parameter(reaper_engine.connection, "stage", "raw_archived")
+    assert _has_nested_parameter(reaper_engine.connection, "errorCode", "lease-expired")
 
 
 def test_run_rejects_an_unexpired_lease_and_replay_without_raw() -> None:
@@ -277,13 +306,13 @@ def test_fencing_and_quality_helpers_reject_cross_run_evidence_and_invalid_statu
 
     with pytest.raises(RuntimeError, match="no longer active"):
         sector_eod_repository._assert_active_run(
-            cast(Connection, engine.connection),
+            cast(Session, engine.connection),
             run=run,
             now=datetime(2026, 7, 27, 8, 20, tzinfo=UTC),
         )
     with pytest.raises(ValueError, match="does not belong"):
         sector_eod_repository._ensure_source_batch_belongs_to_run(
-            cast(Connection, engine.connection), source_batch_id=uuid4(), run=run
+            cast(Session, engine.connection), source_batch_id=uuid4(), run=run
         )
     warning = SectorEodQualityResult(
         rule_code="availability-market-value",
@@ -401,8 +430,8 @@ def test_ranked_read_uses_only_controlled_sort_expression_and_stable_position() 
 
     assert rows[0].rank == 1
     assert rows[0].position == 1
-    assert "quote.change_percent DESC NULLS LAST" in engine.connection.statements[0]
-    assert 'sector.sector_code COLLATE "C" ASC' in engine.connection.statements[0]
+    assert "sector_eod_quote.change_percent DESC NULLS LAST" in engine.connection.statements[0]
+    assert 'sector_entity.sector_code COLLATE "C" ASC' in engine.connection.statements[0]
 
 
 def test_publish_reuses_current_revision_when_normalized_content_is_unchanged(
@@ -523,7 +552,8 @@ def test_historical_reference_reads_only_latest_prior_published_snapshot() -> No
     assert reference is not None
     assert reference.trade_date == date(2026, 7, 26)
     assert reference.market_values == {"BK0001": Decimal("1000000")}
-    assert "trade_date < :before_trade_date" in engine.connection.statements[0]
+    assert "sector_eod_snapshot.trade_date <" in engine.connection.statements[0]
+    assert _has_parameter(engine.connection, date(2026, 7, 27))
 
 
 def test_quarantine_inserts_evidence_without_superseding_or_publishing() -> None:
@@ -568,10 +598,10 @@ def test_quarantine_inserts_evidence_without_superseding_or_publishing() -> None
     )
 
     statements = "\n".join(engine.connection.statements)
-    assert "'quarantined'" in statements
+    assert _has_parameter(engine.connection, "quarantined")
     assert "INSERT INTO sector_eod_quality_result" in statements
     assert "INSERT INTO dataset_publication" not in statements
-    assert "SET state = 'superseded'" not in statements
+    assert not _has_parameter(engine.connection, "superseded")
 
 
 def test_shadow_candidate_keeps_consumer_publication_unchanged() -> None:
@@ -622,9 +652,9 @@ def test_shadow_candidate_keeps_consumer_publication_unchanged() -> None:
     statements = "\n".join(engine.connection.statements)
     assert stored.inserted is True
     assert stored.snapshot.published_at is None
-    assert "'candidate'" in statements
+    assert _has_parameter(engine.connection, "candidate")
     assert "INSERT INTO dataset_publication" not in statements
-    assert "SET state = 'superseded'" not in statements
+    assert not _has_parameter(engine.connection, "superseded")
 
 
 def test_rollback_atomically_restores_a_superseded_passed_revision() -> None:
@@ -661,8 +691,8 @@ def test_rollback_atomically_restores_a_superseded_passed_revision() -> None:
     statements = "\n".join(engine.connection.statements)
     assert restored.snapshot_id == target["snapshot_id"]
     assert restored.data_version == target["data_version"]
-    assert "SET state = 'superseded'" in statements
-    assert "SET state = 'published', superseded_at = NULL" in statements
+    assert _has_parameter(engine.connection, "superseded")
+    assert _has_parameter(engine.connection, "published")
     assert "UPDATE dataset_publication" in statements
     assert "DELETE" not in statements
 
@@ -684,12 +714,39 @@ def test_list_queued_runs_returns_only_recoverable_partition_identity() -> None:
         ("eastmoney.industry", date(2026, 7, 27)),
         ("eastmoney.concept", date(2026, 7, 27)),
     ]
-    assert "WHERE status = 'queued'" in engine.connection.statements[0]
+    assert _has_parameter(engine.connection, "queued")
 
 
 def _repository(engine: FakeEngine) -> SqlAlchemySectorEodRepository:
     """将本地引擎替身适配为仓储需要的数据库客户端。"""
-    return SqlAlchemySectorEodRepository(DatabaseClient(engine=cast(Engine, engine)))
+    return SqlAlchemySectorEodRepository(cast(DatabaseClient, FakeDatabase(engine.connection)))
+
+
+def _statement_parameters(statement: object) -> object:
+    """提取 SQLAlchemy 语句绑定值，使单测断言业务值而非编译器生成的参数名。"""
+    compile_statement: Any = getattr(statement, "compile", None)
+    if not callable(compile_statement):
+        return None
+    compiled: Any = compile_statement()
+    return dict(compiled.params)
+
+
+def _has_parameter(connection: FakeConnection, expected: object) -> bool:
+    """判断任一 ORM 语句是否绑定了指定的一层业务值。"""
+    return any(
+        isinstance(parameters, dict) and expected in parameters.values()
+        for parameters in connection.parameters
+    )
+
+
+def _has_nested_parameter(connection: FakeConnection, key: str, expected: object) -> bool:
+    """判断任一 JSON 绑定值是否包含指定键和值。"""
+    return any(
+        isinstance(value, dict) and value.get(key) == expected
+        for parameters in connection.parameters
+        if isinstance(parameters, dict)
+        for value in parameters.values()
+    )
 
 
 def _quote(code: str) -> SectorEodQuote:

@@ -9,7 +9,9 @@ from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Connection, Engine, text
+from sqlalchemy import case, exists, insert, literal, select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.orm import Session
 
 from service_data_sync.application.ports.equity_master import (
     EquityMasterRepository,
@@ -21,8 +23,36 @@ from service_data_sync.domain.equity_master import (
     EquityCatalogCompletenessError,
     EquityCatalogEntry,
 )
-from service_data_sync.infrastructure.database.connection import DatabaseClient
-from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
+
+from ..database.connection import DatabaseClient
+from ..database.models.equity.identity.equity_identifier_version import (
+    EquityIdentifierVersion,
+)
+from ..database.models.equity.identity.equity_instrument import (
+    EquityInstrument,
+)
+from ..database.models.equity.identity.equity_listing_status_version import (
+    EquityListingStatusVersion,
+)
+from ..database.models.equity.identity.equity_master_snapshot import (
+    EquityMasterSnapshot,
+)
+from ..database.models.equity.identity.equity_master_snapshot_member import (
+    EquityMasterSnapshotMember,
+)
+from ..database.models.equity.identity.equity_name_version import (
+    EquityNameVersion,
+)
+from ..database.models.equity.identity.equity_presence_anomaly import (
+    EquityPresenceAnomaly,
+)
+from ..database.models.publication.dataset_publication import (
+    DatasetPublication,
+)
+from ..database.models.publication.dataset_publication_component import (
+    DatasetPublicationComponent,
+)
+from .source_batch import record_source_observation
 
 _DATASET = "equity.master.catalog"
 _CN_A_DATASET = "equity.master.cn-a"
@@ -34,7 +64,7 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
 
     def __init__(self, database: DatabaseClient) -> None:
         """使用服务自有数据库引擎，避免应用层接触 SQLAlchemy 细节。"""
-        self._engine: Engine = database.engine
+        self._database = database
 
     def publish_catalog(
         self,
@@ -57,7 +87,7 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
             raise ValueError("catalog entry exchange must match publication exchange")
         now = datetime.now(UTC)
         business_hash = _catalog_business_hash(entries)
-        with self._engine.begin() as connection:
+        with self._database.transaction() as connection:
             previous_catalog = self._latest_catalog(connection, exchange)
             previous_hash = (
                 None if previous_catalog is None else bytes(previous_catalog["business_sha256"])
@@ -133,20 +163,23 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
     def publish_cn_a_aggregate(self) -> PublishedCnAAggregate:
         """以当前三所交易所 child version 原子构成稳定全市场发布。"""
         published_at = datetime.now(UTC)
-        with self._engine.begin() as connection:
+        with self._database.transaction() as connection:
             rows = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT partition_key, data_version, effective_as_of, knowledge_cutoff
-                        FROM dataset_publication
-                        WHERE dataset = :dataset
-                          AND partition_key IN ('SSE', 'SZSE', 'BSE')
-                          AND superseded_at IS NULL
-                        ORDER BY partition_key
-                        """
-                    ),
-                    {"dataset": _DATASET},
+                    select(
+                        DatasetPublication.partition_key,
+                        DatasetPublication.data_version,
+                        DatasetPublication.effective_as_of,
+                        DatasetPublication.knowledge_cutoff,
+                    )
+                    .where(
+                        DatasetPublication.dataset == _DATASET,
+                        DatasetPublication.partition_key.in_(
+                            [exchange.value for exchange in Exchange]
+                        ),
+                        DatasetPublication.superseded_at.is_(None),
+                    )
+                    .order_by(DatasetPublication.partition_key)
                 )
                 .mappings()
                 .all()
@@ -162,19 +195,21 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
             )
             current_components = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT component_partition_key, component_data_version
-                        FROM dataset_publication AS publication
-                        INNER JOIN dataset_publication_component AS component
-                          ON component.aggregate_publication_id = publication.publication_id
-                        WHERE publication.dataset = :dataset
-                          AND publication.partition_key = :partition_key
-                          AND publication.superseded_at IS NULL
-                        ORDER BY component_partition_key
-                        """
-                    ),
-                    {"dataset": _CN_A_DATASET, "partition_key": _CN_A_PARTITION},
+                    select(
+                        DatasetPublicationComponent.component_partition_key,
+                        DatasetPublicationComponent.component_data_version,
+                    )
+                    .join(
+                        DatasetPublication,
+                        DatasetPublicationComponent.aggregate_publication_id
+                        == DatasetPublication.publication_id,
+                    )
+                    .where(
+                        DatasetPublication.dataset == _CN_A_DATASET,
+                        DatasetPublication.partition_key == _CN_A_PARTITION,
+                        DatasetPublication.superseded_at.is_(None),
+                    )
+                    .order_by(DatasetPublicationComponent.component_partition_key)
                 )
                 .mappings()
                 .all()
@@ -186,16 +221,13 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
             if current == components:
                 existing = (
                     connection.execute(
-                        text(
-                            """
-                            SELECT data_version, published_at
-                            FROM dataset_publication
-                            WHERE dataset = :dataset
-                              AND partition_key = :partition_key
-                              AND superseded_at IS NULL
-                            """
-                        ),
-                        {"dataset": _CN_A_DATASET, "partition_key": _CN_A_PARTITION},
+                        select(
+                            DatasetPublication.data_version, DatasetPublication.published_at
+                        ).where(
+                            DatasetPublication.dataset == _CN_A_DATASET,
+                            DatasetPublication.partition_key == _CN_A_PARTITION,
+                            DatasetPublication.superseded_at.is_(None),
+                        )
                     )
                     .mappings()
                     .one()
@@ -207,83 +239,53 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
             effective_as_of = min(row["effective_as_of"] for row in rows)
             knowledge_cutoff = max(row["knowledge_cutoff"] for row in rows)
             connection.execute(
-                text(
-                    """
-                    UPDATE dataset_publication
-                    SET superseded_at = :published_at
-                    WHERE dataset = :dataset
-                      AND partition_key = :partition_key
-                      AND superseded_at IS NULL
-                    """
-                ),
-                {
-                    "published_at": published_at,
-                    "dataset": _CN_A_DATASET,
-                    "partition_key": _CN_A_PARTITION,
-                },
+                update(DatasetPublication)
+                .where(
+                    DatasetPublication.dataset == _CN_A_DATASET,
+                    DatasetPublication.partition_key == _CN_A_PARTITION,
+                    DatasetPublication.superseded_at.is_(None),
+                )
+                .values(superseded_at=published_at)
             )
             publication_id = uuid4()
             data_version = uuid4()
             connection.execute(
-                text(
-                    """
-                    INSERT INTO dataset_publication (
-                      publication_id, dataset, partition_key, data_version, quality_status,
-                      effective_as_of, knowledge_cutoff, published_at, superseded_at
-                    ) VALUES (
-                      :publication_id, :dataset, :partition_key, :data_version, 'passed',
-                      :effective_as_of, :knowledge_cutoff, :published_at, NULL
-                    )
-                    """
-                ),
-                {
-                    "publication_id": publication_id,
-                    "dataset": _CN_A_DATASET,
-                    "partition_key": _CN_A_PARTITION,
-                    "data_version": data_version,
-                    "effective_as_of": effective_as_of,
-                    "knowledge_cutoff": knowledge_cutoff,
-                    "published_at": published_at,
-                },
+                insert(DatasetPublication).values(
+                    publication_id=publication_id,
+                    dataset=_CN_A_DATASET,
+                    partition_key=_CN_A_PARTITION,
+                    data_version=data_version,
+                    quality_status="passed",
+                    effective_as_of=effective_as_of,
+                    knowledge_cutoff=knowledge_cutoff,
+                    published_at=published_at,
+                    superseded_at=None,
+                )
             )
             for partition_key, component_data_version in components:
                 connection.execute(
-                    text(
-                        """
-                        INSERT INTO dataset_publication_component (
-                          aggregate_publication_id, component_partition_key, component_data_version
-                        ) VALUES (
-                          :aggregate_publication_id, :component_partition_key,
-                          :component_data_version
-                        )
-                        """
-                    ),
-                    {
-                        "aggregate_publication_id": publication_id,
-                        "component_partition_key": partition_key,
-                        "component_data_version": component_data_version,
-                    },
+                    insert(DatasetPublicationComponent).values(
+                        aggregate_publication_id=publication_id,
+                        component_partition_key=partition_key,
+                        component_data_version=component_data_version,
+                    )
                 )
         return PublishedCnAAggregate(data_version=data_version, published_at=published_at)
 
-    def _latest_catalog(
-        self, connection: Connection, exchange: Exchange
-    ) -> Mapping[Any, Any] | None:
+    def _latest_catalog(self, connection: Session, exchange: Exchange) -> Mapping[Any, Any] | None:
         """读取上一份稳定目录的哈希和行数，供版本与完整性门共用。"""
         row = (
             connection.execute(
-                text(
-                    """
-                    SELECT business_sha256, row_count
-                    FROM equity_master_snapshot
-                    WHERE exchange = :exchange
-                      AND snapshot_kind = 'CATALOG'
-                      AND quality_status = 'passed'
-                    ORDER BY observed_at DESC, snapshot_id DESC
-                    LIMIT 1
-                    """
-                ),
-                {"exchange": exchange.value},
+                select(EquityMasterSnapshot.business_sha256, EquityMasterSnapshot.row_count)
+                .where(
+                    EquityMasterSnapshot.exchange == exchange.value,
+                    EquityMasterSnapshot.snapshot_kind == "CATALOG",
+                    EquityMasterSnapshot.quality_status == "passed",
+                )
+                .order_by(
+                    EquityMasterSnapshot.observed_at.desc(), EquityMasterSnapshot.snapshot_id.desc()
+                )
+                .limit(1)
             )
             .mappings()
             .one_or_none()
@@ -309,7 +311,7 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
 
     def _reconcile_presence_anomalies(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         exchange: Exchange,
         snapshot_id: UUID,
@@ -317,74 +319,92 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
         now: datetime,
     ) -> None:
         """记录目录缺席观测并关闭恢复条目，生命周期状态始终由显式证据维护。"""
-        connection.execute(
-            text(
-                """
-                INSERT INTO equity_presence_anomaly (
-                  anomaly_id, security_id, exchange, symbol,
-                  first_missing_snapshot_id, last_missing_snapshot_id,
-                  consecutive_count, status, resolved_at
+        prior_snapshot_date = (
+            select(EquityMasterSnapshot.target_date)
+            .where(
+                EquityMasterSnapshot.snapshot_id == EquityPresenceAnomaly.last_missing_snapshot_id
+            )
+            .scalar_subquery()
+        )
+        missing_identifiers = (
+            select(
+                literal(uuid4()),
+                EquityIdentifierVersion.security_id,
+                EquityIdentifierVersion.exchange,
+                EquityIdentifierVersion.symbol,
+                literal(snapshot_id),
+                literal(snapshot_id),
+                literal(1),
+                literal("open"),
+                literal(None),
+            )
+            .select_from(
+                EquityIdentifierVersion.__table__.join(
+                    EquityListingStatusVersion.__table__,
+                    EquityListingStatusVersion.security_id == EquityIdentifierVersion.security_id,
                 )
-                SELECT
-                  :anomaly_id, identifier.security_id, identifier.exchange, identifier.symbol,
-                  :snapshot_id, :snapshot_id, 1, 'open', NULL
-                FROM equity_identifier_version AS identifier
-                INNER JOIN equity_listing_status_version AS listing
-                  ON listing.security_id = identifier.security_id
-                WHERE identifier.exchange = :exchange
-                  AND identifier.identity_state = 'CONFIRMED'
-                  AND identifier.effective_range @> :target_date
-                  AND identifier.knowledge_range @> :now
-                  AND listing.status = 'LISTED'
-                  AND listing.effective_range @> :target_date
-                  AND listing.knowledge_range @> :now
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM equity_master_snapshot_member AS member
-                    WHERE member.snapshot_id = :snapshot_id
-                      AND member.security_id = identifier.security_id
-                  )
-                ON CONFLICT (security_id) WHERE status = 'open'
-                DO UPDATE SET
-                  last_missing_snapshot_id = EXCLUDED.last_missing_snapshot_id,
-                  consecutive_count = CASE
-                    WHEN (
-                      SELECT prior_snapshot.target_date
-                      FROM equity_master_snapshot AS prior_snapshot
-                      WHERE prior_snapshot.snapshot_id =
-                        equity_presence_anomaly.last_missing_snapshot_id
-                    ) = :target_date
-                    THEN equity_presence_anomaly.consecutive_count
-                    ELSE equity_presence_anomaly.consecutive_count + 1
-                  END
-                """
-            ),
-            {
-                "anomaly_id": uuid4(),
-                "exchange": exchange.value,
-                "snapshot_id": snapshot_id,
-                "target_date": target_date,
-                "now": now,
-            },
+            )
+            .where(
+                EquityIdentifierVersion.exchange == exchange.value,
+                EquityIdentifierVersion.identity_state == "CONFIRMED",
+                EquityIdentifierVersion.effective_range.contains(target_date),
+                EquityIdentifierVersion.knowledge_range.contains(now),
+                EquityListingStatusVersion.status == "LISTED",
+                EquityListingStatusVersion.effective_range.contains(target_date),
+                EquityListingStatusVersion.knowledge_range.contains(now),
+                ~exists(
+                    select(EquityMasterSnapshotMember.snapshot_id).where(
+                        EquityMasterSnapshotMember.snapshot_id == snapshot_id,
+                        EquityMasterSnapshotMember.security_id
+                        == EquityIdentifierVersion.security_id,
+                    )
+                ),
+            )
+        )
+        insert_missing = postgresql_insert(EquityPresenceAnomaly).from_select(
+            [
+                EquityPresenceAnomaly.anomaly_id,
+                EquityPresenceAnomaly.security_id,
+                EquityPresenceAnomaly.exchange,
+                EquityPresenceAnomaly.symbol,
+                EquityPresenceAnomaly.first_missing_snapshot_id,
+                EquityPresenceAnomaly.last_missing_snapshot_id,
+                EquityPresenceAnomaly.consecutive_count,
+                EquityPresenceAnomaly.status,
+                EquityPresenceAnomaly.resolved_at,
+            ],
+            missing_identifiers,
         )
         connection.execute(
-            text(
-                """
-                UPDATE equity_presence_anomaly AS anomaly
-                SET status = 'resolved', resolved_at = :now
-                FROM equity_master_snapshot_member AS member
-                WHERE member.snapshot_id = :snapshot_id
-                  AND member.security_id = anomaly.security_id
-                  AND anomaly.exchange = :exchange
-                  AND anomaly.status = 'open'
-                """
-            ),
-            {"exchange": exchange.value, "snapshot_id": snapshot_id, "now": now},
+            insert_missing.on_conflict_do_update(
+                index_elements=[EquityPresenceAnomaly.security_id],
+                index_where=EquityPresenceAnomaly.status == "open",
+                set_={
+                    "last_missing_snapshot_id": insert_missing.excluded.last_missing_snapshot_id,
+                    "consecutive_count": case(
+                        (
+                            prior_snapshot_date == target_date,
+                            EquityPresenceAnomaly.consecutive_count,
+                        ),
+                        else_=EquityPresenceAnomaly.consecutive_count + 1,
+                    ),
+                },
+            )
+        )
+        connection.execute(
+            update(EquityPresenceAnomaly)
+            .where(
+                EquityMasterSnapshotMember.snapshot_id == snapshot_id,
+                EquityMasterSnapshotMember.security_id == EquityPresenceAnomaly.security_id,
+                EquityPresenceAnomaly.exchange == exchange.value,
+                EquityPresenceAnomaly.status == "open",
+            )
+            .values(status="resolved", resolved_at=now)
         )
 
     def _insert_snapshot(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         snapshot_id: UUID,
         exchange: Exchange,
@@ -397,34 +417,24 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
     ) -> None:
         """写入一次完整且已通过结构门的目录快照外壳。"""
         connection.execute(
-            text(
-                """
-                INSERT INTO equity_master_snapshot (
-                  snapshot_id, exchange, snapshot_kind, target_date, source_batch_id,
-                  observed_at, row_count, schema_fingerprint, completeness, quality_status,
-                  business_sha256
-                ) VALUES (
-                  :snapshot_id, :exchange, 'CATALOG', :target_date, :source_batch_id,
-                  :observed_at, :row_count, :schema_fingerprint, 'COMPLETE', 'passed',
-                  :business_sha256
-                )
-                """
-            ),
-            {
-                "snapshot_id": snapshot_id,
-                "exchange": exchange.value,
-                "target_date": target_date,
-                "source_batch_id": source_batch_id,
-                "observed_at": observed_at,
-                "row_count": row_count,
-                "schema_fingerprint": schema_fingerprint,
-                "business_sha256": business_hash,
-            },
+            insert(EquityMasterSnapshot).values(
+                snapshot_id=snapshot_id,
+                exchange=exchange.value,
+                snapshot_kind="CATALOG",
+                target_date=target_date,
+                source_batch_id=source_batch_id,
+                observed_at=observed_at,
+                row_count=row_count,
+                schema_fingerprint=schema_fingerprint,
+                completeness="COMPLETE",
+                quality_status="passed",
+                business_sha256=business_hash,
+            )
         )
 
     def _publish_entry(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         entry: EquityCatalogEntry,
         target_date: date,
@@ -463,37 +473,26 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
         )
         if changed:
             connection.execute(
-                text(
-                    """
-                    UPDATE equity_instrument
-                    SET name = :name, updated_at = :updated_at
-                    WHERE security_id = :security_id
-                    """
-                ),
-                {"security_id": security_id, "name": entry.name, "updated_at": now},
+                update(EquityInstrument)
+                .where(EquityInstrument.security_id == security_id)
+                .values(name=entry.name, updated_at=now)
             )
         return changed, security_id
 
     def _current_identifier(
-        self, connection: Connection, entry: EquityCatalogEntry
+        self, connection: Session, entry: EquityCatalogEntry
     ) -> Mapping[Any, Any] | None:
         """读取当前知识下的开放标识；PENDING 也是可被目录确认的稳定锚。"""
         return (
             connection.execute(
-                text(
-                    """
-                    SELECT security_id, identity_state
-                    FROM equity_identifier_version
-                    WHERE exchange = :exchange
-                      AND symbol = :symbol
-                      AND effective_to IS NULL
-                      AND known_to IS NULL
-                    """
-                ),
-                {
-                    "exchange": entry.identifier.exchange.value,
-                    "symbol": entry.identifier.symbol,
-                },
+                select(
+                    EquityIdentifierVersion.security_id, EquityIdentifierVersion.identity_state
+                ).where(
+                    EquityIdentifierVersion.exchange == entry.identifier.exchange.value,
+                    EquityIdentifierVersion.symbol == entry.identifier.symbol,
+                    EquityIdentifierVersion.effective_to.is_(None),
+                    EquityIdentifierVersion.known_to.is_(None),
+                )
             )
             .mappings()
             .one_or_none()
@@ -501,7 +500,7 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
 
     def _create_confirmed_instrument(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         entry: EquityCatalogEntry,
         target_date: date,
@@ -510,35 +509,23 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
     ) -> int:
         """为目录首次发现代码创建确认身份、名称与 LISTED 生命周期事实。"""
         instrument_id = uuid4()
-        row = (
+        security_id = int(
             connection.execute(
-                text(
-                    """
-                    INSERT INTO equity_instrument (
-                      instrument_id, exchange, symbol, name, listing_status,
-                      master_confirmed_at, current_master_version, created_at, updated_at
-                    ) VALUES (
-                      :instrument_id, :exchange, :symbol, :name, 'LISTED',
-                      :master_confirmed_at, :current_master_version, :created_at, :updated_at
-                    )
-                    RETURNING security_id
-                    """
-                ),
-                {
-                    "instrument_id": instrument_id,
-                    "exchange": entry.identifier.exchange.value,
-                    "symbol": entry.identifier.symbol,
-                    "name": entry.name,
-                    "master_confirmed_at": now,
-                    "current_master_version": uuid4(),
-                    "created_at": now,
-                    "updated_at": now,
-                },
-            )
-            .mappings()
-            .one()
+                insert(EquityInstrument)
+                .values(
+                    instrument_id=instrument_id,
+                    exchange=entry.identifier.exchange.value,
+                    symbol=entry.identifier.symbol,
+                    name=entry.name,
+                    listing_status="LISTED",
+                    master_confirmed_at=now,
+                    current_master_version=uuid4(),
+                    created_at=now,
+                    updated_at=now,
+                )
+                .returning(EquityInstrument.security_id)
+            ).scalar_one()
         )
-        security_id = int(row["security_id"])
         identifier_version_id = uuid4()
         self._insert_confirmed_identity(
             connection,
@@ -566,20 +553,15 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
             now=now,
         )
         connection.execute(
-            text(
-                """
-                UPDATE equity_instrument
-                SET current_master_version = :version_id
-                WHERE security_id = :security_id
-                """
-            ),
-            {"security_id": security_id, "version_id": identifier_version_id},
+            update(EquityInstrument)
+            .where(EquityInstrument.security_id == security_id)
+            .values(current_master_version=identifier_version_id)
         )
         return security_id
 
     def _confirm_pending_identifier(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         security_id: int,
         entry: EquityCatalogEntry,
@@ -589,16 +571,13 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
     ) -> None:
         """关闭 PENDING 知识版本并追加可发布的确认身份与初始目录事实。"""
         connection.execute(
-            text(
-                """
-                UPDATE equity_identifier_version
-                SET known_to = :known_to
-                WHERE security_id = :security_id
-                  AND identity_state = 'PENDING'
-                  AND known_to IS NULL
-                """
-            ),
-            {"security_id": security_id, "known_to": now},
+            update(EquityIdentifierVersion)
+            .where(
+                EquityIdentifierVersion.security_id == security_id,
+                EquityIdentifierVersion.identity_state == "PENDING",
+                EquityIdentifierVersion.known_to.is_(None),
+            )
+            .values(known_to=now)
         )
         version_id = uuid4()
         self._insert_confirmed_identity(
@@ -627,26 +606,20 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
             now=now,
         )
         connection.execute(
-            text(
-                """
-                UPDATE equity_instrument
-                SET name = :name, listing_status = 'LISTED', master_confirmed_at = :confirmed_at,
-                    current_master_version = :version_id, updated_at = :updated_at
-                WHERE security_id = :security_id
-                """
-            ),
-            {
-                "security_id": security_id,
-                "name": entry.name,
-                "confirmed_at": now,
-                "version_id": version_id,
-                "updated_at": now,
-            },
+            update(EquityInstrument)
+            .where(EquityInstrument.security_id == security_id)
+            .values(
+                name=entry.name,
+                listing_status="LISTED",
+                master_confirmed_at=now,
+                current_master_version=version_id,
+                updated_at=now,
+            )
         )
 
     def _append_name_if_changed(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         security_id: int,
         entry: EquityCatalogEntry,
@@ -657,16 +630,15 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
         """名称变化以观测日生效；相同名称只保留新快照证据而不制造历史版本。"""
         current = (
             connection.execute(
-                text(
-                    """
-                    SELECT version_id, name, effective_from
-                    FROM equity_name_version
-                    WHERE security_id = :security_id
-                      AND effective_to IS NULL
-                      AND known_to IS NULL
-                    """
-                ),
-                {"security_id": security_id},
+                select(
+                    EquityNameVersion.version_id,
+                    EquityNameVersion.name,
+                    EquityNameVersion.effective_from,
+                ).where(
+                    EquityNameVersion.security_id == security_id,
+                    EquityNameVersion.effective_to.is_(None),
+                    EquityNameVersion.known_to.is_(None),
+                )
             )
             .mappings()
             .one_or_none()
@@ -677,27 +649,17 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
             # 同日更正关闭知识时间；跨日改名关闭市场有效期，避免回写旧名称。
             if current["effective_from"] == target_date:
                 connection.execute(
-                    text(
-                        """
-                        UPDATE equity_name_version
-                        SET known_to = :known_to
-                        WHERE version_id = :version_id
-                        """
-                    ),
-                    {"known_to": now, "version_id": current["version_id"]},
+                    update(EquityNameVersion)
+                    .where(EquityNameVersion.version_id == current["version_id"])
+                    .values(known_to=now)
                 )
             else:
                 if current["effective_from"] > target_date:
                     raise ValueError("catalog target date predates current name fact")
                 connection.execute(
-                    text(
-                        """
-                        UPDATE equity_name_version
-                        SET effective_to = :effective_to
-                        WHERE version_id = :version_id
-                        """
-                    ),
-                    {"effective_to": target_date, "version_id": current["version_id"]},
+                    update(EquityNameVersion)
+                    .where(EquityNameVersion.version_id == current["version_id"])
+                    .values(effective_to=target_date)
                 )
         self._insert_name_version(
             connection,
@@ -711,7 +673,7 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
 
     def _insert_confirmed_identity(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         version_id: UUID,
         security_id: int,
@@ -723,35 +685,25 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
         """追加可发布的确认标识版本，使用可靠上市日或观测日而不猜测历史。"""
         effective_from, precision = _effective_date(entry, target_date)
         connection.execute(
-            text(
-                """
-                INSERT INTO equity_identifier_version (
-                  version_id, security_id, exchange, symbol, identity_state,
-                  effective_from, effective_to, known_from, known_to,
-                  effective_date_precision, source_batch_id, content_sha256
-                ) VALUES (
-                  :version_id, :security_id, :exchange, :symbol, 'CONFIRMED',
-                  :effective_from, NULL, :known_from, NULL,
-                  :precision, :source_batch_id, :content_sha256
-                )
-                """
-            ),
-            {
-                "version_id": version_id,
-                "security_id": security_id,
-                "exchange": entry.identifier.exchange.value,
-                "symbol": entry.identifier.symbol,
-                "effective_from": effective_from,
-                "known_from": now,
-                "precision": precision,
-                "source_batch_id": source_batch_id,
-                "content_sha256": _identity_hash(entry, effective_from, "CONFIRMED"),
-            },
+            insert(EquityIdentifierVersion).values(
+                version_id=version_id,
+                security_id=security_id,
+                exchange=entry.identifier.exchange.value,
+                symbol=entry.identifier.symbol,
+                identity_state="CONFIRMED",
+                effective_from=effective_from,
+                effective_to=None,
+                known_from=now,
+                known_to=None,
+                effective_date_precision=precision,
+                source_batch_id=source_batch_id,
+                content_sha256=_identity_hash(entry, effective_from, "CONFIRMED"),
+            )
         )
 
     def _insert_name_version(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         security_id: int,
         entry: EquityCatalogEntry,
@@ -762,33 +714,23 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
         """追加独立可修订的名称事实，名称日期不能冒充官方上市日期。"""
         effective_from, precision = _effective_date(entry, target_date)
         connection.execute(
-            text(
-                """
-                INSERT INTO equity_name_version (
-                  version_id, security_id, name, effective_from, effective_to,
-                  known_from, known_to, effective_date_precision, source_batch_id,
-                  content_sha256
-                ) VALUES (
-                  :version_id, :security_id, :name, :effective_from, NULL,
-                  :known_from, NULL, :precision, :source_batch_id, :content_sha256
-                )
-                """
-            ),
-            {
-                "version_id": uuid4(),
-                "security_id": security_id,
-                "name": entry.name,
-                "effective_from": effective_from,
-                "known_from": now,
-                "precision": precision,
-                "source_batch_id": source_batch_id,
-                "content_sha256": _name_hash(entry, effective_from),
-            },
+            insert(EquityNameVersion).values(
+                version_id=uuid4(),
+                security_id=security_id,
+                name=entry.name,
+                effective_from=effective_from,
+                effective_to=None,
+                known_from=now,
+                known_to=None,
+                effective_date_precision=precision,
+                source_batch_id=source_batch_id,
+                content_sha256=_name_hash(entry, effective_from),
+            )
         )
 
     def _insert_listed_status(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         security_id: int,
         entry: EquityCatalogEntry,
@@ -799,34 +741,27 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
         """首次确认时写入 LISTED；目录缺席和普通停牌绝不自动转换生命周期。"""
         effective_from, precision = _effective_date(entry, target_date)
         connection.execute(
-            text(
-                """
-                INSERT INTO equity_listing_status_version (
-                  version_id, security_id, status, listed_on, delisted_on,
-                  effective_from, effective_to, known_from, known_to,
-                  effective_date_precision, evidence_kind, source_batch_id, content_sha256
-                ) VALUES (
-                  :version_id, :security_id, 'LISTED', :listed_on, NULL,
-                  :effective_from, NULL, :known_from, NULL,
-                  :precision, 'CATALOG', :source_batch_id, :content_sha256
-                )
-                """
-            ),
-            {
-                "version_id": uuid4(),
-                "security_id": security_id,
-                "listed_on": entry.listed_on,
-                "effective_from": effective_from,
-                "known_from": now,
-                "precision": precision,
-                "source_batch_id": source_batch_id,
-                "content_sha256": _listing_hash(entry, effective_from),
-            },
+            insert(EquityListingStatusVersion).values(
+                version_id=uuid4(),
+                security_id=security_id,
+                status="LISTED",
+                listed_on=entry.listed_on,
+                delisted_on=None,
+                effective_from=effective_from,
+                effective_to=None,
+                known_from=now,
+                known_to=None,
+                effective_date_precision=precision,
+                evidence_kind="CATALOG",
+                source_batch_id=source_batch_id,
+                content_sha256=_listing_hash(entry, effective_from),
+                correction_approval_reference=None,
+            )
         )
 
     def _insert_snapshot_member(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         snapshot_id: UUID,
         ordinal: int,
@@ -837,35 +772,25 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
         """记录完整快照中的解析结果，供差集、质量告警和审计回放读取。"""
         _, precision = _effective_date(entry, target_date)
         connection.execute(
-            text(
-                """
-                INSERT INTO equity_master_snapshot_member (
-                  snapshot_id, row_ordinal, exchange, symbol, name, listed_on,
-                  candidate_status, candidate_status_date, effective_date_precision,
-                  security_id, resolution_status, content_sha256
-                ) VALUES (
-                  :snapshot_id, :row_ordinal, :exchange, :symbol, :name, :listed_on,
-                  'LISTED', :listed_on, :precision,
-                  :security_id, 'resolved', :content_sha256
-                )
-                """
-            ),
-            {
-                "snapshot_id": snapshot_id,
-                "row_ordinal": ordinal,
-                "exchange": entry.identifier.exchange.value,
-                "symbol": entry.identifier.symbol,
-                "name": entry.name,
-                "listed_on": entry.listed_on,
-                "precision": precision,
-                "security_id": security_id,
-                "content_sha256": _entry_hash(entry),
-            },
+            insert(EquityMasterSnapshotMember).values(
+                snapshot_id=snapshot_id,
+                row_ordinal=ordinal,
+                exchange=entry.identifier.exchange.value,
+                symbol=entry.identifier.symbol,
+                name=entry.name,
+                listed_on=entry.listed_on,
+                candidate_status="LISTED",
+                candidate_status_date=entry.listed_on,
+                effective_date_precision=precision,
+                security_id=security_id,
+                resolution_status="resolved",
+                content_sha256=_entry_hash(entry),
+            )
         )
 
     def _publish(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         exchange: Exchange,
         business_changed: bool,
@@ -877,16 +802,11 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
         if not business_changed:
             current = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT data_version
-                        FROM dataset_publication
-                        WHERE dataset = :dataset
-                          AND partition_key = :partition_key
-                          AND superseded_at IS NULL
-                        """
-                    ),
-                    {"dataset": _DATASET, "partition_key": partition_key},
+                    select(DatasetPublication.data_version).where(
+                        DatasetPublication.dataset == _DATASET,
+                        DatasetPublication.partition_key == partition_key,
+                        DatasetPublication.superseded_at.is_(None),
+                    )
                 )
                 .mappings()
                 .one_or_none()
@@ -894,39 +814,27 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
             if current is not None:
                 return UUID(str(current["data_version"]))
         connection.execute(
-            text(
-                """
-                UPDATE dataset_publication
-                SET superseded_at = :published_at
-                WHERE dataset = :dataset
-                  AND partition_key = :partition_key
-                  AND superseded_at IS NULL
-                """
-            ),
-            {"dataset": _DATASET, "partition_key": partition_key, "published_at": published_at},
+            update(DatasetPublication)
+            .where(
+                DatasetPublication.dataset == _DATASET,
+                DatasetPublication.partition_key == partition_key,
+                DatasetPublication.superseded_at.is_(None),
+            )
+            .values(superseded_at=published_at)
         )
         data_version = uuid4()
         connection.execute(
-            text(
-                """
-                INSERT INTO dataset_publication (
-                  publication_id, dataset, partition_key, data_version, quality_status,
-                  effective_as_of, knowledge_cutoff, published_at, superseded_at
-                ) VALUES (
-                  :publication_id, :dataset, :partition_key, :data_version, 'passed',
-                  :effective_as_of, :knowledge_cutoff, :published_at, NULL
-                )
-                """
-            ),
-            {
-                "publication_id": uuid4(),
-                "dataset": _DATASET,
-                "partition_key": partition_key,
-                "data_version": data_version,
-                "effective_as_of": effective_as_of,
-                "knowledge_cutoff": published_at,
-                "published_at": published_at,
-            },
+            insert(DatasetPublication).values(
+                publication_id=uuid4(),
+                dataset=_DATASET,
+                partition_key=partition_key,
+                data_version=data_version,
+                quality_status="passed",
+                effective_as_of=effective_as_of,
+                knowledge_cutoff=published_at,
+                published_at=published_at,
+                superseded_at=None,
+            )
         )
         return data_version
 

@@ -378,7 +378,7 @@
       <div class="meta">
         <dl>
           <dt>状态</dt>
-          <dd class="status">Accepted · 阶段 0–2 已完成；阶段 3 实施中</dd>
+          <dd class="status">Implemented · 全部 32 表与全部业务仓储已迁移</dd>
         </dl>
         <dl>
           <dt>负责人</dt>
@@ -421,8 +421,8 @@
           <span class="label">问题</span>
           <h3>当前 schema 对产品决策不透明</h3>
           <p>
-            表结构散落在历史 migration 和 152 处字符串 SQL 中。维护者无法从一个稳定目录确认当前表、字段、
-            类型、含义和索引，理解成本已经高于业务可接受范围。
+            迁移前表结构散落在历史 migration 和约 152 处字符串 SQL 中。维护者无法从一个稳定目录确认当前表、
+            字段、类型、含义和索引，理解成本已经高于业务可接受范围。
           </p>
         </article>
         <article class="card">
@@ -430,7 +430,7 @@
           <h3>全量 Declarative ORM</h3>
           <p>
             32 张逻辑表一表一模型文件，按业务能力分目录；每个字段显式声明数据库类型、可空性与中文注释；
-            全部仓储最终使用模型字段和 <code>Session</code>。
+            全部仓储已使用模型字段和 <code>Session</code>。
           </p>
         </article>
         <article class="card">
@@ -446,8 +446,8 @@
       <aside class="callout">
         <strong>核心结论</strong>
         没有发现阻止全量 ORM 化的技术障碍。SQLAlchemy 2.0.51 能表达当前主要 PostgreSQL 结构和 DML。
-        但“全量 ORM”定义为：所有逻辑表都有 Declarative 模型，所有业务仓储通过 Session 与模型表达式访问；
-        不代表把历史 migration、extension 或每个月的物理分区伪装成 ORM entity。
+        “全量 ORM”现已满足：所有逻辑表都有 Declarative 模型，所有业务仓储通过 Session 与模型表达式访问；
+        这不代表把历史 migration、extension 或每个月的物理分区伪装成 ORM entity。
       </aside>
       <aside class="callout">
         <strong>0015 完成后的事实校准</strong>
@@ -525,8 +525,8 @@
           <span class="label">代码事实</span>
           <h3>6,733 行持久化实现</h3>
           <p>
-            9 个仓储/辅助文件包含约 152 个 <code>text()</code> 调用；24 个测试文件直接依赖仓储、
-            DatabaseClient 或 SQLAlchemy repository 行为。
+            迁移基线中 9 个仓储/辅助文件包含约 152 个 <code>text()</code> 调用；当前
+            <code>infrastructure/persistence/</code> 已无 <code>text()</code> 调用，并由架构测试持续约束。
           </p>
         </article>
         <article class="card">
@@ -1144,7 +1144,7 @@ Historical Alembic revisions
     <section id="delivery">
       <h2>10. 分阶段实施、发布与回滚</h2>
       <p>
-        分阶段只用于降低回归风险，最终状态仍是全量 ORM。阶段完成前允许临时双轨代码，但不允许双写两套业务事实。
+        分阶段仅用于降低回归风险；以下阶段均已完成，运行时不存在业务持久化双轨。
       </p>
 
       <ol class="steps">
@@ -1154,42 +1154,41 @@ Historical Alembic revisions
           并固化现有 EOD 仓储集成与故障测试结果。退出条件：schema 与行为基线均可重复生成。
         </li>
         <li>
-          <strong>阶段 1 — 模型全量落地（已完成）：</strong>建立 Base、registry 和 32 个一表一文件模型；repository 暂不切换。
+          <strong>阶段 1 — 模型全量落地（已完成）：</strong>建立 Base、registry 和 32 个一表一文件模型。
           退出条件：模型 import、Pyright、字段注释完整性、metadata/pg_catalog parity 全过。
         </li>
         <li>
-          <strong>阶段 2 — Alembic 接入：</strong>配置 <code>target_metadata</code>、naming convention、
+          <strong>阶段 2 — Alembic 接入（已完成）：</strong>配置 <code>target_metadata</code>、naming convention、
           include filter、comment migration 和 <code>alembic check</code>。退出条件：空库和已升级库均零意外 diff。
         </li>
         <li>
-          <strong>阶段 3 — Session 基础设施：</strong>增加 sessionmaker/Unit of Work，保持原 Engine 探活；
+          <strong>阶段 3 — Session 基础设施（已完成）：</strong>增加 sessionmaker/Unit of Work，保持原 Engine 探活；
           建立 rollback、连接释放、事务边界测试。退出条件：无 application/domain import ORM。
         </li>
         <li>
-          <strong>阶段 4 — 低风险切片：</strong>先迁移 publication、简单目录读取、source batch 和基础身份读取；
+          <strong>阶段 4 — 低风险切片（已完成）：</strong>迁移 publication、简单目录读取、source batch 和基础身份读取；
           用相同 fixture 比较旧/新查询结果。退出条件：行为等价、SQL 数无异常。
         </li>
         <li>
-          <strong>阶段 5 — 行情与主数据：</strong>迁移 equity daily bar、sector 三周期、identity resolver、
+          <strong>阶段 5 — 行情与主数据（已完成）：</strong>迁移 equity daily bar、sector 三周期、identity resolver、
           master/lifecycle 双时间写入；验证 revision、排斥约束、代码复用和 publication。
         </li>
         <li>
-          <strong>阶段 6 — Membership 与 EOD：</strong>最后迁移锁、lease、checkpoint、动态分区、quarantine、
+          <strong>阶段 6 — Membership 与 EOD（已完成）：</strong>迁移锁、lease、checkpoint、动态分区、quarantine、
           release 和 rollback 最密集的仓储；EOD 必须逐项保持 0015 的 raw replay、candidate/publish、
           fencing、动态 rank、ETag/cursor、reaper 和受控回滚语义，并执行并发与故障注入。
         </li>
         <li>
-          <strong>阶段 7 — 收口：</strong>删除旧字符串 statement 和假 Connection 测试，architecture test 禁止
-          persistence <code>text()</code>；更新 README。退出条件：最终 allowlist 只含 migration/partition DDL。
+          <strong>阶段 7 — 收口（已完成）：</strong>删除旧字符串 statement 和假 Connection 测试，architecture test 禁止
+          persistence <code>text()</code>；更新 README。唯一 DDL 例外为 migration 与专用 partition manager。
         </li>
       </ol>
 
       <aside class="callout">
-        <strong>2026-07-28 首轮实施状态</strong>
-        阶段 0–2 已完成：32 张逻辑表均已有一表一文件 Declarative 模型，并按业务能力分目录；registry、
-        模型注释完整性、真实 PostgreSQL 的字段/主键/COMMENT parity、<code>alembic check</code>，以及
-        COMMENT migration 的升降级均已验证。阶段 3 已开始：<code>DatabaseClient</code> 提供短生命周期
-        <code>Session</code> 与显式事务，基础身份读取已迁为模型表达式；其余仓储尚保留既有生产读写路径。
+        <strong>2026-07-28 实施完成</strong>
+        32 张逻辑表均已有一表一文件 Declarative 模型，并按业务能力分目录；全部业务仓储已改为短生命周期
+        <code>Session</code> 与模型表达式。EOD 的 fencing、租约、checkpoint、raw replay、candidate/publish、
+        quarantine、动态排行和 rollback 语义保持不变；月度物理分区 DDL 收敛到专用 partition manager。
       </aside>
 
       <h3>发布与回滚</h3>
@@ -1208,7 +1207,7 @@ Historical Alembic revisions
         </article>
       </div>
 
-      <h3>计划验收命令</h3>
+      <h3>已执行验收命令</h3>
       <pre><code># 构建与基础质量门
 docker build --target test --tag quant-v2/service-data-sync:test service-data-sync
 docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff format --check .
@@ -1231,11 +1230,11 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
   data-sync-worker data-sync-diagnostics --format json</code></pre>
 
       <p>
-        本轮已完成模型层、数据库说明迁移与 Session 基础设施：测试镜像构建、Ruff、Pyright、目标模型单元测试、
-        真实 PostgreSQL 的 <code>alembic upgrade head</code>/<code>downgrade</code>、<code>alembic check</code>
-        和 schema parity 测试均已运行。
-        受本机既有 PostgreSQL 卷凭据不匹配影响，未重置该卷执行 Compose 全量集成；改以独立临时 PostgreSQL
-        完成迁移与结构验证。后续 <code>Session</code> 仓储切片仍须按本节完整质量门执行。
+        已重建测试镜像并通过 Ruff format、Ruff check、Pyright、203 项非集成测试和 5 项架构测试。
+        使用独立 Docker Compose 项目执行真实 PostgreSQL、Redis 与 MinIO 验证：迁移到 head、8 项集成测试、
+        schema parity 和 <code>alembic check</code> 全部通过；1 项 AKShare 外部 smoke 按默认策略跳过。
+        <code>ix_equity_name_current_prefix</code> 的 PostgreSQL operator class 仍会触发 Alembic 已知比较警告，
+        已由 schema parity 测试覆盖，未产生新的 upgrade 操作。
       </p>
     </section>
 
@@ -1318,9 +1317,9 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
 
   <footer>
     <div class="shell">
-      同步服务 SQLAlchemy ORM 全量迁移 · Accepted ·
-      变更摘要：已落地 32 表 Declarative 模型、按能力分组 registry、数据库 COMMENT migration、Alembic
-      结构 parity 与真实 PostgreSQL 验证；后续继续迁移其余 Session 仓储与质量门。0015 的 EOD Accepted 实现仍是既定回归基线。
+      同步服务 SQLAlchemy ORM 全量迁移 · Implemented ·
+      变更摘要：32 表 Declarative 模型、按能力分组 registry、数据库 COMMENT migration、全部 Session 仓储、
+      无字符串 SQL 架构门和真实 PostgreSQL 集成验证均已完成。0015 的 EOD Accepted 实现仍是既定回归基线。
     </div>
   </footer>
 </body>

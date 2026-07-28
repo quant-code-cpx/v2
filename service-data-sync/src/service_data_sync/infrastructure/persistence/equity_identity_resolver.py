@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import Connection, Select, select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from service_data_sync.application.ports.equity_master import EquityIdentityResolver
@@ -66,7 +66,7 @@ class SqlAlchemyEquityIdentityResolver(EquityIdentityResolver):
 
 
 def resolve_identity_on_connection(
-    connection: Session | Connection,
+    connection: Session,
     *,
     exchange: Exchange,
     symbol: str,

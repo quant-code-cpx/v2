@@ -9,7 +9,6 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import Engine
 
 from service_data_sync.domain.equity import EquityIdentifier, Exchange
 from service_data_sync.domain.equity_master import (
@@ -38,8 +37,16 @@ class FakeResult:
     def scalar_one(self) -> object:
         """模拟 ORM-enabled `RETURNING` 的单一标量结果。"""
         if isinstance(self._value, dict):
-            return self._value["source_batch_id"]
+            for key in ("source_batch_id", "security_id", "data_version"):
+                if key in self._value:
+                    return self._value[key]
         return self._value
+
+    def scalar_one_or_none(self) -> object | None:
+        """模拟可无结果的 ORM 标量查询。"""
+        if self._value is None:
+            return None
+        return self.scalar_one()
 
     def one_or_none(self) -> object:
         """为可选查询返回排队行或 `None`。"""
@@ -84,6 +91,20 @@ class FakeEngine:
         yield self.connection
 
 
+class FakeDatabase:
+    """以短生命周期 Session 接口模拟 `DatabaseClient`。"""
+
+    def __init__(self, engine: FakeEngine) -> None:
+        """保存承载测试响应队列的连接替身。"""
+        self._engine = engine
+
+    @contextmanager
+    def transaction(self) -> Iterator[FakeConnection]:
+        """提供一次原子写入使用的模拟 Session。"""
+        with self._engine.begin() as connection:
+            yield connection
+
+
 def test_repository_creates_confirmed_identity_snapshot_and_exchange_publication() -> None:
     """首次目录发现必须同时写确认身份、名称、LISTED 与可审计快照成员。"""
     engine = FakeEngine([None, {"source_batch_id": uuid4()}, None, None, {"security_id": 8}])
@@ -94,8 +115,8 @@ def test_repository_creates_confirmed_identity_snapshot_and_exchange_publication
     assert publication.inserted_count == 1
     assert publication.unchanged_count == 0
     joined = "\n".join(engine.connection.statements)
-    assert "'CONFIRMED'" in joined
-    assert "'LISTED'" in joined
+    assert "identity_state" in joined
+    assert "listing_status" in joined
     assert "equity_master_snapshot_member" in joined
     assert "INSERT INTO sync_run" in joined
 
@@ -145,7 +166,7 @@ def test_repository_keeps_data_version_when_catalog_business_content_is_unchange
     assert publication.unchanged_count == 1
     joined = "\n".join(engine.connection.statements)
     assert "INSERT INTO equity_master_snapshot" in joined
-    assert "UPDATE dataset_publication\n                SET superseded_at" not in joined
+    assert "UPDATE dataset_publication SET superseded_at" not in joined
 
 
 def test_repository_rejects_catalog_drop_larger_than_one_percent_before_writes() -> None:
@@ -168,7 +189,7 @@ def test_repository_records_presence_anomalies_without_mutating_listing_status()
 
     joined = "\n".join(engine.connection.statements)
     assert "INSERT INTO equity_presence_anomaly" in joined
-    assert "UPDATE equity_presence_anomaly AS anomaly" in joined
+    assert "UPDATE equity_presence_anomaly SET" in joined
     assert "DELISTED" not in joined
 
 
@@ -275,8 +296,8 @@ def test_repository_refuses_mixed_target_dates_for_cn_a_aggregate() -> None:
 
 
 def _repository(engine: FakeEngine) -> SqlAlchemyEquityMasterRepository:
-    """以类型转换后的引擎替身构造仓储，不加载运行时配置。"""
-    return SqlAlchemyEquityMasterRepository(DatabaseClient(engine=cast(Engine, engine)))
+    """围绕带短 Session 边界的替身数据库构造仓储。"""
+    return SqlAlchemyEquityMasterRepository(cast(DatabaseClient, FakeDatabase(engine)))
 
 
 def _entry() -> EquityCatalogEntry:

@@ -9,8 +9,9 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Engine, text
-from sqlalchemy.engine import Connection
+from sqlalchemy import and_, func, insert, literal, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.orm import Session
 
 from service_data_sync.application.ports.sector_market_data import StoredSector
 from service_data_sync.application.ports.sector_membership import (
@@ -30,11 +31,59 @@ from service_data_sync.domain.sector import (
     SectorMembershipCandidate,
     SectorScheme,
 )
-from service_data_sync.infrastructure.database.connection import DatabaseClient
-from service_data_sync.infrastructure.persistence.equity_identity_resolver import (
+
+from ..database.connection import DatabaseClient
+from ..database.models.equity.identity.equity_identifier_version import (
+    EquityIdentifierVersion,
+)
+from ..database.models.equity.identity.equity_instrument import (
+    EquityInstrument,
+)
+from ..database.models.equity.identity.equity_listing_status_version import (
+    EquityListingStatusVersion,
+)
+from ..database.models.equity.identity.equity_name_version import (
+    EquityNameVersion,
+)
+from ..database.models.execution.sync_partition import SyncPartition
+from ..database.models.execution.sync_run import SyncRun
+from ..database.models.publication.dataset_publication import (
+    DatasetPublication,
+)
+from ..database.models.sector.catalog.sector_entity import (
+    SectorEntity,
+)
+from ..database.models.sector.membership.sector_membership_interval import (
+    SectorMembershipInterval,
+)
+from ..database.models.sector.membership.sector_membership_item import (
+    SectorMembershipItem,
+)
+from ..database.models.sector.membership.sector_membership_pending import (
+    SectorMembershipPending,
+)
+from ..database.models.sector.membership.sector_membership_quality_result import (
+    SectorMembershipQualityResult,
+)
+from ..database.models.sector.membership.sector_membership_quarantine import (
+    SectorMembershipQuarantine,
+)
+from ..database.models.sector.membership.sector_membership_release import (
+    SectorMembershipRelease,
+)
+from ..database.models.sector.membership.sector_membership_release_sector import (
+    SectorMembershipReleaseSector,
+)
+from ..database.models.sector.membership.sector_membership_snapshot import (
+    SectorMembershipSnapshot,
+)
+from ..database.partition_manager import (
+    ensure_sector_membership_item_partition,
+)
+from .equity_identity_resolver import (
     resolve_identity_on_connection,
 )
-from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
+from .source_batch import record_source_observation
 
 _CAPABILITY = "sector.membership.snapshot.raw"
 _DATASET = "sector.membership.release"
@@ -45,23 +94,24 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
     """独占板块成分 canonical 存储；所有区间仅表达来源完整快照的观测边界。"""
 
     def __init__(self, database: DatabaseClient) -> None:
-        """保存服务私有数据库引擎，调用方不接触 SQLAlchemy 或数据表。"""
-        self._engine: Engine = database.engine
+        """保存服务私有数据库会话工厂，调用方不接触 SQLAlchemy 或数据表。"""
+        self._database = database
 
     def list_active_sectors(self, *, scheme: SectorScheme) -> Sequence[StoredSector]:
         """读取一个分类体系当前 ACTIVE 板块，供一次 scheme run 冻结分区集合。"""
-        with self._engine.connect() as connection:
+        with self._database.session() as connection:
             rows = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT sector_key, sector_id, scheme, sector_code, name, status
-                        FROM sector_entity
-                        WHERE scheme = :scheme AND status = 'ACTIVE'
-                        ORDER BY sector_code, sector_id
-                        """
-                    ),
-                    {"scheme": scheme.value},
+                    select(
+                        SectorEntity.sector_key,
+                        SectorEntity.sector_id,
+                        SectorEntity.scheme,
+                        SectorEntity.sector_code,
+                        SectorEntity.name,
+                        SectorEntity.status,
+                    )
+                    .where(SectorEntity.scheme == scheme.value, SectorEntity.status == "ACTIVE")
+                    .order_by(SectorEntity.sector_code, SectorEntity.sector_id)
                 )
                 .mappings()
                 .all()
@@ -96,7 +146,7 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         now = datetime.now(UTC)
         content_hash = _candidate_hash(candidates)
         idempotency_key = _idempotency_key(sector.identifier, observation_date)
-        with self._engine.begin() as connection:
+        with self._database.transaction() as connection:
             self._lock_sector(connection, sector.identifier)
             source_batch_id = record_source_observation(
                 connection,
@@ -217,32 +267,21 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
             raise ValueError("sector membership run requires active sectors from one scheme")
         now = datetime.now(UTC)
         request_key = _run_request_key(scheme, observation_date)
-        with self._engine.begin() as connection:
+        with self._database.transaction() as connection:
             self._lock_scheme(connection, scheme)
+            requested_partitions = [
+                _partition_key(sector.identifier, observation_date) for sector in sectors
+            ]
+            existing_run = select(SyncRun.run_id).where(SyncRun.request_key == request_key)
             leased_partitions = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT partition_key
-                        FROM sync_partition
-                        WHERE run_id = (
-                          SELECT run_id
-                          FROM sync_run
-                          WHERE request_key = :request_key
-                        )
-                          AND partition_key = ANY(CAST(:partition_keys AS VARCHAR[]))
-                          AND lease_until > :now
-                        FOR UPDATE
-                        """
-                    ),
-                    {
-                        "request_key": request_key,
-                        "partition_keys": [
-                            _partition_key(sector.identifier, observation_date)
-                            for sector in sectors
-                        ],
-                        "now": now,
-                    },
+                    select(SyncPartition.partition_key)
+                    .where(
+                        SyncPartition.run_id == existing_run.scalar_subquery(),
+                        SyncPartition.partition_key.in_(requested_partitions),
+                        SyncPartition.lease_until > now,
+                    )
+                    .with_for_update()
                 )
                 .mappings()
                 .all()
@@ -251,63 +290,60 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
                 # 活跃租约代表另一个 worker 正在处理同一冻结集合。
                 # 不能把该 worker 的 checkpoint 重置为新尝试。
                 raise RuntimeError("sector membership run is already leased")
-            row = (
-                connection.execute(
-                    text(
-                        """
-                        INSERT INTO sync_run (
-                          run_id, capability, mode, request_key, target_date, status,
-                          requested_at, started_at, finished_at, created_at
-                        ) VALUES (
-                          :run_id, :capability, 'manual', :request_key, :target_date, 'running',
-                          :now, :now, NULL, :now
-                        )
-                        ON CONFLICT (request_key) DO UPDATE
-                        SET status = 'running', started_at = EXCLUDED.started_at, finished_at = NULL
-                        RETURNING run_id
-                        """
-                    ),
-                    {
-                        "run_id": uuid4(),
-                        "capability": _CAPABILITY,
-                        "request_key": request_key,
-                        "target_date": observation_date,
-                        "now": now,
-                    },
-                )
-                .mappings()
-                .one()
+            insert_run = postgresql_insert(SyncRun).values(
+                run_id=uuid4(),
+                capability=_CAPABILITY,
+                mode="manual",
+                request_key=request_key,
+                target_date=observation_date,
+                status="running",
+                requested_at=now,
+                started_at=now,
+                finished_at=None,
+                created_at=now,
             )
-            run_id = UUID(str(row["run_id"]))
+            run_id = UUID(
+                str(
+                    connection.execute(
+                        insert_run.on_conflict_do_update(
+                            index_elements=[SyncRun.request_key],
+                            set_={
+                                "status": "running",
+                                "started_at": insert_run.excluded.started_at,
+                                "finished_at": None,
+                            },
+                        ).returning(SyncRun.run_id)
+                    ).scalar_one()
+                )
+            )
             for sector in sectors:
+                insert_partition = postgresql_insert(SyncPartition).values(
+                    run_id=run_id,
+                    partition_key=_partition_key(sector.identifier, observation_date),
+                    status="running",
+                    attempt=1,
+                    lease_owner=f"sector-membership:{run_id}",
+                    lease_until=now + _LEASE_DURATION,
+                    heartbeat_at=now,
+                    next_retry_at=None,
+                    checkpoint_json=None,
+                    error_code=None,
+                    updated_at=now,
+                )
                 connection.execute(
-                    text(
-                        """
-                        INSERT INTO sync_partition (
-                          run_id, partition_key, status, attempt, lease_owner, lease_until,
-                          heartbeat_at, next_retry_at, checkpoint_json, error_code, updated_at
-                        ) VALUES (
-                          :run_id, :partition_key, 'running', 1, :lease_owner,
-                          :lease_until, :now, NULL, NULL, NULL, :now
-                        )
-                        ON CONFLICT (run_id, partition_key) DO UPDATE
-                        SET status = 'running',
-                            attempt = sync_partition.attempt + 1,
-                            lease_owner = EXCLUDED.lease_owner,
-                            lease_until = EXCLUDED.lease_until,
-                            heartbeat_at = EXCLUDED.heartbeat_at,
-                            next_retry_at = NULL,
-                            error_code = NULL,
-                            updated_at = EXCLUDED.updated_at
-                        """
-                    ),
-                    {
-                        "run_id": run_id,
-                        "partition_key": _partition_key(sector.identifier, observation_date),
-                        "lease_owner": f"sector-membership:{run_id}",
-                        "lease_until": now + _LEASE_DURATION,
-                        "now": now,
-                    },
+                    insert_partition.on_conflict_do_update(
+                        index_elements=[SyncPartition.run_id, SyncPartition.partition_key],
+                        set_={
+                            "status": "running",
+                            "attempt": SyncPartition.attempt + 1,
+                            "lease_owner": insert_partition.excluded.lease_owner,
+                            "lease_until": insert_partition.excluded.lease_until,
+                            "heartbeat_at": insert_partition.excluded.heartbeat_at,
+                            "next_retry_at": None,
+                            "error_code": None,
+                            "updated_at": insert_partition.excluded.updated_at,
+                        },
+                    )
                 )
         return SectorMembershipRun(run_id=run_id, scheme=scheme, observation_date=observation_date)
 
@@ -330,7 +366,7 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
             },
             separators=(",", ":"),
         )
-        with self._engine.begin() as connection:
+        with self._database.transaction() as connection:
             self._update_partition(
                 connection,
                 run=run,
@@ -348,7 +384,7 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         error_code: str,
     ) -> None:
         """记录已经耗尽重试的来源失败并释放 lease，后续重跑可复用同一 partition。"""
-        with self._engine.begin() as connection:
+        with self._database.transaction() as connection:
             self._update_partition(
                 connection,
                 run=run,
@@ -362,16 +398,11 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         """结束 run 并保留各分区 checkpoint；不接受未定义状态避免审计语义漂移。"""
         if status not in {"succeeded", "partial", "failed"}:
             raise ValueError("sector membership run status is invalid")
-        with self._engine.begin() as connection:
+        with self._database.transaction() as connection:
             connection.execute(
-                text(
-                    """
-                    UPDATE sync_run
-                    SET status = :status, finished_at = :finished_at
-                    WHERE run_id = :run_id
-                    """
-                ),
-                {"status": status, "finished_at": datetime.now(UTC), "run_id": run.run_id},
+                update(SyncRun)
+                .where(SyncRun.run_id == run.run_id)
+                .values(status=status, finished_at=datetime.now(UTC))
             )
 
     def publish_release(
@@ -379,7 +410,7 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
     ) -> PublishedSectorMembershipRelease | None:
         """汇总冻结的 ACTIVE 板块快照，满足质量覆盖门才原子切换 scheme release。"""
         now = datetime.now(UTC)
-        with self._engine.begin() as connection:
+        with self._database.transaction() as connection:
             self._lock_scheme(connection, scheme)
             sectors = self._active_sectors_on_connection(connection, scheme)
             if not sectors:
@@ -419,67 +450,40 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
                 )
             if current is not None:
                 connection.execute(
-                    text(
-                        """
-                        UPDATE sector_membership_release
-                        SET superseded_at = :published_at
-                        WHERE release_id = :release_id
-                        """
-                    ),
-                    {"published_at": now, "release_id": current["release_id"]},
+                    update(SectorMembershipRelease)
+                    .where(SectorMembershipRelease.release_id == current["release_id"])
+                    .values(superseded_at=now)
                 )
             release_id = uuid4()
             data_version = uuid4()
             release_as_of = max(snapshot["observed_at"] for _, snapshot, _ in components)
             coverage_start = min(snapshot["observed_at"] for _, snapshot, _ in components)
             connection.execute(
-                text(
-                    """
-                    INSERT INTO sector_membership_release (
-                      release_id, scheme, release_as_of, coverage_start, data_version,
-                      quality_status,
-                      expected_sector_count, fresh_sector_count, carried_forward_sector_count,
-                      identity_coverage_percent, excluded_identity_count, published_at,
-                      superseded_at
-                    ) VALUES (
-                      :release_id, :scheme, :release_as_of, :coverage_start, :data_version,
-                      :quality_status, :expected_sector_count, :fresh_sector_count,
-                      :carried_forward_sector_count, 100, 0, :published_at, NULL
-                    )
-                    """
-                ),
-                {
-                    "release_id": release_id,
-                    "scheme": scheme.value,
-                    "release_as_of": release_as_of,
-                    "coverage_start": coverage_start,
-                    "data_version": data_version,
-                    "quality_status": quality_status,
-                    "expected_sector_count": expected_count,
-                    "fresh_sector_count": fresh_count,
-                    "carried_forward_sector_count": carried_count,
-                    "published_at": now,
-                },
+                insert(SectorMembershipRelease).values(
+                    release_id=release_id,
+                    scheme=scheme.value,
+                    release_as_of=release_as_of,
+                    coverage_start=coverage_start,
+                    data_version=data_version,
+                    quality_status=quality_status,
+                    expected_sector_count=expected_count,
+                    fresh_sector_count=fresh_count,
+                    carried_forward_sector_count=carried_count,
+                    identity_coverage_percent=100,
+                    excluded_identity_count=0,
+                    published_at=now,
+                    superseded_at=None,
+                )
             )
             for sector, snapshot, carried_forward in components:
                 connection.execute(
-                    text(
-                        """
-                        INSERT INTO sector_membership_release_sector (
-                          release_id, sector_key, snapshot_id, carried_forward, snapshot_observed_at
-                        ) VALUES (
-                          :release_id, :sector_key, :snapshot_id, :carried_forward,
-                          :snapshot_observed_at
-                        )
-                        """
-                    ),
-                    {
-                        "release_id": release_id,
-                        "sector_key": sector.sector_key,
-                        "snapshot_id": snapshot["snapshot_id"],
-                        "carried_forward": carried_forward,
-                        "snapshot_observed_at": snapshot["observed_at"],
-                    },
+                    insert(SectorMembershipReleaseSector).values(
+                        release_id=release_id,
+                        sector_key=sector.sector_key,
+                        snapshot_id=snapshot["snapshot_id"],
+                        carried_forward=carried_forward,
+                        snapshot_observed_at=snapshot["observed_at"],
+                    )
                 )
             self._publish_dataset(
                 connection,
@@ -502,56 +506,54 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         self, *, scheme: SectorScheme, as_of: datetime | None
     ) -> StoredSectorMembershipRelease | None:
         """读取当前或历史最近 release，始终只暴露不可变已发布清单。"""
-        query = (
-            """
-            SELECT release_id, scheme, release_as_of, coverage_start, data_version, quality_status,
-                   carried_forward_sector_count, published_at
-            FROM sector_membership_release
-            WHERE scheme = :scheme AND superseded_at IS NULL
-            """
-            if as_of is None
-            else """
-            SELECT release_id, scheme, release_as_of, coverage_start, data_version, quality_status,
-                   carried_forward_sector_count, published_at
-            FROM sector_membership_release
-            WHERE scheme = :scheme AND release_as_of <= :as_of
-            ORDER BY release_as_of DESC
-            LIMIT 1
-            """
-        )
-        parameters: dict[str, object] = {"scheme": scheme.value}
-        if as_of is not None:
-            parameters["as_of"] = as_of
-        with self._engine.connect() as connection:
-            row = connection.execute(text(query), parameters).mappings().one_or_none()
+        statement = select(
+            SectorMembershipRelease.release_id,
+            SectorMembershipRelease.scheme,
+            SectorMembershipRelease.release_as_of,
+            SectorMembershipRelease.coverage_start,
+            SectorMembershipRelease.data_version,
+            SectorMembershipRelease.quality_status,
+            SectorMembershipRelease.carried_forward_sector_count,
+            SectorMembershipRelease.published_at,
+        ).where(SectorMembershipRelease.scheme == scheme.value)
+        if as_of is None:
+            statement = statement.where(SectorMembershipRelease.superseded_at.is_(None))
+        else:
+            statement = (
+                statement.where(SectorMembershipRelease.release_as_of <= as_of)
+                .order_by(SectorMembershipRelease.release_as_of.desc())
+                .limit(1)
+            )
+        with self._database.session() as connection:
+            row = connection.execute(statement).mappings().one_or_none()
         return None if row is None else _stored_release(row, requested_as_of=as_of)
 
     def get_release_sector(
         self, *, release_id: UUID, identifier: SectorIdentifier
     ) -> tuple[StoredSector, datetime, bool] | None:
         """读取 release 固定板块快照，不能回退到随后变更的当前快照。"""
-        with self._engine.connect() as connection:
+        with self._database.session() as connection:
             row = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT entity.sector_key, entity.sector_id, entity.scheme,
-                               entity.sector_code,
-                               entity.name, entity.status, component.snapshot_observed_at,
-                               component.carried_forward
-                        FROM sector_membership_release_sector AS component
-                        INNER JOIN sector_entity AS entity
-                          ON entity.sector_key = component.sector_key
-                        WHERE component.release_id = :release_id
-                          AND entity.scheme = :scheme
-                          AND entity.sector_code = :sector_code
-                        """
-                    ),
-                    {
-                        "release_id": release_id,
-                        "scheme": identifier.scheme.value,
-                        "sector_code": identifier.code,
-                    },
+                    select(
+                        SectorEntity.sector_key,
+                        SectorEntity.sector_id,
+                        SectorEntity.scheme,
+                        SectorEntity.sector_code,
+                        SectorEntity.name,
+                        SectorEntity.status,
+                        SectorMembershipReleaseSector.snapshot_observed_at,
+                        SectorMembershipReleaseSector.carried_forward,
+                    )
+                    .join(
+                        SectorEntity,
+                        SectorEntity.sector_key == SectorMembershipReleaseSector.sector_key,
+                    )
+                    .where(
+                        SectorMembershipReleaseSector.release_id == release_id,
+                        SectorEntity.scheme == identifier.scheme.value,
+                        SectorEntity.sector_code == identifier.code,
+                    )
                 )
                 .mappings()
                 .one_or_none()
@@ -574,61 +576,99 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
             raise ValueError("constituent limit must be from 1 to 501")
         if (after_exchange is None) != (after_symbol is None):
             raise ValueError("constituent cursor values must be supplied together")
-        statement = text(
-            """
-            SELECT instrument.instrument_id, identifier_version.exchange, identifier_version.symbol,
-                   name_version.name, status_version.status, membership.observed_from,
-                   membership.observed_to
-            FROM sector_membership_release_sector AS component
-            INNER JOIN sector_entity AS sector ON sector.sector_key = component.sector_key
-            INNER JOIN sector_membership_item AS item ON item.snapshot_id = component.snapshot_id
-            INNER JOIN sector_membership_interval AS membership
-              ON membership.sector_key = component.sector_key
-             AND membership.security_id = item.security_id
-             AND membership.observation_range @> component.snapshot_observed_at
-            INNER JOIN sector_membership_release AS release
-              ON release.release_id = component.release_id
-            INNER JOIN equity_instrument AS instrument ON instrument.security_id = item.security_id
-            INNER JOIN equity_identifier_version AS identifier_version
-              ON identifier_version.security_id = item.security_id
-             AND identifier_version.identity_state = 'CONFIRMED'
-             AND identifier_version.effective_range @> component.snapshot_observed_at::date
-             AND identifier_version.knowledge_range @> release.published_at
-            INNER JOIN equity_name_version AS name_version
-              ON name_version.security_id = item.security_id
-             AND name_version.effective_range @> component.snapshot_observed_at::date
-             AND name_version.knowledge_range @> release.published_at
-            INNER JOIN equity_listing_status_version AS status_version
-              ON status_version.security_id = item.security_id
-             AND status_version.effective_range @> component.snapshot_observed_at::date
-             AND status_version.knowledge_range @> release.published_at
-            WHERE component.release_id = :release_id
-              AND sector.scheme = :scheme
-              AND sector.sector_code = :sector_code
-              AND (
-                :after_exchange IS NULL
-                OR identifier_version.exchange > :after_exchange
-                OR (
-                  identifier_version.exchange = :after_exchange
-                  AND identifier_version.symbol > :after_symbol
-                )
-              )
-            ORDER BY identifier_version.exchange, identifier_version.symbol
-            LIMIT :limit
-            """
+        statement = (
+            select(
+                EquityInstrument.instrument_id,
+                EquityIdentifierVersion.exchange,
+                EquityIdentifierVersion.symbol,
+                EquityNameVersion.name,
+                EquityListingStatusVersion.status,
+                SectorMembershipInterval.observed_from,
+                SectorMembershipInterval.observed_to,
+            )
+            .select_from(SectorMembershipReleaseSector)
+            .join(SectorEntity, SectorEntity.sector_key == SectorMembershipReleaseSector.sector_key)
+            .join(
+                SectorMembershipItem,
+                SectorMembershipItem.snapshot_id == SectorMembershipReleaseSector.snapshot_id,
+            )
+            .join(
+                SectorMembershipInterval,
+                and_(
+                    SectorMembershipInterval.sector_key == SectorMembershipReleaseSector.sector_key,
+                    SectorMembershipInterval.security_id == SectorMembershipItem.security_id,
+                    SectorMembershipInterval.observation_range.contains(
+                        SectorMembershipReleaseSector.snapshot_observed_at
+                    ),
+                ),
+            )
+            .join(
+                SectorMembershipRelease,
+                SectorMembershipRelease.release_id == SectorMembershipReleaseSector.release_id,
+            )
+            .join(
+                EquityInstrument, EquityInstrument.security_id == SectorMembershipItem.security_id
+            )
+            .join(
+                EquityIdentifierVersion,
+                and_(
+                    EquityIdentifierVersion.security_id == SectorMembershipItem.security_id,
+                    EquityIdentifierVersion.identity_state == "CONFIRMED",
+                    EquityIdentifierVersion.effective_range.contains(
+                        func.date(SectorMembershipReleaseSector.snapshot_observed_at)
+                    ),
+                    EquityIdentifierVersion.knowledge_range.contains(
+                        SectorMembershipRelease.published_at
+                    ),
+                ),
+            )
+            .join(
+                EquityNameVersion,
+                and_(
+                    EquityNameVersion.security_id == SectorMembershipItem.security_id,
+                    EquityNameVersion.effective_range.contains(
+                        func.date(SectorMembershipReleaseSector.snapshot_observed_at)
+                    ),
+                    EquityNameVersion.knowledge_range.contains(
+                        SectorMembershipRelease.published_at
+                    ),
+                ),
+            )
+            .join(
+                EquityListingStatusVersion,
+                and_(
+                    EquityListingStatusVersion.security_id == SectorMembershipItem.security_id,
+                    EquityListingStatusVersion.effective_range.contains(
+                        func.date(SectorMembershipReleaseSector.snapshot_observed_at)
+                    ),
+                    EquityListingStatusVersion.knowledge_range.contains(
+                        SectorMembershipRelease.published_at
+                    ),
+                ),
+            )
+            .where(
+                SectorMembershipReleaseSector.release_id == release_id,
+                SectorEntity.scheme == identifier.scheme.value,
+                SectorEntity.sector_code == identifier.code,
+            )
         )
-        with self._engine.connect() as connection:
+        if after_exchange is not None:
+            assert after_symbol is not None
+            statement = statement.where(
+                or_(
+                    EquityIdentifierVersion.exchange > after_exchange.value,
+                    and_(
+                        EquityIdentifierVersion.exchange == after_exchange.value,
+                        EquityIdentifierVersion.symbol > after_symbol,
+                    ),
+                )
+            )
+        with self._database.session() as connection:
             rows = (
                 connection.execute(
-                    statement,
-                    {
-                        "release_id": release_id,
-                        "scheme": identifier.scheme.value,
-                        "sector_code": identifier.code,
-                        "after_exchange": None if after_exchange is None else after_exchange.value,
-                        "after_symbol": after_symbol,
-                        "limit": limit,
-                    },
+                    statement.order_by(
+                        EquityIdentifierVersion.exchange, EquityIdentifierVersion.symbol
+                    ).limit(limit)
                 )
                 .mappings()
                 .all()
@@ -643,34 +683,61 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         symbol: str,
     ) -> StoredMembershipEquity | None:
         """在 release 冻结的市场日与知识时刻解析反向查询身份，不读当前锚列。"""
-        with self._engine.connect() as connection:
+        with self._database.session() as connection:
             row = (
                 connection.execute(
-                    text(
-                        """
-                        SELECT instrument.instrument_id, identifier_version.exchange,
-                               identifier_version.symbol, name_version.name, status_version.status
-                        FROM sector_membership_release AS release
-                        INNER JOIN equity_identifier_version AS identifier_version
-                          ON identifier_version.exchange = :exchange
-                         AND identifier_version.symbol = :symbol
-                         AND identifier_version.identity_state = 'CONFIRMED'
-                         AND identifier_version.effective_range @> release.release_as_of::date
-                         AND identifier_version.knowledge_range @> release.published_at
-                        INNER JOIN equity_instrument AS instrument
-                          ON instrument.security_id = identifier_version.security_id
-                        INNER JOIN equity_name_version AS name_version
-                          ON name_version.security_id = identifier_version.security_id
-                         AND name_version.effective_range @> release.release_as_of::date
-                         AND name_version.knowledge_range @> release.published_at
-                        INNER JOIN equity_listing_status_version AS status_version
-                          ON status_version.security_id = identifier_version.security_id
-                         AND status_version.effective_range @> release.release_as_of::date
-                         AND status_version.knowledge_range @> release.published_at
-                        WHERE release.release_id = :release_id
-                        """
-                    ),
-                    {"release_id": release_id, "exchange": exchange.value, "symbol": symbol},
+                    select(
+                        EquityInstrument.instrument_id,
+                        EquityIdentifierVersion.exchange,
+                        EquityIdentifierVersion.symbol,
+                        EquityNameVersion.name,
+                        EquityListingStatusVersion.status,
+                    )
+                    .select_from(SectorMembershipRelease)
+                    .join(
+                        EquityIdentifierVersion,
+                        and_(
+                            EquityIdentifierVersion.exchange == exchange.value,
+                            EquityIdentifierVersion.symbol == symbol,
+                            EquityIdentifierVersion.identity_state == "CONFIRMED",
+                            EquityIdentifierVersion.effective_range.contains(
+                                func.date(SectorMembershipRelease.release_as_of)
+                            ),
+                            EquityIdentifierVersion.knowledge_range.contains(
+                                SectorMembershipRelease.published_at
+                            ),
+                        ),
+                    )
+                    .join(
+                        EquityInstrument,
+                        EquityInstrument.security_id == EquityIdentifierVersion.security_id,
+                    )
+                    .join(
+                        EquityNameVersion,
+                        and_(
+                            EquityNameVersion.security_id == EquityIdentifierVersion.security_id,
+                            EquityNameVersion.effective_range.contains(
+                                func.date(SectorMembershipRelease.release_as_of)
+                            ),
+                            EquityNameVersion.knowledge_range.contains(
+                                SectorMembershipRelease.published_at
+                            ),
+                        ),
+                    )
+                    .join(
+                        EquityListingStatusVersion,
+                        and_(
+                            EquityListingStatusVersion.security_id
+                            == EquityIdentifierVersion.security_id,
+                            EquityListingStatusVersion.effective_range.contains(
+                                func.date(SectorMembershipRelease.release_as_of)
+                            ),
+                            EquityListingStatusVersion.knowledge_range.contains(
+                                SectorMembershipRelease.published_at
+                            ),
+                        ),
+                    )
+                    .where(SectorMembershipRelease.release_id == release_id)
                 )
                 .mappings()
                 .one_or_none()
@@ -688,66 +755,78 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         """读取 release 清单中的反向归属，并按板块代码维持稳定游标顺序。"""
         if not 1 <= limit <= 501:
             raise ValueError("membership limit must be from 1 to 501")
-        with self._engine.connect() as connection:
-            rows = (
-                connection.execute(
-                    text(
-                        """
-                        SELECT sector.sector_key, sector.sector_id, sector.scheme,
-                               sector.sector_code,
-                               sector.name, sector.status, membership.observed_from,
-                               membership.observed_to, component.snapshot_observed_at,
-                               component.carried_forward
-                        FROM sector_membership_release_sector AS component
-                        INNER JOIN sector_entity AS sector
-                          ON sector.sector_key = component.sector_key
-                        INNER JOIN sector_membership_item AS item
-                          ON item.snapshot_id = component.snapshot_id
-                        INNER JOIN equity_instrument AS instrument
-                          ON instrument.security_id = item.security_id
-                        INNER JOIN sector_membership_interval AS membership
-                          ON membership.sector_key = component.sector_key
-                         AND membership.security_id = item.security_id
-                         AND membership.observation_range @> component.snapshot_observed_at
-                        WHERE component.release_id = :release_id
-                          AND instrument.instrument_id = :instrument_id
-                          AND (
-                            :after_sector_code IS NULL
-                            OR sector.sector_code > :after_sector_code
-                          )
-                        ORDER BY sector.sector_code
-                        LIMIT :limit
-                        """
+        statement = (
+            select(
+                SectorEntity.sector_key,
+                SectorEntity.sector_id,
+                SectorEntity.scheme,
+                SectorEntity.sector_code,
+                SectorEntity.name,
+                SectorEntity.status,
+                SectorMembershipInterval.observed_from,
+                SectorMembershipInterval.observed_to,
+                SectorMembershipReleaseSector.snapshot_observed_at,
+                SectorMembershipReleaseSector.carried_forward,
+            )
+            .select_from(SectorMembershipReleaseSector)
+            .join(SectorEntity, SectorEntity.sector_key == SectorMembershipReleaseSector.sector_key)
+            .join(
+                SectorMembershipItem,
+                SectorMembershipItem.snapshot_id == SectorMembershipReleaseSector.snapshot_id,
+            )
+            .join(
+                EquityInstrument, EquityInstrument.security_id == SectorMembershipItem.security_id
+            )
+            .join(
+                SectorMembershipInterval,
+                and_(
+                    SectorMembershipInterval.sector_key == SectorMembershipReleaseSector.sector_key,
+                    SectorMembershipInterval.security_id == SectorMembershipItem.security_id,
+                    SectorMembershipInterval.observation_range.contains(
+                        SectorMembershipReleaseSector.snapshot_observed_at
                     ),
-                    {
-                        "release_id": release_id,
-                        "instrument_id": instrument_id,
-                        "after_sector_code": after_sector_code,
-                        "limit": limit,
-                    },
-                )
+                ),
+            )
+            .where(
+                SectorMembershipReleaseSector.release_id == release_id,
+                EquityInstrument.instrument_id == instrument_id,
+            )
+        )
+        if after_sector_code is not None:
+            statement = statement.where(SectorEntity.sector_code > after_sector_code)
+        with self._database.session() as connection:
+            rows = (
+                connection.execute(statement.order_by(SectorEntity.sector_code).limit(limit))
                 .mappings()
                 .all()
             )
         return tuple(_stored_equity_membership(row) for row in rows)
 
-    def _lock_sector(self, connection: Connection, identifier: SectorIdentifier) -> None:
+    def _lock_sector(self, connection: Session, identifier: SectorIdentifier) -> None:
         """为单板块快照和区间差分获取事务级互斥，阻止并发任务双重闭合。"""
         connection.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
-            {"lock_key": f"sector-membership:{identifier.qualified_key}"},
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtextextended(
+                        literal(f"sector-membership:{identifier.qualified_key}"), 0
+                    )
+                )
+            )
         )
 
-    def _lock_scheme(self, connection: Connection, scheme: SectorScheme) -> None:
+    def _lock_scheme(self, connection: Session, scheme: SectorScheme) -> None:
         """为 scheme release reducer 获取事务级互斥，防止清单交叉切换。"""
         connection.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
-            {"lock_key": f"sector-membership-release:{scheme.value}"},
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtextextended(literal(f"sector-membership-release:{scheme.value}"), 0)
+                )
+            )
         )
 
     def _update_partition(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         run: SectorMembershipRun,
         sector: StoredSector,
@@ -756,45 +835,39 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         error_code: str | None,
     ) -> None:
         """提交分区最终状态并清除 lease，避免故障 worker 永久占有同一逻辑分区。"""
+        updated_at = datetime.now(UTC)
         connection.execute(
-            text(
-                """
-                UPDATE sync_partition
-                SET status = :status,
-                    lease_owner = NULL,
-                    lease_until = NULL,
-                    heartbeat_at = :updated_at,
-                    next_retry_at = NULL,
-                    checkpoint_json = CAST(:checkpoint_json AS JSONB),
-                    error_code = :error_code,
-                    updated_at = :updated_at
-                WHERE run_id = :run_id AND partition_key = :partition_key
-                """
-            ),
-            {
-                "status": status,
-                "updated_at": datetime.now(UTC),
-                "checkpoint_json": checkpoint,
-                "error_code": error_code,
-                "run_id": run.run_id,
-                "partition_key": _partition_key(sector.identifier, run.observation_date),
-            },
+            update(SyncPartition)
+            .where(
+                SyncPartition.run_id == run.run_id,
+                SyncPartition.partition_key
+                == _partition_key(sector.identifier, run.observation_date),
+            )
+            .values(
+                status=status,
+                lease_owner=None,
+                lease_until=None,
+                heartbeat_at=updated_at,
+                next_retry_at=None,
+                checkpoint_json=None if checkpoint is None else json.loads(checkpoint),
+                error_code=error_code,
+                updated_at=updated_at,
+            )
         )
 
     def _existing_snapshot(
-        self, connection: Connection, idempotency_key: str
+        self, connection: Session, idempotency_key: str
     ) -> Mapping[Any, Any] | None:
         """读取同一逻辑分区的既有观测，重复执行仍保留新 source batch 但不重写事实。"""
         return (
             connection.execute(
-                text(
-                    """
-                    SELECT snapshot_id, observed_at, status, pending_count, quarantine_count
-                    FROM sector_membership_snapshot
-                    WHERE idempotency_key = :idempotency_key
-                    """
-                ),
-                {"idempotency_key": idempotency_key},
+                select(
+                    SectorMembershipSnapshot.snapshot_id,
+                    SectorMembershipSnapshot.observed_at,
+                    SectorMembershipSnapshot.status,
+                    SectorMembershipSnapshot.pending_count,
+                    SectorMembershipSnapshot.quarantine_count,
+                ).where(SectorMembershipSnapshot.idempotency_key == idempotency_key)
             )
             .mappings()
             .one_or_none()
@@ -802,7 +875,7 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
 
     def _resolve_candidates(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         candidates: Sequence[SectorMembershipCandidate],
         fact_date: date,
@@ -844,7 +917,7 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
 
     def _quality_results(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         sector_key: int,
         observation_date: date,
@@ -861,11 +934,9 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
             return [("OBSERVATION_ORDER", "error", "quarantine", None, None)]
         prior_rows = (
             connection.execute(
-                text(
-                    "SELECT security_id FROM sector_membership_item "
-                    "WHERE snapshot_id = :snapshot_id"
-                ),
-                {"snapshot_id": previous["snapshot_id"]},
+                select(SectorMembershipItem.security_id).where(
+                    SectorMembershipItem.snapshot_id == previous["snapshot_id"]
+                )
             )
             .mappings()
             .all()
@@ -887,7 +958,7 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
 
     def _insert_snapshot(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         snapshot_id: UUID,
         sector_key: int,
@@ -905,39 +976,26 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
     ) -> None:
         """先保存全部来源观测头和质量状态，坏快照也保留可重放定位证据。"""
         connection.execute(
-            text(
-                """
-                INSERT INTO sector_membership_snapshot (
-                  snapshot_id, sector_key, source_batch_id, observed_at, observation_date,
-                  status, quality_status, member_count, verified_count, pending_count,
-                  quarantine_count, content_sha256, idempotency_key
-                ) VALUES (
-                  :snapshot_id, :sector_key, :source_batch_id, :observed_at, :observation_date,
-                  :status, :quality_status, :member_count, :verified_count, :pending_count,
-                  :quarantine_count, :content_sha256, :idempotency_key
-                )
-                """
-            ),
-            {
-                "snapshot_id": snapshot_id,
-                "sector_key": sector_key,
-                "source_batch_id": source_batch_id,
-                "observed_at": observed_at,
-                "observation_date": observation_date,
-                "status": "COMPLETE" if complete else "QUARANTINED",
-                "quality_status": quality_status,
-                "member_count": len(candidates),
-                "verified_count": verified_count,
-                "pending_count": pending_count,
-                "quarantine_count": quarantine_count,
-                "content_sha256": content_hash,
-                "idempotency_key": idempotency_key,
-            },
+            insert(SectorMembershipSnapshot).values(
+                snapshot_id=snapshot_id,
+                sector_key=sector_key,
+                source_batch_id=source_batch_id,
+                observed_at=observed_at,
+                observation_date=observation_date,
+                status="COMPLETE" if complete else "QUARANTINED",
+                quality_status=quality_status,
+                member_count=len(candidates),
+                verified_count=verified_count,
+                pending_count=pending_count,
+                quarantine_count=quarantine_count,
+                content_sha256=content_hash,
+                idempotency_key=idempotency_key,
+            )
         )
 
     def _insert_pending(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         snapshot_id: UUID,
         rows: Sequence[tuple[int, SectorMembershipCandidate, Exchange | None, str]],
@@ -946,31 +1004,20 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         """保存未确认身份的最小标准行，禁止将其写入正式成员表。"""
         for ordinal, candidate, exchange, reason in rows:
             connection.execute(
-                text(
-                    """
-                    INSERT INTO sector_membership_pending (
-                      snapshot_id, row_ordinal, source_symbol, source_name, inferred_exchange,
-                      reason_code, created_at
-                    ) VALUES (
-                      :snapshot_id, :row_ordinal, :source_symbol, :source_name,
-                      :inferred_exchange, :reason_code, :created_at
-                    )
-                    """
-                ),
-                {
-                    "snapshot_id": snapshot_id,
-                    "row_ordinal": ordinal,
-                    "source_symbol": candidate.source_symbol,
-                    "source_name": candidate.source_name,
-                    "inferred_exchange": None if exchange is None else exchange.value,
-                    "reason_code": reason,
-                    "created_at": now,
-                },
+                insert(SectorMembershipPending).values(
+                    snapshot_id=snapshot_id,
+                    row_ordinal=ordinal,
+                    source_symbol=candidate.source_symbol,
+                    source_name=candidate.source_name,
+                    inferred_exchange=None if exchange is None else exchange.value,
+                    reason_code=reason,
+                    created_at=now,
+                )
             )
 
     def _insert_quarantine(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         snapshot_id: UUID,
         rows: Sequence[tuple[int, SectorMembershipCandidate, str]],
@@ -979,29 +1026,19 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         """保存冲突或无法推断交易所的标准行，供 raw 重放和人工处置定位。"""
         for ordinal, candidate, reason in rows:
             connection.execute(
-                text(
-                    """
-                    INSERT INTO sector_membership_quarantine (
-                      snapshot_id, row_ordinal, source_symbol, source_name, reason_code, created_at
-                    ) VALUES (
-                      :snapshot_id, :row_ordinal, :source_symbol, :source_name,
-                      :reason_code, :created_at
-                    )
-                    """
-                ),
-                {
-                    "snapshot_id": snapshot_id,
-                    "row_ordinal": ordinal,
-                    "source_symbol": candidate.source_symbol,
-                    "source_name": candidate.source_name,
-                    "reason_code": reason,
-                    "created_at": now,
-                },
+                insert(SectorMembershipQuarantine).values(
+                    snapshot_id=snapshot_id,
+                    row_ordinal=ordinal,
+                    source_symbol=candidate.source_symbol,
+                    source_name=candidate.source_name,
+                    reason_code=reason,
+                    created_at=now,
+                )
             )
 
     def _insert_quality_results(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         snapshot_id: UUID,
         results: Sequence[tuple[str, str, str, int | None, int | None]],
@@ -1010,59 +1047,24 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         """持久化不含 raw 或敏感字段的质量判定，供恢复和告警查询。"""
         for rule_code, severity, disposition, actual_value, expected_value in results:
             connection.execute(
-                text(
-                    """
-                    INSERT INTO sector_membership_quality_result (
-                      snapshot_id, rule_code, severity, disposition, actual_value, expected_value,
-                      created_at
-                    ) VALUES (
-                      :snapshot_id, :rule_code, :severity, :disposition, :actual_value,
-                      :expected_value, :created_at
-                    )
-                    """
-                ),
-                {
-                    "snapshot_id": snapshot_id,
-                    "rule_code": rule_code,
-                    "severity": severity,
-                    "disposition": disposition,
-                    "actual_value": actual_value,
-                    "expected_value": expected_value,
-                    "created_at": now,
-                },
+                insert(SectorMembershipQualityResult).values(
+                    snapshot_id=snapshot_id,
+                    rule_code=rule_code,
+                    severity=severity,
+                    disposition=disposition,
+                    actual_value=actual_value,
+                    expected_value=expected_value,
+                    created_at=now,
+                )
             )
 
-    def _ensure_item_partition(self, connection: Connection, snapshot_date: date) -> None:
+    def _ensure_item_partition(self, connection: Session, snapshot_date: date) -> None:
         """按观测月份创建正式成员分区和反向读取索引，避免无界单表增长。"""
-        month_start = snapshot_date.replace(day=1)
-        next_month = (
-            date(month_start.year + 1, 1, 1)
-            if month_start.month == 12
-            else date(month_start.year, month_start.month + 1, 1)
-        )
-        suffix = month_start.strftime("%Y%m")
-        table_name = f"sector_membership_item_{suffix}"
-        connection.execute(
-            text(
-                f"""
-                CREATE TABLE IF NOT EXISTS {table_name}
-                PARTITION OF sector_membership_item
-                FOR VALUES FROM ('{month_start.isoformat()}') TO ('{next_month.isoformat()}')
-                """
-            )
-        )
-        connection.execute(
-            text(
-                f"""
-                CREATE INDEX IF NOT EXISTS ix_{table_name}_reverse
-                ON {table_name} (security_id, snapshot_id)
-                """
-            )
-        )
+        ensure_sector_membership_item_partition(connection, snapshot_date)
 
     def _insert_items(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         snapshot_id: UUID,
         snapshot_date: date,
@@ -1071,30 +1073,19 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         """仅把唯一 CONFIRMED 身份写入正式分区，保留来源代码名称与行级哈希。"""
         for security_id, candidate in verified:
             connection.execute(
-                text(
-                    """
-                    INSERT INTO sector_membership_item (
-                      snapshot_date, snapshot_id, security_id, source_symbol, source_name,
-                      content_sha256
-                    ) VALUES (
-                      :snapshot_date, :snapshot_id, :security_id, :source_symbol, :source_name,
-                      :content_sha256
-                    )
-                    """
-                ),
-                {
-                    "snapshot_date": snapshot_date,
-                    "snapshot_id": snapshot_id,
-                    "security_id": security_id,
-                    "source_symbol": candidate.source_symbol,
-                    "source_name": candidate.source_name,
-                    "content_sha256": _candidate_hash((candidate,)),
-                },
+                insert(SectorMembershipItem).values(
+                    snapshot_date=snapshot_date,
+                    snapshot_id=snapshot_id,
+                    security_id=security_id,
+                    source_symbol=candidate.source_symbol,
+                    source_name=candidate.source_name,
+                    content_sha256=_candidate_hash((candidate,)),
+                )
             )
 
     def _advance_intervals(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         sector_key: int,
         snapshot_id: UUID,
@@ -1104,15 +1095,12 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         """在完整快照下关闭明确缺席关系并打开新增关系，所有边界均使用本次观测时刻。"""
         rows = (
             connection.execute(
-                text(
-                    """
-                    SELECT security_id
-                    FROM sector_membership_interval
-                    WHERE sector_key = :sector_key AND observed_to IS NULL
-                    FOR UPDATE
-                    """
-                ),
-                {"sector_key": sector_key},
+                select(SectorMembershipInterval.security_id)
+                .where(
+                    SectorMembershipInterval.sector_key == sector_key,
+                    SectorMembershipInterval.observed_to.is_(None),
+                )
+                .with_for_update()
             )
             .mappings()
             .all()
@@ -1120,59 +1108,44 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         open_ids = {int(row["security_id"]) for row in rows}
         for security_id in open_ids - security_ids:
             connection.execute(
-                text(
-                    """
-                    UPDATE sector_membership_interval
-                    SET observed_to = :observed_to, close_snapshot_id = :close_snapshot_id
-                    WHERE sector_key = :sector_key
-                      AND security_id = :security_id
-                      AND observed_to IS NULL
-                    """
-                ),
-                {
-                    "observed_to": observed_at,
-                    "close_snapshot_id": snapshot_id,
-                    "sector_key": sector_key,
-                    "security_id": security_id,
-                },
+                update(SectorMembershipInterval)
+                .where(
+                    SectorMembershipInterval.sector_key == sector_key,
+                    SectorMembershipInterval.security_id == security_id,
+                    SectorMembershipInterval.observed_to.is_(None),
+                )
+                .values(observed_to=observed_at, close_snapshot_id=snapshot_id)
             )
         for security_id in security_ids - open_ids:
             connection.execute(
-                text(
-                    """
-                    INSERT INTO sector_membership_interval (
-                      sector_key, security_id, observed_from, observed_to, open_snapshot_id,
-                      close_snapshot_id
-                    ) VALUES (
-                      :sector_key, :security_id, :observed_from, NULL, :open_snapshot_id, NULL
-                    )
-                    """
-                ),
-                {
-                    "sector_key": sector_key,
-                    "security_id": security_id,
-                    "observed_from": observed_at,
-                    "open_snapshot_id": snapshot_id,
-                },
+                insert(SectorMembershipInterval).values(
+                    sector_key=sector_key,
+                    security_id=security_id,
+                    observed_from=observed_at,
+                    observed_to=None,
+                    open_snapshot_id=snapshot_id,
+                    close_snapshot_id=None,
+                )
             )
         return len(security_ids - open_ids), len(open_ids - security_ids)
 
     def _active_sectors_on_connection(
-        self, connection: Connection, scheme: SectorScheme
+        self, connection: Session, scheme: SectorScheme
     ) -> tuple[StoredSector, ...]:
         """在 release 事务内重读 ACTIVE 集合，避免目录变更和清单切换交错。"""
         rows = (
             connection.execute(
-                text(
-                    """
-                    SELECT sector_key, sector_id, scheme, sector_code, name, status
-                    FROM sector_entity
-                    WHERE scheme = :scheme AND status = 'ACTIVE'
-                    ORDER BY sector_code, sector_id
-                    FOR SHARE
-                    """
-                ),
-                {"scheme": scheme.value},
+                select(
+                    SectorEntity.sector_key,
+                    SectorEntity.sector_id,
+                    SectorEntity.scheme,
+                    SectorEntity.sector_code,
+                    SectorEntity.name,
+                    SectorEntity.status,
+                )
+                .where(SectorEntity.scheme == scheme.value, SectorEntity.status == "ACTIVE")
+                .order_by(SectorEntity.sector_code, SectorEntity.sector_id)
+                .with_for_update(read=True)
             )
             .mappings()
             .all()
@@ -1180,42 +1153,48 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         return tuple(_stored_sector(row) for row in rows)
 
     def _latest_complete_snapshot(
-        self, connection: Connection, sector_key: int
+        self, connection: Session, sector_key: int
     ) -> Mapping[Any, Any] | None:
         """读取一板块最后完整快照；隔离或失败观测绝不覆盖此基线。"""
         return (
             connection.execute(
-                text(
-                    """
-                    SELECT snapshot_id, observed_at, observation_date, member_count, quality_status
-                    FROM sector_membership_snapshot
-                    WHERE sector_key = :sector_key AND status = 'COMPLETE'
-                    ORDER BY observed_at DESC
-                    LIMIT 1
-                    """
-                ),
-                {"sector_key": sector_key},
+                select(
+                    SectorMembershipSnapshot.snapshot_id,
+                    SectorMembershipSnapshot.observed_at,
+                    SectorMembershipSnapshot.observation_date,
+                    SectorMembershipSnapshot.member_count,
+                    SectorMembershipSnapshot.quality_status,
+                )
+                .where(
+                    SectorMembershipSnapshot.sector_key == sector_key,
+                    SectorMembershipSnapshot.status == "COMPLETE",
+                )
+                .order_by(SectorMembershipSnapshot.observed_at.desc())
+                .limit(1)
             )
             .mappings()
             .one_or_none()
         )
 
     def _current_release(
-        self, connection: Connection, scheme: SectorScheme
+        self, connection: Session, scheme: SectorScheme
     ) -> Mapping[Any, Any] | None:
         """读取 scheme 当前 release，供 manifest 比较和原子 supersede 使用。"""
         return (
             connection.execute(
-                text(
-                    """
-                    SELECT release_id, data_version, quality_status, fresh_sector_count,
-                           carried_forward_sector_count, published_at
-                    FROM sector_membership_release
-                    WHERE scheme = :scheme AND superseded_at IS NULL
-                    FOR UPDATE
-                    """
-                ),
-                {"scheme": scheme.value},
+                select(
+                    SectorMembershipRelease.release_id,
+                    SectorMembershipRelease.data_version,
+                    SectorMembershipRelease.quality_status,
+                    SectorMembershipRelease.fresh_sector_count,
+                    SectorMembershipRelease.carried_forward_sector_count,
+                    SectorMembershipRelease.published_at,
+                )
+                .where(
+                    SectorMembershipRelease.scheme == scheme.value,
+                    SectorMembershipRelease.superseded_at.is_(None),
+                )
+                .with_for_update()
             )
             .mappings()
             .one_or_none()
@@ -1223,7 +1202,7 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
 
     def _release_matches(
         self,
-        connection: Connection,
+        connection: Session,
         release_id: UUID,
         snapshot_ids: tuple[UUID, ...],
         quality_status: str,
@@ -1231,15 +1210,9 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         """比较固定 manifest，内容未变时复用现有稳定 dataVersion。"""
         rows = (
             connection.execute(
-                text(
-                    """
-                    SELECT snapshot_id
-                    FROM sector_membership_release_sector
-                    WHERE release_id = :release_id
-                    ORDER BY snapshot_id
-                    """
-                ),
-                {"release_id": release_id},
+                select(SectorMembershipReleaseSector.snapshot_id)
+                .where(SectorMembershipReleaseSector.release_id == release_id)
+                .order_by(SectorMembershipReleaseSector.snapshot_id)
             )
             .mappings()
             .all()
@@ -1249,23 +1222,19 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
             sorted(snapshot_ids)
         ) and quality_status == self._release_quality(connection, release_id)
 
-    def _release_quality(self, connection: Connection, release_id: UUID) -> str:
+    def _release_quality(self, connection: Session, release_id: UUID) -> str:
         """读取已比较 release 的质量标签，防止 carry-forward 变化却复用旧版本。"""
         return str(
             connection.execute(
-                text(
-                    "SELECT quality_status FROM sector_membership_release "
-                    "WHERE release_id = :release_id"
-                ),
-                {"release_id": release_id},
-            )
-            .mappings()
-            .one()["quality_status"]
+                select(SectorMembershipRelease.quality_status).where(
+                    SectorMembershipRelease.release_id == release_id
+                )
+            ).scalar_one()
         )
 
     def _publish_dataset(
         self,
-        connection: Connection,
+        connection: Session,
         *,
         scheme: SectorScheme,
         data_version: UUID,
@@ -1275,39 +1244,26 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
     ) -> None:
         """同步维护通用数据集发布指针，供跨服务健康和版本追踪统一读取。"""
         connection.execute(
-            text(
-                """
-                UPDATE dataset_publication
-                SET superseded_at = :published_at
-                WHERE dataset = :dataset
-                  AND partition_key = :partition_key
-                  AND superseded_at IS NULL
-                """
-            ),
-            {"dataset": _DATASET, "partition_key": scheme.value, "published_at": published_at},
+            update(DatasetPublication)
+            .where(
+                DatasetPublication.dataset == _DATASET,
+                DatasetPublication.partition_key == scheme.value,
+                DatasetPublication.superseded_at.is_(None),
+            )
+            .values(superseded_at=published_at)
         )
         connection.execute(
-            text(
-                """
-                INSERT INTO dataset_publication (
-                  publication_id, dataset, partition_key, data_version, quality_status,
-                  effective_as_of, knowledge_cutoff, published_at, superseded_at
-                ) VALUES (
-                  :publication_id, :dataset, :partition_key, :data_version, :quality_status,
-                  :effective_as_of, :knowledge_cutoff, :published_at, NULL
-                )
-                """
-            ),
-            {
-                "publication_id": uuid4(),
-                "dataset": _DATASET,
-                "partition_key": scheme.value,
-                "data_version": data_version,
-                "quality_status": quality_status,
-                "effective_as_of": effective_as_of,
-                "knowledge_cutoff": published_at,
-                "published_at": published_at,
-            },
+            insert(DatasetPublication).values(
+                publication_id=uuid4(),
+                dataset=_DATASET,
+                partition_key=scheme.value,
+                data_version=data_version,
+                quality_status=quality_status,
+                effective_as_of=effective_as_of,
+                knowledge_cutoff=published_at,
+                published_at=published_at,
+                superseded_at=None,
+            )
         )
 
 

@@ -8,7 +8,6 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, insert, literal, select
-from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from service_data_sync.infrastructure.database.models.execution.sync_partition import SyncPartition
@@ -20,7 +19,7 @@ _UNVERSIONED_ADAPTER = "unversioned"
 
 
 def record_source_observation(
-    session: Session | Connection,
+    session: Session,
     *,
     provider_id: str,
     capability: str,
@@ -135,7 +134,7 @@ def record_source_observation(
 
 
 def _record_in_existing_partition(
-    session: Session | Connection,
+    session: Session,
     *,
     source_batch_id: UUID,
     provider_id: str,

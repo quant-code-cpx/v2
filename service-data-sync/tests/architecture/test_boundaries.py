@@ -6,6 +6,7 @@ import ast
 from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).parents[2] / "src" / "service_data_sync"
+PERSISTENCE_ROOT = PACKAGE_ROOT / "infrastructure" / "persistence"
 FORBIDDEN_PROVIDER_MODULES = {"akshare", "tushare"}
 FORBIDDEN_PROVIDER_SYMBOLS = {"akshare", "tushare", "ts_code", "dataframe"}
 
@@ -75,3 +76,19 @@ def test_provider_specific_symbols_are_absent_from_port_contract() -> None:
     )
 
     assert all(symbol not in port_source for symbol in FORBIDDEN_PROVIDER_SYMBOLS)
+
+
+def test_persistence_repositories_do_not_execute_string_sql() -> None:
+    """持久化层必须通过声明式模型构造语句，动态分区 DDL 仅可留在数据库基础设施。"""
+    violations: list[str] = []
+    for path in PERSISTENCE_ROOT.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "text"
+            ):
+                violations.append(f"{path.relative_to(PACKAGE_ROOT)}:{node.lineno}")
+
+    assert violations == []

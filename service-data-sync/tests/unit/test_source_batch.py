@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
 from sqlalchemy.sql import ClauseElement
 
 from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
@@ -45,7 +45,7 @@ def test_same_payload_creates_distinct_source_observations() -> None:
     observed_at = datetime(2026, 7, 27, 9, tzinfo=UTC)
 
     first = record_source_observation(
-        cast(Connection, connection),
+        cast(Session, connection),
         provider_id="fixture-provider",
         capability="equity.bar.1d.raw",
         source_payload_sha256="a" * 64,
@@ -54,7 +54,7 @@ def test_same_payload_creates_distinct_source_observations() -> None:
         created_at=observed_at,
     )
     second = record_source_observation(
-        cast(Connection, connection),
+        cast(Session, connection),
         provider_id="fixture-provider",
         capability="equity.bar.1d.raw",
         source_payload_sha256="a" * 64,
@@ -80,7 +80,7 @@ def test_existing_run_partition_appends_source_evidence_without_creating_new_run
     run_id = uuid4()
 
     source_batch_id = record_source_observation(
-        cast(Connection, connection),
+        cast(Session, connection),
         provider_id="fixture-provider",
         capability="sector.membership.snapshot.raw",
         source_payload_sha256="a" * 64,
@@ -104,7 +104,7 @@ def test_source_observation_requires_complete_execution_context() -> None:
 
     with pytest.raises(ValueError, match="supplied together"):
         record_source_observation(
-            cast(Connection, connection),
+            cast(Session, connection),
             provider_id="fixture-provider",
             capability="sector.membership.snapshot.raw",
             source_payload_sha256="a" * 64,

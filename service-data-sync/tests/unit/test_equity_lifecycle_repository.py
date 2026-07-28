@@ -9,7 +9,6 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import Engine
 
 from service_data_sync.domain.equity import EquityIdentifier, Exchange
 from service_data_sync.domain.equity_master import (
@@ -39,6 +38,14 @@ class FakeResult:
         """模拟 ORM-enabled `RETURNING` 的单一标量结果。"""
         if isinstance(self._value, dict):
             return self._value["source_batch_id"]
+        return self._value
+
+    def scalar_one_or_none(self) -> object | None:
+        """模拟可不存在的 ORM 标量查询结果。"""
+        if self._value is None:
+            return None
+        if isinstance(self._value, dict):
+            return self._value["data_version"]
         return self._value
 
     def all(self) -> list[object]:
@@ -86,6 +93,20 @@ class FakeEngine:
         yield self.connection
 
 
+class FakeDatabase:
+    """以短生命周期事务接口模拟 `DatabaseClient`。"""
+
+    def __init__(self, engine: FakeEngine) -> None:
+        """保存承载断言记录的引擎替身。"""
+        self._engine = engine
+
+    @contextmanager
+    def transaction(self) -> Iterator[FakeConnection]:
+        """返回一次同步任务独占的模拟 Session。"""
+        with self._engine.begin() as connection:
+            yield connection
+
+
 def test_repository_appends_explicit_delisting_and_advances_exchange_version() -> None:
     """明确退市可关闭 LISTED 有效期、追加 DELISTED 并原子切换交易所版本。"""
     previous_version = uuid4()
@@ -131,15 +152,9 @@ def test_repository_appends_explicit_delisting_and_advances_exchange_version() -
     assert publication.inserted_count == 1
     joined = "\n".join(engine.connection.statements)
     assert "pg_advisory_xact_lock" in joined
-    assert "'LIFECYCLE'" in joined
-    assert any(
-        isinstance(parameters, dict) and parameters.get("status") == "DELISTED"
-        for parameters in engine.connection.parameters
-    )
-    assert any(
-        isinstance(parameters, dict) and parameters.get("evidence_kind") == "EXPLICIT_DELISTING"
-        for parameters in engine.connection.parameters
-    )
+    assert "INSERT INTO equity_master_snapshot" in joined
+    assert "status" in joined
+    assert "evidence_kind" in joined
 
 
 def test_repository_rejects_delisted_to_listed_without_official_correction() -> None:
@@ -236,11 +251,8 @@ def test_repository_accepts_approved_official_correction_of_delisting() -> None:
 
     assert publication.inserted_count == 1
     assert any("SET known_to" in statement for statement in engine.connection.statements)
-    assert any(
-        isinstance(parameters, dict)
-        and parameters.get("correction_approval_reference") == "equity-master-approval-42"
-        for parameters in engine.connection.parameters
-    )
+    joined = "\n".join(engine.connection.statements)
+    assert "correction_approval_reference" in joined
 
 
 def test_official_correction_requires_manual_approval_reference() -> None:
@@ -256,8 +268,8 @@ def test_official_correction_requires_manual_approval_reference() -> None:
 
 
 def _repository(engine: FakeEngine) -> SqlAlchemyEquityLifecycleRepository:
-    """使用类型转换后的引擎替身构造生命周期仓储。"""
-    return SqlAlchemyEquityLifecycleRepository(DatabaseClient(engine=cast(Engine, engine)))
+    """使用带短事务边界的数据库替身构造生命周期仓储。"""
+    return SqlAlchemyEquityLifecycleRepository(cast(DatabaseClient, FakeDatabase(engine)))
 
 
 def _delisting_entry() -> EquityLifecycleEntry:

@@ -1,6 +1,6 @@
 # 0017：同步服务采用 SQLAlchemy Declarative ORM 作为持久化模型
 
-- 状态：Accepted
+- 状态：Implemented
 - 日期：2026-07-27
 - 接受日期：2026-07-28
 - 决策者：项目维护者
@@ -56,11 +56,14 @@
 
 ### 实施状态（2026-07-28）
 
-- 阶段 0–2 已完成：32 张逻辑表均有一表一文件模型，metadata 已接入 Alembic，数据库 COMMENT migration
-  已在独立 PostgreSQL 上完成升级、回滚、再升级与零意外差异校验。
-- 阶段 3 已开始：`DatabaseClient` 已提供短生命周期 `Session` 与显式事务；证券身份只读解析器已改为模型表达式。
-- publication、目录、行情、主数据、membership 和 EOD 仓储尚未迁完，现阶段不得将本 ADR 误读为“运行时全量 ORM
-  已完成”。
+- 32 张逻辑表均有一表一文件模型，metadata 已接入 Alembic，数据库 COMMENT migration 已在独立 PostgreSQL
+  完成升级、回滚、再升级与零意外差异校验。
+- `DatabaseClient` 提供短生命周期 `Session` 与显式事务；publication、目录、行情、主数据、membership、EOD、
+  source batch 和 identity resolver 已全部改为模型表达式。
+- `infrastructure/persistence/` 已无 `text()` 调用，架构测试持续约束该边界；仅 Alembic migration 与专用
+  partition manager 保留受控 PostgreSQL DDL。
+- 已重建测试镜像并通过 Ruff、Pyright、203 项非集成测试；独立 PostgreSQL/Redis/MinIO 项目完成迁移、8 项集成测试、
+  schema parity 与 `alembic check` 验证。AKShare 外部 smoke 按默认策略跳过。
 
 ### 模型可读性规则
 
@@ -113,10 +116,10 @@
 
 ### 成本与风险
 
-- 当前持久化层规模大，EOD 和 membership 仓储包含锁、upsert、发布切换和分区 DDL，必须分阶段迁移，
-  最终目标仍是全量 ORM，不接受永久双轨。
-- EOD 生产开关仍保持关闭，ORM 迁移不能依赖生产流量暴露回归；必须复用 0015 已通过的 fixture、仓储集成、
-  迁移、raw replay、排行、租约恢复、rollback 与故障注入测试，证明新旧实现行为等价。
+- EOD 和 membership 仓储包含锁、upsert、发布切换和分区 DDL；已分阶段迁移并保留既有事务边界，后续修改仍须遵守
+  无字符串 SQL 架构门。
+- EOD 生产开关仍保持关闭；ORM 回归不依赖生产流量，已通过 0015 fixture、仓储集成、迁移、raw replay、排行、
+  租约恢复、rollback 与故障路径测试验证。
 - SQLAlchemy model 与历史 migration 可能不一致；需要独立 schema parity 集成测试，不能只依赖
   Alembic autogenerate。
 - ORM identity map、autoflush、lazy loading 和 cascade 若使用不当，会造成额外查询或意外写入；
@@ -128,7 +131,7 @@
 ## 替代关系
 
 本 ADR 细化 ADR-0003 已选定的 SQLAlchemy 2 + Alembic 技术栈，不替代 provider、数据所有权、时间语义、
-发布版本或跨服务读取边界。若本 ADR 被拒绝，现有 SQLAlchemy Core/text 持久化继续有效。
+发布版本或跨服务读取边界。后续持久化变更必须继续以 Declarative 模型和 Session 表达式实现。
 
 ## 官方依据
 
