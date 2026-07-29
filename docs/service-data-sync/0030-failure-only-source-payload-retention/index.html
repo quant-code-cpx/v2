@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>0030｜同步失败留证与成功载荷零归档</title>
+  <style>
+    :root { color-scheme: light; --ink:#17212b; --muted:#5f6b76; --line:#dce3e9; --paper:#f4f7f9; --surface:#fff; --brand:#155f52; --soft:#e7f3ef; --warn:#8b5a00; }
+    * { box-sizing:border-box; } body { margin:0; min-width:1080px; color:var(--ink); background:var(--paper); font:15px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; }
+    header { padding:44px 0 30px; background:var(--surface); border-bottom:1px solid var(--line); } main, header>div { width:1040px; margin:auto; } h1 { margin:8px 0; font-size:38px; } h2 { margin:0 0 12px; font-size:25px; } h3 { margin:18px 0 8px; } p { margin:8px 0; } section { margin:22px 0; padding:24px; background:var(--surface); border:1px solid var(--line); border-radius:12px; } .eyebrow { color:var(--brand); font-weight:800; letter-spacing:.12em; font-size:12px; } .lead { max-width:830px; color:var(--muted); font-size:17px; } .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; } .card { padding:16px; background:#fbfdfc; border:1px solid var(--line); border-radius:9px; } .ok { color:var(--brand); font-weight:700; } .warn { color:var(--warn); font-weight:700; } table { width:100%; border-collapse:collapse; } th,td { padding:10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; } th { background:#f7faf9; } code { padding:2px 5px; border-radius:4px; background:#edf3f2; } .flow { display:flex; align-items:stretch; gap:10px; } .flow div { flex:1; padding:14px; border:1px solid var(--line); border-radius:8px; background:#fbfdfc; } .arrow { flex:0 !important; border:0 !important; background:transparent !important; align-self:center; font-size:22px; color:var(--brand); }
+  </style>
+</head>
+<body>
+  <header><div>
+    <div class="eyebrow">SERVICE-DATA-SYNC · IMPLEMENTED</div>
+    <h1>0030｜同步失败留证与成功载荷零归档</h1>
+    <p class="lead">个人自用模式：成功同步只保存 canonical 数据和来源摘要；AKShare 原始字段只在同步失败时写入私有 S3，兼顾成本和排障。</p>
+  </div></header>
+  <main>
+    <section><h2>结果</h2><div class="grid">
+      <div class="card"><div class="ok">成功路径</div><strong>不写 S3 原始对象</strong><p>保留 canonical、SHA-256、来源身份和不可回放标记。</p></div>
+      <div class="card"><div class="ok">失败路径</div><strong>写入失败证据包</strong><p>归档 raw、标准化载荷与最小 manifest，原始异常不被掩盖。</p></div>
+      <div class="card"><div class="warn">取舍</div><strong>新成功批次不可 raw replay</strong><p>需要回填时重新抓取；已存在的旧对象可在清理前处理。</p></div>
+    </div></section>
+    <section><h2>运行流程</h2><div class="flow">
+      <div>AKShare 返回<br><code>ProviderBatch</code></div><div class="arrow">→</div><div>仅内存暂存 raw / normalized</div><div class="arrow">→</div><div>校验、质量门、canonical 发布</div><div class="arrow">→</div><div>成功：丢弃<br>失败：<code>failures/…</code></div>
+    </div><p>内存暂存发生在解码前，schema 漂移也能获得失败证据；同一摘要和内容类型会去重。</p></section>
+    <section><h2>存储与表影响</h2><table><thead><tr><th>位置</th><th>变更后含义</th><th>是否保存 AKShare 原始大字段</th></tr></thead><tbody>
+      <tr><td>canonical / revision / publication</td><td>唯一长期业务事实</td><td>否</td></tr>
+      <tr><td><code>source_batch.raw_uri</code>、lineage、checkpoint</td><td>成功时为 <code>unretained://</code> 摘要标记；失败时可指向失败证据</td><td>否</td></tr>
+      <tr><td><code>raw_payload_manifest</code></td><td>只保存 URI、SHA-256、大小等索引元数据</td><td>否</td></tr>
+      <tr><td>私有 S3 <code>failures/</code></td><td>仅失败批次的排障原始载荷和 manifest</td><td>是，仅失败</td></tr>
+    </tbody></table></section>
+    <section><h2>迁移与回滚</h2><ul>
+      <li>无需数据库迁移：现有 URI 列继续保存留证标记或失败证据位置，避免大范围 schema 破坏。</li>
+      <li>历史成功归档位于 <code>raw/</code> 与 <code>normalized/</code> 前缀；确认不再需要旧 raw replay 后可清理。不得删除 <code>failures/</code>。</li>
+      <li>回滚仅恢复旧版本写入策略；不会自动恢复已删除的历史对象，因此清理操作必须先做清单与备份确认。</li>
+    </ul></section>
+    <section><h2>验证</h2><p>单元测试验证成功不调用 <code>put_object</code>、失败写入载荷与 manifest、以及解码失败发生在业务归档前时仍留存原始字节。入口与 Celery 组合测试覆盖主同步路径。</p><p>关联决策：<a href="../../decisions/0021-failure-only-source-payload-retention.md">ADR-0021</a>。</p></section>
+  </main>
+</body>
+</html>

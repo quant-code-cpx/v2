@@ -1,0 +1,2558 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta
+    name="description"
+    content="quant-v2 沪深港通市场统计、成交活跃证券与持股快照数据源、时态、同步、质量和 API 消费需求的 Proposed 技术方案。"
+  >
+  <title>0022｜沪深港通市场数据技术方案｜quant-v2</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #657084;
+      --line: #dce3ec;
+      --surface: #f6f8fb;
+      --accent: #245fb5;
+      --accent-soft: #edf4ff;
+      --success: #176b4d;
+      --success-soft: #eaf7f1;
+      --warning: #92510c;
+      --warning-soft: #fff4e5;
+      --danger: #aa3344;
+      --danger-soft: #fff0f2;
+      --radius: 14px;
+      --shadow: 0 10px 28px rgb(23 32 51 / 7%);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      min-width: 1200px;
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 15px;
+      line-height: 1.72;
+    }
+
+    a {
+      color: var(--accent);
+      text-underline-offset: 0.2em;
+    }
+
+    a:focus-visible {
+      border-radius: 3px;
+      outline: 3px solid rgb(36 95 181 / 25%);
+      outline-offset: 3px;
+    }
+
+    code {
+      padding: 0.08em 0.34em;
+      border-radius: 4px;
+      background: #eef1f6;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+      overflow-wrap: anywhere;
+    }
+
+    .shell {
+      width: min(1120px, calc(100% - 48px));
+      margin: 0 auto;
+    }
+
+    header {
+      padding: 52px 0 36px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, var(--surface), #fff);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 780;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4 {
+      line-height: 1.28;
+      letter-spacing: -0.018em;
+    }
+
+    h1 {
+      max-width: 920px;
+      margin: 0;
+      font-size: 3rem;
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      font-size: 1.86rem;
+    }
+
+    h3 {
+      margin: 25px 0 9px;
+      font-size: 1.13rem;
+    }
+
+    h4 {
+      margin: 18px 0 7px;
+      font-size: 1rem;
+    }
+
+    p {
+      max-width: 84ch;
+    }
+
+    .lede {
+      max-width: 880px;
+      margin: 16px 0 0;
+      color: var(--muted);
+      font-size: 1.08rem;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 27px 0 0;
+    }
+
+    .meta div {
+      padding: 13px 15px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgb(255 255 255 / 86%);
+    }
+
+    .meta dt {
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .meta dd {
+      margin: 3px 0 0;
+      font-weight: 690;
+    }
+
+    .status {
+      color: var(--success);
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 95%);
+      backdrop-filter: blur(12px);
+    }
+
+    nav ul {
+      display: flex;
+      gap: 20px;
+      width: max-content;
+      margin: 0;
+      padding: 12px 0;
+      list-style: none;
+    }
+
+    nav a {
+      color: var(--muted);
+      font-size: 0.88rem;
+      font-weight: 680;
+      text-decoration: none;
+    }
+
+    nav a:hover {
+      color: var(--accent);
+    }
+
+    main {
+      padding: 18px 0 70px;
+    }
+
+    section {
+      padding: 47px 0;
+      border-bottom: 1px solid var(--line);
+      scroll-margin-top: 56px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 15px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      min-width: 0;
+      padding: 19px 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow);
+      overflow-wrap: anywhere;
+    }
+
+    .card h3 {
+      margin-top: 0;
+    }
+
+    .card p:last-child,
+    .card ul:last-child {
+      margin-bottom: 0;
+    }
+
+    .label,
+    .tag {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 780;
+    }
+
+    .label {
+      margin-bottom: 8px;
+      color: var(--accent);
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .tag {
+      margin: 0 5px 4px 0;
+      padding: 2px 8px;
+      border: 1px solid #c8d9f1;
+      border-radius: 999px;
+      color: var(--accent);
+      background: var(--accent-soft);
+      white-space: nowrap;
+    }
+
+    .tag.fact {
+      border-color: #b8ddcf;
+      color: var(--success);
+      background: var(--success-soft);
+    }
+
+    .tag.inference {
+      border-color: #e7c68f;
+      color: var(--warning);
+      background: var(--warning-soft);
+    }
+
+    .tag.recommendation {
+      border-color: #c8d9f1;
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .tag.open {
+      border-color: #efb7c0;
+      color: var(--danger);
+      background: var(--danger-soft);
+    }
+
+    .priority {
+      display: inline-flex;
+      align-items: center;
+      min-width: 34px;
+      justify-content: center;
+      margin-right: 5px;
+      padding: 1px 7px;
+      border-radius: 999px;
+      color: #fff;
+      background: var(--accent);
+      font-size: 0.76rem;
+      font-weight: 800;
+    }
+
+    .priority.p1 {
+      background: var(--success);
+    }
+
+    .priority.p2 {
+      background: var(--muted);
+    }
+
+    .callout {
+      margin: 18px 0;
+      padding: 17px 20px;
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      background: var(--accent-soft);
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    .callout.warning {
+      border-left-color: var(--warning);
+      background: var(--warning-soft);
+    }
+
+    .callout.danger {
+      border-left-color: var(--danger);
+      background: var(--danger-soft);
+    }
+
+    .callout.success {
+      border-left-color: var(--success);
+      background: var(--success-soft);
+    }
+
+    .table-wrap {
+      margin: 15px 0 22px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    table {
+      width: 100%;
+      min-width: 780px;
+      border-collapse: collapse;
+      font-size: 0.91rem;
+    }
+
+    table.wide {
+      min-width: 1120px;
+    }
+
+    th,
+    td {
+      padding: 11px 13px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: #455267;
+      background: var(--surface);
+      font-size: 0.8rem;
+      white-space: nowrap;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    ul,
+    ol {
+      padding-left: 1.25rem;
+    }
+
+    li + li {
+      margin-top: 5px;
+    }
+
+    .flow,
+    pre {
+      overflow-x: auto;
+      padding: 18px 20px;
+      border: 1px solid #293449;
+      border-radius: var(--radius);
+      color: #e6edf7;
+      background: #111827;
+      font: 0.86rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 0.87rem;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .yes {
+      color: var(--success);
+      font-weight: 720;
+    }
+
+    .no {
+      color: var(--danger);
+      font-weight: 720;
+    }
+
+    .warn {
+      color: var(--warning);
+      font-weight: 720;
+    }
+
+    .checklist {
+      padding-left: 1.15rem;
+      list-style: "□  ";
+    }
+
+    .checklist li {
+      padding-left: 5px;
+    }
+
+    footer {
+      padding: 27px 0 44px;
+      color: var(--muted);
+      font-size: 0.87rem;
+    }
+
+    @media print {
+      @page {
+        size: A4;
+        margin: 13mm;
+      }
+
+      body {
+        min-width: 0;
+        color: #111;
+        font-size: 10pt;
+      }
+
+      nav {
+        display: none;
+      }
+
+      header,
+      main,
+      section {
+        padding-top: 17px;
+      }
+
+      .shell {
+        width: 100%;
+      }
+
+      .card {
+        box-shadow: none;
+        break-inside: avoid;
+      }
+
+      .table-wrap {
+        overflow: visible;
+      }
+
+      table {
+        min-width: 0;
+        font-size: 7.6pt;
+      }
+
+      th,
+      td {
+        padding: 5px 6px;
+      }
+
+      .flow,
+      pre {
+        color: #111;
+        background: #fff;
+        border-color: #888;
+        white-space: pre-wrap;
+      }
+
+      h2,
+      h3,
+      h4 {
+        break-after: avoid;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Service Data Sync · Technical Proposal 0022</p>
+      <h1>沪深港通市场数据技术方案</h1>
+      <p class="lede">
+        建议接入交易所披露的沪股通、深股通与两路港股通日终统计、成交活跃证券和持股快照，
+        但按方向、通道、披露制度和时间粒度分离发布。北向净买与日频持股在 2024 年披露调整后
+        不再是连续可得事实；任何缺失、占位零、供应商“资金流入”或估算增持都不得补成连续官方序列。
+      </p>
+      <dl class="meta">
+        <div>
+          <dt>状态</dt>
+          <dd class="status">Proposed</dd>
+        </div>
+        <div>
+          <dt>负责人</dt>
+          <dd>service-data-sync</dd>
+        </div>
+        <div>
+          <dt>最后修改</dt>
+          <dd>2026-07-28</dd>
+        </div>
+        <div>
+          <dt>范围</dt>
+          <dd>已实现 P0 通道统计、活跃榜、制度门、发布、受控 CLI 与内部读取；持股快照和来源启用待后续门禁</dd>
+        </div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">结论</a></li>
+        <li><a href="#scope">价值与边界</a></li>
+        <li><a href="#facts">制度事实</a></li>
+        <li><a href="#sources">数据源</a></li>
+        <li><a href="#semantics">口径与时序</a></li>
+        <li><a href="#model">领域模型</a></li>
+        <li><a href="#sync">同步与恢复</a></li>
+        <li><a href="#quality">质量与未来函数</a></li>
+        <li><a href="#api">API 需求</a></li>
+        <li><a href="#gates">门禁与风险</a></li>
+        <li><a href="#delivery">路线与验收</a></li>
+        <li><a href="#references">引用</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>1. 结论与优先级</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">问题</span>
+          <h3>同名“资金”跨制度并不连续</h3>
+          <p>
+            北向、南向、沪股通、深股通、港股通沪、港股通深同时混合方向、通道、币种、
+            成交流量、额度与持股存量。2024 年披露机制变化又改变了字段和频率。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">推荐</span>
+          <h3>官方事实优先，三类数据隔离</h3>
+          <p>
+            分别发布通道级成交统计、成交活跃证券、持股快照；交易所官方来源为主，
+            AKShare/东方财富只做研究与缺口诊断，不作为无条件生产主源。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">最大风险</span>
+          <h3 class="warn">把未披露映射为零</h3>
+          <p>
+            固定版本探针显示北向历史在新规后仍有日期行，但买入、卖出、净买字段为
+            <code>NaN</code>；即时汇总却返回 0。若写成真实零值，会系统性污染因子和回测。
+          </p>
+        </article>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>优先级</th>
+              <th>能力</th>
+              <th>接入结论</th>
+              <th>消费者价值</th>
+              <th>关键边界</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="priority">P0</span></td>
+              <td>官方日终通道统计、前十大成交活跃证券、互联互通交易日历</td>
+              <td class="yes">建议接入</td>
+              <td>市场热度、通道成交、南向买卖结构、事件研究、仪表盘</td>
+              <td>2024-08-19 前后方法学分段；北向新规后只保留总成交，不制造买卖/净买</td>
+            </tr>
+            <tr>
+              <td><span class="priority p1">P1</span></td>
+              <td>南向日频持股、北向季度持股、历史官方文件回补</td>
+              <td class="yes">条件接入</td>
+              <td>机构持仓、拥挤度、跨境配置、point-in-time 暴露</td>
+              <td>北向季度末仓位在季度后第 5 个北向交易日才可见；港股身份必须先无歧义解析</td>
+            </tr>
+            <tr>
+              <td><span class="priority p2">P2</span></td>
+              <td>东方财富历史“资金流入”、累计净买、持股市值、排行与增持估计</td>
+              <td class="no">不建议生产接入</td>
+              <td>仅用于来源研究、断点诊断、方法学对照</td>
+              <td>语义、授权、披露断点和估算方法未闭环；不得与官方序列拼接</td>
+            </tr>
+            <tr>
+              <td><span class="priority p2">P2</span></td>
+              <td>分钟级北向/南向“资金流”</td>
+              <td class="no">当前不接入</td>
+              <td>盘中观察</td>
+              <td>实时披露规则已变、接口仅当前日、无法可靠重放，且指标不等同成交净买</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout success">
+        <strong>推荐答案</strong>
+        以 <code>SSE</code>/<code>SZSE</code> 主场官方披露承接各通道当前事实，以
+        <code>HKEX</code> 官方日历和获授权历史文件承接跨市场日历、对账与回补。
+        所有来源经独立 adapter 进入 provider-neutral port；未确认许可或稳定性的能力保持
+        <code>research</code>，不阻断其他官方能力实施。
+      </aside>
+    </section>
+
+    <section id="scope">
+      <h2>2. 业务价值、目标用户与边界</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>目标用户</h3>
+          <ul>
+            <li>量化研究员：构建不含未来信息的跨境成交、持仓和拥挤度因子。</li>
+            <li>投资分析用户：观察北向/南向通道活跃度与重点证券。</li>
+            <li>数据运营：监控披露延迟、字段断点、历史缺口和来源修订。</li>
+            <li>API 消费者：按通道、方向、日期、证券和可见时间查询已发布数据。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>核心场景</h3>
+          <ul>
+            <li>比较沪股通与深股通总成交，不把其错误称为净流入。</li>
+            <li>分析两路港股通买入、卖出、总成交与前十大证券。</li>
+            <li>按真实披露时间重建北向季度持股和南向日频持股。</li>
+            <li>识别 2024 年制度断点，阻止跨制度回归和排名静默混算。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>非目标</h3>
+          <ul>
+            <li>不提供交易建议、实时逐笔、订单流或投资者身份数据。</li>
+            <li>不把额度余额、资金净流入、成交净买和持仓变化视为同一指标。</li>
+            <li>不在本专题定义跨资产证券主表、日历表、来源表或 publication 支撑表。</li>
+            <li>不修改生产代码、迁移、OpenAPI、配置、依赖或 Docker。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3>事实、推断、建议、未决的标记</h3>
+      <p>
+        <span class="tag fact">事实</span>来自交易所规则、官方页面、AKShare 文档或固定版本探针；
+        <span class="tag inference">推断</span>由多项事实推导但尚无生产证据；
+        <span class="tag recommendation">建议</span>本方案拟议设计；
+        <span class="tag open">未决</span>需后续技术、合规或消费契约验证。
+      </p>
+
+      <aside class="callout">
+        <strong>与现有系统的关系</strong>
+        复用
+        <a href="../0014-equity-instrument-master/index.html">0014 证券身份与上市生命周期</a>
+        的日期感知 A 股身份解析，复用
+        <a href="../0017-daily-money-flow/index.html">0017 日频资金流</a>
+        的方法学隔离、raw evidence、revision、quality、publication 与
+        <code>knownAt</code> 读取模式；不复用其供应商资金流语义。
+      </aside>
+    </section>
+
+    <section id="facts">
+      <h2>3. 权威制度事实与历史断点</h2>
+
+      <h3>3.1 通道、方向与启动日</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>通道</th>
+              <th>方向</th>
+              <th>交易标的市场</th>
+              <th>交易币种/统计币种</th>
+              <th>历史起点事实</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>SH_CONNECT</code></td>
+              <td><code>NORTHBOUND</code> / 沪股通</td>
+              <td>上海证券交易所</td>
+              <td>CNY</td>
+              <td>沪港通于 2014-11-17 启动</td>
+            </tr>
+            <tr>
+              <td><code>SH_CONNECT</code></td>
+              <td><code>SOUTHBOUND</code> / 港股通沪</td>
+              <td>香港联合交易所</td>
+              <td>HKD；人民币结算换汇属于另一数据语义</td>
+              <td>沪港通于 2014-11-17 启动</td>
+            </tr>
+            <tr>
+              <td><code>SZ_CONNECT</code></td>
+              <td><code>NORTHBOUND</code> / 深股通</td>
+              <td>深圳证券交易所</td>
+              <td>CNY</td>
+              <td>深港通于 2016-12-05 启动</td>
+            </tr>
+            <tr>
+              <td><code>SZ_CONNECT</code></td>
+              <td><code>SOUTHBOUND</code> / 港股通深</td>
+              <td>香港联合交易所</td>
+              <td>HKD；不得未经方法学换算为 CNY</td>
+              <td>深港通于 2016-12-05 启动</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">
+        <span class="tag fact">事实</span>
+        HKEX 官方发布确认沪港通与深港通启动日；HKEX 市场数据接口规范将北向成交定义为 RMB、
+        南向成交定义为 HKD。统计币种必须逐记录保存，不允许用参考汇率静默改写原事实。
+      </p>
+
+      <h3>3.2 2024 年交易信息披露变化</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>生效阶段</th>
+              <th>北向</th>
+              <th>南向</th>
+              <th>对 canonical 的直接影响</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>2024-05-13</td>
+              <td>停止实时披露买入、卖出和总成交；额度余额仅低于 30% 时给数值，否则显示“额度充足”</td>
+              <td>额度余额采用相同阈值展示；其他数据当时保持</td>
+              <td>分钟“资金流”不能再被解释为持续官方实时成交；额度不可将“额度充足”写成金额</td>
+            </tr>
+            <tr>
+              <td>2024-08-19</td>
+              <td>
+                收市后披露总成交额、总笔数、ETF 成交总额及前十大证券总成交；
+                单只证券持有数量改为季度末、在季度后第 5 个北向交易日披露
+              </td>
+              <td>
+                收市后披露买入/卖出金额与笔数、总额与总笔数、ETF 成交总额、前十大证券买卖/总额；
+                单只证券持有数量仍为日频收市后披露
+              </td>
+              <td>
+                北向买入、卖出、净买和日频持股在断点后必须为不可用；
+                南向仍可发布买卖结构与日频仓位，但两路通道不得静默求和
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout danger">
+        <strong>不可逆语义</strong>
+        “北向日期行仍存在”不代表“北向买卖字段为零”。断点后官方没有该字段时，canonical 必须保存
+        <code>NULL + NOT_DISCLOSED</code>；只有上游在该披露制度下明确给出数值 0，才能写真实零。
+      </aside>
+
+      <h3>3.3 交易日历与节假日</h3>
+      <ul>
+        <li>
+          <span class="tag fact">事实</span>
+          2023-04-24 起日历增强，使互联互通可在香港与内地市场共同开放的交易日运行；
+          清算仍有 H-1 等安排，不能只取 A 股或港股单一日历。
+        </li>
+        <li>
+          <span class="tag recommendation">建议</span>
+          每年导入 HKEX 官方 Stock Connect CSV/PDF，按 <code>direction + connect_venue + trade_date</code>
+          校验；交易状态公告可形成更正观测，但本专题不自行定义共享日历物理表。
+        </li>
+        <li>
+          <span class="tag recommendation">建议</span>
+          缺少数据行不能推断休市；只有官方互联互通日历或临时停市公告能把分区标为
+          <code>NOT_SCHEDULED</code>。
+        </li>
+        <li>
+          <span class="tag fact">事实</span>
+          上海与香港当前均为 UTC+8 且无夏令时；业务时区仍需分别保留
+          <code>Asia/Shanghai</code> 与 <code>Asia/Hong_Kong</code>，因为交易时段和日历不同。
+          瞬时时间统一按 UTC 存储，展示与交易日归属必须按对应市场业务时区换算。
+        </li>
+      </ul>
+    </section>
+
+    <section id="sources">
+      <h2>4. 数据源、AKShare 函数与真实上游</h2>
+
+      <h3>4.1 推荐来源分工</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>来源</th>
+              <th>真实所有者</th>
+              <th>覆盖与历史</th>
+              <th>稳定性 / 限流</th>
+              <th>授权状态</th>
+              <th>建议角色</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>SSE 沪港通市场数据页与披露通知</td>
+              <td>上海证券交易所</td>
+              <td>沪股通/港股通沪日、月、年统计；活跃证券；沪股通季度持股；港股通日频持股</td>
+              <td>制度稳定；公开页面的机器接口、请求上限、SLA 未公开，需连续探针</td>
+              <td>官网法律声明限制商业销售与散发；生产存储/对外展示范围待合规确认</td>
+              <td class="yes">SH_CONNECT 当前官方主源候选</td>
+            </tr>
+            <tr>
+              <td>SZSE 深港通交易/持有信息页与披露通知</td>
+              <td>深圳证券交易所</td>
+              <td>深股通/港股通深日、月、年统计及持有信息</td>
+              <td>制度稳定；公开页面机器接口、请求上限、SLA 未公开</td>
+              <td>用户协议对抓取和再使用有限制；生产用途需确认具体数据许可</td>
+              <td class="yes">SZ_CONNECT 当前官方主源候选</td>
+            </tr>
+            <tr>
+              <td>HKEX Stock Connect Statistics / Data Products</td>
+              <td>香港交易及结算所有限公司</td>
+              <td>
+                历史日/月统计、前十大；官方产品说明日文件约收市后 18:00 可用；
+                上海通历史产品首期标注 2014-12-01，完整启动期覆盖需验
+              </td>
+              <td>官方结构化产品；公开网页动态加载，批量历史产品为订阅制</td>
+              <td>需按产品订阅和再分发条款取得相应权益</td>
+              <td class="yes">官方日历、对账与获授权历史回补</td>
+            </tr>
+            <tr>
+              <td>AKShare 1.18.78 → 东方财富</td>
+              <td>AKShare 为采集库；业务数据真实上游为东方财富</td>
+              <td>六路历史、当前汇总、北向排行、单股持股；部分历史到 2024-08-16 或近 90 日</td>
+              <td>无 SLA、无公开限流；固定版本当日排行探针失败，字段会随网页变化</td>
+              <td>AKShare 明示仅用于学术研究、不可商业使用；底层数据权利另属上游</td>
+              <td class="no">research / 断点诊断，不做无条件生产主源</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>4.2 固定版本 AKShare 能力矩阵</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>函数 / 签名</th>
+              <th>真实上游与报告</th>
+              <th>主要字段与单位</th>
+              <th>历史/窗口</th>
+              <th>结论</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>stock_hsgt_fund_flow_summary_em()</code></td>
+              <td>
+                东方财富 <code>datacenter-web.eastmoney.com</code>；
+                <code>RPT_MUTUAL_QUOTA</code> 与 quote fields
+              </td>
+              <td>交易日、通道、方向、成交净买额、资金净流入、余额、涨跌家数；金额输出亿元</td>
+              <td>仅当前汇总，单次 4 行</td>
+              <td>
+                北向新规后占位 0 不可发布；南向“资金净流入”探针等于每日额度，语义不闭环，排除
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>stock_hsgt_hist_em(symbol)</code><br>
+                六选一：北向/沪股通/深股通/南向/港股通沪/港股通深
+              </td>
+              <td>
+                东方财富 <code>RPT_MUTUAL_DEAL_HISTORY</code>，分页 1000
+              </td>
+              <td>
+                买/卖/净买、累计净买、资金流入、余额、持股市值、领涨股、指数；
+                北向 CNY、港股通 HKD，但个别累计/流入字段单位转换不一致
+              </td>
+              <td>单次获取指定 symbol 全历史；固定探针最早 2014-11-17</td>
+              <td>
+                可研究披露断点；不得把领涨股、累计净买、持股市值混入官方通道事实
+              </td>
+            </tr>
+            <tr>
+              <td><code>stock_hsgt_hold_stock_em(market, indicator)</code></td>
+              <td>东方财富 <code>RPT_MUTUAL_STOCK_NORTHSTA</code></td>
+              <td>
+                北向/沪股通/深股通排行；今日持股、占比和 3/5/10 日、月/季/年“增持估计”
+              </td>
+              <td>网页当前日或滚动排行，不支持任意历史日</td>
+              <td>估计值和滚动排行不入 P0/P1；2026-07-28 单次探针返回空 result 并抛错</td>
+            </tr>
+            <tr>
+              <td><code>stock_hsgt_individual_em(symbol)</code></td>
+              <td>东方财富单股持股历史页</td>
+              <td>A/H 股收盘价、持股数量、持股市值、占比及变化；数量股、金额 CNY/HKD</td>
+              <td>AKShare 文档明确截至 2024-08-16</td>
+              <td>仅历史研究；不能承担当前增量</td>
+            </tr>
+            <tr>
+              <td><code>stock_hsgt_individual_detail_em(symbol, start_date, end_date)</code></td>
+              <td>东方财富 <code>RPT_MUTUAL_HOLD_DET</code></td>
+              <td>机构名、持股数量/市值/占比、1/5/10 日市值变化</td>
+              <td>文档称仅最近 90 个交易日内可返回</td>
+              <td>参与者明细、滚动变化和时窗均不满足本期 canonical 需求</td>
+            </tr>
+            <tr>
+              <td><code>stock_hsgt_fund_min_em(symbol)</code></td>
+              <td>东方财富分钟“资金”页</td>
+              <td>日期、分钟时间、两通道及北/南向金额；万元</td>
+              <td>当前日分钟快照</td>
+              <td>披露制度与方法学不闭环，无法可靠重放；当前不接入</td>
+            </tr>
+            <tr>
+              <td><code>stock_hk_ggt_components_em()</code></td>
+              <td>东方财富港股通成份行情页</td>
+              <td>港股代码、名称、当前行情、成交量/额</td>
+              <td>当前快照，不给调入调出有效期</td>
+              <td>不能替代官方资格名单或历史生命周期</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>4.3 固定版本探针证据</h3>
+      <pre aria-label="AKShare 固定版本探针摘要">环境：仓库现有 quant-v2/service-data-sync:test，akshare==1.18.78
+日期：2026-07-28；只读、小样本；不代表生产准入
+
+签名：
+  stock_hsgt_fund_flow_summary_em()
+  stock_hsgt_hist_em(symbol="北向资金")
+  stock_hsgt_hold_stock_em(market="沪股通", indicator="5日排行")
+  stock_hsgt_individual_em(symbol="002008")
+  stock_hsgt_individual_detail_em(symbol, start_date, end_date)
+  stock_hsgt_fund_min_em(symbol="北向资金")
+  stock_hk_ggt_components_em()
+
+结果：
+  当前汇总：4 行；北向两路成交净买/资金净流入/余额均为 0
+  北向历史：2718 行，2014-11-17..2026-07-28；新规后买/卖/净买/额度为 NaN
+  南向历史：2680 行，2014-11-17..2026-07-28；近期买/卖/净买仍有值
+  单股持股：1672 行，2017-03-16..2024-08-16
+  北向今日排行：上游 result=None，函数抛 TypeError</pre>
+      <aside class="callout warning">
+        <strong>探针解释</strong>
+        单次成功只证明固定时间、固定网络下的函数形状；单次失败只证明当前稳定性风险。
+        生产接入仍需连续交易日、schema、单位、空值、修订、许可和限流验证。
+      </aside>
+
+      <h3>4.4 字段真实来源与采纳</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>业务字段</th>
+              <th>权威来源</th>
+              <th>AKShare/东财字段</th>
+              <th>采纳规则</th>
+              <th>不可比边界</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>总成交额 / 总笔数 / ETF 成交额</td>
+              <td>SSE、SZSE、HKEX 官方披露</td>
+              <td>历史接口仅部分覆盖，且包含其他无关列</td>
+              <td>P0 官方源；保留币种、原单位和披露制度版本</td>
+              <td>北向 CNY 与南向 HKD 不可直接求和</td>
+            </tr>
+            <tr>
+              <td>买入、卖出、成交净买</td>
+              <td>南向新规后仍官方披露；北向新规后不披露买卖拆分</td>
+              <td><code>BUY_AMT</code>、<code>SELL_AMT</code>、<code>NET_DEAL_AMT</code></td>
+              <td>官方报告值优先；可审计公式 <code>buy - sell</code> 产生派生净买</td>
+              <td>不得以额度、资金流入或供应商估计补北向缺口</td>
+            </tr>
+            <tr>
+              <td>额度余额</td>
+              <td>交易所按阈值披露；HKEX 说明额度计算公式</td>
+              <td><code>QUOTA_BALANCE</code> / 当前汇总余额</td>
+              <td>若未来接入，数值与状态分开；“额度充足”不是数值</td>
+              <td>额度是买单约束，不是实际资金流或净买</td>
+            </tr>
+            <tr>
+              <td>单只证券持有数量</td>
+              <td>北向季度官方；南向每日官方</td>
+              <td><code>HOLD_NUM</code>、排名持股股数</td>
+              <td>P1 只采官方数量；记录 position date 与真实 visible time</td>
+              <td>不同频率不能构造同频持仓变化</td>
+            </tr>
+            <tr>
+              <td>持股市值、持股占比、增持估计</td>
+              <td>官方规则核心只承诺持有数量；价格与分母来自其他数据域</td>
+              <td><code>HOLD_MARKET_CAP</code>、ratio、rolling estimates</td>
+              <td>不作为源事实；后续独立派生需绑定行情/股本版本与公式</td>
+              <td>公司行动、价格变化和真实买卖都会改变数值，不能称为资金流</td>
+            </tr>
+            <tr>
+              <td>前十大成交活跃证券</td>
+              <td>SSE/SZSE/HKEX 官方</td>
+              <td>历史接口的“领涨股”不是前十大成交</td>
+              <td>P0 官方源；排名和成交字段一起版本化</td>
+              <td>领涨股、涨跌幅与成交活跃榜不是同一数据集</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="semantics">
+      <h2>5. 粒度、身份、时间与修订语义</h2>
+
+      <h3>5.1 三类数据绝不静默混算</h3>
+      <div class="grid">
+        <article class="card">
+          <span class="label">reported_turnover</span>
+          <h3>通道成交流量</h3>
+          <p>
+            粒度为通道 × 方向 × 统计周期。买卖、总额、笔数是交易所披露的成交事实；
+            南向可计算净买，北向断点后不可。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">position_snapshot</span>
+          <h3>证券持股存量</h3>
+          <p>
+            粒度为通道 × 方向 × 持仓日 × 证券。是时点库存，不是当日成交流；
+            北向季度、南向每日。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">security_turnover</span>
+          <h3>个股成交明细</h3>
+          <p>
+            粒度为通道 × 方向 × 统计日 × 证券，当前仅纳入官方前十大；
+            不用行情总成交冒充互联互通成交。
+          </p>
+        </article>
+      </div>
+
+      <h3>5.2 候选实体身份与唯一键</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>实体</th>
+              <th>领域身份</th>
+              <th>候选事实键</th>
+              <th>修订键</th>
+              <th>身份失败处置</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>通道统计</td>
+              <td><code>connect_venue + direction</code></td>
+              <td><code>venue + direction + statistic_period + period_end + methodology_id</code></td>
+              <td>事实键 + <code>revision_no</code> / 知识时间区间</td>
+              <td>未知通道、方向或币种整分区隔离</td>
+            </tr>
+            <tr>
+              <td>成交活跃证券</td>
+              <td>共享证券身份 + 事实日期</td>
+              <td><code>venue + direction + period_end + instrument_id + methodology_id</code></td>
+              <td>事实键 + <code>revision_no</code></td>
+              <td>代码不解析、代码复用冲突或榜单重复时隔离</td>
+            </tr>
+            <tr>
+              <td>持股快照</td>
+              <td>共享证券身份 + position date</td>
+              <td><code>venue + direction + position_date + instrument_id + methodology_id</code></td>
+              <td>事实键 + <code>revision_no</code></td>
+              <td>不创建专题私有证券；A 股走现有 resolver，港股待统一身份模型</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">
+        上述为候选逻辑键，不是最终 PostgreSQL DDL。跨专题共享的证券、来源、批次、质量、publication、
+        checkpoint 与日历结构由统一 canonical data model 方案定义。
+      </p>
+
+      <h3>5.3 时间字段字典</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>含义</th>
+              <th>成交统计</th>
+              <th>持股快照</th>
+              <th>未来函数规则</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>trade_date</code></td>
+              <td>互联互通实际交易日</td>
+              <td>日频事实日期</td>
+              <td>仅作关联，不替代 position date</td>
+              <td>必须由官方 Stock Connect 日历验证</td>
+            </tr>
+            <tr>
+              <td><code>period_start / period_end</code></td>
+              <td>日/月/年统计覆盖区间，包含端</td>
+              <td>官方周期边界</td>
+              <td>不适用</td>
+              <td>月/年统计在周期完成与发布前不可见</td>
+            </tr>
+            <tr>
+              <td><code>position_date</code></td>
+              <td>持有数量对应的仓位时点</td>
+              <td>不适用</td>
+              <td>北向季度末；南向交易日收市</td>
+              <td>不等于披露日，不能在 position date 当日用于回测</td>
+            </tr>
+            <tr>
+              <td><code>source_published_at</code></td>
+              <td>来源明确给出的发布时间</td>
+              <td>有精确时间则保存</td>
+              <td>北向季度披露至少晚于季度末</td>
+              <td>来源只给日期时保持空值，不伪造收市时间</td>
+            </tr>
+            <tr>
+              <td><code>observed_at</code></td>
+              <td>系统成功取得该载荷的 UTC 时刻</td>
+              <td>每次请求独立记录</td>
+              <td>每次请求独立记录</td>
+              <td>回补也使用真实抓取时刻，不回拨</td>
+            </tr>
+            <tr>
+              <td><code>visible_at</code></td>
+              <td>消费者最早可见时刻</td>
+              <td>可信 published time 与首次 observed time 的较晚者</td>
+              <td>同左；北向季度不得早于第 5 个北向交易日披露</td>
+              <td><code>knownAt &lt; visible_at</code> 时必须不可查询</td>
+            </tr>
+            <tr>
+              <td><code>effective_from / effective_to</code></td>
+              <td>市场事实有效区间，结束不包含</td>
+              <td>通常覆盖对应统计周期</td>
+              <td>该快照代表的仓位时点，不推断到下一快照</td>
+              <td>不得用下一快照倒填中间日期</td>
+            </tr>
+            <tr>
+              <td><code>known_from / known_to</code></td>
+              <td>系统知识版本区间，结束不包含</td>
+              <td>修订追加新知识版本</td>
+              <td>修订追加新知识版本</td>
+              <td>旧版本保留，支持重建当时所知</td>
+            </tr>
+            <tr>
+              <td><code>revision_no</code></td>
+              <td>同一事实键的单调修订序号</td>
+              <td>内容变更才递增</td>
+              <td>内容变更才递增</td>
+              <td>后见更正不覆盖旧记录</td>
+            </tr>
+            <tr>
+              <td><code>data_version</code></td>
+              <td>冻结 publication 的稳定消费者版本</td>
+              <td>分数据集/分区生成</td>
+              <td>分数据集/分区生成</td>
+              <td>游标和缓存必须绑定该版本</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout warning">
+        <strong>可见时间保守规则</strong>
+        若来源不给可信发布时间，<code>visible_at = first_observed_at</code>。历史文件在 2026 年回补
+        2018 年事实时，不能把 <code>visible_at</code> 写成 2018 年；否则会把后获得的数据送入过去回测。
+      </aside>
+
+      <h3>5.4 空值、零值与无行</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>表现</th>
+              <th>语义</th>
+              <th>例子</th>
+              <th>消费者处理</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>数值 0</td>
+              <td>来源在当前披露制度下明确报告真实零</td>
+              <td>某南向通道实际无成交，官方报告总额 0</td>
+              <td>可参与计算</td>
+            </tr>
+            <tr>
+              <td><code>NULL + NOT_DISCLOSED</code></td>
+              <td>制度不披露或来源无此字段</td>
+              <td>2024-08-19 后北向买入/卖出/净买</td>
+              <td>不得补零、求和或排行</td>
+            </tr>
+            <tr>
+              <td>无记录</td>
+              <td>尚未抓取、抓取失败、非计划交易日或未知</td>
+              <td>供应商超时但日历显示应交易</td>
+              <td>结合 checkpoint/日历判断，不自行推断</td>
+            </tr>
+            <tr>
+              <td><code>NULL + SOURCE_MISSING</code></td>
+              <td>字段应披露但载荷缺失</td>
+              <td>南向日终应有买入额而页面缺列</td>
+              <td>质量阻断或 quarantine</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="model">
+      <h2>6. Canonical dataset 输入与领域表草案</h2>
+
+      <h3>6.1 Provider-neutral capability</h3>
+      <p class="small">
+        “标准载荷”是 Adapter 到 normalizer 的输入 schema 标识，可独立版本化；“目标 dataset”是稳定
+        canonical code，不嵌 <code>.vN</code>，schema major 由 catalog 单独登记。
+      </p>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th>中立请求</th>
+              <th>标准载荷</th>
+              <th>目标 dataset</th>
+              <th>发布策略</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>stock_connect.market_statistics.raw</code></td>
+              <td><code>venue, direction, period, periodEnd</code></td>
+              <td><code>quant-v2.stock-connect-market-stat.v1</code></td>
+              <td><code>market.stock_connect.market_stat.reported</code></td>
+              <td>P0；一个通道/方向/周期独立发布</td>
+            </tr>
+            <tr>
+              <td><code>stock_connect.active_securities.raw</code></td>
+              <td><code>venue, direction, period, periodEnd</code></td>
+              <td><code>quant-v2.stock-connect-active-security.v1</code></td>
+              <td><code>market.stock_connect.active_security.snapshot</code></td>
+              <td>P0；必须绑定对应市场统计版本</td>
+            </tr>
+            <tr>
+              <td><code>stock_connect.holdings.raw</code></td>
+              <td><code>venue, direction, positionDate</code></td>
+              <td><code>quant-v2.stock-connect-holding.v1</code></td>
+              <td><code>market.stock_connect.holding.snapshot</code></td>
+              <td>P1；北向季度、南向每日分开发布</td>
+            </tr>
+            <tr>
+              <td><code>stock_connect.calendar.raw</code></td>
+              <td><code>calendarYear</code></td>
+              <td><code>quant-v2.stock-connect-calendar.v1</code></td>
+              <td>统一日历模型决定</td>
+              <td>作为任务准入输入；本专题不定义共享表</td>
+            </tr>
+            <tr>
+              <td><code>stock_connect.vendor_history.raw</code></td>
+              <td><code>vendorSeries, start, end</code></td>
+              <td><code>quant-v2.stock-connect-vendor-history.v1</code></td>
+              <td>默认不发布 canonical</td>
+              <td>P2 research；方法学通过后另行评审</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="flow" aria-label="领域数据流">official SSE / SZSE / HKEX source
+          │
+          ▼
+source-specific adapter ── vendor URL / field / auth stays here
+          │ ProviderBatch: provider_id, upstream_source, observed_at,
+          │ raw_payload, adapter_version, schema_fingerprint
+          ▼
+raw evidence archive ──▶ provider-neutral decoder ──▶ disclosure-regime gate
+                                                      │
+                             identity resolver ◀──────┤
+                                                      ▼
+                                    domain revision + quality result
+                                                      │
+                                             atomic publication
+                                                      ▼
+                                   versioned internal read contract
+                                                      ▼
+                                      service-api POST projection</pre>
+
+      <h3>6.2 表一：<code>stock_connect_market_stat_revision</code></h3>
+      <p>
+        只描述本领域通道级成交统计；来源、batch、quality、publication 等共享表由统一模型定义。
+        建议按 <code>period_end</code> 年分区，日频为主，月/年官方汇总不能由日频静默生成后冒充来源事实。
+      </p>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>拟议类型</th>
+              <th>单位 / 空值</th>
+              <th>含义与约束</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>market_stat_revision_id</code></td>
+              <td>UUID</td>
+              <td>非空</td>
+              <td>领域 revision 内部键，不对外暴露</td>
+            </tr>
+            <tr>
+              <td><code>connect_venue</code></td>
+              <td>受控文本</td>
+              <td>非空</td>
+              <td><code>SH_CONNECT</code> 或 <code>SZ_CONNECT</code></td>
+            </tr>
+            <tr>
+              <td><code>direction</code></td>
+              <td>受控文本</td>
+              <td>非空</td>
+              <td><code>NORTHBOUND</code> 或 <code>SOUTHBOUND</code></td>
+            </tr>
+            <tr>
+              <td><code>statistic_period</code></td>
+              <td>受控文本</td>
+              <td>非空</td>
+              <td><code>DAILY</code>、<code>MONTHLY</code>、<code>YEARLY</code></td>
+            </tr>
+            <tr>
+              <td><code>period_start / period_end</code></td>
+              <td>DATE</td>
+              <td>非空</td>
+              <td>包含端；start ≤ end</td>
+            </tr>
+            <tr>
+              <td><code>currency</code></td>
+              <td>CHAR(3)</td>
+              <td>非空</td>
+              <td>北向 CNY、南向 HKD；来源变化需新方法学</td>
+            </tr>
+            <tr>
+              <td><code>buy_turnover_amount</code></td>
+              <td>NUMERIC(28,4)</td>
+              <td>基础货币单位；可空</td>
+              <td>北向新规后为 <code>NULL/NOT_DISCLOSED</code></td>
+            </tr>
+            <tr>
+              <td><code>sell_turnover_amount</code></td>
+              <td>NUMERIC(28,4)</td>
+              <td>基础货币单位；可空</td>
+              <td>与 buy 相同披露边界</td>
+            </tr>
+            <tr>
+              <td><code>total_turnover_amount</code></td>
+              <td>NUMERIC(28,4)</td>
+              <td>基础货币单位；非负</td>
+              <td>官方总成交；若缺失且制度要求则阻断</td>
+            </tr>
+            <tr>
+              <td><code>etf_turnover_amount</code></td>
+              <td>NUMERIC(28,4)</td>
+              <td>基础货币单位；可空</td>
+              <td>2024 新规明确披露；早期不适用时标 <code>NOT_APPLICABLE</code></td>
+            </tr>
+            <tr>
+              <td><code>buy_trade_count / sell_trade_count</code></td>
+              <td>BIGINT</td>
+              <td>笔；可空</td>
+              <td>南向可用；北向新规后不要求拆分</td>
+            </tr>
+            <tr>
+              <td><code>total_trade_count</code></td>
+              <td>BIGINT</td>
+              <td>笔；非负/可空</td>
+              <td>按制度版本决定必填性</td>
+            </tr>
+            <tr>
+              <td><code>net_buy_amount</code></td>
+              <td>NUMERIC(28,4)</td>
+              <td>基础货币单位；可空</td>
+              <td>只在来源明确报告或 <code>buy-sell</code> 可审计计算时存在</td>
+            </tr>
+            <tr>
+              <td><code>net_buy_origin</code></td>
+              <td>受控文本</td>
+              <td>可空</td>
+              <td><code>REPORTED</code> 或 <code>CALCULATED_V1</code>；与 net_buy 同空</td>
+            </tr>
+            <tr>
+              <td><code>disclosure_regime</code></td>
+              <td>受控文本</td>
+              <td>非空</td>
+              <td>至少区分 2024-05-13、2024-08-19 两个断点</td>
+            </tr>
+            <tr>
+              <td><code>field_availability</code></td>
+              <td>JSONB 或规范化状态映射</td>
+              <td>非空</td>
+              <td>逐字段标记 reported/not_disclosed/not_applicable/source_missing</td>
+            </tr>
+            <tr>
+              <td><code>methodology_id / methodology_version</code></td>
+              <td>文本</td>
+              <td>非空</td>
+              <td>绑定来源与披露制度，不因中文名相同而复用</td>
+            </tr>
+            <tr>
+              <td><code>raw_unit / unit_multiplier</code></td>
+              <td>文本 / NUMERIC</td>
+              <td>非空</td>
+              <td>例如“亿元”→ 100,000,000；转换版本可审计</td>
+            </tr>
+            <tr>
+              <td><code>source_published_at / observed_at / visible_at</code></td>
+              <td>TIMESTAMPTZ</td>
+              <td>published 可空，其余非空</td>
+              <td>遵守第 5.3 节保守可见规则</td>
+            </tr>
+            <tr>
+              <td><code>known_from / known_to / revision_no</code></td>
+              <td>TIMESTAMPTZ / INTEGER</td>
+              <td>known_to 可空</td>
+              <td>知识时间与修订历史</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>6.3 表二：<code>stock_connect_active_security_revision</code></h3>
+      <p>
+        保存官方前十大成交活跃证券，不保存东方财富“领涨股”。候选当前唯一约束为
+        <code>venue + direction + period_end + instrument_id + methodology_id + known_to IS NULL</code>；
+        同一榜单内 rank 也必须唯一。
+      </p>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>拟议类型</th>
+              <th>单位 / 空值</th>
+              <th>含义与约束</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>active_security_revision_id</code></td>
+              <td>UUID</td>
+              <td>非空</td>
+              <td>领域 revision 内部键</td>
+            </tr>
+            <tr>
+              <td><code>connect_venue / direction</code></td>
+              <td>受控文本</td>
+              <td>非空</td>
+              <td>与市场统计一致</td>
+            </tr>
+            <tr>
+              <td><code>statistic_period / period_end</code></td>
+              <td>受控文本 / DATE</td>
+              <td>非空</td>
+              <td>日/月/年官方榜单</td>
+            </tr>
+            <tr>
+              <td><code>instrument_id</code></td>
+              <td>共享身份引用</td>
+              <td>非空</td>
+              <td>A 股/H 股按事实日期解析；不暴露内部键</td>
+            </tr>
+            <tr>
+              <td><code>rank</code></td>
+              <td>SMALLINT</td>
+              <td>1..10</td>
+              <td>来源名次；更正后通过 revision 更新</td>
+            </tr>
+            <tr>
+              <td><code>currency</code></td>
+              <td>CHAR(3)</td>
+              <td>非空</td>
+              <td>北向 CNY、南向 HKD</td>
+            </tr>
+            <tr>
+              <td><code>buy_turnover_amount / sell_turnover_amount</code></td>
+              <td>NUMERIC(28,4)</td>
+              <td>可空</td>
+              <td>南向披露；北向新规后为 not_disclosed</td>
+            </tr>
+            <tr>
+              <td><code>total_turnover_amount</code></td>
+              <td>NUMERIC(28,4)</td>
+              <td>非负、非空</td>
+              <td>官方榜单成交总额</td>
+            </tr>
+            <tr>
+              <td><code>security_type</code></td>
+              <td>受控文本</td>
+              <td>非空</td>
+              <td><code>EQUITY</code>/<code>ETF</code>；来自共享身份分类</td>
+            </tr>
+            <tr>
+              <td><code>methodology_id / version</code></td>
+              <td>文本</td>
+              <td>非空</td>
+              <td>绑定制度和来源</td>
+            </tr>
+            <tr>
+              <td><code>source_published_at / observed_at / visible_at</code></td>
+              <td>TIMESTAMPTZ</td>
+              <td>published 可空</td>
+              <td>榜单只有收市后可见</td>
+            </tr>
+            <tr>
+              <td><code>known_from / known_to / revision_no</code></td>
+              <td>TIMESTAMPTZ / INTEGER</td>
+              <td>known_to 可空</td>
+              <td>修订历史</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>6.4 表三：<code>stock_connect_holding_revision</code></h3>
+      <p>
+        只保存官方报告的持有数量。持股市值、持股占比、日变化和滚动增持不得写入该源事实表；
+        如需派生，必须另用带行情、股本、公司行动和公式版本的派生 dataset。
+      </p>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>拟议类型</th>
+              <th>单位 / 空值</th>
+              <th>含义与约束</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>holding_revision_id</code></td>
+              <td>UUID</td>
+              <td>非空</td>
+              <td>领域 revision 内部键</td>
+            </tr>
+            <tr>
+              <td><code>connect_venue / direction</code></td>
+              <td>受控文本</td>
+              <td>非空</td>
+              <td>港股通沪、港股通深保持独立；北向也按沪/深分开</td>
+            </tr>
+            <tr>
+              <td><code>instrument_id</code></td>
+              <td>共享身份引用</td>
+              <td>非空</td>
+              <td>按 position date 解析</td>
+            </tr>
+            <tr>
+              <td><code>position_date</code></td>
+              <td>DATE</td>
+              <td>非空</td>
+              <td>北向季度末、南向交易日收市</td>
+            </tr>
+            <tr>
+              <td><code>position_frequency</code></td>
+              <td>受控文本</td>
+              <td>非空</td>
+              <td><code>DAILY</code> 或 <code>QUARTER_END</code></td>
+            </tr>
+            <tr>
+              <td><code>held_share_quantity</code></td>
+              <td>NUMERIC(28,4)</td>
+              <td>股；非负</td>
+              <td>兼容可能存在非整数单位证券；原始精度保留</td>
+            </tr>
+            <tr>
+              <td><code>quantity_status</code></td>
+              <td>受控文本</td>
+              <td>非空</td>
+              <td><code>REPORTED</code>、<code>NOT_DISCLOSED</code>、<code>SOURCE_MISSING</code></td>
+            </tr>
+            <tr>
+              <td><code>holding_scope</code></td>
+              <td>受控文本</td>
+              <td>非空</td>
+              <td>本期只允许 <code>INVESTOR_AGGREGATE</code>，不发布参与者明细</td>
+            </tr>
+            <tr>
+              <td><code>methodology_id / version</code></td>
+              <td>文本</td>
+              <td>非空</td>
+              <td>北向季度与历史日频必须不同版本</td>
+            </tr>
+            <tr>
+              <td><code>source_published_at / observed_at / visible_at</code></td>
+              <td>TIMESTAMPTZ</td>
+              <td>published 可空</td>
+              <td>北向季度特别校验第 5 个交易日可见边界</td>
+            </tr>
+            <tr>
+              <td><code>known_from / known_to / revision_no</code></td>
+              <td>TIMESTAMPTZ / INTEGER</td>
+              <td>known_to 可空</td>
+              <td>更正追加，不覆盖旧仓位证据</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>6.5 关系与共享基础设施需求</h3>
+      <ul>
+        <li>三张领域表都引用共享的来源批次、方法学、质量结果和 publication，但不在本专题重复定义。</li>
+        <li>活跃证券与持股引用共享证券身份；A 股沿用既有日期感知解析，港股身份由统一模型补齐。</li>
+        <li>市场统计 publication 与前十大榜单 publication 应绑定同一来源批次或声明关联批次，防止跨日混版。</li>
+        <li>持股 snapshot 不与市场统计同事务强绑定；其披露频率、到达时间和失败边界不同。</li>
+        <li>数据版本按 dataset + venue + direction + period/frequency 独立推进，任一路失败不污染其他稳定版本。</li>
+      </ul>
+    </section>
+
+    <section id="sync">
+      <h2>7. 同步模式、分区、幂等、回补与恢复</h2>
+
+      <h3>7.1 任务定义</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>任务</th>
+              <th>触发与新鲜度建议</th>
+              <th>分区</th>
+              <th>增量/回补</th>
+              <th>消费者</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>P0 日终市场统计</td>
+              <td>官方 Stock Connect 交易日；收市后延迟执行，HKEX 文件说明约 18:00；实际发布时间待探针校准</td>
+              <td><code>dataset/venue/direction/trade_date</code></td>
+              <td>每日增量；最近 5 个交易日滚动重拉接收更正；历史按月有界回补</td>
+              <td>市场概览、跨境成交因子、API</td>
+            </tr>
+            <tr>
+              <td>P0 前十大成交活跃证券</td>
+              <td>与对应市场统计同批或紧随其后</td>
+              <td><code>dataset/venue/direction/trade_date</code></td>
+              <td>每日增量；与统计批次一起回补</td>
+              <td>活跃榜、个股事件研究</td>
+            </tr>
+            <tr>
+              <td>P1 南向日频持股</td>
+              <td>港股通交易日收市后；发布时间由连续探针校准</td>
+              <td><code>dataset/venue/SOUTHBOUND/position_date</code></td>
+              <td>每日完整快照；最近 5 日滚动重拉</td>
+              <td>持仓、拥挤度、机构配置</td>
+            </tr>
+            <tr>
+              <td>P1 北向季度持股</td>
+              <td>季度末后第 5 个北向交易日；当日披露后抓取</td>
+              <td><code>dataset/venue/NORTHBOUND/quarter_end</code></td>
+              <td>季度完整快照；历史按季度回补</td>
+              <td>季度持仓、point-in-time 因子</td>
+            </tr>
+            <tr>
+              <td>P0 日历</td>
+              <td>每年官方日历发布/修订后；运行前按年加载</td>
+              <td><code>calendar_year</code></td>
+              <td>全年快照；公告修订追加版本</td>
+              <td>所有任务准入</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>7.2 正常写入顺序与事务边界</h3>
+      <ol>
+        <li>scheduler 或受控 CLI 以中立 partition 创建 run，获取同分区租约；不在任务中导入 SDK。</li>
+        <li>adapter 拉取唯一来源，返回标准载荷与原始响应；供应商 URL、字段、认证和错误留在 adapter。</li>
+        <li>先把 raw payload 写入 S3/MinIO，记录 SHA-256、schema fingerprint、adapter version 和 observed time。</li>
+        <li>decoder 验证通道、方向、日期、披露制度、单位与逐字段 availability，不进行跨来源补洞。</li>
+        <li>证券级数据按事实日期调用共享 identity resolver；未解析记录进入 quarantine。</li>
+        <li>单个分区事务写入来源观测引用、domain revisions、quality results 和 candidate publication。</li>
+        <li>全部阻断规则通过后原子推进 publication 与 checkpoint；任何失败保持上一稳定版本。</li>
+      </ol>
+
+      <h3>7.3 幂等、并发与重复</h3>
+      <div class="grid">
+        <article class="card">
+          <h3>幂等键</h3>
+          <p>
+            run 键为 <code>capability + provider_policy + partition</code>；
+            canonical 内容键为事实键 + 方法学 + 规范化内容 hash。
+            相同内容重跑不创建新 revision 或 dataVersion。
+          </p>
+        </article>
+        <article class="card">
+          <h3>观测不折叠</h3>
+          <p>
+            每次外部拉取仍是独立 source observation；相同 raw 字节可按 hash 复用对象，
+            但必须保留每次 observed time、HTTP 元数据和 run 关系。
+          </p>
+        </article>
+        <article class="card">
+          <h3>并发锁</h3>
+          <p>
+            同 dataset/venue/direction/date 只允许一份写租约；租约含过期时间和 fencing token。
+            僵尸任务不能在新任务发布后推进旧 checkpoint。
+          </p>
+        </article>
+      </div>
+
+      <h3>7.4 错误、重试和部分成功</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>失败</th>
+              <th>分类</th>
+              <th>重试</th>
+              <th>结果</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>超时、连接重置、HTTP 429/5xx</td>
+              <td><code>retryable</code></td>
+              <td>指数退避 + 抖动，最多 3 次；尊重 Retry-After</td>
+              <td>不推进 checkpoint；耗尽后 failed</td>
+            </tr>
+            <tr>
+              <td>鉴权/权益失败</td>
+              <td><code>terminal_for_policy</code></td>
+              <td>不自动重试</td>
+              <td>该 provider capability 停止；其他官方能力继续</td>
+            </tr>
+            <tr>
+              <td>schema 漂移、单位未知、制度不匹配</td>
+              <td><code>terminal_data</code></td>
+              <td>不重试同一载荷</td>
+              <td>raw 保留、整分区 quarantine</td>
+            </tr>
+            <tr>
+              <td>单只证券身份失败</td>
+              <td><code>partial</code></td>
+              <td>身份修复后 replay</td>
+              <td>对完整榜单/持股快照默认阻断 publication，不静默丢行</td>
+            </tr>
+            <tr>
+              <td>一个通道失败</td>
+              <td><code>partition_failure</code></td>
+              <td>仅重试该分区</td>
+              <td>其他 venue/direction 可独立发布；聚合查询不得混新旧</td>
+            </tr>
+            <tr>
+              <td>数据库事务失败</td>
+              <td><code>retryable_if_safe</code></td>
+              <td>从已归档 raw replay</td>
+              <td>事务回滚，publication/checkpoint 不变</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>7.5 历史回补与不可比边界</h3>
+      <ul>
+        <li>回补按来源产品许可、通道、方向、月份拆分；每批有明确起止日期和最大页数。</li>
+        <li>沪港通启动前、深港通启动前不创建零记录；标为 capability 尚未存在。</li>
+        <li>2024-05-13 与 2024-08-19 两个断点两侧使用不同方法学版本，不做平滑、插值或连续累计。</li>
+        <li>HKEX 获授权历史文件、SSE/SZSE 页面和东方财富同日值分别保存来源身份；没有等价证据不拼接。</li>
+        <li>北向日频持股历史到 2024-08-16 后直接结束；之后接季度快照时标注频率断点，不前向填充。</li>
+        <li>南向两路通道只有在币种、position date、证券身份、范围和披露时间全部一致后，才可另建派生汇总。</li>
+      </ul>
+
+      <h3>7.6 恢复、回滚与保留</h3>
+      <ul>
+        <li>raw replay：按 source batch hash 校验后重新 decoder/quality，不访问上游。</li>
+        <li>publication rollback：只把消费者指针切回已通过质量的旧 dataVersion；不删除新 revision 或 raw。</li>
+        <li>checkpoint repair：只能从已验证 raw 与事务账本重建；禁止人工改业务表日期或伪造成功。</li>
+        <li>来源字段/单位修复：发布新 adapter/methodology version，全量 replay 受影响分区并保留旧知识版本。</li>
+        <li>保留期由统一模型与许可决定；在修订和审计周期未冻结前，不清理已被 publication 引用的 raw/revision。</li>
+      </ul>
+    </section>
+
+    <section id="quality">
+      <h2>8. 数据质量、时序防未来函数与可观测性</h2>
+
+      <h3>8.1 质量规则</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>规则</th>
+              <th>适用</th>
+              <th>阈值 / 检查</th>
+              <th>失败处置</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>身份与枚举</td>
+              <td>全部</td>
+              <td>venue、direction、period、currency 必须在受控集合；证券 100% 解析</td>
+              <td>阻断 / quarantine</td>
+            </tr>
+            <tr>
+              <td>制度字段矩阵</td>
+              <td>市场统计、活跃榜</td>
+              <td>按日期和方向校验 required/not_disclosed；北向新规后不接受占位 0 冒充买卖值</td>
+              <td>阻断</td>
+            </tr>
+            <tr>
+              <td>金额单位</td>
+              <td>全部金额</td>
+              <td>raw unit、currency、multiplier 非空；转换后反算与 raw 在舍入容差内</td>
+              <td>阻断</td>
+            </tr>
+            <tr>
+              <td>算术一致性</td>
+              <td>三项同时存在</td>
+              <td><code>total ≈ buy + sell</code>；<code>net ≈ buy - sell</code>，容差由原始舍入精度决定</td>
+              <td>超过容差 quarantine</td>
+            </tr>
+            <tr>
+              <td>非负与计数</td>
+              <td>成交、持股</td>
+              <td>成交总额、买卖额、持股数、笔数非负；净买可负</td>
+              <td>阻断</td>
+            </tr>
+            <tr>
+              <td>前十大完整性</td>
+              <td>活跃榜</td>
+              <td>交易日通常 10 条、rank 1..10 唯一；少于 10 必须有官方原因</td>
+              <td>无原因则 quarantine</td>
+            </tr>
+            <tr>
+              <td>日历对齐</td>
+              <td>日频</td>
+              <td>trade date 必须是对应 venue/direction 官方互联互通交易日</td>
+              <td>阻断；不自动改日期</td>
+            </tr>
+            <tr>
+              <td>频率与披露延迟</td>
+              <td>持股</td>
+              <td>北向 2024-08-19 后仅季度末；visible time 不早于季度后第 5 个北向交易日</td>
+              <td>阻断</td>
+            </tr>
+            <tr>
+              <td>跨源差异</td>
+              <td>对账</td>
+              <td>仅同制度、币种、通道、周期、截点可比较；差异是指标，不默认要求相等</td>
+              <td>warn / 人工诊断</td>
+            </tr>
+            <tr>
+              <td>修订稳定性</td>
+              <td>全部</td>
+              <td>同内容重跑 dataVersion 不变；内容变更保留旧 known-time slice</td>
+              <td>阻断发布</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>8.2 明确排除的未来函数与事后字段</h3>
+      <div class="grid two">
+        <article class="card">
+          <h3>禁止进入可回测事实</h3>
+          <ul>
+            <li>季度末北向持股在第 5 个北向交易日前的任何可见性。</li>
+            <li>后续修订值回写到原 trade/position date 并覆盖旧版本。</li>
+            <li>回补时把 2026 年 observed time 伪造成历史 published time。</li>
+            <li>未来 1/5/10 日市值变化、滚动增持排行或事后领涨股表现。</li>
+            <li>下一持股快照反推前一日至下一日之间每日仓位。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>禁止口径混淆</h3>
+          <ul>
+            <li>把成交净买、资金净流入、额度余额和持股变化当成同一“资金流”。</li>
+            <li>把 CNY 北向与 HKD 南向金额直接相加。</li>
+            <li>把日频持股与季度持股拼成等频连续序列。</li>
+            <li>把公司行动造成的持股数量跳变解释为买卖。</li>
+            <li>用东方财富字段补官方未披露的北向买卖拆分。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3>8.3 状态与处置</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>状态</th>
+              <th>含义</th>
+              <th>可否 publication</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>passed</code></td>
+              <td>所有阻断规则通过，字段 availability 与制度一致</td>
+              <td class="yes">可以</td>
+            </tr>
+            <tr>
+              <td><code>warned</code></td>
+              <td>跨源差异、到达延迟等非破坏性异常，事实仍完整</td>
+              <td>按 policy 可发布并显式返回质量状态</td>
+            </tr>
+            <tr>
+              <td><code>quarantined</code></td>
+              <td>schema、单位、身份、完整性、制度字段或时序失败</td>
+              <td class="no">不可</td>
+            </tr>
+            <tr>
+              <td><code>research</code></td>
+              <td>方法学、许可或生产稳定性未通过</td>
+              <td class="no">公开 API fail-closed</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>8.4 指标、日志与告警</h3>
+      <ul>
+        <li>日志关联 <code>task_id/run_id/batch_id/partition/provider/methodology/data_version</code>，不记录 token 或完整 raw。</li>
+        <li>指标：分区成功率、到达延迟、schema fingerprint 变化、字段 availability、quarantine 数、身份失败数。</li>
+        <li>指标：榜单行数、持股覆盖证券数、交易日缺口、修订次数、同内容幂等命中率。</li>
+        <li>告警：官方交易日 T+1 仍无 P0 publication；北向隐藏字段被写成非空/零；单位或币种突变。</li>
+        <li>告警：北向季度持股在预期披露日后仍缺失；南向日频覆盖率较前一日异常下降超过待校准阈值。</li>
+        <li>阈值需在 shadow 连续样本后冻结；未校准阈值只产生诊断，不以猜测值阻断全部能力。</li>
+      </ul>
+    </section>
+
+    <section id="api">
+      <h2>9. 对 service-api 的查询、分页与权限需求</h2>
+
+      <aside class="callout">
+        <strong>边界不变</strong>
+        <code>service-api</code> 只能通过版本化内部 HTTP/事件契约消费已发布视图，
+        不得读取 data-sync PostgreSQL/S3，不得访问 SSE/SZSE/HKEX/AKShare；
+        <code>service-web</code> 只访问 <code>service-api</code>。
+      </aside>
+
+      <h3>9.1 拟议公开 POST 能力</h3>
+      <p class="small">
+        以下只表达消费需求；最终路径、DTO 和机器契约由后续跨服务契约方案冻结，不修改现有 OpenAPI。
+      </p>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>拟议 POST 路径</th>
+              <th>用例</th>
+              <th>核心筛选</th>
+              <th>返回要求</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>POST /api/v1/market-data/stock-connect/statistics/query</code></td>
+              <td>查询通道日/月/年成交统计</td>
+              <td>venue、direction、period、start/end、knownAt、qualityStatus、fields、sort</td>
+              <td>币种、单位、availability、方法学、来源、visibleAt、dataVersion</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/market-data/stock-connect/active-securities/query</code></td>
+              <td>查询官方前十大成交活跃证券</td>
+              <td>venue、direction、periodEnd、exchange/symbol、securityType、knownAt</td>
+              <td>公开证券身份、rank、成交字段、质量与版本；不暴露内部 UUID</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/market-data/stock-connect/holdings/query</code></td>
+              <td>按证券或横截面查询持股快照</td>
+              <td>venue、direction、positionDate、frequency、exchange/symbol、knownAt、asOf</td>
+              <td>报告数量、position/visible time、频率断点、来源和免责声明</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>9.2 输入边界与分页</h3>
+      <ul>
+        <li>所有 public operation 只能声明 <code>POST</code>；查询参数可在 JSON body，禁止新增 GET 路由。</li>
+        <li><code>start/end</code> 为包含端；日频默认最大 366 日，扩大窗口需更高权限或异步导出另案。</li>
+        <li>默认 limit 100，最大 500；游标不透明且绑定全部筛选、sort、fields、knownAt 与 dataVersion。</li>
+        <li>排序仅允许白名单：日期升/降序、rank 升序、持股数量升/降序；稳定次序追加证券身份。</li>
+        <li><code>knownAt</code> 选择系统当时所知；<code>asOf</code> 选择市场有效切片；二者不得混为同一时间。</li>
+        <li>字段选择不能隐藏解释字段：currency、unit、availability、methodologyVersion、source、qualityStatus、visibleAt、dataVersion 必须保留。</li>
+        <li>条件读取沿用 POST-only 决策：ETag 命中返回 204；下游 internal GET 的 304 不直接暴露。</li>
+      </ul>
+
+      <h3>9.3 鉴权、权限与失败映射</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>主题</th>
+              <th>需求</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>认证</td>
+              <td>默认有效 Bearer Session；禁止匿名和 <code>@Public()</code></td>
+            </tr>
+            <tr>
+              <td>授权</td>
+              <td>至少 <code>market-data:stock-connect:read</code>；历史深度或持股横截面可按数据许可细分 scope</td>
+            </tr>
+            <tr>
+              <td>限流</td>
+              <td>按用户、IP、路由、日期窗和返回行数计费；横截面持股比单证券查询更严格</td>
+            </tr>
+            <tr>
+              <td>缓存</td>
+              <td>只缓存已发布 dataVersion 的私有投影；Redis 不成为行情权威存储</td>
+            </tr>
+            <tr>
+              <td>下游失败</td>
+              <td>timeout/schema drift/unavailable → 503 Problem Details；无未标记 stale fallback</td>
+            </tr>
+            <tr>
+              <td>数据不存在</td>
+              <td>合法查询无事实 → 404 或空页按最终契约统一；NOT_DISCLOSED 字段仍返回空值和状态</td>
+            </tr>
+            <tr>
+              <td>版本冲突</td>
+              <td>旧 cursor/dataVersion 不匹配 → 409，客户端从第一页重启</td>
+            </tr>
+            <tr>
+              <td>审计</td>
+              <td>记录 actor、route、范围、rows、dataVersion、requestId；不记录 token 和大 payload</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>9.4 最新与 point-in-time 能力</h3>
+      <ul>
+        <li>通道统计、活跃榜：支持 latest 与 <code>knownAt</code> 历史视图。</li>
+        <li>持股：必须支持 <code>positionDate + knownAt</code>；否则不能用于可信回测。</li>
+        <li>供应商 research 字段：公开 API 不可见；internal 运维诊断另由授权合同决定。</li>
+        <li>响应免责声明需说明披露频率、2024 断点、币种、数据仅供参考且不构成投资建议。</li>
+      </ul>
+    </section>
+
+    <section id="gates">
+      <h2>10. 技术硬门禁与非技术风险</h2>
+
+      <h3>10.1 技术硬门禁</h3>
+      <p>
+        门禁只作用于对应 capability 的生产 publication，不阻断其他专题、其他通道或方案评审。
+      </p>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>门禁</th>
+              <th>准入条件</th>
+              <th>可验证证据</th>
+              <th>验证人</th>
+              <th>退出条件</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>G1 披露制度与单位完整</td>
+              <td>目标字段能按 venue/direction/date 唯一映射到制度、币种、原单位和 availability</td>
+              <td>覆盖断点前后 fixture；官方样本对账；单位反算；schema fingerprint 测试</td>
+              <td>data-sync 维护者 + 数据质量评审人</td>
+              <td>字段矩阵全部通过；未披露字段保持 null/status，未知字段 quarantine</td>
+            </tr>
+            <tr>
+              <td>G2 证券身份无歧义</td>
+              <td>全部活跃榜/持股证券按事实日期解析为唯一身份；代码复用不误绑</td>
+              <td>A/H 股 fixture、退市/更名/代码复用样本、100% 覆盖报告、冲突注入测试</td>
+              <td>数据架构评审人 + 数据质量评审人</td>
+              <td>全量唯一解析，或任何未解析行使整快照保持 quarantine</td>
+            </tr>
+            <tr>
+              <td>G3 point-in-time 可证明</td>
+              <td>position/trade/published/observed/visible/known 时间可重建且不回拨</td>
+              <td>北向季度第 5 交易日样本；历史回补测试；knownAt 前后查询对照；修订回放</td>
+              <td>量化研究评审人 + data-sync 维护者</td>
+              <td>所有样本在 visibleAt 前不可见，修订只影响之后知识切片</td>
+            </tr>
+            <tr>
+              <td>G4 幂等与可恢复</td>
+              <td>重复、超时、schema drift、DB 失败和中断均不产生混版或不可恢复缺口</td>
+              <td>同分区双跑、fencing、raw replay、事务失败、publication rollback 自动测试</td>
+              <td>平台维护者 + data-sync 维护者</td>
+              <td>重复结果一致；checkpoint 只随成功 publication 推进；回放恢复</td>
+            </tr>
+            <tr>
+              <td>G5 capability 许可合规</td>
+              <td>拟生产保存和对外投影的数据具有与实际用途匹配的许可或明确可用条款</td>
+              <td>数据产品订阅/许可、条款快照、允许的留存/内部使用/展示范围和技术配置</td>
+              <td>合规验证人 + 数据治理验证人</td>
+              <td>改用获授权官方源，或把该 capability 固定为 research/internal-only</td>
+            </tr>
+            <tr>
+              <td>G6 生产来源连续性</td>
+              <td>固定 adapter 版本在真实互联互通交易日按合同返回完整数据</td>
+              <td>至少 5 个连续交易日 shadow、一个跨市场节假日样本、限流/超时/空响应故障注入</td>
+              <td>data-sync 维护者 + 运行验证人</td>
+              <td>成功率、延迟、字段和覆盖达到冻结阈值；阈值和证据进入 source policy</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>10.2 非技术风险与跟进</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>风险 / 跟进</th>
+              <th>负责人</th>
+              <th>时间点</th>
+              <th>技术兜底</th>
+              <th>是否阻断整套方案</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>HKEX 历史产品预算与采购周期</td>
+              <td>数据治理负责人</td>
+              <td>P1 历史回补启动前</td>
+              <td>先上线当前官方增量；历史保持缺口并返回 coverage，不用东财静默补</td>
+              <td class="no">否</td>
+            </tr>
+            <tr>
+              <td>SSE/SZSE/HKEX 商务授权沟通</td>
+              <td>合规/数据治理负责人</td>
+              <td>对应 capability 生产 publication 前</td>
+              <td>research-only、内部样本、关闭公开投影；其他已获权能力继续</td>
+              <td class="no">否；仅约束该 capability 的生产用途</td>
+            </tr>
+            <tr>
+              <td>公开 API 最终权限和产品套餐</td>
+              <td>service-api 产品/安全负责人</td>
+              <td>跨服务机器契约冻结前</td>
+              <td>默认只向已认证管理员/研究角色开放，历史横截面关闭</td>
+              <td class="no">否</td>
+            </tr>
+            <tr>
+              <td>未公开的 Provider 限流</td>
+              <td>data-sync 运行负责人</td>
+              <td>P0 shadow 前</td>
+              <td>单线程、低频、缓存、指数退避；不做跨口径自动 fallback</td>
+              <td class="no">否</td>
+            </tr>
+            <tr>
+              <td>历史深度和用户优先级</td>
+              <td>量化研究产品负责人</td>
+              <td>P1 回补范围冻结前</td>
+              <td>先提供 2024 制度断点后的官方序列及明确 coverage</td>
+              <td class="no">否</td>
+            </tr>
+            <tr>
+              <td>生产 SLO、告警平台与值守安排</td>
+              <td>平台运行负责人</td>
+              <td>P0 灰度前</td>
+              <td>保守日期窗、fail-closed、保留上一 publication、人工 raw replay</td>
+              <td class="no">否</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="delivery">
+      <h2>11. 实施路线、回滚与验收</h2>
+
+      <h3>11.1 分阶段路线</h3>
+      <ol>
+        <li>
+          <strong>P0-A：制度与 source contract 冻结。</strong>
+          固定官方字段、披露断点、币种、单位、日历、许可范围和 adapter 中立载荷；
+          对 2024 断点前后建立 fixture。退出：G1、G5 的目标 P0 capability 通过。
+        </li>
+        <li>
+          <strong>P0-B：日终统计与活跃榜 shadow。</strong>
+          只写 raw/candidate/quality，不对消费者发布；连续观察到达时间、缺行、修订、限流。
+          退出：G4、G6 通过。
+        </li>
+        <li>
+          <strong>P0-C：受控 publication 与内部读取。</strong>
+          按 venue/direction 独立发布；内部契约返回 dataVersion、来源、方法学、质量和 visible time。
+          退出：契约测试、point-in-time 查询和回滚演练通过。
+        </li>
+        <li>
+          <strong>P1-A：持股快照。</strong>
+          先南向日频，再北向季度；完成港股身份、公司行动边界和披露延迟验证。
+          退出：G2、G3 通过。
+        </li>
+        <li>
+          <strong>P1-B：授权历史回补。</strong>
+          按制度分段、按月/季有限回补；返回 coverage，不追求伪连续。
+          退出：抽样对账、幂等、恢复、容量和索引计划通过。
+        </li>
+        <li>
+          <strong>P2：供应商研究。</strong>
+          仅在业务明确需要且方法学、许可、稳定性全部闭环后再另案；当前不进入生产路线。
+        </li>
+      </ol>
+
+      <h3>11.2 回滚策略</h3>
+      <ul>
+        <li>来源异常：关闭该 provider policy，保留上一稳定 publication；不把次源自动升为同一方法学。</li>
+        <li>schema/单位错误：隔离新 batch，回滚 publication 指针；修复 adapter 后从 raw replay。</li>
+        <li>身份错误：冻结证券级 publication，修复共享 identity 后 replay；不改写历史外键。</li>
+        <li>公开 API 错误：service-api 关闭投影或回滚 client；data-sync raw/revision 保留。</li>
+        <li>制度解释错误：创建新 methodology/revision 并重放受影响范围；旧 dataVersion 继续可审计。</li>
+      </ul>
+
+      <h3>11.3 验收清单</h3>
+      <div class="grid two">
+        <article class="card">
+          <h3>文档与设计验收</h3>
+          <ul class="checklist">
+            <li>事实、推断、建议、未决可区分。</li>
+            <li>P0/P1/P2、接入/不接入结论明确。</li>
+            <li>来源、真实上游、函数、字段、单位、历史、许可和限流有记录。</li>
+            <li>三类数据粒度、唯一键、空值和修订语义完整。</li>
+            <li>2024 披露断点和未来函数防护可执行。</li>
+            <li>技术门禁与非技术风险分离，四要素完整。</li>
+            <li>本地链接、外部引用、访问日期和待决项完整。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>未来实现验收（计划执行，未运行）</h3>
+          <ul class="checklist">
+            <li>固定 adapter fixture 覆盖断点前后与全部通道。</li>
+            <li>同分区双跑不新增 revision/dataVersion。</li>
+            <li>provider timeout、429、空响应、schema drift、DB 失败可恢复。</li>
+            <li>北向占位零不会成为真实数值。</li>
+            <li>knownAt/visibleAt 测试证明历史回补无未来可见性。</li>
+            <li>内部/公开 contract test、游标、ETag、503/409 路径通过。</li>
+            <li>Docker Ruff、Pyright、pytest、架构测试、迁移和两服务构建通过。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3>11.4 数据量与查询假设</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>数据集</th>
+              <th>粗略年增量</th>
+              <th>主要查询</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>通道日统计</td>
+              <td>约 4 × 240 ≈ 960 facts + revisions</td>
+              <td>方向/通道日期序列</td>
+              <td>低容量，高语义风险</td>
+            </tr>
+            <tr>
+              <td>前十大证券</td>
+              <td>约 4 × 10 × 240 ≈ 9,600 facts</td>
+              <td>单日榜单、单证券历史</td>
+              <td>身份与复合索引关键</td>
+            </tr>
+            <tr>
+              <td>南向日频持股</td>
+              <td>若两路各 500–1,000 证券，约 24–48 万 facts</td>
+              <td>单证券时间序列、单日横截面</td>
+              <td>估算，需真实样本校准</td>
+            </tr>
+            <tr>
+              <td>北向季度持股</td>
+              <td>若两市场合计 3,000 证券，约 1.2 万 facts</td>
+              <td>季度横截面、证券历史</td>
+              <td>估算，频率低但 visible time 关键</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>11.5 未决事项</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>未决问题</th>
+              <th>负责人</th>
+              <th>决定触发点</th>
+              <th>当前安全默认</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>SSE/SZSE 官方页面是否提供稳定、获授权的机器接口或下载文件？</td>
+              <td>data-sync 来源研究 + 数据治理</td>
+              <td>P0 source contract 冻结</td>
+              <td>只做低频 shadow，不宣布生产可用</td>
+            </tr>
+            <tr>
+              <td>HKEX 历史产品完整起点、文件 schema、修订与再分发范围？</td>
+              <td>数据治理</td>
+              <td>P1 历史回补前</td>
+              <td>历史 coverage 明示缺口</td>
+            </tr>
+            <tr>
+              <td>南向两路持股能否在消费者层求和？</td>
+              <td>数据质量 + 量化研究</td>
+              <td>首次汇总因子设计</td>
+              <td>通道独立，不提供聚合</td>
+            </tr>
+            <tr>
+              <td>港股统一证券身份、退市与代码复用模型如何定义？</td>
+              <td>canonical data model 方案</td>
+              <td>P1 持股实现前</td>
+              <td>不能唯一解析即 quarantine</td>
+            </tr>
+            <tr>
+              <td>来源只给披露日期、不提供精确时间时如何表达？</td>
+              <td>canonical data model 方案</td>
+              <td>时间字段 DDL 冻结</td>
+              <td>source_published_at 为空，visible_at 取 observed_at</td>
+            </tr>
+            <tr>
+              <td>月/年官方汇总是否作为独立 source fact 保存？</td>
+              <td>数据产品 + 数据质量</td>
+              <td>P0 消费合同冻结</td>
+              <td>保存独立方法学，不覆盖日频内部聚合</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="references">
+      <h2>12. 引用、关联资料与访问日期</h2>
+
+      <h3>12.1 官方与 AKShare 资料</h3>
+      <ol>
+        <li>
+          <a href="https://www.sse.com.cn/lawandrules/sselawsrules2025/global/hkexsc/c/c_20250613_10781806.shtml">
+            上交所：关于沪港通交易信息披露机制调整相关事项的通知
+          </a>
+          — 2024-07-26 发布，2024-08-19 起执行；访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.szse.cn/szhk/hkbussiness/news/t20240726_608353.html">
+            深交所：关于深港通交易信息披露机制调整相关事项的通知
+          </a>
+          — 访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.hkex.com.hk/News/Market-Communications/2024/2404122news?sc_lang=en">
+            HKEX、SSE、SZSE：Stock Connect 市场数据披露调整计划
+          </a>
+          — 访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.hkex.com.hk/-/media/HKEX-Market/Services/Circulars-and-Notices/Participant-and-Members-Circulars/HKSCC/2024/ce_HKSCC_NOM_217_2024.pdf">
+            HKEX：2024 年披露调整剩余项目实施通告
+          </a>
+          — 说明 2024-05-13 与 2024-08-19 两阶段；访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.hkex.com.hk/mutual-market/stock-connect/reference-materials/trading-hour%2C-trading-and-settlement-calendar?sc_lang=en">
+            HKEX：Stock Connect 交易时段、交易与结算日历
+          </a>
+          — 访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.hkex.com.hk/-/media/HKEX-Market/Mutual-Market/Stock-Connect/Reference-Materials/Trading-Calendar-Enhancement-for-Stock-Connect/FAQ-for-Trading-Calendar-Enhancement-for-Stock-Connect.pdf">
+            HKEX：Stock Connect 交易日历增强 FAQ
+          </a>
+          — 2023-04-24 生效；访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.hkex.com.hk/-/media/HKEX-Market/Services/Market-Data-Services/Infrastructure/HKEX-Orion-Market-Data-Platform-Securities-Market-OMD-C/HKEX_OMDC_Binary_Interface_Specifications_v1%2C-d-%2C39a.pdf">
+            HKEX：OMD-C Binary Interface Specifications
+          </a>
+          — 用于核对互联互通统计字段、币种与不可用值语义；访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.hkex.com.hk/Mutual-Market/Stock-Connect/Statistics/Historical-Daily?sc_lang=en">
+            HKEX：Stock Connect Historical Daily
+          </a>
+          — 访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.hkex.com.hk/eng/ods/historicalData.aspx">
+            HKEX Historical Data Products
+          </a>
+          — Stock Connect 日/月历史产品与价格入口；访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/services/hkexsc/hgtscsj/hgtcjgk/">
+            上交所：沪股通成交概况
+          </a>
+          — 访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/services/hkexsc/hgtscsj/hgtcjhyzq/">
+            上交所：沪股通成交活跃证券
+          </a>
+          — 访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/services/hkexsc/hgtscsj/hgtzqcysl/">
+            上交所：沪股通证券持有数量
+          </a>
+          — 页面注明季度第 5 个沪股通交易日披露；访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/services/hkexsc/ggtscsj/ggtcjhyzq/">
+            上交所：港股通成交活跃证券
+          </a>
+          — 页面注明成交金额为港元；访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/services/hkexsc/ggtscsj/ggtzqcysl/">
+            上交所：港股通证券持有数量
+          </a>
+          — 访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.hkex.com.hk/News/News-Release/2014/141117news?sc_lang=en">
+            HKEX：沪港通于 2014-11-17 启动
+          </a>
+          — 访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.hkex.com.hk/News/News-Release/2016/161205news?sc_lang=en">
+            HKEX：深港通于 2016-12-05 启动
+          </a>
+          — 访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://akshare.akfamily.xyz/data/stock/stock.html">
+            AKShare 股票数据：沪深港通资金流向与持股函数
+          </a>
+          — 在线文档访问日期 2026-07-28；仓库固定版本为 1.18.78。
+        </li>
+        <li>
+          <a href="https://akshare.akfamily.xyz/introduction.html">
+            AKShare 项目概览与风险提示
+          </a>
+          — 访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://akshare.akfamily.xyz/special.html">
+            AKShare 特别说明
+          </a>
+          — 明示学术研究与商业用途边界；访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/home/legal/">上交所法律声明</a>
+          — 访问日期 2026-07-28。
+        </li>
+        <li>
+          <a href="https://www.szse.cn/application/register/protocol/">深交所用户服务协议</a>
+          — 访问日期 2026-07-28。
+        </li>
+      </ol>
+
+      <h3>12.2 仓库关联资料</h3>
+      <ul>
+        <li>
+          <a href="../0008-akshare-b06-initial-research/index.html">
+            0008：AKShare B06 资金流与特殊交易首轮调研
+          </a>
+        </li>
+        <li>
+          <a href="../0010-akshare-round2-verification/index.html">
+            0010：AKShare 第二轮独立验证汇总
+          </a>
+        </li>
+        <li>
+          <a href="../0014-equity-instrument-master/index.html">
+            0014：A 股证券主数据与上市生命周期
+          </a>
+        </li>
+        <li>
+          <a href="../0017-daily-money-flow/index.html">
+            0017：日频资金流向
+          </a>
+        </li>
+        <li>
+          <a href="../0018-sqlalchemy-orm-persistence-models/index.html">
+            0018：SQLAlchemy ORM 全量迁移
+          </a>
+        </li>
+        <li>
+          <a href="../../decisions/0002-data-sync-ownership-and-access.md">
+            ADR-0002：同步数据所有权与读取边界
+          </a>
+        </li>
+        <li>
+          <a href="../../decisions/0004-market-data-provider-adapters.md">
+            ADR-0004：多数据源适配与路由
+          </a>
+        </li>
+        <li>
+          <a href="../../decisions/0013-equity-instrument-identity-lifecycle.md">
+            ADR-0013：证券身份、生命周期与跨服务读取边界
+          </a>
+        </li>
+        <li>
+          <a href="../../decisions/0018-service-api-post-only-http-method.md">
+            ADR-0018：service-api 入站路由仅允许 POST
+          </a>
+        </li>
+        <li>
+          <a href="../../contracts/0015-data-sync-daily-money-flow-internal.openapi.yaml">
+            现有 data-sync 日频资金流内部契约
+          </a>
+        </li>
+        <li>
+          <a href="../../contracts/0016-service-api-daily-money-flow.openapi.yaml">
+            现有 service-api 日频资金流公开契约
+          </a>
+        </li>
+        <li>
+          <a href="../../contracts/0009-data-sync-equity-instrument-internal.openapi.yaml">
+            现有证券身份内部契约
+          </a>
+        </li>
+        <li><a href="../../../service-data-sync/README.md">service-data-sync README</a></li>
+        <li><a href="../../../service-api/README.md">service-api README</a></li>
+      </ul>
+
+      <aside class="callout">
+        <strong>文档级验证范围</strong>
+        本方案只新增本文档。固定 AKShare 1.18.78 已执行签名与小样本只读探针；
+        未运行实现测试、数据库迁移、服务构建或外部生产确认，均在实施阶段按验收计划执行。
+      </aside>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      0022 沪深港通市场数据技术方案 · Proposed ·
+      变更摘要：完成官方披露制度、固定 AKShare 探针、领域模型、同步恢复、质量、API 消费与门禁调研。
+    </div>
+  </footer>
+</body>
+</html>

@@ -8,11 +8,77 @@ from service_data_sync.infrastructure.database.models.registry import ALL_MODELS
 def test_registry_explicitly_exposes_every_logical_business_table() -> None:
     """保证维护者只需查看显式 registry 即可发现全部逻辑业务表。"""
     expected_tables = {
+        "canonical_dataset",
+        "data_source",
+        "source_dataset",
+        "methodology_version",
+        "raw_payload_manifest",
+        "normalization_run",
+        "normalized_record_manifest",
+        "quality_evaluation",
+        "quality_result",
+        "quarantine_record",
+        "dataset_release",
+        "canonical_checkpoint",
+        "canonical_record_lineage",
+        "index_definition",
+        "index_catalog_observation",
+        "index_catalog_observation_item",
+        "index_observed_snapshot",
+        "index_observed_snapshot_item",
+        "trading_venue",
+        "market_entity",
+        "market_instrument",
+        "instrument_identifier_version",
+        "instrument_lifecycle_version",
+        "market_entity_relation_version",
+        "market_calendar_day",
+        "market_session_version",
+        "fund_legal_entity",
+        "fund_share_class",
+        "etf_listing",
+        "derivative_product",
+        "derivative_contract",
+        "derivative_contract_revision",
+        "derivative_daily_bar_revision",
+        "disclosure_document",
+        "disclosure_document_relation",
+        "business_composition_report_revision",
+        "business_composition_line",
+        "business_composition_label_version",
+        "corporate_event",
+        "corporate_event_revision",
+        "corporate_earnings_value",
+        "restricted_unlock_lot",
+        "share_capital_component",
+        "shareholder_holding_action",
+        "dragon_tiger_event_revision",
+        "dragon_tiger_seat_item",
+        "block_trade_execution_revision",
+        "trading_disclosure_reason_map_version",
+        "etf_profile_version",
+        "etf_tracking_relation_version",
+        "etf_daily_bar_revision",
+        "etf_nav_revision",
+        "etf_share_revision",
+        "etf_status_revision",
+        "etf_action_version",
+        "etf_premium_revision",
+        "margin_market_daily_revision",
+        "margin_security_daily_revision",
+        "margin_eligibility_revision",
+        "margin_system_risk_daily_revision",
+        "stock_connect_disclosure_regime",
+        "stock_connect_channel_daily_revision",
+        "stock_connect_active_security_revision",
+        "stock_connect_holding_snapshot",
+        "stock_connect_holding_item",
         "source_batch",
         "sync_run",
         "sync_partition",
         "dataset_publication",
         "dataset_publication_component",
+        "dataset_availability_observation",
         "data_quality_issue",
         "equity_instrument",
         "equity_identifier_version",
@@ -85,6 +151,147 @@ def test_registry_explicitly_exposes_every_logical_business_table() -> None:
     assert len(ALL_MODELS) == len(expected_tables)
     assert {model.__tablename__ for model in ALL_MODELS} == expected_tables
     assert set(Base.metadata.tables) == expected_tables
+
+
+def test_shared_lifecycle_models_preserve_legacy_compatibility_and_release_lineage() -> None:
+    """共享支撑表必须保留来源、质量、release 和既有表的 additive 兼容关联。"""
+    source_batch = Base.metadata.tables["source_batch"]
+    publication = Base.metadata.tables["dataset_publication"]
+    release = Base.metadata.tables["dataset_release"]
+    lineage = Base.metadata.tables["canonical_record_lineage"]
+
+    assert source_batch.c.source_dataset_id.nullable is True
+    assert publication.c.release_id.nullable is True
+    assert {foreign_key.target_fullname for foreign_key in source_batch.foreign_keys} >= {
+        "source_dataset.source_dataset_id"
+    }
+    assert {foreign_key.target_fullname for foreign_key in publication.foreign_keys} >= {
+        "dataset_release.release_id"
+    }
+    assert {foreign_key.target_fullname for foreign_key in release.foreign_keys} >= {
+        "canonical_dataset.dataset_id",
+        "methodology_version.methodology_version_id",
+        "normalization_run.normalization_run_id",
+    }
+    assert {foreign_key.target_fullname for foreign_key in lineage.foreign_keys} >= {
+        "dataset_release.release_id",
+        "raw_payload_manifest.raw_payload_id",
+        "source_batch.source_batch_id",
+    }
+    assert {index.name for index in publication.indexes} >= {"uq_dataset_publication_release"}
+
+
+def test_index_shadow_models_keep_observations_separate_from_pit_facts() -> None:
+    """指数 P0-A 表仅关联来源与规范化运行，缺失来源日期或交易所时不伪造事实。"""
+    snapshot = Base.metadata.tables["index_observed_snapshot"]
+    item = Base.metadata.tables["index_observed_snapshot_item"]
+
+    assert snapshot.c.source_as_of_date.nullable is True
+    assert item.c.source_exchange.nullable is True
+    assert {foreign_key.target_fullname for foreign_key in snapshot.foreign_keys} >= {
+        "canonical_dataset.dataset_id",
+        "index_definition.index_id",
+        "normalization_run.normalization_run_id",
+        "source_batch.source_batch_id",
+    }
+    assert {constraint.name for constraint in snapshot.constraints} >= {
+        "ck_index_observed_snapshot_kind",
+        "ck_index_observed_snapshot_quality_status",
+    }
+    assert {constraint.name for constraint in item.constraints} >= {
+        "ck_index_observed_snapshot_item_weight"
+    }
+
+
+def test_market_identity_models_preserve_cross_asset_boundaries() -> None:
+    """市场根、可交易工具和新资产扩展必须保留双时间与资产域隔离。"""
+    entity = Base.metadata.tables["market_entity"]
+    instrument = Base.metadata.tables["market_instrument"]
+    identifier = Base.metadata.tables["instrument_identifier_version"]
+    contract = Base.metadata.tables["derivative_contract"]
+
+    assert {"entity_id", "entity_kind", "created_at", "retired_at"} == set(entity.c.keys())
+    assert {foreign_key.target_fullname for foreign_key in instrument.foreign_keys} >= {
+        "market_entity.entity_id",
+        "market_entity.entity_kind",
+        "trading_venue.venue_id",
+    }
+    assert {constraint.name for constraint in identifier.constraints} >= {
+        "ex_instrument_identifier_code_time",
+        "ex_instrument_identifier_entity_time",
+    }
+    assert {constraint.name for constraint in contract.constraints} >= {
+        "ck_derivative_contract_option_structure"
+    }
+
+
+def test_etf_models_keep_price_nav_and_state_semantics_separate() -> None:
+    """ETF 日行情、NAV、市场状态和折溢价必须分别建模并保留分区策略。"""
+    bar = Base.metadata.tables["etf_daily_bar_revision"]
+    nav = Base.metadata.tables["etf_nav_revision"]
+    status = Base.metadata.tables["etf_status_revision"]
+    premium = Base.metadata.tables["etf_premium_revision"]
+
+    assert bar.dialect_options["postgresql"]["partition_by"] == "RANGE (trade_date)"
+    assert nav.dialect_options["postgresql"]["partition_by"] == "RANGE (nav_date)"
+    assert {constraint.name for constraint in status.constraints} >= {"ex_etf_status_time"}
+    assert {constraint.name for constraint in premium.constraints} >= {
+        "ck_etf_premium_value_comparability"
+    }
+
+
+def test_margin_and_stock_connect_models_preserve_disclosure_boundaries() -> None:
+    """两融与沪深港通必须将来源统计、证券明细、制度和快照事实保持隔离。"""
+    margin_security = Base.metadata.tables["margin_security_daily_revision"]
+    regime = Base.metadata.tables["stock_connect_disclosure_regime"]
+    holding_item = Base.metadata.tables["stock_connect_holding_item"]
+
+    assert margin_security.dialect_options["postgresql"]["partition_by"] == "RANGE (trade_date)"
+    assert {constraint.name for constraint in margin_security.constraints} >= {
+        "ck_margin_security_repayment_source"
+    }
+    assert {constraint.name for constraint in regime.constraints} >= {
+        "ex_stock_connect_regime_time"
+    }
+    assert {foreign_key.target_fullname for foreign_key in holding_item.foreign_keys} >= {
+        "stock_connect_holding_snapshot.snapshot_date",
+        "stock_connect_holding_snapshot.snapshot_id",
+    }
+
+
+def test_equity_expansion_models_preserve_disclosure_event_and_trade_boundaries() -> None:
+    """主营、公司事件和交易公开信息必须保持各自的原始事实边界。"""
+    report = Base.metadata.tables["business_composition_report_revision"]
+    document_relation = Base.metadata.tables["disclosure_document_relation"]
+    event_revision = Base.metadata.tables["corporate_event_revision"]
+    dragon_tiger = Base.metadata.tables["dragon_tiger_event_revision"]
+    block_trade = Base.metadata.tables["block_trade_execution_revision"]
+
+    assert report.dialect_options["postgresql"]["partition_by"] == "RANGE (report_period)"
+    assert {constraint.name for constraint in document_relation.constraints} >= {
+        "ck_disclosure_document_relation_not_self"
+    }
+    assert {foreign_key.target_fullname for foreign_key in event_revision.foreign_keys} >= {
+        "corporate_event.event_id",
+        "disclosure_document.document_id",
+    }
+    assert dragon_tiger.dialect_options["postgresql"]["partition_by"] == "RANGE (trade_date)"
+    assert block_trade.dialect_options["postgresql"]["partition_by"] == "RANGE (trade_date)"
+
+
+def test_derivative_models_keep_real_contracts_and_reported_prices_separate() -> None:
+    """衍生品 P0 只保存真实合约及其日线，不把连续合约当作可交易合约。"""
+    contract_revision = Base.metadata.tables["derivative_contract_revision"]
+    daily_bar = Base.metadata.tables["derivative_daily_bar_revision"]
+
+    assert {constraint.name for constraint in contract_revision.constraints} >= {
+        "ex_derivative_contract_revision_time"
+    }
+    assert daily_bar.dialect_options["postgresql"]["partition_by"] == "RANGE (trade_date)"
+    assert {constraint.name for constraint in daily_bar.constraints} >= {
+        "ck_derivative_daily_bar_ohlc",
+        "ck_derivative_daily_bar_non_negative_position",
+    }
 
 
 def test_every_model_has_chinese_database_comments() -> None:

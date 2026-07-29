@@ -83,6 +83,10 @@ def test_reference_cli_runs_each_capability_and_closes_container(
         Mock(return_value=object()),
     )
     monkeypatch.setattr(equity_reference, "S3RawPayloadStore", Mock(return_value=object()))
+    # 入口组合测试不触及对象存储；留证语义由原始载荷存储的专用单元测试覆盖。
+    monkeypatch.setattr(
+        equity_reference, "retain_failure_evidence", lambda _store, operation: operation()
+    )
     monkeypatch.setattr(
         equity_reference,
         service_name,

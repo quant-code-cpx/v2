@@ -24,6 +24,17 @@
 - [0016：财务报表与估值技术方案](0016-financial-statements-valuation/index.html) — Implemented（AKShare 东财三表、报告期指标、历史估值、平台派生指标、raw evidence、双时态 revision、publication 与双层 API 已实现）
 - [0017：日频资金流向技术方案](0017-daily-money-flow/index.html) — Implemented（固定版本 AKShare 技术验证、方法学、同步、迁移和五条双层 API 已实现；未通过来源门禁的方法学保持 research 并 fail-closed）
 - [0018：同步服务 SQLAlchemy ORM 全量迁移技术方案](0018-sqlalchemy-orm-persistence-models/index.html) — Implemented
+- [0019：指数成分与权重数据接入技术方案](0019-index-constituents/index.html) — Proposed
+- [0020：ETF 市场数据接入技术方案](0020-etf-market-data/index.html) — Proposed
+- [0021：融资融券数据接入技术方案](0021-margin-trading/index.html) — Proposed
+- [0022：沪深港通数据接入技术方案](0022-stock-connect/index.html) — Proposed
+- [0023：上市公司主营构成数据接入技术方案](0023-business-composition/index.html) — Proposed
+- [0024：公司事件数据接入技术方案](0024-corporate-events/index.html) — Proposed
+- [0025：龙虎榜与大宗交易数据接入技术方案](0025-trading-events/index.html) — Proposed
+- [0026：期货与期权独立资产域技术方案](0026-derivatives/index.html) — Proposed
+- [0027：高价值市场数据 Canonical Model 与 PostgreSQL 设计](0027-canonical-data-model/index.html) — Proposed
+- [0028：data-sync 市场数据访问契约方案](0028-data-access-contract/index.html) — Proposed
+- [0029：高价值市场数据扩展路线图](0029-market-data-expansion-roadmap/index.html) — Proposed
 
 从 0011 开始，方案状态与实施完成度只由技术证据决定：AKShare 接口签名和返回事实、连续探针与 fixture、
 同步幂等和恢复、Declarative 模型与 migration、数据质量、内部读取以及 `service-api` 的 POST 公开契约。

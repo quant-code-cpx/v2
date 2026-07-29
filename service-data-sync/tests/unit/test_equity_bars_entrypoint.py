@@ -65,6 +65,10 @@ def test_cli_defaults_to_recent_month_and_closes_composition_root(monkeypatch, c
         equity_bars, "SqlAlchemyEquityMarketDataRepository", lambda _database: object()
     )
     monkeypatch.setattr(equity_bars, "S3RawPayloadStore", lambda _storage: object())
+    # 入口组合测试不触及对象存储；留证语义由原始载荷存储的专用单元测试覆盖。
+    monkeypatch.setattr(
+        equity_bars, "retain_failure_evidence", lambda _store, operation: operation()
+    )
     monkeypatch.setattr(equity_bars, "EquityDailyBarSyncService", FakeSyncService)
 
     assert equity_bars.main(["--instrument", "SSE.600519"]) == 0

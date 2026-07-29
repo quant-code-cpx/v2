@@ -80,6 +80,14 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env \
 前三条列表路由支持最长 1024 字符的不透明游标；游标与同一发布版本和查询范围绑定。机器契约见
 [`0019-service-api-equity-market-data.openapi.yaml`](../docs/contracts/0019-service-api-equity-market-data.openapi.yaml)。
 
+### 通用市场数据查询
+
+个人部署可通过认证后的 `POST /api/v1/market-data/query` 读取方案 0019–0029 已注册的 typed canonical dataset。
+它只代理到 data-sync 的内部 POST query，字段、筛选、时间范围、PIT 与分页仍由 data-sync 的严格 allowlist
+校验；不会直连同步数据库、对象存储或 AKShare。已注册 dataset 尚无 publication 或来源暂不可用时，响应为
+`200`、`records: []` 和 `meta.availability=SOURCE_UNAVAILABLE`，前端应正常显示空状态。完整边界见
+[ADR-0023](../docs/decisions/0023-personal-market-data-query-gateway.md)。
+
 方案 0012、0016、0017 的公开 POST 契约分别为：
 
 - [`0021-service-api-sw-sector.openapi.yaml`](../docs/contracts/0021-service-api-sw-sector.openapi.yaml)：3 条申万读取路径。

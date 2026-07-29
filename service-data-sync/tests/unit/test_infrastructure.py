@@ -156,6 +156,7 @@ def test_container_registers_sector_adapter_only_when_both_source_policies_are_e
     container.close()
 
     assert container.source_registry.provider_ids() == {
+        "akshare",
         "akshare-eastmoney-equity-catalog",
         "akshare-eastmoney-sector",
         "akshare-official-exchange-equity-lifecycle",
@@ -185,3 +186,25 @@ def test_registry_adds_equity_market_sources_only_with_explicit_capability_flag(
     assert {provider.provider_id for provider in registry.for_capability("equity.profile")} == {
         "akshare-cninfo-company-profile"
     }
+
+
+def test_registry_adds_csindex_shadow_adapter_only_with_explicit_policy(
+    configured_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """指数来源默认不注册；只有 AKShare 与固定中证策略同时开启才暴露影子能力。"""
+    monkeypatch.setenv("DATA_SYNC_AKSHARE_ENABLED", "true")
+    monkeypatch.setenv("DATA_SYNC_INDEX_ENABLED", "true")
+    monkeypatch.setenv("DATA_SYNC_INDEX_SOURCE_POLICY", "akshare-csindex-cnindex")
+
+    registry = container_module.build_source_registry(load_settings())
+
+    assert {
+        provider.provider_id for provider in registry.for_capability("index.catalog.snapshot")
+    } == {"akshare-csindex-index-snapshot", "akshare-cnindex-index-snapshot"}
+    assert {
+        provider.provider_id for provider in registry.for_capability("index.constituent.snapshot")
+    } == {"akshare-csindex-index-snapshot", "akshare-cnindex-index-snapshot"}
+    assert {
+        provider.provider_id for provider in registry.for_capability("index.weight.snapshot")
+    } == {"akshare-csindex-index-snapshot", "akshare-cnindex-index-snapshot"}

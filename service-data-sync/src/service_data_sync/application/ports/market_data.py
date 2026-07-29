@@ -1,4 +1,4 @@
-"""个股行情的持久化与原始证据端口，均不依赖具体数据源。"""
+"""个股行情持久化与仅失败留证端口，均不依赖具体数据源。"""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ class PublishedDailyBars:
 
 @dataclass(frozen=True, slots=True)
 class EquitySourceObservation:
-    """描述 raw evidence 已可靠归档后的标准来源观察。"""
+    """描述来源摘要及成功不留存或失败归档标记的标准观察。"""
 
     provider_id: str
     capability: str
@@ -68,6 +68,15 @@ class EquityDatasetPublication:
 
     data_version: UUID
     published_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class EquityAvailabilityObservation:
+    """表示不会产生 canonical 事实的同步结果，供读取方安全显示为空。"""
+
+    availability: str
+    reason_code: str
+    observed_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +124,7 @@ class EquityIdentityReadConflictError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class RawPayload:
-    """记录标准化数据持久化前必须保存的不可变原始证据。"""
+    """表示仅在同步失败时才会持久化的来源或标准化字节。"""
 
     object_key: str
     content_sha256: str
@@ -124,14 +133,14 @@ class RawPayload:
 
 
 class RawPayloadStore(Protocol):
-    """独立于适配器和标准表保存数据源证据。"""
+    """独立于适配器和标准表管理失败排障所需的来源字节。"""
 
     def put(self, payload: RawPayload) -> str:
-        """持久化一个不可变对象并返回其标准存储 URI。"""
+        """暂存来源字节并返回成功路径不可回放的摘要标记。"""
         ...
 
     def get(self, uri: str) -> bytes:
-        """读取服务自有 raw evidence，供受控 replay 恢复标准载荷。"""
+        """只读取失败时归档的服务私有证据，成功标记必须明确拒绝。"""
         ...
 
 
@@ -148,7 +157,32 @@ class EquityDailyBarRepository(Protocol):
         raw_uri: str,
         observed_at: datetime,
     ) -> PublishedDailyBars:
-        """原始证据可靠保存后，对标准日线进行版本化并发布。"""
+        """记录来源摘要和留证标记后，对标准日线进行版本化发布。"""
+        ...
+
+    def record_daily_bar_availability(
+        self,
+        *,
+        identifier: EquityIdentifier,
+        start: date,
+        end: date,
+        availability: str,
+        reason_code: str,
+        provider_id: str | None,
+        observed_at: datetime,
+    ) -> EquityAvailabilityObservation:
+        """记录空集或来源不可用，禁止写入缺少业务事实的日线行。"""
+        ...
+
+    def clear_daily_bar_availability(
+        self,
+        *,
+        identifier: EquityIdentifier,
+        start: date,
+        end: date,
+        cleared_at: datetime,
+    ) -> None:
+        """在同一窗口成功发布真实日线后，终结旧的非事实可用性观测。"""
         ...
 
 
@@ -236,6 +270,16 @@ class EquityMarketDataRepository(EquityDailyBarRepository, Protocol):
         instrument: StoredEquityInstrument,
     ) -> EquityDatasetPublication | None:
         """按永久证券分区返回当前发布，并受控兼容未发生代码复用的旧分区。"""
+        ...
+
+    def get_daily_bar_availability(
+        self,
+        *,
+        identifier: EquityIdentifier,
+        start: date,
+        end: date,
+    ) -> EquityAvailabilityObservation | None:
+        """返回精确请求窗口最近的空集或来源不可用观测。"""
         ...
 
     def list_bars(

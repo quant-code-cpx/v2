@@ -23,7 +23,11 @@ from service_data_sync.application.sector.eod_snapshot_sync import SectorEodSnap
 from service_data_sync.bootstrap.container import build_container
 from service_data_sync.bootstrap.settings import Settings
 from service_data_sync.domain.sector import SectorScheme
-from service_data_sync.infrastructure.object_storage.raw_payload_store import S3RawPayloadStore
+from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    FailureEvidenceDataSource,
+    S3RawPayloadStore,
+    retain_failure_evidence,
+)
 from service_data_sync.infrastructure.persistence.sector_eod_repository import (
     SqlAlchemySectorEodRepository,
 )
@@ -124,10 +128,11 @@ def register_sector_eod_tasks(app: Celery, *, settings: Settings) -> None:
             if len(providers) != 1:
                 raise RuntimeError("exactly one approved sector-eod provider must be enabled")
             repository = SqlAlchemySectorEodRepository(container.database)
+            raw_payload_store = S3RawPayloadStore(container.object_storage)
             service = SectorEodSnapshotSyncService(
-                source=providers[0],
+                source=FailureEvidenceDataSource(providers[0], raw_payload_store),
                 repository=repository,
-                raw_payload_store=S3RawPayloadStore(container.object_storage),
+                raw_payload_store=raw_payload_store,
                 trading_calendar=container.trading_calendar,
             )
             replayed = repository.has_archived_observation(
@@ -149,13 +154,17 @@ def register_sector_eod_tasks(app: Celery, *, settings: Settings) -> None:
                 replayed=replayed,
             )
             operation = service.replay if replayed else service.sync
-            result = asyncio.run(
-                operation(
-                    scheme=scheme,
-                    trade_date=trade_date,
-                    source_cutoff_at=sector_eod_source_cutoff_at(trade_date),
-                    execution_mode=execution_mode,
-                )
+            result = retain_failure_evidence(
+                raw_payload_store,
+                # 失败时归档本分区来源字节；成功发布不留下双份对象。
+                lambda: asyncio.run(
+                    operation(
+                        scheme=scheme,
+                        trade_date=trade_date,
+                        source_cutoff_at=sector_eod_source_cutoff_at(trade_date),
+                        execution_mode=execution_mode,
+                    )
+                ),
             )
             _LOGGER.info(
                 "sector_eod.run_completed",

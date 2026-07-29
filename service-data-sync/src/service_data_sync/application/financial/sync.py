@@ -117,7 +117,7 @@ class FinancialSyncService:
         )
 
     def _archive(self, batch: ProviderBatch) -> FinancialSourceObservation:
-        """先持久化原始证据，再将其摘要和血缘交给 canonical 写入事务。"""
+        """暂存来源字节并将摘要和血缘交给 canonical 写入；仅失败时固化证据。"""
         raw_payload = batch.raw_payload if batch.raw_payload is not None else batch.payload
         raw_digest = hashlib.sha256(raw_payload).hexdigest()
         raw_uri = self._raw_payload_store.put(

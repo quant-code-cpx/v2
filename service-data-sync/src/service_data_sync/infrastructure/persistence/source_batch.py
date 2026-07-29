@@ -30,6 +30,7 @@ def record_source_observation(
     upstream_source: str | None = None,
     adapter_version: str = _UNVERSIONED_ADAPTER,
     schema_fingerprint: str | None = None,
+    source_dataset_id: UUID | None = None,
     run_id: UUID | None = None,
     partition_key: str | None = None,
 ) -> UUID:
@@ -56,6 +57,7 @@ def record_source_observation(
             upstream_source=upstream_source or provider_id,
             adapter_version=adapter_version,
             schema_fingerprint=resolved_schema_fingerprint,
+            source_dataset_id=source_dataset_id,
             run_id=run_id,
             partition_key=partition_key,
         )
@@ -101,6 +103,7 @@ def record_source_observation(
                 "source_batch_id",
                 "provider_id",
                 "capability",
+                "source_dataset_id",
                 "payload_sha256",
                 "raw_uri",
                 "observed_at",
@@ -116,6 +119,7 @@ def record_source_observation(
                 literal(source_batch_id),
                 literal(provider_id),
                 literal(capability),
+                literal(source_dataset_id),
                 literal(source_payload_sha256),
                 literal(raw_uri),
                 literal(observed_at),
@@ -146,6 +150,7 @@ def _record_in_existing_partition(
     upstream_source: str,
     adapter_version: str,
     schema_fingerprint: str,
+    source_dataset_id: UUID | None,
     run_id: UUID,
     partition_key: str,
 ) -> UUID:
@@ -164,6 +169,7 @@ def _record_in_existing_partition(
             source_batch_id=source_batch_id,
             provider_id=provider_id,
             capability=capability,
+            source_dataset_id=source_dataset_id,
             payload_sha256=source_payload_sha256,
             raw_uri=raw_uri,
             observed_at=observed_at,

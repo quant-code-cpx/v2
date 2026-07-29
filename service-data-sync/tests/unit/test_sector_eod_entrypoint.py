@@ -99,6 +99,10 @@ def test_cli_requires_enabled_policy_and_closes_container(monkeypatch, capsys) -
     monkeypatch.setattr(sector_eod, "build_container", fake_build_container)
     monkeypatch.setattr(sector_eod, "SqlAlchemySectorEodRepository", fake_repository)
     monkeypatch.setattr(sector_eod, "S3RawPayloadStore", fake_raw_store)
+    # 入口组合测试不触及对象存储；留证语义由原始载荷存储的专用单元测试覆盖。
+    monkeypatch.setattr(
+        sector_eod, "retain_failure_evidence", lambda _store, operation: operation()
+    )
     monkeypatch.setattr(sector_eod, "SectorEodSnapshotSyncService", FakeSyncService)
 
     assert sector_eod.main(["--scheme", "eastmoney.industry", "--trade-date", "2026-07-27"]) == 0

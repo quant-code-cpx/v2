@@ -7,6 +7,7 @@ import { EquityInstrumentClient } from '../clients/equity-instrument.client.js';
 import { EquityMarketDataClient } from '../clients/equity-market-data.client.js';
 import { FinancialDataClient } from '../clients/financial-data.client.js';
 import { MoneyFlowClient } from '../clients/money-flow.client.js';
+import { MarketDataAccessClient } from '../clients/market-data-access.client.js';
 import { SectorMarketDataClient } from '../clients/sector-market-data.client.js';
 import { SwSectorClient } from '../clients/sw-sector.client.js';
 import { DataSyncModule } from '../data-sync.module.js';
@@ -23,6 +24,7 @@ describe('DataSyncModule', () => {
     expect(moduleReference.get(EquityMarketDataClient)).toBeInstanceOf(EquityMarketDataClient);
     expect(moduleReference.get(FinancialDataClient)).toBeInstanceOf(FinancialDataClient);
     expect(moduleReference.get(MoneyFlowClient)).toBeInstanceOf(MoneyFlowClient);
+    expect(moduleReference.get(MarketDataAccessClient)).toBeInstanceOf(MarketDataAccessClient);
     expect(moduleReference.get(SectorMarketDataClient)).toBeInstanceOf(SectorMarketDataClient);
     expect(moduleReference.get(SwSectorClient)).toBeInstanceOf(SwSectorClient);
 

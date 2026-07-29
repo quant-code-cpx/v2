@@ -163,8 +163,10 @@ def test_sw_run_and_replay_close_short_lived_infrastructure(
         database: object,
         object_storage: object,
         replay_only: bool = False,
+        raw_payload_store: object | None = None,
     ) -> FakeSyncService:
         """断言资源已注入并返回可同步或 replay 的服务。"""
+        del raw_payload_store
         assert database in resources and object_storage in resources
         assert replay_only in {True, False}
         service = FakeSyncService()

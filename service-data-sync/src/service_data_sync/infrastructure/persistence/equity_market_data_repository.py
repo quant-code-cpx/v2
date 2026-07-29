@@ -12,9 +12,11 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import Select, func, insert, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.orm import Session
 
 from service_data_sync.application.ports.market_data import (
+    EquityAvailabilityObservation,
     EquityDatasetPublication,
     EquityIdentityReadConflictError,
     EquityMarketDataRepository,
@@ -64,6 +66,9 @@ from ..database.models.equity.market_data.equity_daily_bar import (
 from ..database.models.equity.market_data.equity_monthly_bar import EquityMonthlyBar
 from ..database.models.equity.market_data.equity_sync_checkpoint import EquitySyncCheckpoint
 from ..database.models.equity.market_data.equity_weekly_bar import EquityWeeklyBar
+from ..database.models.publication.dataset_availability_observation import (
+    DatasetAvailabilityObservation,
+)
 from ..database.models.publication.dataset_publication import DatasetPublication
 
 _DAILY_DATASET = "equity.bar.1d.raw"
@@ -82,6 +87,13 @@ def _security_partition_key(security_id: int) -> str:
     if security_id <= 0:
         raise ValueError("security_id must be positive")
     return f"security:{security_id}"
+
+
+def _availability_partition_key(identifier: EquityIdentifier, start: date, end: date) -> str:
+    """把无身份事实窗口编码为精确查询分区，避免空观测跨日期误用。"""
+    if start > end:
+        raise ValueError("start must not be after end")
+    return f"{identifier.qualified_symbol}:{start.isoformat()}:{end.isoformat()}"
 
 
 def _current_publication_statement(
@@ -172,6 +184,88 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
             unchanged_count=unchanged_count,
             instrument=instrument,
         )
+
+    def record_daily_bar_availability(
+        self,
+        *,
+        identifier: EquityIdentifier,
+        start: date,
+        end: date,
+        availability: str,
+        reason_code: str,
+        provider_id: str | None,
+        observed_at: datetime,
+    ) -> EquityAvailabilityObservation:
+        """持久化单窗口空集或来源不可用，不创建任何虚构日线事实。"""
+        if availability not in {"empty", "source_unavailable"}:
+            raise ValueError("daily-bar availability is invalid")
+        if observed_at.tzinfo is None:
+            raise ValueError("observed_at must include a timezone")
+        partition_key = _availability_partition_key(identifier, start, end)
+        with self._database.transaction() as connection:
+            # 同一请求窗口只保留一个当前观测；历史用于诊断，不参与读取选择。
+            connection.execute(
+                update(DatasetAvailabilityObservation)
+                .where(
+                    DatasetAvailabilityObservation.dataset == _DAILY_DATASET,
+                    DatasetAvailabilityObservation.partition_key == partition_key,
+                    DatasetAvailabilityObservation.superseded_at.is_(None),
+                )
+                .values(superseded_at=observed_at)
+            )
+            # 重试可能复用同一来源时间戳；以唯一键回写该观测，保证任务可安全重跑。
+            connection.execute(
+                postgresql_insert(DatasetAvailabilityObservation)
+                .values(
+                    observation_id=uuid4(),
+                    dataset=_DAILY_DATASET,
+                    partition_key=partition_key,
+                    availability=availability,
+                    reason_code=reason_code,
+                    provider_id=provider_id,
+                    observed_at=observed_at,
+                    superseded_at=None,
+                    detail=None,
+                )
+                .on_conflict_do_update(
+                    constraint="uq_dataset_availability_observation_time",
+                    set_={
+                        "availability": availability,
+                        "reason_code": reason_code,
+                        "provider_id": provider_id,
+                        "superseded_at": None,
+                        "detail": None,
+                    },
+                )
+            )
+        return EquityAvailabilityObservation(
+            availability=availability,
+            reason_code=reason_code,
+            observed_at=observed_at,
+        )
+
+    def clear_daily_bar_availability(
+        self,
+        *,
+        identifier: EquityIdentifier,
+        start: date,
+        end: date,
+        cleared_at: datetime,
+    ) -> None:
+        """在日线真实发布后终结精确窗口的旧空集或来源不可用观测。"""
+        if cleared_at.tzinfo is None:
+            raise ValueError("cleared_at must include a timezone")
+        partition_key = _availability_partition_key(identifier, start, end)
+        with self._database.transaction() as connection:
+            connection.execute(
+                update(DatasetAvailabilityObservation)
+                .where(
+                    DatasetAvailabilityObservation.dataset == _DAILY_DATASET,
+                    DatasetAvailabilityObservation.partition_key == partition_key,
+                    DatasetAvailabilityObservation.superseded_at.is_(None),
+                )
+                .values(superseded_at=cleared_at)
+            )
 
     def get_instrument(self, instrument_id: UUID) -> StoredEquityInstrument | None:
         """按公开 UUID 读取一只证券，不关联供应商专有表。"""
@@ -644,6 +738,39 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         return EquityDatasetPublication(
             data_version=UUID(str(row["data_version"])),
             published_at=row["published_at"],
+        )
+
+    def get_daily_bar_availability(
+        self,
+        *,
+        identifier: EquityIdentifier,
+        start: date,
+        end: date,
+    ) -> EquityAvailabilityObservation | None:
+        """读取精确窗口当前的非事实观测，禁止把它当成 canonical publication。"""
+        partition_key = _availability_partition_key(identifier, start, end)
+        with self._database.session() as connection:
+            row = (
+                connection.execute(
+                    select(
+                        DatasetAvailabilityObservation.availability,
+                        DatasetAvailabilityObservation.reason_code,
+                        DatasetAvailabilityObservation.observed_at,
+                    ).where(
+                        DatasetAvailabilityObservation.dataset == _DAILY_DATASET,
+                        DatasetAvailabilityObservation.partition_key == partition_key,
+                        DatasetAvailabilityObservation.superseded_at.is_(None),
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+        if row is None:
+            return None
+        return EquityAvailabilityObservation(
+            availability=str(row["availability"]),
+            reason_code=str(row["reason_code"]),
+            observed_at=row["observed_at"],
         )
 
     def list_bars(

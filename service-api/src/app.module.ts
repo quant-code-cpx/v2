@@ -5,6 +5,7 @@ import { AuthModule } from './apps/auth/auth.module.js';
 import { AuditModule } from './apps/audit/audit.module.js';
 import { IndustryModule } from './apps/industry/industry.module.js';
 import { MoneyFlowModule } from './apps/market/money-flow.module.js';
+import { MarketDataAccessModule } from './apps/market/market-data-access.module.js';
 import { StockModule } from './apps/stock/stock.module.js';
 import { UserModule } from './apps/user/user.module.js';
 import { AppConfigModule } from './config/app-config.module.js';
@@ -31,6 +32,7 @@ import { RedisModule } from './shared/redis/redis.module.js';
     StockModule,
     IndustryModule,
     MoneyFlowModule,
+    MarketDataAccessModule,
   ],
 })
 export class AppModule {}

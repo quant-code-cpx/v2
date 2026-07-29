@@ -13,6 +13,10 @@ from service_data_sync.bootstrap.container import build_container
 from service_data_sync.bootstrap.logging import configure_logging
 from service_data_sync.bootstrap.settings import load_settings
 from service_data_sync.bootstrap.sw_sector import build_sw_sync_service
+from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    S3RawPayloadStore,
+    retain_failure_evidence,
+)
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -25,16 +29,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     container = build_container(settings)
     snapshot_date = arguments.snapshot_date or datetime.now(_SHANGHAI).date()
     try:
+        raw_payload_store = S3RawPayloadStore(container.object_storage)
         service = build_sw_sync_service(
             settings,
             database=container.database,
             object_storage=container.object_storage,
             replay_only=arguments.replay_raw,
+            raw_payload_store=raw_payload_store,
         )
-        result = (
-            service.replay(snapshot_date=snapshot_date)
-            if arguments.replay_raw
-            else asyncio.run(service.sync(snapshot_date=snapshot_date))
+        result = retain_failure_evidence(
+            raw_payload_store,
+            # 成功释放来源字节；同步或解码失败时才归档本次申万响应。
+            lambda: (
+                service.replay(snapshot_date=snapshot_date)
+                if arguments.replay_raw
+                else asyncio.run(service.sync(snapshot_date=snapshot_date))
+            ),
         )
     finally:
         container.close()

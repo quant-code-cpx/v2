@@ -1,0 +1,1141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="quant-v2 八类高价值市场数据的 canonical dataset、统一身份、PostgreSQL 物理表、迁移回滚与验收设计。">
+  <title>0027｜高价值市场数据 Canonical Model 与 PostgreSQL 设计（Proposed）</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink:#172033; --muted:#667085; --line:#dce3ec; --surface:#f6f8fb;
+      --accent:#3157d5; --accent-soft:#eef2ff; --ok:#176b4d; --ok-soft:#eaf7f1;
+      --warn:#8a4b08; --warn-soft:#fff5df; --bad:#a1392f; --bad-soft:#fff0ee;
+      --radius:13px; --shadow:0 10px 28px rgb(23 32 51 / 7%);
+    }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body {
+      margin:0; min-width:1200px; color:var(--ink); background:#fff;
+      font:15px/1.68 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
+        "Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    }
+    a { color:var(--accent); text-underline-offset:.2em; }
+    a:focus-visible { outline:3px solid rgb(49 87 213 / 28%); outline-offset:3px; }
+    code {
+      padding:.08em .32em; border-radius:4px; background:#eef1f6; color:#293d78;
+      font:.89em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      overflow-wrap:anywhere;
+    }
+    .shell { width:1120px; margin:0 auto; }
+    header {
+      padding:46px 0 32px; border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg,var(--surface),#fff);
+    }
+    .eyebrow,.label {
+      color:var(--accent); font-size:.76rem; font-weight:800;
+      letter-spacing:.1em; text-transform:uppercase;
+    }
+    h1,h2,h3,h4 { line-height:1.28; letter-spacing:-.02em; }
+    h1 { max-width:960px; margin:8px 0 12px; font-size:3rem; }
+    h2 { margin:0 0 18px; font-size:1.92rem; }
+    h3 { margin:24px 0 8px; font-size:1.12rem; }
+    h4 { margin:18px 0 6px; font-size:.98rem; }
+    p { max-width:92ch; }
+    .lede { max-width:920px; color:var(--muted); font-size:1.08rem; }
+    .meta,.grid { display:grid; gap:13px; }
+    .meta { grid-template-columns:repeat(5,minmax(0,1fr)); margin-top:24px; }
+    .grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+    .grid.two { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .meta div,.card {
+      min-width:0; padding:16px; border:1px solid var(--line); border-radius:var(--radius);
+      background:#fff;
+    }
+    .meta div { padding:11px 13px; }
+    .meta dt { color:var(--muted); font-size:.76rem; }
+    .meta dd { margin:3px 0 0; font-weight:730; }
+    .status { color:var(--warn); }
+    .card { box-shadow:var(--shadow); }
+    .card h3 { margin-top:0; }
+    nav {
+      position:sticky; top:0; z-index:10; overflow-x:auto;
+      border-bottom:1px solid var(--line); background:rgb(255 255 255 / 95%);
+      backdrop-filter:blur(10px);
+    }
+    nav ul {
+      display:flex; gap:17px; width:max-content; margin:0; padding:11px 0;
+      list-style:none;
+    }
+    nav a { color:var(--muted); font-size:.8rem; font-weight:750; text-decoration:none; }
+    main { padding:16px 0 66px; }
+    section { padding:42px 0; border-bottom:1px solid var(--line); scroll-margin-top:52px; }
+    .callout {
+      margin:17px 0; padding:16px 19px; border-left:4px solid var(--accent);
+      border-radius:0 var(--radius) var(--radius) 0; background:var(--accent-soft);
+    }
+    .callout.ok { border-left-color:var(--ok); background:var(--ok-soft); }
+    .callout.warn { border-left-color:var(--warn); background:var(--warn-soft); }
+    .callout.bad { border-left-color:var(--bad); background:var(--bad-soft); }
+    .callout strong { display:block; margin-bottom:4px; }
+    .table-wrap {
+      max-width:100%; margin:13px 0 19px; overflow-x:auto;
+      border:1px solid var(--line); border-radius:var(--radius);
+    }
+    table { width:100%; min-width:920px; border-collapse:collapse; font-size:.84rem; }
+    table.wide { min-width:1320px; }
+    th,td {
+      padding:10px 11px; border-bottom:1px solid var(--line);
+      text-align:left; vertical-align:top;
+    }
+    th { background:var(--surface); font-size:.78rem; white-space:nowrap; }
+    tr:last-child td { border-bottom:0; }
+    pre {
+      overflow-x:auto; padding:18px; border:1px solid #263247; border-radius:var(--radius);
+      color:#e5e7eb; background:#111827;
+      font:.82rem/1.62 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    }
+    pre code { padding:0; color:inherit; background:transparent; }
+    .tag {
+      display:inline-block; margin-right:5px; padding:2px 7px; border-radius:99px;
+      font-size:.71rem; font-weight:800; white-space:nowrap;
+    }
+    .fact { color:#245e8d; background:#e9f2fa; }
+    .decision { color:var(--ok); background:var(--ok-soft); }
+    .assumption { color:var(--warn); background:var(--warn-soft); }
+    .open { color:var(--bad); background:var(--bad-soft); }
+    .small,.muted { color:var(--muted); font-size:.88rem; }
+    ul,ol { padding-left:1.25rem; }
+    li + li { margin-top:5px; }
+    footer { padding:26px 0 42px; color:var(--muted); font-size:.82rem; }
+    @media print {
+      @page { size:A4 landscape; margin:10mm; }
+      body { min-width:0; font-size:9pt; }
+      nav { display:none; }
+      header,main,section { padding-top:14px; }
+      .shell { width:100%; }
+      .card { box-shadow:none; break-inside:avoid; }
+      .table-wrap { overflow:visible; }
+      table,table.wide { min-width:0; font-size:6.8pt; }
+      th,td { padding:4px 5px; }
+      pre { white-space:pre-wrap; color:#111; background:#fff; }
+      a { color:inherit; text-decoration:none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Technical solution · service-data-sync · 0027</p>
+      <h1>高价值市场数据 Canonical Model 与 PostgreSQL 物理设计</h1>
+      <p class="lede">
+        统一指数、ETF、融资融券、沪深港通、主营构成、公司事件、交易事件和衍生品八个专题。
+        推荐采用“共享身份与数据生命周期支撑层 + 强类型领域表 + 不可变 release +
+        可回退 publication”结构；来源、方法学、粒度、时间精度不同的数据不共用事实表，也不静默补洞。
+      </p>
+      <dl class="meta">
+        <div><dt>状态</dt><dd class="status">Proposed</dd></div>
+        <div><dt>日期</dt><dd>2026-07-28</dd></div>
+        <div><dt>数据库</dt><dd>PostgreSQL 17 · SQLAlchemy 2</dd></div>
+        <div><dt>范围</dt><dd>逻辑/物理设计与迁移计划</dd></div>
+        <div><dt>实现</dt><dd>已实现共享 canonical 模型、additive migrations、不可变 release 与 publication；历史数据回填按独立门禁执行。</dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">结论</a></li>
+        <li><a href="#scope">边界</a></li>
+        <li><a href="#map">域地图</a></li>
+        <li><a href="#identity">身份日历</a></li>
+        <li><a href="#support">支撑表</a></li>
+        <li><a href="#temporal">时态版本</a></li>
+        <li><a href="#domains">领域表</a></li>
+        <li><a href="#ddl">DDL</a></li>
+        <li><a href="#write">写入恢复</a></li>
+        <li><a href="#capacity">容量索引</a></li>
+        <li><a href="#migration">迁移回滚</a></li>
+        <li><a href="#gates">门禁验收</a></li>
+        <li><a href="#references">依据</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>1. 结论</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">问题</span>
+          <h3>新增专题会复制身份、时间和运行账本</h3>
+          <p>
+            八份专题各自需要来源、批次、raw、质量、修订、发布、证券/合约身份与 PIT。
+            若逐专题复制，会出现多个“当前证券”、多个 <code>data_version</code> 定义和无法统一恢复的 checkpoint。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">推荐</span>
+          <h3>共享支撑，事实强类型，发布不可变</h3>
+          <p>
+            保留当前 72 个 Declarative 模型和 13 个 Alembic revision，additive 新增共享根与领域表。
+            每个 release 固定方法学、来源批次、质量和内容哈希；publication 只移动指针，不原地改事实。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">最大风险</span>
+          <h3>“统一”变成静默混算</h3>
+          <p>
+            统一只覆盖身份引用、审计和生命周期协议，不抹平价格/NAV、汇总/明细、观察/生效、
+            reported/derived、期货真实合约/连续序列等语义差异。
+          </p>
+        </article>
+      </div>
+
+      <aside class="callout ok">
+        <strong>拟议决策</strong>
+        新增 <code>market_entity</code> 作为跨域引用根，并以 <code>market_instrument</code>
+        只表达可交易对象；同时保留
+        <code>equity_instrument.security_id</code> 及现有大表外键；现有
+        <code>equity_instrument.instrument_id</code> 原值成为根表 UUID。ETF、指数、期货、期权以领域扩展表承载，
+        不让期货/期权进入股票解析器。该选择为 Proposed，实施前应由独立身份 ADR 接受。
+      </aside>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>选择</th><th>结论</th><th>理由</th><th>拒绝项</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>数据库</td><td>延续 data-sync 独占 PostgreSQL</td>
+              <td>已有 SQLAlchemy/Alembic、双时态、分区和 publication 基线</td>
+              <td>service-api 直连；跨服务共享 schema</td>
+            </tr>
+            <tr>
+              <td>事实形态</td><td>强类型领域表 + 统一审计清单</td>
+              <td>金额、单位、空值、约束可由数据库验证</td>
+              <td>把供应商 JSONB 当 canonical；通用 EAV</td>
+            </tr>
+            <tr>
+              <td>版本</td><td>immutable release + mutable current pointer</td>
+              <td>幂等重放、稳定分页、回退和历史审计同时成立</td>
+              <td>原地 upsert 覆盖旧值；跨分页换版本</td>
+            </tr>
+            <tr>
+              <td>时间</td><td>事实时间、来源公开时间、平台观察、消费者可见、知识区间分开</td>
+              <td>阻断未来函数，保留迟到修订</td>
+              <td>用报告期/交易日代替可见时间</td>
+            </tr>
+            <tr>
+              <td>来源</td><td>一条序列绑定 source dataset + methodology version</td>
+              <td>Provider-neutral 不等于 methodology-neutral</td>
+              <td>主源缺失时跨来源逐格补洞</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="scope">
+      <h2>2. 目标、非目标、事实与假设</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>目标</h3>
+          <ul>
+            <li>八专题到 dataset、表、身份、时间和 publication 的唯一映射。</li>
+            <li>给出可落地 PostgreSQL 字段、类型、约束、索引和分区。</li>
+            <li>兼容当前 72 个 ORM 模型，不重写 13 个历史 revision。</li>
+            <li>提供 expand/backfill/switch/contract、回滚和验收 SQL。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>非目标</h3>
+          <ul>
+            <li>不选择或批准具体生产 Provider。</li>
+            <li>不创建 migration、ORM、任务、配置、OpenAPI 或 Docker 变更。</li>
+            <li>不冻结 data-sync → service-api 通信契约。</li>
+            <li>不承诺历史深度、SLA、采购或对外再分发权。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>硬边界</h3>
+          <ul>
+            <li>SDK、URL、供应商字段仅在 Adapter。</li>
+            <li>Adapter 不写 canonical；service-api 不读 data-sync DB。</li>
+            <li>Redis 不保存权威市场数据。</li>
+            <li>不同来源、方法学、粒度、币种、终态不可静默混算。</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>分类</th><th>内容</th><th>设计处理</th></tr></thead>
+          <tbody>
+            <tr><td><span class="tag fact">事实</span></td><td>当前 registry 明确登记 72 个模型；Alembic 有 13 个不可改写 revision。</td><td>只做 additive 迁移，schema 权威仍是 Declarative 当前态 + Alembic 演进历史。</td></tr>
+            <tr><td><span class="tag fact">事实</span></td><td><code>source_batch</code> 已保存 run、partition、raw URI、hash、observed、upstream、adapter 与 schema fingerprint。</td><td>保留并扩展；多页/多文件 raw 由新 manifest 一对多承接。</td></tr>
+            <tr><td><span class="tag fact">事实</span></td><td><code>dataset_publication</code> 已提供分区 current 唯一、dataVersion、quality、effectiveAsOf、knowledgeCutoff。</td><td>保留公开语义，新增 release FK，不另造竞争 publication。</td></tr>
+            <tr><td><span class="tag decision">建议</span></td><td>共享 root 只统一引用，不统一领域计算。</td><td>根表 + 领域子表；资产类别用 composite FK 校验。</td></tr>
+            <tr><td><span class="tag assumption">假设</span></td><td>PostgreSQL 17、<code>btree_gist</code>、对象存储继续可用。</td><td>实现前以空库升级和扩展权限验证；不满足则门禁 G1。</td></tr>
+            <tr><td><span class="tag open">待决</span></td><td>跨资产根身份是否接受、生产来源、保留期和精确分区阈值。</td><td>保持 Proposed；阈值由 pilot/压测校准，不阻断 DDL 评审。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="map">
+      <h2>3. 数据域地图与专题映射</h2>
+      <pre aria-label="数据域地图">service-data-sync PostgreSQL
+├─ shared control plane
+│  ├─ source / raw / normalization / quality / quarantine / checkpoint
+│  ├─ immutable dataset_release → dataset_publication → components
+│  └─ venue / calendar / market_entity / market_instrument / identifier / relation / lifecycle
+├─ index                 0019：目录、方法学、正式成分、观察快照、权重
+├─ fund.etf              0020：ETF 身份、行情、NAV、份额、状态、跟踪、折溢价
+├─ financing.margin      0021：交易所汇总、证券明细、资格、系统统计
+├─ connect               0022：通道统计、活跃证券、持股、披露制度
+├─ financial.composition 0023：报告修订、行业/产品/地区行、标签
+├─ corporate.event       0024：文档、事件、修订、分类型数值
+├─ trading.event         0025：龙虎榜、席位、大宗逐笔、原因映射
+└─ derivatives           0026：产品、合约、行情、期权、仓单/交割、连续序列
+
+consumer path：service-web → service-api → versioned data-sync boundary → publication/read repository
+禁止路径：service-api → data-sync DB；任意非 Adapter → Provider</pre>
+
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr><th>专题</th><th>Canonical dataset</th><th>共享依赖</th><th>领域主表</th><th>必须隔离</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>指数</td>
+              <td><code>index.catalog</code>、<code>index.constituent.membership.reported</code>、<code>index.constituent.snapshot.observed</code>、<code>index.weight.close.reported</code></td>
+              <td>instrument、calendar、source、methodology、release</td>
+              <td>index_definition、index_constituent_revision、index_weight_snapshot/item</td>
+              <td>正式生效 vs 当前观察；收盘权重 vs 目标权重；中证 vs 国证</td>
+            </tr>
+            <tr>
+              <td>ETF</td>
+              <td><code>fund.etf.profile</code>、<code>fund.etf.bar.1d.reported</code>、<code>fund.etf.nav.1d.reported</code>、<code>fund.etf.share.1d.reported</code>、<code>fund.etf.market_state</code>、<code>fund.etf.premium_discount.close.derived</code></td>
+              <td>instrument、venue/calendar、source、release</td>
+              <td>etf_fund_share、etf_*_revision</td>
+              <td>ETF vs LOF/REIT；price vs NAV vs IOPV；交易/申购/赎回状态</td>
+            </tr>
+            <tr>
+              <td>融资融券</td>
+              <td><code>market.margin.market.1d.reported</code>、<code>market.margin.instrument.1d.reported</code>、<code>market.margin.eligibility</code>、<code>market.margin.system_risk.1d.reported</code></td>
+              <td>equity identity、venue/calendar、release</td>
+              <td>margin_*_revision</td>
+              <td>官方市场汇总 vs 明细求和；直报偿还 vs 派生差分</td>
+            </tr>
+            <tr>
+              <td>沪深港通</td>
+              <td><code>market.stock_connect.market_stat.reported</code>、<code>market.stock_connect.active_security.snapshot</code>、<code>market.stock_connect.holding.snapshot</code></td>
+              <td>A/H instrument、connect calendar、methodology、release</td>
+              <td>stock_connect_*_revision/snapshot/item</td>
+              <td>北/南向、两通道、成交流量/额度/持股存量、2024 制度断点</td>
+            </tr>
+            <tr>
+              <td>主营构成</td>
+              <td><code>equity.business_composition.reported</code></td>
+              <td>equity identity、financial methodology、release</td>
+              <td>business_composition_report_revision/line</td>
+              <td>行业/产品/地区；主营构成 vs CAS 35 分部；reported vs derived</td>
+            </tr>
+            <tr>
+              <td>公司事件</td>
+              <td><code>disclosure.document</code>、<code>equity.corporate_event.&lt;family&gt;.reported</code></td>
+              <td>equity identity、calendar、raw、release</td>
+              <td>共享 source_document/version/link、corporate_event/revision、typed detail</td>
+              <td>计划/进展/结果；预告/快报/正式财报；事后收益全部排除</td>
+            </tr>
+            <tr>
+              <td>交易事件</td>
+              <td><code>equity.dragon_tiger.event.reported</code>、<code>equity.dragon_tiger.seat.reported</code>、<code>equity.block_trade.execution.reported</code></td>
+              <td>equity identity、venue/calendar、release</td>
+              <td>dragon_tiger_event_revision/seat_item、block_trade_execution_revision</td>
+              <td>龙虎榜 vs 大宗；逐笔重数；席位不等于投资者；未来表现排除</td>
+            </tr>
+            <tr>
+              <td>衍生品</td>
+              <td><code>derivative.contract</code>、<code>derivative.bar.1d.reported</code>、<code>derivative.option_risk.1d.reported</code>、<code>derivative.continuous.1d.derived</code>；option chain 仅为查询投影</td>
+              <td>instrument、venue/session calendar、methodology、release</td>
+              <td>derivative_product/contract/spec、daily_bar、option_metric、inventory/delivery、continuous</td>
+              <td>真实合约 vs 连续；close/settlement/delivery settlement；仓单/库存/持仓</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="identity">
+      <h2>4. 统一身份、生命周期与日历</h2>
+      <h3>4.1 统一根与领域扩展</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>表</th><th>用途</th><th>字段（类型；单位/空值）</th><th>键、约束与索引</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>market_entity</code></td>
+              <td>跨域不可变引用根；指数、法律基金、份额类、衍生品产品均可引用，不暗示可交易</td>
+              <td><code>entity_id uuid</code>；<code>entity_kind varchar(24)</code>；<code>created_at timestamptz</code>；<code>retired_at timestamptz null</code></td>
+              <td>PK entity_id；UK(entity_id,entity_kind)；CHECK kind ∈ EQUITY/ETF_LISTING/INDEX/FUND/FUND_SHARE/DERIVATIVE_PRODUCT/FUTURE/OPTION</td>
+            </tr>
+            <tr>
+              <td><code>market_instrument</code></td>
+              <td>只表达可在明确 venue 交易的对象；指数与法律基金不能进入</td>
+              <td><code>instrument_id uuid</code> PK/FK market_entity；<code>instrument_kind</code>；<code>primary_venue_id uuid null</code>；<code>tradable_from/to date null</code></td>
+              <td>FK(entity_id,kind)；CHECK kind ∈ EQUITY/ETF_LISTING/FUTURE/OPTION；指数只可作 underlying reference</td>
+            </tr>
+            <tr>
+              <td><code>instrument_identifier_version</code></td>
+              <td>ETF、指数和衍生品实体代码的双时态解析；股票迁移期仍由现表权威</td>
+              <td>version_id、entity_id、entity_kind、venue_id null、identifier_scheme、identifier_value、effective_from/to date、known_from/to timestamptz、precision、source_batch_id</td>
+              <td>PK；FK market_entity/source；GiST EXCLUDE 同标识及同 entity 的有效×知识重叠；as-of B-tree</td>
+            </tr>
+            <tr>
+              <td><code>instrument_lifecycle_version</code></td>
+              <td>上市、停编、到期、摘牌等事实版本</td>
+              <td>version_id、entity_id、status_code、event_kind、effective_from/to、known_from/to、evidence_ref null、source_batch_id</td>
+              <td>PK；FK；CHECK ranges；EXCLUDE entity + effective_range + knowledge_range；observed_at 只从 source_batch 取得</td>
+            </tr>
+            <tr>
+              <td><code>market_entity_relation_version</code></td>
+              <td>跟踪、underlying、法律基金→份额→上市、产品→合约等类型化关系</td>
+              <td>relation_version_id、from_entity_id、to_entity_id、relation_kind、effective/known ranges、source_batch_id、methodology_version_id null</td>
+              <td>PK；禁止自环；同关系有效×知识区间 EXCLUDE；关系类型白名单校验 from/to kind</td>
+            </tr>
+            <tr>
+              <td><code>trading_venue</code></td>
+              <td>交易所/指数管理人相关场所字典</td>
+              <td>venue_id uuid、mic varchar(8) null、code varchar(16)、name text、timezone varchar(64)、country char(2)、active bool</td>
+              <td>PK；UK code；MIC 非空时 UK；timezone 必须来自应用允许表</td>
+            </tr>
+            <tr>
+              <td><code>market_calendar_day</code></td>
+              <td>按日历版本表达交易、结算、披露可用日</td>
+              <td>calendar_id uuid、calendar_date date、day_kind、is_open bool、version int、source_batch_id、known_from/to</td>
+              <td>PK(calendar_id,date,version)；索引(date,is_open)；知识区间不重叠</td>
+            </tr>
+            <tr>
+              <td><code>market_session_version</code></td>
+              <td>夜盘、日盘、临时调整与跨自然日归属</td>
+              <td>session_id、calendar_id、product_scope null、trade_date date、opens_at/closes_at timestamptz、session_kind、known_from/to</td>
+              <td>PK；CHECK close&gt;open；EXCLUDE 同 scope/session_kind 时间重叠</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout warn">
+        <strong>兼容不变量</strong>
+        <code>equity_instrument.security_id</code> 继续作为现有行情、财务、资金流和板块表的 bigint FK。
+        先用相同 UUID 回填 <code>market_entity</code> 与可交易子表
+        <code>market_instrument</code>，再把 <code>equity_instrument.instrument_id</code>
+        加 FK；不改公开身份、不重编号、不双写两套股票标识。
+        通用 resolver 在迁移期按 asset class 委派给现有 equity resolver 或新领域 resolver。
+      </aside>
+
+      <h3>4.2 领域身份扩展</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>表</th><th>粒度与关系</th><th>关键字段/约束</th></tr></thead>
+          <tbody>
+            <tr><td><code>index_definition</code></td><td>一个管理人定义的非交易指数实体</td><td>entity_id PK/FK(root INDEX)、administrator_code、base_date、base_value numeric、currency、status；管理人+内部代码+有效期由 identifier 表唯一</td></tr>
+            <tr><td><code>fund_legal_entity</code></td><td>一只法律基金</td><td>entity_id PK/FK(root FUND)、legal_fund_code null、manager_entity_ref null、fund_type、base_currency；不持交易代码</td></tr>
+            <tr><td><code>fund_share_class</code></td><td>法律基金下一个份额类别</td><td>entity_id PK/FK(root FUND_SHARE)、fund_entity_id FK、share_class_code、currency、accumulation_kind；UK(fund,share class)</td></tr>
+            <tr><td><code>etf_listing</code></td><td>份额类在一个 venue 的 ETF 上市工具</td><td>instrument_id PK/FK(root ETF_LISTING)、share_class_entity_id FK、venue_id、management_mode；交易代码在 identifier version</td></tr>
+            <tr><td><code>derivative_product</code></td><td>场所 × 品种实体</td><td>entity_id uuid PK/FK(root DERIVATIVE_PRODUCT)、venue_id、product_code、asset_kind FUTURE/OPTION、underlying_entity_id null、currency；UK(venue,product_code)</td></tr>
+            <tr><td><code>derivative_contract</code></td><td>一个真实可交易合约</td><td>instrument_id PK/FK(root FUTURE/OPTION)、product_entity_id、expiry_date、call_put null、strike numeric null、underlying_entity_id null；期权结构 CHECK 完整</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="support">
+      <h2>5. 数据生命周期支撑表</h2>
+      <p>
+        现有六张共享表继续使用：<code>source_batch</code>、<code>sync_run</code>、
+        <code>sync_partition</code>、<code>dataset_publication</code>、
+        <code>dataset_publication_component</code>、<code>data_quality_issue</code>。
+        下表是 additive 扩展；不会把强类型领域值塞入 JSONB。
+      </p>
+
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr><th>表</th><th>用途</th><th>字段（类型；空值语义）</th><th>约束、索引、保留</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>canonical_dataset</code></td>
+              <td>稳定 dataset 身份与 schema 版本</td>
+              <td>dataset_id uuid；code varchar(120)；schema_version int；domain varchar(48)；grain text；status；owner_service；created_at</td>
+              <td>PK；UK(code,schema_version)；status RESEARCH/CANDIDATE/PRODUCTION/RETIRED；永久保留</td>
+            </tr>
+            <tr>
+              <td><code>data_source</code></td>
+              <td>真实上游所有者，不等于 Adapter</td>
+              <td>source_id uuid；code varchar(64)；legal_name text；source_kind；timezone；rights_status；rights_evidence_ref null</td>
+              <td>PK/UK code；权限证据缺失不影响 research，但阻断 production</td>
+            </tr>
+            <tr>
+              <td><code>source_dataset</code></td>
+              <td>上游某一具体数据产品/栏目</td>
+              <td>source_dataset_id uuid；source_id；code；capability；native_grain；native_unit_json jsonb；history_from/to null；license_scope；active</td>
+              <td>UK(source_id,code)；JSONB 只存源元数据，不存事实；索引 capability</td>
+            </tr>
+            <tr>
+              <td><code>methodology_version</code></td>
+              <td>跨新专题的 reported/derived 方法学版本</td>
+              <td>methodology_version_id uuid；code；version int；semantic_family；kind REPORTED/DERIVED；formula_hash null；effective_from/to；status；documentation_ref</td>
+              <td>UK(code,version)；同 code 有效期不得重叠；现有 financial/money-flow 方法学表暂不搬迁</td>
+            </tr>
+            <tr>
+              <td><code>raw_payload_manifest</code></td>
+              <td>一个 source batch 下每页/文件/附件的不可变对象清单</td>
+              <td>raw_payload_id uuid；source_batch_id；sequence_no int；role RAW/NORMALIZED/ATTACHMENT；object_uri text；sha256 char(64)；content_type；byte_size bigint；fetched_at</td>
+              <td>UK(batch,role,sequence)；CHECK hash/size；索引 sha256；对象 retention 见后文</td>
+            </tr>
+            <tr>
+              <td><code>normalization_run</code></td>
+              <td>记录 adapter 标准载荷到 canonical candidate 的一次确定转换</td>
+              <td>normalization_run_id uuid；dataset_id；partition_key；run_id；adapter_version；schema_fingerprint；mapping_version；input_set_hash；status；started/finished_at</td>
+              <td>UK(dataset,partition,input_set_hash,mapping_version)；状态 RUNNING/PASSED/FAILED；失败不发布</td>
+            </tr>
+            <tr>
+              <td><code>normalized_record_manifest</code></td>
+              <td>规范化记录的审计索引；事实本体仍在强类型表</td>
+              <td>normalization_run_id；record_key_hash char(64)；canonical_table varchar(96)；canonical_pk jsonb；content_hash；disposition CANDIDATE/ACCEPTED/QUARANTINED</td>
+              <td>PK(run,record_key_hash)；canonical_pk 只用于审计定位；禁止消费者据此通用查询</td>
+            </tr>
+            <tr>
+              <td><code>quality_evaluation</code></td>
+              <td>一次 policy 对一个 normalization/release 的执行头</td>
+              <td>evaluation_id uuid；dataset_id；partition_key；normalization_run_id；policy_code/version；status；score numeric(8,5) null；evaluated_at</td>
+              <td>UK(normalization,policy,version)；status PASSED/WARNED/BLOCKED；索引 dataset/partition/time</td>
+            </tr>
+            <tr>
+              <td><code>quality_result</code></td>
+              <td>逐规则结果与有界证据</td>
+              <td>evaluation_id；rule_code；severity；passed bool；actual/threshold numeric null；sample_json jsonb null；affected_count bigint</td>
+              <td>PK(evaluation,rule_code)；sample 脱敏且限 16KB；BLOCKING 失败禁止 publication</td>
+            </tr>
+            <tr>
+              <td><code>quarantine_record</code></td>
+              <td>统一隔离索引，不替代领域隔离详情</td>
+              <td>quarantine_id uuid；dataset_id；partition_key；source_batch_id null；record_key_hash null；reason_code；payload_ref null；sample_json null；status；created/resolved_at</td>
+              <td>索引 open(dataset,partition,created_at)；payload_ref 指私有对象；不进入业务 API</td>
+            </tr>
+            <tr>
+              <td><code>canonical_checkpoint</code></td>
+              <td>跨 run 的成功发布水位，不替代 run 内 checkpoint</td>
+              <td>dataset_id；partition_key；checkpoint_kind；position_json；last_release_id null；fencing_token bigint；updated_at</td>
+              <td>PK(dataset,partition,kind)；CAS 按 fencing_token；只在 publication 提交后推进</td>
+            </tr>
+            <tr>
+              <td><code>dataset_release</code></td>
+              <td>不可变候选内容集合，publication 的实际目标</td>
+              <td>release_id uuid；dataset_id；partition_key；methodology_version_id；normalization_run_id；content_hash char(64)；quality_status；record_count；fact_min/max date null；created_at</td>
+              <td>UK(dataset,partition,methodology,content_hash)；索引 dataset/partition/created；不可更新、不可删除</td>
+            </tr>
+            <tr>
+              <td><code>canonical_record_lineage</code></td>
+              <td>release 内记录到多个 raw/source batch 的 N:M 血缘</td>
+              <td>release_id；record_key_hash；source_batch_id；raw_payload_id null；lineage_role PRIMARY/CORROBORATING/INPUT；transform_hash</td>
+              <td>PK(release,record,source_batch,role)；索引 source_batch 反查；永久审计</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>5.1 对现表的 additive 变化</h3>
+      <ul>
+        <li><code>source_batch</code> 新增可空 <code>source_dataset_id</code>，回填完成后对新 capability 设非空应用门；旧行保留。</li>
+        <li><code>dataset_publication</code> 新增可空 <code>release_id</code> 与 FK；新 dataset 强制非空，旧 dataset 兼容。</li>
+        <li><code>dataset_publication.data_version</code> 继续是消费者稳定版本；同内容幂等重放复用 release 和 dataVersion。</li>
+        <li><code>data_quality_issue.snapshot_id</code> 的 equity 专属 FK 不再扩张；新域通过 evaluation/quarantine 关联。</li>
+        <li>各专题不得再创建独立 source、raw、通用 quality、publication 或 run 表；领域专用质量明细确有强类型需求时可补充。</li>
+      </ul>
+    </section>
+
+    <section id="temporal">
+      <h2>6. 时间、修订、方法学与 dataVersion</h2>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>字段</th><th>类型</th><th>语义</th><th>空值/约束</th><th>禁止替代</th></tr></thead>
+          <tbody>
+            <tr><td><code>trade_date</code></td><td>date</td><td>交易所业务日</td><td>日事实必填；按权威日历验证</td><td>抓取日、自然日</td></tr>
+            <tr><td><code>report_period</code></td><td>date</td><td>会计报告期末</td><td>财务披露必填</td><td>公告日、可见日</td></tr>
+            <tr><td><code>event_date</code></td><td>date</td><td>事件发生或计划日期</td><td>来源未给则 null + null_reason</td><td>公告日</td></tr>
+            <tr><td><code>source_published_at</code></td><td>timestamptz/date + precision</td><td>可验证的上游首次公开时间或日期</td><td>无证据为 null；precision=EXACT/DATE_ONLY/UNKNOWN</td><td>平台 observed_at</td></tr>
+            <tr><td><code>observed_at</code></td><td>timestamptz</td><td>平台取得 raw 的时间；只在 source_batch 保存</td><td>非空、UTC 存储；历史回补永不回拨</td><td>来源声称更新时间</td></tr>
+            <tr><td><code>public_usable_at</code></td><td>timestamptz</td><td>市场 PIT 中该事实最早可安全使用的时点</td><td>非生产/未验证可为 null；必须配 availability_basis</td><td>平台 publication 激活时间</td></tr>
+            <tr><td><code>availability_basis</code></td><td>varchar(32)</td><td>EXACT / DATE_ONLY_CONSERVATIVE / OBSERVED_ONLY</td><td>production revision 非空</td><td>“推测已公开”</td></tr>
+            <tr><td><code>effective_from/to</code></td><td>date/timestamptz</td><td>业务事实适用半开区间</td><td>to&gt;from 或 null</td><td>系统知识区间</td></tr>
+            <tr><td><code>known_from/to</code></td><td>timestamptz</td><td>系统采用某修订的知识半开区间</td><td>known_from ≥ 首次 observed_at；to&gt;from</td><td>回填到历史公告/报告期</td></tr>
+            <tr><td><code>revision_no</code></td><td>integer</td><td>同逻辑事实、同方法学的内容修订序号</td><td>从 1 开始；内容不变不递增</td><td>Provider 页码或抓取次数</td></tr>
+            <tr><td><code>published_at/superseded_at</code></td><td>timestamptz</td><td>平台 publication 的激活/停用区间</td><td>只属 publication/activation；事实表不复制</td><td>public_usable_at</td></tr>
+            <tr><td><code>data_version</code></td><td>uuid</td><td>一个不可变 publication 的稳定消费者快照</td><td>全局唯一；跨页固定；不进入事实自然键</td><td>单行 revision ID</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>6.1 发布算法</h3>
+      <ol>
+        <li>规范化后按业务键稳定排序，字段按 canonical 表顺序序列化，生成每行 <code>content_hash</code>。</li>
+        <li>按 dataset、partition、methodology 与行 hash 集合生成 <code>release.content_hash</code>。</li>
+        <li>若相同 release 已存在，复用它；新 source observation 仍保留，但不新增业务修订。</li>
+        <li>质量通过后创建随机 UUID <code>data_version</code>；同 release 的重复发布请求复用既有 dataVersion。</li>
+        <li>单事务关闭旧 current publication、插入新 publication、写聚合 components、推进 checkpoint。</li>
+        <li>回滚只创建/恢复指向旧 release 的新 publication 记录或受控切回指针；不删除新 release。</li>
+      </ol>
+
+      <aside class="callout bad">
+        <strong>三层 PIT 与防未来函数</strong>
+        查询同时应用事实条件（<code>asOf</code>）与知识条件（<code>knownAt</code>），且
+        <code>knownAt</code> 不得晚于 publication 的 <code>knowledge_cutoff</code>。
+        <code>MARKET_PIT</code> 应用 effective + public_usable；
+        <code>KNOWLEDGE_PIT</code> 再应用 known range；
+        <code>OPERATIONAL_REPLAY</code> 再限定 publication activation 区间。
+        日期-only 公告采用版本化“下一可交易时段”保守转换；日历证据不足时从 <code>observed_at</code> 起可见。
+        后续收益、事后修订、未来成分/换月、后来确认完成值永不回填早期知识切片。
+      </aside>
+    </section>
+
+    <section id="domains">
+      <h2>7. 领域物理表目录</h2>
+      <p>
+        下表“公共修订列”统一指：
+        <code>release_id uuid</code>、<code>revision_no int</code>、
+        <code>source_batch_id uuid</code>、
+        <code>source_published_at timestamptz/date null</code>、<code>source_time_precision</code>、
+        <code>public_usable_at timestamptz null</code>、<code>availability_basis</code>、
+        <code>known_from/to timestamptz</code>、
+        <code>content_hash char(64)</code>、<code>quality_status varchar(16)</code>。
+        金额使用 <code>numeric(24,4)</code> + ISO currency；价格
+        <code>numeric(24,8)</code>；数量 <code>numeric(28,8)</code> + unit；比率
+        <code>numeric(18,10)</code>，API 再投影十进制字符串。
+      </p>
+
+      <h3>7.1 指数与 ETF</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>表</th><th>粒度/用途</th><th>领域字段</th><th>键与物理策略</th></tr></thead>
+          <tbody>
+            <tr><td><code>index_methodology_document_version</code></td><td>指数 × 方法学版本</td><td>index_id、methodology_version_id、document_ref/hash、effective_from/to、announcement_at null、公共修订列</td><td>UK(index,methodology)；有效期 EXCLUDE；不分区</td></tr>
+            <tr><td><code>index_constituent_revision</code></td><td>指数 × 成分 × 有效/观察区间</td><td>index_id、member_instrument_id、membership_kind EFFECTIVE/OBSERVED_CURRENT、effective_from/to、announcement_at null、weight_target null、weight_unit null、公共修订列</td><td>UK(index,member,kind,effective_from,revision)；GiST 区间；按 effective_from 年分区</td></tr>
+            <tr><td><code>index_weight_snapshot</code></td><td>指数 × weight_date × 类型</td><td>snapshot_id、index_id、weight_date、weight_kind CLOSE/TARGET/OBSERVED、currency null、is_complete、expected_count、公共修订列</td><td>UK(index,date,kind,methodology,revision)；按 weight_date 年分区</td></tr>
+            <tr><td><code>index_weight_item</code></td><td>snapshot × 成分</td><td>weight_date、snapshot_id、member_instrument_id、weight numeric(18,10)、rank null</td><td>PK(weight_date,snapshot,member)；CHECK 0≤weight≤1；同父分区</td></tr>
+            <tr><td><code>etf_tracking_relation_version</code></td><td>ETF × 跟踪对象有效区间</td><td>etf_id、target_instrument_id null、target_name_raw null、relation_kind、effective/known ranges、methodology_version_id、公共修订列</td><td>目标 ID 或 raw 名称二选一；区间 EXCLUDE；不分区</td></tr>
+            <tr><td><code>etf_daily_bar_revision</code></td><td>ETF × 交易日 × 来源方法学</td><td>etf_id、trade_date、OHLC price、volume、volume_unit SHARE/LOT、amount、currency、trade_status、公共修订列</td><td>PK(trade_date,row_id)；UK(etf,date,methodology,revision)；按年分区；索引(etf,date DESC)</td></tr>
+            <tr><td><code>etf_nav_revision</code></td><td>ETF × nav_date × NAV 类型</td><td>etf_id、nav_date、nav_kind UNIT/ACCUMULATED/IOPV、nav、currency、valuation_calendar_id、finality、null_reason、公共修订列</td><td>UK(etf,date,kind,methodology,revision)；IOPV 与 EOD 分 dataset；按年分区</td></tr>
+            <tr><td><code>etf_share_revision</code></td><td>ETF × 统计日期</td><td>etf_id、stat_date、shares、quantity_unit、scale_factor、is_post_clearing、公共修订列</td><td>UK(etf,date,methodology,revision)；CHECK shares≥0；按年分区</td></tr>
+            <tr><td><code>etf_status_revision</code></td><td>ETF × 状态维度 × 有效区间</td><td>etf_id、status_dimension TRADING/SUBSCRIPTION/REDEMPTION、status_code、effective/known ranges、reason、公共修订列</td><td>EXCLUDE 同 ETF+维度有效×知识重叠；不分区</td></tr>
+            <tr><td><code>etf_premium_revision</code></td><td>ETF × 交易日 × 公式版本</td><td>etf_id、trade_date、price_release_id、nav_release_id、premium_ratio、comparability_status/reason、公共修订列</td><td>仅 DERIVED；UK(etf,date,methodology,revision)；输入 release FK；按年分区</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>7.2 融资融券与沪深港通</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>表</th><th>粒度</th><th>领域字段</th><th>键与隔离</th></tr></thead>
+          <tbody>
+            <tr><td><code>margin_market_daily_revision</code></td><td>venue × trade_date</td><td>venue_id、trade_date、financing_balance/buy/repayment、lending_balance_amount/qty/sell/repayment、total_balance、currency、quantity_unit null、公共修订列</td><td>UK(venue,date,methodology,revision)；按年分区；不得由明细覆盖</td></tr>
+            <tr><td><code>margin_security_daily_revision</code></td><td>equity × trade_date</td><td>security_id、trade_date、直报金额/数量、derived_repayment null、derived_methodology_id null、null_reason、公共修订列</td><td>UK(security,date,methodology,revision)；按年分区；直报/派生字段不可同时冒名</td></tr>
+            <tr><td><code>margin_eligibility_revision</code></td><td>证券资格有效×知识区间</td><td>security_id、status、announcement_at null、effective/known ranges、公共修订列</td><td>GiST EXCLUDE；当前名单不得倒推历史</td></tr>
+            <tr><td><code>margin_system_risk_daily_revision</code></td><td>scope × trade_date</td><td>scope_code、trade_date、account_count、guarantee_amount、metric_code/value/unit、公共修订列</td><td>P2 独立 dataset；UK(scope,date,metric,methodology,revision)</td></tr>
+            <tr><td><code>stock_connect_disclosure_regime</code></td><td>方向/通道的制度有效期</td><td>regime_id、channel、direction、effective_from/to、available_fields text[]、methodology_version_id、evidence_ref</td><td>EXCLUDE(channel,direction,date range)；2024 断点显式版本</td></tr>
+            <tr><td><code>stock_connect_channel_daily_revision</code></td><td>通道 × 方向 × trade_date</td><td>channel、direction、trade_date、buy/sell/turnover/net_buy/quota_balance、currency、availability_status、regime_id、公共修订列</td><td>UK(channel,direction,date,methodology,revision)；按年分区；未披露=null 非 0</td></tr>
+            <tr><td><code>stock_connect_active_security_revision</code></td><td>通道 × 方向 × 日 × 证券 × rank</td><td>instrument_id、buy/sell/turnover、currency、rank、公共修订列</td><td>UK(channel,direction,date,rank,release)；按年分区；A/H 身份必须解析</td></tr>
+            <tr><td><code>stock_connect_holding_snapshot</code></td><td>通道 × 方向 × snapshot_date</td><td>snapshot_id、frequency DAILY/QUARTERLY、period_end、disclosed_at、is_complete、expected_count、公共修订列</td><td>UK(channel,direction,date,methodology,revision)；按年分区</td></tr>
+            <tr><td><code>stock_connect_holding_item</code></td><td>snapshot × 证券</td><td>snapshot_date、snapshot_id、instrument_id、holding_qty、quantity_unit、holding_value null、currency null、ownership_ratio null</td><td>PK(snapshot_date,snapshot,instrument)；公司行动调整不原地改源事实</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>7.3 主营构成与公司事件</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>表</th><th>粒度</th><th>领域字段</th><th>键与隔离</th></tr></thead>
+          <tbody>
+            <tr><td><code>business_composition_report_revision</code></td><td>证券 × 报告期 × scope × 披露章节</td><td>security_id、report_period、report_type、statement_scope、disclosure_section、currency null、currency_null_reason null、amount_unit/scale、announcement_document_id null、公共修订列</td><td>UK(logical report,methodology,revision)；知识区间 EXCLUDE；按 report_period 年分区</td></tr>
+            <tr><td><code>business_composition_line</code></td><td>报告修订 × dimension × source label</td><td>report_period、report_revision_id、dimension INDUSTRY/PRODUCT/REGION、label_raw、line_no、revenue/cost/profit null、gross_margin null、null_reason</td><td>PK(report_period,report_revision,line_no)；金额同币种/单位；跨维度禁止求和</td></tr>
+            <tr><td><code>business_composition_label_version</code></td><td>公司自定义标签的保留与可选精确映射</td><td>security_id、dimension、label_raw、normalized_label null、effective/known ranges、mapping_method EXACT/NONE</td><td>不做模糊自动 taxonomy；区间 EXCLUDE</td></tr>
+            <tr><td><code>disclosure_document</code></td><td>一份官方公开文档永久身份</td><td>document_id、source_id、source_document_id、issuer_security_id null、title、document_type、published_at null、precision、official_url、content_hash null、withdrawn_at null</td><td>UK(source,source_document_id)；URL 不是身份；百万级按 published year 分区候选</td></tr>
+            <tr><td><code>disclosure_document_relation</code></td><td>文档更正/补充/结果关系</td><td>from_document_id、to_document_id、relation_type、evidence_source_batch_id</td><td>PK(from,to,type)；禁止自环；应用/递归验收禁止有环</td></tr>
+            <tr><td><code>corporate_event</code></td><td>跨文档的一个业务事件</td><td>event_id、security_id、event_family、source_event_key null、created_at</td><td>PK；来源键非空时 UK(source,event key)；不按标题/姓名模糊合并</td></tr>
+            <tr><td><code>corporate_event_revision</code></td><td>事件知识版本</td><td>event_revision_id、event_id、stage PLAN/PROGRESS/RESULT/CORRECTION/WITHDRAWAL、status、report_period/event/effective_date null、primary_document_id、公共修订列</td><td>UK(event,revision)；known range EXCLUDE；按 visible year 分区候选</td></tr>
+            <tr><td><code>corporate_earnings_value</code></td><td>预告/快报 revision × 指标</td><td>event_revision_id、metric_code、value_low/high/single null、currency、amount_unit、change_ratio null、value_kind GUIDANCE/EXPRESS</td><td>PK(revision,metric)；区间/单值合法性 CHECK；不混正式财报</td></tr>
+            <tr><td><code>restricted_unlock_lot</code></td><td>解禁 revision × 股东/批次</td><td>event_revision_id、lot_no、holder_name_raw null、planned/actual_qty null、listing_date null、quantity_unit SHARE、null_reason</td><td>PK(revision,lot_no)；禁止事后收益/最新市值字段</td></tr>
+            <tr><td><code>share_capital_component</code></td><td>股本事件 revision × 股份类别</td><td>event_revision_id、component_code、before_qty/after_qty/change_qty、quantity_unit SHARE、reason_code</td><td>PK(revision,component)；总分平衡质量门，不静默修复</td></tr>
+            <tr><td><code>shareholder_holding_action</code></td><td>计划或实际变动 revision × 主体原文</td><td>event_revision_id、actor_name_raw、actor_type、action_direction、planned/actual_qty null、price null、currency null、relation_text null</td><td>PK(revision,actor_name_hash,action_direction)；同名不合并；P2</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>7.4 交易事件与衍生品</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>表</th><th>粒度</th><th>领域字段</th><th>键与策略</th></tr></thead>
+          <tbody>
+            <tr><td><code>dragon_tiger_event_revision</code></td><td>证券 × 日 × 原因 × revision</td><td>security_id、venue_id、trade_date、reason_code/raw、reason_family、turnover/buy/sell/net_amount、currency、source_event_key、公共修订列</td><td>UK(security,date,reason,source key,revision)；按年分区</td></tr>
+            <tr><td><code>dragon_tiger_seat_item</code></td><td>事件 revision × 买卖侧 × rank</td><td>trade_date、event_revision_id、side、rank 1..5、seat_code null、seat_name_raw、seat_type、amount、ratio null</td><td>PK(trade_date,event,side,rank)；席位名非投资者 ID</td></tr>
+            <tr><td><code>block_trade_execution_revision</code></td><td>一笔大宗成交知识版本</td><td>security_id、venue_id、trade_date、price、quantity、amount、buyer/seller seat、reference_price/type null、premium_ratio null、source_event_key null、economic_fingerprint、occurrence_no、公共修订列</td><td>有源 ID 按源 ID；否则 UK(release,fingerprint,occurrence_no)；按年分区，保留完全相同多笔</td></tr>
+            <tr><td><code>trading_disclosure_reason_map_version</code></td><td>venue/board 原因映射有效期</td><td>venue_id、board null、source_reason_code/text、canonical_family、rule_ref、effective_from/to、methodology_version_id</td><td>同来源代码有效期 EXCLUDE；未知映射为 UNKNOWN</td></tr>
+            <tr><td><code>derivative_contract_spec_version</code></td><td>合约 × 规格有效/知识区间</td><td>contract_id、multiplier、multiplier_unit、price_unit、tick_size、delivery_method、listed/last_trade/delivery_date、effective/known ranges、公共修订列</td><td>EXCLUDE(contract,effective,known)；不分区</td></tr>
+            <tr><td><code>derivative_daily_bar_revision</code></td><td>真实合约 × trade_date</td><td>contract_id、trade_date、OHLC、settlement null、delivery_settlement null、volume bigint、open_interest bigint、turnover null、currency、public columns</td><td>UK(contract,date,methodology,revision)；按年分区；close/settlement 分列</td></tr>
+            <tr><td><code>option_daily_metric_revision</code></td><td>期权合约 × trade_date × 指标</td><td>contract_id、trade_date、metric_code、value、unit、value_origin EXCHANGE/DERIVED、model_version null、公共修订列</td><td>reported/derived 不同 methodology；按年分区</td></tr>
+            <tr><td><code>derivative_position_rank_revision</code></td><td>venue × product/contract × 日 × member × rank type</td><td>product_id、contract_id null、member_name/code、rank_kind、rank、quantity/change、quantity_unit LOT、公共修订列</td><td>UK(scope,date,kind,rank,release)；按年分区</td></tr>
+            <tr><td><code>derivative_warehouse_receipt_revision</code></td><td>venue × product × warehouse/grade × 日</td><td>product_id、warehouse_code/name、grade null、trade_date、receipt_qty/change、unit、公共修订列</td><td>按年分区；不与商业库存混算</td></tr>
+            <tr><td><code>derivative_delivery_revision</code></td><td>venue × contract/product × 交割周期</td><td>contract_id null、product_id、period_start/end、delivery_qty/amount、settlement_price null、unit/currency、delivery_kind、公共修订列</td><td>UK(scope,period,kind,methodology,revision)；月度或年度分区候选</td></tr>
+            <tr><td><code>derivative_continuous_series</code></td><td>品种 × 连续方法学</td><td>series_id、product_id、series_kind MAIN/INDEX、methodology_version_id、adjustment_mode、selection_lag、status</td><td>UK(product,kind,methodology)；P2，仅 DERIVED</td></tr>
+            <tr><td><code>derivative_roll_event</code></td><td>series × 生效 trade_date</td><td>series_id、from/to_contract_id、signal_date、effective_trade_date、signal_release_id、reason_metrics</td><td>UK(series,effective date)；effective&gt;signal；必须 T+1 或更保守</td></tr>
+            <tr><td><code>derivative_continuous_bar</code></td><td>series × trade_date × release</td><td>series_id、trade_date、source_contract_id、OHLC、adjustment_factor、roll_event_id null、公共修订列</td><td>每行 FK 真实合约；按年分区；不可作为可交易报价</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="ddl">
+      <h2>8. 拟议 DDL 级设计</h2>
+      <p class="muted">片段用于冻结约束形态，不是 migration 文件；名称与 schema 由实现评审最终确认。</p>
+
+      <h3>8.1 身份根、双时态标识</h3>
+      <pre><code>CREATE TABLE market_entity (
+  entity_id uuid PRIMARY KEY,
+  entity_kind varchar(24) NOT NULL,
+  created_at timestamptz NOT NULL,
+  retired_at timestamptz NULL,
+  UNIQUE (entity_id, entity_kind),
+  CONSTRAINT ck_market_entity_kind CHECK (entity_kind IN
+    ('EQUITY','ETF_LISTING','INDEX','FUND','FUND_SHARE',
+     'DERIVATIVE_PRODUCT','FUTURE','OPTION'))
+);
+
+CREATE TABLE market_instrument (
+  instrument_id uuid PRIMARY KEY,
+  instrument_kind varchar(24) NOT NULL,
+  primary_venue_id uuid NULL REFERENCES trading_venue(venue_id),
+  tradable_from date NULL,
+  tradable_to date NULL,
+  FOREIGN KEY (instrument_id,instrument_kind)
+    REFERENCES market_entity(entity_id,entity_kind),
+  CHECK (instrument_kind IN ('EQUITY','ETF_LISTING','FUTURE','OPTION')),
+  CHECK (tradable_to IS NULL OR tradable_to &gt; tradable_from)
+);
+
+CREATE TABLE instrument_identifier_version (
+  version_id uuid PRIMARY KEY,
+  entity_id uuid NOT NULL,
+  entity_kind varchar(24) NOT NULL,
+  venue_id uuid NULL REFERENCES trading_venue(venue_id),
+  identifier_scheme varchar(32) NOT NULL,
+  identifier_value varchar(64) NOT NULL,
+  effective_from date NOT NULL,
+  effective_to date NULL,
+  known_from timestamptz NOT NULL,
+  known_to timestamptz NULL,
+  source_batch_id uuid NOT NULL REFERENCES source_batch(source_batch_id),
+  effective_range daterange GENERATED ALWAYS AS
+    (daterange(effective_from,effective_to,'[)')) STORED,
+  knowledge_range tstzrange GENERATED ALWAYS AS
+    (tstzrange(known_from,known_to,'[)')) STORED,
+  FOREIGN KEY (entity_id,entity_kind)
+    REFERENCES market_entity(entity_id,entity_kind),
+  CHECK (effective_to IS NULL OR effective_to &gt; effective_from),
+  CHECK (known_to IS NULL OR known_to &gt; known_from),
+  EXCLUDE USING gist (
+    entity_kind WITH =, venue_id WITH =, identifier_scheme WITH =,
+    identifier_value WITH =, effective_range WITH &amp;&amp;, knowledge_range WITH &amp;&amp;
+  )
+);
+CREATE INDEX ix_instrument_identifier_asof
+  ON instrument_identifier_version
+  (entity_kind,venue_id,identifier_scheme,identifier_value,effective_from DESC,known_from DESC);</code></pre>
+
+      <h3>8.2 Release、publication 与血缘</h3>
+      <pre><code>CREATE TABLE dataset_release (
+  release_id uuid PRIMARY KEY,
+  dataset_id uuid NOT NULL REFERENCES canonical_dataset(dataset_id),
+  partition_key varchar(240) NOT NULL,
+  methodology_version_id uuid NOT NULL REFERENCES methodology_version(methodology_version_id),
+  normalization_run_id uuid NOT NULL REFERENCES normalization_run(normalization_run_id),
+  content_hash char(64) NOT NULL,
+  quality_status varchar(16) NOT NULL,
+  record_count bigint NOT NULL,
+  fact_min date NULL,
+  fact_max date NULL,
+  created_at timestamptz NOT NULL,
+  UNIQUE (dataset_id,partition_key,methodology_version_id,content_hash),
+  CHECK (content_hash ~ '^[0-9a-f]{64}$'),
+  CHECK (quality_status IN ('passed','warned','partial')),
+  CHECK (record_count &gt;= 0),
+  CHECK (fact_max IS NULL OR fact_min IS NOT NULL),
+  CHECK (fact_max IS NULL OR fact_max &gt;= fact_min)
+);
+
+ALTER TABLE dataset_publication ADD COLUMN release_id uuid NULL;
+ALTER TABLE dataset_publication ADD CONSTRAINT fk_publication_release
+  FOREIGN KEY (release_id) REFERENCES dataset_release(release_id);
+
+-- 新 dataset 由应用与迁移验收强制 release_id 非空；
+-- 旧 publication 在兼容窗口允许 null，避免一次性重写历史。
+CREATE UNIQUE INDEX uq_release_publication
+  ON dataset_publication(release_id)
+  WHERE release_id IS NOT NULL;</code></pre>
+
+      <h3>8.3 高容量分区事实</h3>
+      <pre><code>CREATE TABLE margin_security_daily_revision (
+  trade_date date NOT NULL,
+  row_id uuid NOT NULL,
+  security_id bigint NOT NULL REFERENCES equity_instrument(security_id),
+  methodology_version_id uuid NOT NULL REFERENCES methodology_version(methodology_version_id),
+  release_id uuid NOT NULL REFERENCES dataset_release(release_id),
+  revision_no integer NOT NULL,
+  financing_balance numeric(24,4) NULL,
+  financing_buy_amount numeric(24,4) NULL,
+  financing_repayment_reported numeric(24,4) NULL,
+  financing_repayment_derived numeric(24,4) NULL,
+  lending_balance_qty numeric(28,8) NULL,
+  quantity_unit varchar(16) NULL,
+  currency char(3) NOT NULL,
+  null_reason varchar(32) NULL,
+  known_from timestamptz NOT NULL,
+  known_to timestamptz NULL,
+  content_hash char(64) NOT NULL,
+  PRIMARY KEY (trade_date,row_id),
+  UNIQUE (trade_date,security_id,methodology_version_id,revision_no),
+  CHECK (revision_no &gt; 0),
+  CHECK (financing_balance IS NULL OR financing_balance &gt;= 0),
+  CHECK (known_to IS NULL OR known_to &gt; known_from),
+  CHECK (financing_repayment_reported IS NULL
+         OR financing_repayment_derived IS NULL)
+) PARTITION BY RANGE (trade_date);
+
+CREATE TABLE margin_security_daily_revision_y2026
+  PARTITION OF margin_security_daily_revision
+  FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+CREATE INDEX ix_margin_security_date
+  ON margin_security_daily_revision (security_id,trade_date DESC,known_from DESC);
+CREATE INDEX ix_margin_date_cross_section
+  ON margin_security_daily_revision (trade_date,security_id)
+  INCLUDE (financing_balance,financing_buy_amount,quality_status);</code></pre>
+
+      <aside class="callout warn">
+        <strong>PostgreSQL 约束限制</strong>
+        分区表的 PK/UK 必须包含分区键，因此跨表引用优先指向稳定 header/release，不把高容量事实
+        <code>row_id</code> 当全局单列 FK。GiST 排斥约束只用于未分区或可证明分区边界包含全部冲突范围的表。
+        复杂 CHECK、EXCLUDE、operator class、partition DDL 必须人工补 migration，并由
+        <code>pg_catalog</code> parity 测试覆盖，不能只信 Alembic autogenerate。
+      </aside>
+    </section>
+
+    <section id="write">
+      <h2>9. 写入顺序、事务、幂等、并发与恢复</h2>
+      <pre aria-label="写入状态流">1 acquire partition lease + fencing token
+2 fetch through DataSourcePort
+3 write immutable raw object → source_batch + raw_payload_manifest
+4 normalize → normalization_run + typed candidate rows + manifest
+5 resolve instrument/date/calendar; conflicts → quarantine
+6 execute quality policy → quality_evaluation/result
+7 BLOCKED: preserve candidate/quarantine, keep old publication, no checkpoint advance
+8 PASSED/WARNED: create/reuse immutable dataset_release
+9 one DB transaction:
+    lock current publication(dataset,partition)
+    close old current → insert new publication + components
+    CAS canonical_checkpoint(fencing token)
+    mark sync_partition succeeded
+10 after commit: emit metrics/audit; consumer sees complete dataVersion</pre>
+
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>场景</th><th>事务/锁</th><th>幂等键</th><th>恢复</th><th>结果</th></tr></thead>
+          <tbody>
+            <tr><td>正常增量</td><td>网络与对象存储不持有 DB 事务；发布短事务</td><td>run request_key；release content unique</td><td>checkpoint 从最后 publication 后继续</td><td>一个新 dataVersion</td></tr>
+            <tr><td>同 raw 重跑</td><td>新 source observation；复用 normalization/release 可由输入 hash 判断</td><td>batch observation 独立；业务内容 hash 去重</td><td>无需补偿</td><td>raw 审计增加，revision/dataVersion 不增加</td></tr>
+            <tr><td>重复投递</td><td>同 partition advisory lock + lease</td><td>request_key + partition key</td><td>后到者读取完成状态</td><td>不重复发布</td></tr>
+            <tr><td>并发不同分区</td><td>锁键 hash(dataset,partition)，可并行</td><td>各分区独立</td><td>单分区失败不污染其他分区</td><td>可 partial run；聚合 publication 冻结 components</td></tr>
+            <tr><td>worker 僵死</td><td>lease_until + fencing_token；旧 token 禁写</td><td>CAS token</td><td>reaper 回收 queued；从 raw/页 checkpoint 续跑</td><td>旧 worker 无法晚提交</td></tr>
+            <tr><td>schema drift</td><td>不进入 release 事务</td><td>schema fingerprint</td><td>修 Adapter 后从 raw replay</td><td>quarantine + 旧 publication</td></tr>
+            <tr><td>数据库中断</td><td>事务原子回滚</td><td>release/publication unique</td><td>重新执行发布；raw 已归档</td><td>消费者不见半批</td></tr>
+            <tr><td>迟到修订</td><td>关闭旧 known_to，追加 revision；不改旧值</td><td>业务键 + methodology + content hash</td><td>重建受影响 release</td><td>新 knownAt 才可见</td></tr>
+            <tr><td>回滚</td><td>锁 current publication；指向旧 release</td><td>受控 rollback request ID</td><td>保留错误 release 供审计</td><td>新 rollback dataVersion 或明确恢复旧版本策略</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>9.1 写入批量与隔离级别</h3>
+      <ul>
+        <li>大表使用 SQLAlchemy bulk DML/COPY staging；禁止逐 ORM 实例 flush。</li>
+        <li>candidate staging 与 publication 分事务；publication 使用 <code>READ COMMITTED</code> + 行锁/advisory lock 即可，身份区间变更使用 <code>SERIALIZABLE</code> 或显式锁顺序。</li>
+        <li>身份 → release → publication → checkpoint 固定锁序，防止跨域死锁。</li>
+        <li>单行坏数据只有在 dataset 允许 partial 且契约明确时可隔离后发布；完整快照、指数权重、持股横截面默认整分区 fail closed。</li>
+        <li>删除语义使用生命周期/撤回 revision 或 publication 替换，不物理删除历史事实。</li>
+      </ul>
+    </section>
+
+    <section id="capacity">
+      <h2>10. 容量、查询、索引与保留</h2>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>数据族</th><th>年增量粗估（不含修订）</th><th>主查询</th><th>分区/索引</th><th>风险与取舍</th></tr></thead>
+          <tbody>
+            <tr><td>指数成分/权重</td><td>10 万–500 万，取决于白名单与日权重</td><td>指数 as-of 成分；单日权重横截面</td><td>effective/weight_date 年分区；index+date、member+date</td><td>全量长尾日权重会膨胀；P0 白名单</td></tr>
+            <tr><td>ETF 日行情/NAV/份额</td><td>各 20–50 万</td><td>ETF 时间序列；日期横截面</td><td>trade/nav/stat date 年分区；instrument+date DESC</td><td>三表避免宽行稀疏；多一次 join 换语义清晰</td></tr>
+            <tr><td>融资融券证券明细</td><td>100–200 万</td><td>证券序列；单日横截面</td><td>trade_date 年分区；两组覆盖索引</td><td>避免对全部金额建索引；排序字段白名单</td></tr>
+            <tr><td>互联互通持股</td><td>25–60 万；制度后频率下降</td><td>证券持股历史；快照横截面</td><td>snapshot_date 年分区；instrument+date</td><td>不追求伪连续；coverage 元数据优先</td></tr>
+            <tr><td>主营构成</td><td>16.5–33 万</td><td>证券报告历史；同报告维度</td><td>report_period 年分区；security+period；report FK</td><td>标签索引仅精确匹配，不做默认全文索引</td></tr>
+            <tr><td>公告/公司事件</td><td>公告百万级累计；结构化事件十万级/年</td><td>证券时间线；事件 revision 链</td><td>published/visible year；security+visible；source ID</td><td>正文留对象存储；DB 不存大文本/PDF</td></tr>
+            <tr><td>龙虎榜/大宗</td><td>数万–数十万</td><td>证券/日期/原因；逐笔规模</td><td>trade_date 年分区；security+date；venue+date</td><td>大宗经济字段不唯一，必须保留 occurrence</td></tr>
+            <tr><td>衍生品日行情/期权链</td><td>数百万，期权为主</td><td>合约序列；日链横截面</td><td>trade_date 年分区；contract+date；underlying+expiry+strike</td><td>达到 2,000 万行/50GB 后再改月分区；避免过早分区</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>10.1 索引原则</h3>
+      <ul>
+        <li>每个线上查询必须命中“身份 + 日期”或“分区日期 + 身份”索引；游标排序尾部包含稳定 UUID/序号。</li>
+        <li>部分索引只覆盖 current/open knowledge；历史查询用完整复合索引，避免 current 索引误导 PIT。</li>
+        <li>金额、比率筛选仅对真实高频路由建立部分/覆盖索引；先用 <code>EXPLAIN (ANALYZE,BUFFERS)</code> 证据。</li>
+        <li>BRIN 只用于强时间相关的超大 append-only 分区；不能替代 identity B-tree。</li>
+        <li>JSONB 支撑字段不建通用 GIN；消费者禁止通过任意 JSON 路径访问。</li>
+      </ul>
+
+      <h3>10.2 保留、归档与清理</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>对象</th><th>在线保留建议</th><th>归档/清理</th><th>禁止</th></tr></thead>
+          <tbody>
+            <tr><td>Canonical revision/release/publication/lineage</td><td>永久或按合规批准周期</td><td>冷分区只读归档；先验证可恢复再 detach</td><td>按“过期”覆盖/删除历史版本</td></tr>
+            <tr><td>Raw/normalized object</td><td>production 至少覆盖回放、审计和许可周期；具体待定</td><td>S3 lifecycle 转冷存储；manifest 永久</td><td>无 release/lineage 校验即删除</td></tr>
+            <tr><td>Quality/quarantine</td><td>开放项永久在线；已解决至少 2 年建议</td><td>已解决样本脱敏归档；大 payload 在对象存储</td><td>为降低告警数删除未解决问题</td></tr>
+            <tr><td>Sync run/partition</td><td>在线 180 天建议</td><td>终态 run 摘要归档；checkpoint 独立永久</td><td>删除仍被 source_batch 引用的 run</td></tr>
+            <tr><td>Staging/candidate</td><td>成功后 7–30 天；失败直到处置</td><td>按 release/quarantine 引用计数清理</td><td>清理未发布且无 raw replay 证据的唯一候选</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="migration">
+      <h2>11. 与当前模型差异、迁移、兼容与回滚</h2>
+      <h3>11.1 差异</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>当前</th><th>拟议</th><th>兼容策略</th><th>不可逆点</th></tr></thead>
+          <tbody>
+            <tr><td>72 个模型按已实现能力各自组织</td><td>新增跨八专题共享支撑与领域模型</td><td>一表一模型、显式 registry；不修改历史 migration</td><td>无，纯 expand 时可回退应用</td></tr>
+            <tr><td>股票 identity 独立，其他资产尚无根</td><td>market_entity 跨域引用根 + tradable market_instrument 子表</td><td>复用 equity instrument UUID；security_id/FK 保持</td><td>新域 production 引用 root 后不能删除，只能 roll forward</td></tr>
+            <tr><td>source_batch 一批一个 raw_uri</td><td>一批多 raw manifest</td><td>旧 raw_uri 保留；新 capability 双读 manifest，非双写事实</td><td>manifest 被 release 引用后永久</td></tr>
+            <tr><td>各能力存在领域 quality/checkpoint/publication</td><td>通用 evaluation/checkpoint/release，领域表只保留特有规则</td><td>旧能力不强迁；新能力先用统一层，后续按收益迁移</td><td>消费者绑定新 dataVersion 后不能回旧无 release 语义</td></tr>
+            <tr><td>dataset_publication 无 release FK</td><td>publication 指向 immutable release</td><td>nullable expand；新 dataset 强制，旧行暂空</td><td>生产新 dataset 后 release 不删除</td></tr>
+            <tr><td>财务/money flow 自有 methodology</td><td>新专题统一 methodology_version</td><td>不立即搬旧表；建只读映射视图/adapter</td><td>避免双权威；迁移另案</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>11.2 分阶段迁移</h3>
+      <ol>
+        <li><strong>M0 冻结证据：</strong>从空库执行现有 13 个 revision 到 head；导出 72 表模型、约束、索引、分区、行数与依赖基线。</li>
+        <li><strong>M1 Shared expand：</strong>新增 source/dataset/methodology/raw/normalization/quality/quarantine/checkpoint/release/lineage；现表只加 nullable FK。应用仍走旧路径。</li>
+        <li><strong>M2 Identity expand：</strong>按现有 <code>equity_instrument.instrument_id</code> 回填 root 并校验一一对应；新增 venue/calendar 与新资产领域表。</li>
+        <li><strong>M3 Domain expand：</strong>按 P0 顺序建专题表和父分区；source policy/feature 默认关闭；先 fake/fixture。</li>
+        <li><strong>M4 Shadow/backfill：</strong>只写 raw、candidate、quality、release，不移动 production publication。小窗口、低并发、可暂停。</li>
+        <li><strong>M5 Read switch：</strong>内部读取先绑定 release/dataVersion；双读比对但只有旧路径对消费者权威。通过后原子切 publication。</li>
+        <li><strong>M6 Contract：</strong>稳定窗口后收紧新行 FK/NOT NULL、停止兼容写；旧字段/表只有依赖为零才另案删除。</li>
+      </ol>
+
+      <h3>11.3 回滚矩阵</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>阶段</th><th>触发</th><th>回滚</th><th>数据处理</th></tr></thead>
+          <tbody>
+            <tr><td>M1–M3</td><td>schema/parity 或应用兼容失败</td><td>回退应用；新增空表可执行 downgrade</td><td>旧表不动；确认无引用后才删空对象</td></tr>
+            <tr><td>M4</td><td>来源/质量/性能失败</td><td>关闭 capability，停止 shadow</td><td>保留 raw/candidate/quarantine；不影响消费者</td></tr>
+            <tr><td>M5 已发布</td><td>错误数据、延迟或契约故障</td><td>publication 指回上一 release；关闭新读取</td><td>不删 revision/release；修复后 raw replay</td></tr>
+            <tr><td>M6</td><td>发现旧消费者</td><td>恢复兼容 view/client，不恢复双权威写入</td><td>roll forward；禁止回退到破坏新身份的旧唯一约束</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout bad">
+        <strong>迁移硬规则</strong>
+        production 应用不自动 migration；每个 revision 必须有人工 rollback/runbook。
+        已产生 production release 后不做破坏性删表降级。历史回补保留真实
+        <code>observed_at/known_from</code>，不能为了“完整历史”回写早期可见时间。
+      </aside>
+    </section>
+
+    <section id="gates">
+      <h2>12. 技术门禁、验收 SQL 与测试计划</h2>
+      <h3>12.1 技术硬门禁</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>门禁</th><th>准入条件</th><th>可验证证据</th><th>验证人</th><th>退出条件</th><th>失败兜底</th></tr></thead>
+          <tbody>
+            <tr><td>G1 Schema 可迁移/回滚</td><td>执行任何 shared/domain migration 前</td><td>空库 upgrade、现库 expand、alembic check、pg_catalog parity、rollback 演练</td><td>DBA + data-sync 维护者</td><td>72 个旧模型零意外 diff；新增约束/索引/分区与设计一致；回滚不丢旧数据</td><td>不部署 migration；继续现有 schema</td></tr>
+            <tr><td>G2 身份完整性</td><td>新域 candidate 转 production release 前</td><td>root/child 1:1、代码复用、跨资产同码、退市/停编/到期、underlying fixture</td><td>数据架构负责人 + 各领域验证人</td><td>发布行身份解析 100%；冲突 0；equity security_id 映射 100%</td><td>冲突行/整快照 quarantine；不造临时公开身份</td></tr>
+            <tr><td>G3 PIT 与日历</td><td>任何 as-of/回测能力开放前</td><td>公告 date-only、收盘后、周末、制度断点、夜盘、未来调样/换月、迟到修订回放</td><td>量化研究验证人 + 数据质量负责人</td><td>未来信息回归 0；自然日误分区 0；所有知识基础可审计</td><td>只开放 latest 或 OBSERVED_ONLY；PIT 关闭</td></tr>
+            <tr><td>G4 单位/口径隔离</td><td>跨表派生或聚合前</td><td>来源字段→canonical 映射、原单位/缩放、currency、null reason、异口径负例</td><td>领域负责人 + 数据 QA</td><td>必需字段单位明确率 100%；负例全部拒绝静默混算</td><td>原字段隔离；派生/聚合不发布</td></tr>
+            <tr><td>G5 原子发布/恢复</td><td>自动移动 publication/checkpoint 前</td><td>重复 run、并发、lease 过期、四写入中断点、DB 故障、raw replay、rollback</td><td>SRE + DBA + data-sync 维护者</td><td>半发布 0、重复业务行 0、旧 worker 晚提交 0、回放 hash 一致</td><td>手工受控发布；保持上一版本</td></tr>
+            <tr><td>G6 来源权利/安全</td><td>对应来源长期存储或 API 投影前</td><td>许可/条款、留存与字段矩阵、secret/egress、访问控制、删除/下架流程</td><td>合规验证人 + 安全负责人</td><td>每个 capability 的允许用途可执行且越权测试为 0</td><td>research/internal-only、只存获准摘要或关闭来源</td></tr>
+            <tr><td>G7 性能/容量</td><td>全市场 backfill 或公开查询前</td><td>真实规模 pilot、EXPLAIN ANALYZE、分区裁剪、索引大小、批写吞吐、连接池与锁等待</td><td>DBA + 性能验证人</td><td>P95/吞吐预算由实测冻结并达标；无顺序扫描越界和锁放大</td><td>缩小范围/窗口；异步导出；保持 feature 关闭</td></tr>
+            <tr><td>G8 契约可满足</td><td>service-api 消费前</td><td>固定 dataVersion 分页、source/methodology/quality/visible 元数据、错误/权限、contract/E2E</td><td>两服务维护者 + API QA</td><td>契约必填字段 100%，版本/游标/错误稳定，禁止直连证据通过</td><td>内部路径不注册；数据仍可 shadow</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>12.2 非技术风险与跟进</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>事项</th><th>负责人</th><th>时间点</th><th>影响</th><th>技术兜底</th></tr></thead>
+          <tbody>
+            <tr><td>跨资产 root 身份 ADR 尚未接受</td><td>架构负责人</td><td>M1 评审前</td><td>决定统一引用范围</td><td>先实现 source/release/quality；领域 ID 保持独立，不做双写</td></tr>
+            <tr><td>Provider、预算、许可与历史采购未定</td><td>数据产品/治理负责人</td><td>各 capability shadow 前</td><td>覆盖、历史、再分发范围</td><td>fake/官方小样本；source policy 默认关闭；缺口显式</td></tr>
+            <tr><td>P0/P1 业务排序与历史窗口未定</td><td>量化研究负责人</td><td>路线图评审</td><td>容量和实施范围</td><td>采用专题默认白名单与有限窗口；schema 不变</td></tr>
+            <tr><td>实施与值守人力未排</td><td>工程负责人</td><td>M3 前</td><td>排期和恢复时效</td><td>无 beat、手工 CLI、fail closed、旧 publication 保持</td></tr>
+            <tr><td>raw/审计实际保留期未冻结</td><td>数据治理 + 成本负责人</td><td>M4 前</td><td>对象存储成本</td><td>先用保守长期保留；S3 lifecycle 只转冷不删</td></tr>
+            <tr><td>公开数据产品权限/免责声明未定</td><td>service-api 产品/安全负责人</td><td>契约评审前</td><td>公开范围</td><td>默认认证、最小 scope、批量/P2 关闭</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>12.3 验收 SQL</h3>
+      <pre><code>-- 1. 现有 equity UUID 全量映射且无重复
+SELECT count(*) FILTER (WHERE m.instrument_id IS NULL) AS missing,
+       count(*) - count(DISTINCT e.instrument_id) AS duplicates
+FROM equity_instrument e
+LEFT JOIN market_entity m
+  ON m.entity_id=e.instrument_id AND m.entity_kind='EQUITY';
+-- 期望：missing=0，duplicates=0
+
+-- 2. 每 dataset/partition 至多一个 current publication
+SELECT dataset,partition_key,count(*)
+FROM dataset_publication
+WHERE superseded_at IS NULL
+GROUP BY dataset,partition_key HAVING count(*)&gt;1;
+-- 期望：0 行
+
+-- 3. 新 dataset publication 必须绑定 release，且方法学一致
+SELECT p.publication_id
+FROM dataset_publication p
+JOIN canonical_dataset d ON d.code=p.dataset
+LEFT JOIN dataset_release r ON r.release_id=p.release_id
+WHERE d.created_at &gt;= :expansion_cutoff
+  AND (r.release_id IS NULL OR r.partition_key&lt;&gt;p.partition_key);
+-- 期望：0 行
+
+-- 4. checkpoint 不得领先 publication
+SELECT c.dataset_id,c.partition_key
+FROM canonical_checkpoint c
+LEFT JOIN dataset_release r ON r.release_id=c.last_release_id
+LEFT JOIN dataset_publication p
+  ON p.release_id=r.release_id AND p.superseded_at IS NULL
+WHERE c.last_release_id IS NOT NULL AND p.publication_id IS NULL;
+-- 期望：0 行
+
+-- 5. knowledge 时间不得早于来源观察
+SELECT count(*) FROM normalized_record_manifest n
+JOIN normalization_run nr USING(normalization_run_id)
+JOIN source_batch b ON b.run_id=nr.run_id
+JOIN /* 各 revision 表的统一验收视图 */ canonical_revision_audit v
+  ON v.record_key_hash=n.record_key_hash
+WHERE v.known_from &lt; b.observed_at;
+-- 期望：0；官方历史公开时间只影响 effective/publicUsable，不回填平台 known_from
+
+-- 6. 分区裁剪与索引计划（每个高容量表执行）
+EXPLAIN (ANALYZE,BUFFERS)
+SELECT * FROM margin_security_daily_revision
+WHERE security_id=:id AND trade_date BETWEEN :from AND :to
+  AND known_from&lt;=:known_at
+  AND (known_to IS NULL OR known_to&gt;:known_at)
+ORDER BY trade_date,row_id LIMIT 501;</code></pre>
+
+      <h3>12.4 计划测试</h3>
+      <ul>
+        <li>Schema：72 个旧模型 parity、全部新表 comment/type/nullability/FK/CHECK/EXCLUDE/index/partition、Alembic check。</li>
+        <li>Identity：代码复用、同码跨资产、ETF 法律份额、指数停编、期货到期、期权 underlying、港股歧义。</li>
+        <li>Temporal：八域分别覆盖 asOf/knownAt、日期-only、周末、夜盘、制度断点、修订、撤回和回补。</li>
+        <li>Quality：同名异口径、单位突变、未知币种、null≠0、快照缺页、逐笔重数、连续换月未来函数。</li>
+        <li>Recovery：provider timeout/429/schema drift、对象存储成功后 DB 失败、candidate 后失败、publication 后进程终止、旧 worker 晚提交。</li>
+        <li>Performance：COPY/bulk DML、分区创建并发、单证券序列、单日横截面、PIT、稳定游标、10 年范围与批量上限。</li>
+        <li>Contract：service-api 仅经版本化边界；响应含 source/methodology/quality/visible/dataVersion；raw/internal key 不外泄。</li>
+      </ul>
+
+      <aside class="callout">
+        <strong>本轮验证边界</strong>
+        本文只做模型与文档设计，未执行 migration、SQL、容器测试、性能测试或跨服务契约测试。
+        实现后按仓库 Docker-only 流程计划执行 Ruff、Pyright、pytest、架构/集成测试、Alembic、
+        service-api format/lint/typecheck/test/build；不得把本次设计审阅写成实现测试已通过。
+      </aside>
+    </section>
+
+    <section id="references">
+      <h2>13. 依据、未决与评审清单</h2>
+      <h3>13.1 八专题输入</h3>
+      <ul>
+        <li><a href="../0019-index-constituents/index.html">0019 指数成分与权重</a></li>
+        <li><a href="../0020-etf-market-data/index.html">0020 ETF 市场数据</a></li>
+        <li><a href="../0021-margin-trading/index.html">0021 融资融券</a></li>
+        <li><a href="../0022-stock-connect/index.html">0022 沪深港通</a></li>
+        <li><a href="../0023-business-composition/index.html">0023 主营构成</a></li>
+        <li><a href="../0024-corporate-events/index.html">0024 公司事件</a></li>
+        <li><a href="../0025-trading-events/index.html">0025 龙虎榜与大宗交易</a></li>
+        <li><a href="../0026-derivatives/index.html">0026 期货与期权</a></li>
+      </ul>
+
+      <h3>13.2 当前架构与决策</h3>
+      <ul>
+        <li><a href="../0018-sqlalchemy-orm-persistence-models/index.html">0018 SQLAlchemy ORM 持久化基线</a></li>
+        <li><a href="../../decisions/0002-data-sync-ownership-and-access.md">ADR-0002 data-sync 所有权与内部访问</a></li>
+        <li><a href="../../decisions/0004-market-data-provider-adapters.md">ADR-0004 Provider Adapter</a></li>
+        <li><a href="../../decisions/0013-equity-instrument-identity-lifecycle.md">ADR-0013 A 股身份与生命周期</a></li>
+        <li><a href="../../decisions/0015-financial-point-in-time-and-valuation.md">ADR-0015 财务 PIT 与方法学隔离</a></li>
+        <li><a href="../../decisions/0017-service-data-sync-declarative-orm.md">ADR-0017 Declarative ORM</a></li>
+        <li><a href="../../decisions/0018-service-api-post-only-http-method.md">ADR-0018 service-api POST-only</a></li>
+        <li><a href="../../contracts/0009-data-sync-equity-instrument-internal.openapi.yaml">现有证券内部身份契约</a></li>
+        <li><a href="../../contracts/0013-data-sync-financial-valuation-internal.openapi.yaml">现有财务 PIT 契约</a></li>
+        <li><a href="../../contracts/0015-data-sync-daily-money-flow-internal.openapi.yaml">现有方法学隔离契约</a></li>
+      </ul>
+
+      <h3>13.3 未决事项</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>问题</th><th>决定触发点</th><th>当前安全默认</th></tr></thead>
+          <tbody>
+            <tr><td>跨资产 market_entity root 是否接受？</td><td>M1 前独立 ADR</td><td>共享支撑先落；各域 ID 独立，不双写股票标识</td></tr>
+            <tr><td>现有 financial/money-flow methodology 是否迁入共享表？</td><td>出现跨域统一查询需求</td><td>保留现表权威，建立只读映射，不双权威</td></tr>
+            <tr><td>公告 document 是否跨更多领域共享？</td><td>ETF/指数/衍生品公告解析实施</td><td>本批先归 corporate 域；其他域只引用 source evidence</td></tr>
+            <tr><td>日期-only 的公共可用时间公式？</td><td>统一日历和第五批契约冻结</td><td>无权威日历则 observed_at；有日历取下一可交易时段</td></tr>
+            <tr><td>分区由年切月的阈值？</td><td>pilot 达 2,000 万行或 50GB，并完成压测</td><td>年度分区；低容量表不分区</td></tr>
+            <tr><td>raw、quality、run 的最终保留期？</td><td>许可、审计和恢复窗口确认</td><td>不删，只转冷；清理 job 不启用</td></tr>
+            <tr><td>内部访问用 HTTP、事件或组合？</td><td>0028 数据访问契约与 Proposed ADR</td><td>模型保持 transport-neutral；service-api 禁止直连</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>13.4 方案评审清单</h3>
+      <ul>
+        <li>八专题均映射到明确 dataset 和强类型表；共享表与隔离表边界清晰。</li>
+        <li>证券、指数、基金、期货、期权身份与生命周期可引用、可兼容、无股票解析器越界。</li>
+        <li>source、batch、raw、normalization、quality、quarantine、checkpoint、release、lineage 完整。</li>
+        <li>每张表已给用途、字段类型、单位/空值、主外键、唯一、检查、索引和分区建议。</li>
+        <li>报告期、交易日、公告、观察、有效、可见、知识、修订和 dataVersion 分开。</li>
+        <li>写入顺序、事务、幂等、锁、重复、恢复、保留、归档和清理可实施。</li>
+        <li>容量与查询假设可由 pilot 校准，索引未依赖猜测性全字段覆盖。</li>
+        <li>与当前 72 模型/13 revision 的差异、expand-contract、兼容和回滚已定义。</li>
+        <li>技术门禁具备准入、证据、验证人、退出；非技术风险有负责人、时间与兜底。</li>
+        <li>实现 SQL/测试明确为计划执行，未虚报生产接入或迁移完成。</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      0027 高价值市场数据 Canonical Model 与 PostgreSQL 设计 · Proposed ·
+      仅技术方案，不代表身份 ADR、Provider、migration 或跨服务契约已接受/实施。
+    </div>
+  </footer>
+</body>
+</html>

@@ -27,27 +27,32 @@ Design synchronization capabilities that remain provider-neutral, repeatable, re
    - when market data is involved, adjustment basis, corporate-action effects, suspension/no-trade semantics, units, and revision policy.
    - when a metric is vendor-derived, its semantic family, methodology owner/version, universe, bucket definition, denominator, window, cutoff, and finalization state.
 3. Separate facts, assumptions, decisions, and unresolved questions. Do not promote provider research into production approval.
-4. Design provider isolation:
+4. Classify each constraint before making it a gate:
+   - use a hard gate only when proceeding would make the design technically infeasible, unsafe, non-compliant, non-recoverable, or incapable of meeting its stated data contract;
+   - give every hard gate a measurable entry condition, evidence, verifier, and exit condition;
+   - record approvals, ownership assignment, budgets, scheduling, stakeholder availability, and other non-technical dependencies as risks or follow-up actions, not execution blockers; give them an owner, a due point, and a technically safe fallback where possible;
+   - do not invent prerequisite work or turn an unresolved non-technical question into a stop condition.
+5. Design provider isolation:
    - keep SDKs, URLs, and vendor fields inside one adapter;
    - emit provider-neutral batches through existing ports;
    - prevent tasks, application, quality, and persistence code from importing concrete providers;
    - keep adapters unable to write the canonical database directly.
    - preserve upstream source and methodology as canonical provenance; provider-neutral does not mean methodology-neutral.
-5. Design execution semantics:
+6. Design execution semantics:
    - trigger, schedule, partitions, full/incremental mode, checkpoints, backfill;
    - idempotency key, concurrency lock, retry budget, timeout, cancellation, resume, and rerun;
    - success, partial success, quarantine, and terminal failure states.
-6. Design the data lifecycle:
+7. Design the data lifecycle:
    - source payload boundary, canonical schema, provenance, observed/effective time, version;
    - validation, deduplication, completeness, reconciliation, revision, and quality gates;
    - PostgreSQL/S3 ownership, transaction boundary, migration, rollback, retention, and cleanup.
-7. Design runtime operations:
+8. Design runtime operations:
    - rate limits, credentials, egress, resource limits, health/readiness;
    - run/batch correlation, structured logs, metrics, traces, alerts, diagnostics, and operator recovery.
-8. Design consumer access through versioned API or event contracts. Never grant service-api or service-web direct database/provider access.
-9. For vendor-derived or semantically ambiguous market data such as fund flow, main-force flow, order-size buckets, sentiment, or estimated positions, read `references/derived-market-data.md` completely and apply its comparability gate.
-10. Read `references/design-checklist.md` completely and close every applicable item before finalizing.
-11. Validate the HTML proposal, links, and Compose impact. Execute document-level checks; list implementation acceptance commands as planned/not run when no implementation exists. Do not implement unless the user also requests implementation.
+9. Design consumer access through versioned API or event contracts. Never grant service-api or service-web direct database/provider access.
+10. For vendor-derived or semantically ambiguous market data such as fund flow, main-force flow, order-size buckets, sentiment, or estimated positions, read `references/derived-market-data.md` completely and apply its comparability gate.
+11. Read `references/design-checklist.md` completely and close every applicable item before finalizing.
+12. Validate the HTML proposal, links, and Compose impact. Execute document-level checks; list implementation acceptance commands as planned/not run when no implementation exists. Do not implement unless the user also requests implementation.
 
 ## Required proposal content
 
@@ -58,12 +63,14 @@ Include, when applicable:
 - canonical data model plus provenance and temporal semantics;
 - idempotency, checkpoint, backfill, correction, retention, and rollback strategies;
 - quality rules with measurable thresholds and disposition;
+- a gate register that separates measurable technical gates from non-technical risks and follow-up actions;
 - deployment topology, migration jobs, secrets, egress, and operational ownership;
 - acceptance commands using the repository Docker-only workflow.
 
 ## Non-negotiable boundaries
 
 - Do not invent an undecided source, scheduler, transport, SLA, or schema.
+- Do not add approval, budget, staffing, scheduling, ownership, or stakeholder-response items as hard execution gates. Track them separately with an owner, timing, and fallback; preserve hard gates for technical correctness, security, compliance, data integrity, recoverability, and acceptance evidence.
 - Do not call vendor SDKs outside adapters.
 - Do not let adapters write canonical storage.
 - Do not canonicalize a vendor label as a universal market fact or silently substitute a differently defined source.

@@ -1,7 +1,13 @@
 """AKShare 适配器；上游 API 与字段必须封装在本包内。"""
 
+from service_data_sync.infrastructure.providers.akshare.cnindex_index_snapshot import (
+    AkshareCnindexIndexSnapshotAdapter,
+)
 from service_data_sync.infrastructure.providers.akshare.cninfo_company_profile import (
     AkshareCninfoCompanyProfileAdapter,
+)
+from service_data_sync.infrastructure.providers.akshare.csindex_index_snapshot import (
+    AkshareCsindexIndexSnapshotAdapter,
 )
 from service_data_sync.infrastructure.providers.akshare.eastmoney_corporate_actions import (
     AkshareEastmoneyCorporateActionsAdapter,
@@ -31,6 +37,9 @@ from service_data_sync.infrastructure.providers.akshare.money_flow import (
     AkshareEastmoneyMoneyFlowAdapter,
     AkshareThsMoneyFlowAdapter,
 )
+from service_data_sync.infrastructure.providers.akshare.p0_market_data import (
+    AkshareP0MarketDataAdapter,
+)
 from service_data_sync.infrastructure.providers.akshare.sina_adjustment_factors import (
     AkshareSinaAdjustmentFactorsAdapter,
 )
@@ -43,11 +52,14 @@ from service_data_sync.infrastructure.providers.akshare.tencent_daily_bars impor
 
 __all__ = [
     "AkshareCninfoCompanyProfileAdapter",
+    "AkshareCnindexIndexSnapshotAdapter",
+    "AkshareCsindexIndexSnapshotAdapter",
     "AkshareEastmoneyCorporateActionsAdapter",
     "AkshareEastmoneyEquityCatalogAdapter",
     "AkshareEastmoneyEquityPeriodBarsAdapter",
     "AkshareEastmoneyFinancialAdapter",
     "AkshareEastmoneyMoneyFlowAdapter",
+    "AkshareP0MarketDataAdapter",
     "AkshareEastmoneySectorBarsAdapter",
     "AkshareEastmoneySectorEodAdapter",
     "AkshareEastmoneySectorMembershipAdapter",

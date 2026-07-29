@@ -18,7 +18,9 @@ from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.messaging.redis_client import RedisClient
 from service_data_sync.infrastructure.object_storage.client import ObjectStorageClient
 from service_data_sync.infrastructure.providers.akshare import (
+    AkshareCnindexIndexSnapshotAdapter,
     AkshareCninfoCompanyProfileAdapter,
+    AkshareCsindexIndexSnapshotAdapter,
     AkshareEastmoneyCorporateActionsAdapter,
     AkshareEastmoneyEquityCatalogAdapter,
     AkshareEastmoneyEquityPeriodBarsAdapter,
@@ -28,6 +30,7 @@ from service_data_sync.infrastructure.providers.akshare import (
     AkshareEastmoneySectorEodAdapter,
     AkshareEastmoneySectorMembershipAdapter,
     AkshareExchangeEquityLifecycleAdapter,
+    AkshareP0MarketDataAdapter,
     AkshareSinaAdjustmentFactorsAdapter,
     AkshareTencentDailyBarsAdapter,
     AkshareThsMoneyFlowAdapter,
@@ -70,6 +73,12 @@ def build_source_registry(settings: Settings) -> SourceRegistry:
     """只按开关组合来源适配器，不创建数据库、消息或对象存储客户端。"""
     registry = SourceRegistry()
     if settings.akshare_enabled:
+        # P0 CLI 默认精确选择 `provider_id=akshare`；统一 adapter 避免同名 provider 注册歧义。
+        registry.register(
+            AkshareP0MarketDataAdapter(
+                request_timeout_seconds=settings.akshare_request_timeout_seconds
+            )
+        )
         registry.register(
             AkshareTencentDailyBarsAdapter(
                 request_timeout_seconds=settings.akshare_request_timeout_seconds
@@ -127,6 +136,19 @@ def build_source_registry(settings: Settings) -> SourceRegistry:
                     request_timeout_seconds=settings.akshare_request_timeout_seconds
                 )
             )
+        if settings.index_enabled:
+            if settings.index_source_policy in {"akshare-csindex", "akshare-csindex-cnindex"}:
+                registry.register(
+                    AkshareCsindexIndexSnapshotAdapter(
+                        request_timeout_seconds=settings.akshare_request_timeout_seconds
+                    )
+                )
+            if settings.index_source_policy in {"akshare-cnindex", "akshare-csindex-cnindex"}:
+                registry.register(
+                    AkshareCnindexIndexSnapshotAdapter(
+                        request_timeout_seconds=settings.akshare_request_timeout_seconds
+                    )
+                )
         if settings.sector_enabled:
             registry.register(
                 AkshareEastmoneySectorBarsAdapter(

@@ -85,7 +85,7 @@ class SectorBarSyncService:
         raw_payload = batch.raw_payload if batch.raw_payload is not None else batch.payload
         raw_content_type = batch.raw_content_type or batch.content_type
         raw_digest = hashlib.sha256(raw_payload).hexdigest()
-        # 所有 canonical 变更均必须能回链至不可变原始证据。
+        # canonical 变更保留来源摘要；原始字节只在本次同步失败时供排障使用。
         raw_uri = self._raw_payload_store.put(
             RawPayload(
                 object_key=(

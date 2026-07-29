@@ -13,11 +13,16 @@ from service_data_sync.application.equity.master_catalog_sync import (
     EquityCatalogSyncResult,
     EquityCatalogSyncService,
 )
+from service_data_sync.application.ports.equity_master import PublishedCnAAggregate
 from service_data_sync.bootstrap.container import build_container
 from service_data_sync.bootstrap.logging import configure_logging
 from service_data_sync.bootstrap.settings import load_settings
 from service_data_sync.domain.equity import Exchange
-from service_data_sync.infrastructure.object_storage.raw_payload_store import S3RawPayloadStore
+from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    FailureEvidenceDataSource,
+    S3RawPayloadStore,
+    retain_failure_evidence,
+)
 from service_data_sync.infrastructure.persistence.equity_master_repository import (
     SqlAlchemyEquityMasterRepository,
 )
@@ -43,15 +48,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         if len(sources) != 1:
             raise SystemExit("exactly one approved equity catalog provider must be enabled")
         repository = SqlAlchemyEquityMasterRepository(container.database)
+        raw_payload_store = S3RawPayloadStore(container.object_storage)
         service = EquityCatalogSyncService(
-            source=sources[0],
+            source=FailureEvidenceDataSource(sources[0], raw_payload_store),
             repository=repository,
-            raw_payload_store=S3RawPayloadStore(container.object_storage),
+            raw_payload_store=raw_payload_store,
         )
-        results = asyncio.run(
-            _sync_exchanges(service, exchanges=exchanges, target_date=target_date)
+        results, aggregate = retain_failure_evidence(
+            raw_payload_store,
+            lambda: _sync_and_publish(
+                service,
+                repository=repository,
+                exchanges=exchanges,
+                target_date=target_date,
+                publish_aggregate=arguments.all_exchanges,
+            ),
         )
-        aggregate = repository.publish_cn_a_aggregate() if arguments.all_exchanges else None
     finally:
         container.close()
     print(
@@ -85,6 +97,20 @@ async def _sync_exchanges(
     for exchange in exchanges:
         results.append(await service.sync(exchange=exchange, target_date=target_date))
     return tuple(results)
+
+
+def _sync_and_publish(
+    service: EquityCatalogSyncService,
+    *,
+    repository: SqlAlchemyEquityMasterRepository,
+    exchanges: tuple[Exchange, ...],
+    target_date: date,
+    publish_aggregate: bool,
+) -> tuple[tuple[EquityCatalogSyncResult, ...], PublishedCnAAggregate | None]:
+    """在同一失败证据边界内顺序同步目录并可选发布全市场聚合。"""
+    results = asyncio.run(_sync_exchanges(service, exchanges=exchanges, target_date=target_date))
+    aggregate = repository.publish_cn_a_aggregate() if publish_aggregate else None
+    return results, aggregate
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:

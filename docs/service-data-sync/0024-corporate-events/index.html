@@ -1,0 +1,1969 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta
+    name="description"
+    content="上市公司公告、业绩预告与快报、限售解禁、股本变动及股东增减持的点时同步、领域模型和查询需求 Proposed 技术方案。"
+  >
+  <title>0024｜公司事件数据技术方案（Proposed）</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #dce3ec;
+      --surface: #f6f8fb;
+      --paper: #ffffff;
+      --accent: #3659c9;
+      --accent-soft: #edf1ff;
+      --good: #176b4d;
+      --good-soft: #e9f6ef;
+      --warn: #8a4b08;
+      --warn-soft: #fff5df;
+      --danger: #a1392f;
+      --danger-soft: #fff0ee;
+      --radius: 13px;
+      --shadow: 0 12px 30px rgb(23 32 51 / 7%);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      min-width: 1200px;
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 15px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    a {
+      color: var(--accent);
+      text-underline-offset: 0.2em;
+    }
+
+    a:focus-visible {
+      outline: 3px solid rgb(54 89 201 / 28%);
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
+
+    code {
+      padding: 0.08em 0.32em;
+      border-radius: 4px;
+      color: #2f467f;
+      background: var(--surface);
+      font: 0.89em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+
+    .shell {
+      width: 1120px;
+      margin: 0 auto;
+    }
+
+    header {
+      padding: 48px 0 34px;
+      border-bottom: 1px solid var(--line);
+      background:
+        radial-gradient(circle at 85% 18%, rgb(54 89 201 / 10%), transparent 32%),
+        linear-gradient(180deg, #f7f9ff, #ffffff);
+    }
+
+    .eyebrow,
+    .label {
+      color: var(--accent);
+      font-size: 0.76rem;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow {
+      margin: 0 0 9px;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4 {
+      line-height: 1.28;
+      letter-spacing: -0.02em;
+    }
+
+    h1 {
+      max-width: 900px;
+      margin: 0;
+      font-size: 3rem;
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      font-size: 1.92rem;
+    }
+
+    h3 {
+      margin: 24px 0 8px;
+      font-size: 1.12rem;
+    }
+
+    h4 {
+      margin: 18px 0 6px;
+      font-size: 0.98rem;
+    }
+
+    p {
+      max-width: 92ch;
+    }
+
+    .lede {
+      max-width: 880px;
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 1.08rem;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 11px;
+      margin: 25px 0 0;
+    }
+
+    .meta div {
+      padding: 14px 15px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgb(255 255 255 / 86%);
+    }
+
+    .meta dt {
+      color: var(--muted);
+      font-size: 0.76rem;
+    }
+
+    .meta dd {
+      margin: 3px 0 0;
+      font-weight: 720;
+    }
+
+    .status {
+      color: var(--warn);
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 95%);
+      backdrop-filter: blur(11px);
+    }
+
+    nav ul {
+      display: flex;
+      gap: 17px;
+      width: max-content;
+      margin: 0;
+      padding: 11px 0;
+      list-style: none;
+    }
+
+    nav a {
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 750;
+      text-decoration: none;
+    }
+
+    nav a:hover {
+      color: var(--accent);
+    }
+
+    main {
+      padding: 16px 0 66px;
+    }
+
+    section {
+      padding: 42px 0;
+      border-bottom: 1px solid var(--line);
+      scroll-margin-top: 52px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .card h3 {
+      margin-top: 0;
+    }
+
+    .card p:last-child,
+    .card ul:last-child {
+      margin-bottom: 0;
+    }
+
+    .label {
+      display: inline-block;
+      margin-bottom: 7px;
+    }
+
+    .callout {
+      margin: 18px 0;
+      padding: 16px 19px;
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      background: var(--accent-soft);
+    }
+
+    .callout.good {
+      border-left-color: var(--good);
+      background: var(--good-soft);
+    }
+
+    .callout.warn {
+      border-left-color: var(--warn);
+      background: var(--warn-soft);
+    }
+
+    .callout.danger {
+      border-left-color: var(--danger);
+      background: var(--danger-soft);
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      margin: 13px 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+    }
+
+    table {
+      width: 100%;
+      min-width: 920px;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    table.wide {
+      min-width: 1260px;
+    }
+
+    th,
+    td {
+      padding: 10px 11px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--surface);
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    pre,
+    .flow {
+      overflow-x: auto;
+      padding: 17px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      color: #e5e7eb;
+      background: #111827;
+      font: 0.85rem/1.68 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .facts,
+    .steps {
+      padding-left: 1.22rem;
+    }
+
+    .facts li + li,
+    .steps li + li {
+      margin-top: 6px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .badge.fact {
+      color: #245e8d;
+      background: #e9f2fa;
+    }
+
+    .badge.decision {
+      color: var(--good);
+      background: var(--good-soft);
+    }
+
+    .badge.assumption,
+    .badge.open {
+      color: var(--warn);
+      background: var(--warn-soft);
+    }
+
+    .badge.risk {
+      color: var(--danger);
+      background: var(--danger-soft);
+    }
+
+    .priority {
+      font-weight: 820;
+      white-space: nowrap;
+    }
+
+    .p0 {
+      color: var(--danger);
+    }
+
+    .p1 {
+      color: var(--warn);
+    }
+
+    .p2 {
+      color: var(--accent);
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    footer {
+      padding: 26px 0 42px;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    @media print {
+      @page {
+        size: A4 landscape;
+        margin: 11mm;
+      }
+
+      body {
+        min-width: 0;
+        font-size: 9pt;
+      }
+
+      nav {
+        display: none;
+      }
+
+      header {
+        padding: 0 0 16px;
+      }
+
+      main,
+      section {
+        padding-top: 16px;
+      }
+
+      .shell {
+        width: 100%;
+      }
+
+      .card,
+      .callout {
+        box-shadow: none;
+        break-inside: avoid;
+      }
+
+      .table-wrap {
+        overflow: visible;
+      }
+
+      table,
+      table.wide {
+        min-width: 0;
+        font-size: 7.2pt;
+      }
+
+      th,
+      td {
+        padding: 4px 5px;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Technical solution · service-data-sync · 0024</p>
+      <h1>上市公司事件：以公告证据和可见时间为轴</h1>
+      <p class="lede">
+        覆盖公告目录、业绩预告、业绩快报、限售解禁、股本变动、股东及董监高增减持。
+        推荐先建立“公开文档—业务事件—追加修订”三层模型；任何完成值、后续价格或事后表现只从其真实披露时点起可见，
+        不得回填到原计划或报告期。
+      </p>
+      <dl class="meta">
+        <div><dt>状态</dt><dd class="status">Proposed</dd></div>
+        <div><dt>方案编号</dt><dd>0024</dd></div>
+        <div><dt>所属服务</dt><dd>service-data-sync</dd></div>
+        <div><dt>调研日期</dt><dd>2026-07-28</dd></div>
+        <div><dt>实现影响</dt><dd>已实现 P0 公告业绩发布、追加修订、受控 CLI 与内部读取；真实来源启用仍需书面许可。</dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">1 结论</a></li>
+        <li><a href="#value">2 价值</a></li>
+        <li><a href="#sources">3 来源</a></li>
+        <li><a href="#grain">4 粒度字段</a></li>
+        <li><a href="#temporal">5 时态修订</a></li>
+        <li><a href="#sync">6 同步恢复</a></li>
+        <li><a href="#quality">7 质量防未来</a></li>
+        <li><a href="#canonical">8 Canonical</a></li>
+        <li><a href="#tables">9 领域表</a></li>
+        <li><a href="#api">10 API 需求</a></li>
+        <li><a href="#gates">11 门禁风险</a></li>
+        <li><a href="#acceptance">12 引用验收</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>1. 结论与优先级</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">推荐</span>
+          <h3>建议接入，按文档证据分三期</h3>
+          <p>
+            <strong>P0</strong> 先接官方公告目录、业绩预告与快报；
+            <strong>P1</strong> 接限售解禁和股本变动；
+            <strong>P2</strong> 再接股东计划、进展、结果及董监高实际交易。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">核心选择</span>
+          <h3>公告不是一行“最新状态”</h3>
+          <p>
+            公告文档有永久身份，业务事件可跨多个文档，事件值按公开顺序追加修订。
+            更正、补充、结果公告都保留旧版本，不覆盖、不倒填。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">最大风险</span>
+          <h3>聚合接口制造历史幻觉</h3>
+          <p>
+            东财业绩和解禁接口常返回当前聚合状态；把当前完成值、解禁后收益或最新价格放回原公告日，
+            会直接产生未来函数。
+          </p>
+        </article>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>优先级</th>
+              <th>数据集</th>
+              <th>接入结论</th>
+              <th>理由</th>
+              <th>首期边界</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="priority p0">P0</span></td>
+              <td><code>corporate.disclosure.document</code></td>
+              <td>建议接入</td>
+              <td>所有事件的公开时间、文档身份、修订关系和审计证据基础。</td>
+              <td>只存目录元数据、稳定 ID、官方链接和受控文档哈希；不做全量 OCR。</td>
+            </tr>
+            <tr>
+              <td><span class="priority p0">P0</span></td>
+              <td>
+                <code>corporate.earnings.guidance</code><br>
+                <code>corporate.earnings.express</code>
+              </td>
+              <td>建议接入</td>
+              <td>基本面因子、预期差、退市风险和财报前瞻价值高；监管规则明确要求更正链。</td>
+              <td>预告区间、快报初步值与正式财报严格隔离；先保守公开时间。</td>
+            </tr>
+            <tr>
+              <td><span class="priority p1">P1</span></td>
+              <td><code>corporate.restricted.unlock</code></td>
+              <td>条件接入</td>
+              <td>供给冲击、流通盘变化与风险提示价值高。</td>
+              <td>只接计划/实际数量、上市流通日和股东明细；排除前后收益与事后市值。</td>
+            </tr>
+            <tr>
+              <td><span class="priority p1">P1</span></td>
+              <td><code>corporate.share.capital.change</code></td>
+              <td>条件接入</td>
+              <td>流通股本、每股指标、持股比例与公司行动计算的基础。</td>
+              <td>保存事件与结构快照，单位和变动原因编码通过门禁后发布。</td>
+            </tr>
+            <tr>
+              <td><span class="priority p2">P2</span></td>
+              <td>
+                <code>corporate.shareholder.holding.plan</code><br>
+                <code>corporate.insider.holding.change</code>
+              </td>
+              <td>延后接入</td>
+              <td>情绪和治理信号有价值，但主体身份、计划/实际阶段、跨所口径和超大分页复杂。</td>
+              <td>董监高实际填报与大股东计划分数据集；禁止按姓名模糊合并。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout danger">
+        <strong>不建议首期接入的字段</strong>
+        解禁前/后 20 日收益、公告后收益、最新价、当前涨跌幅、按后续价格回算的历史市值、最终财报实际值、
+        后来确认的完成数量和任何“事后表现”字段。若业务需要，必须作为其他行情或派生数据集在真实观察时点计算，
+        不能进入公司事件事实。
+      </aside>
+
+      <p>
+        <span class="badge decision">建议</span>
+        现有 <code>equity.corporate_action</code> 只表达分红、送股、转增，继续保持兼容；
+        本方案不扩写它的含义。公司事件建立新 capability，详见
+        <a href="../0011-equity-data-sync-and-api/index.html">0011 个股同步方案</a>和
+        <a href="../../contracts/0018-data-sync-equity-market-data-internal.openapi.yaml">现有内部行情契约 0018</a>。
+      </p>
+    </section>
+
+    <section id="value">
+      <h2>2. 业务价值、用户、场景与边界</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>量化研究者</h3>
+          <ul class="facts">
+            <li>按市场当时可见版本构造业绩预告变化、快报偏差和更正风险因子。</li>
+            <li>重建限售解禁供给、股本分母和股东行为，不使用后来才知道的完成值。</li>
+            <li>把公告事件与行情、财务事实按时间连接，但不静默混算来源或口径。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>投研与风控用户</h3>
+          <ul class="facts">
+            <li>查看原公告、补充、更正、进展和结果的完整链。</li>
+            <li>识别预告方向变化、解禁规模、股本突变和重要股东减持计划。</li>
+            <li>通过来源、方法学、质量状态和免责声明判断可用性。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>平台与审计维护者</h3>
+          <ul class="facts">
+            <li>按文档 ID、raw hash、批次和 revision 解释任意 API 结果。</li>
+            <li>从 raw 重放、隔离 schema drift、回退 publication，不破坏历史。</li>
+            <li>对缺页、撤回、修订和空结果给出明确状态。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3>范围与非目标</h3>
+      <div class="grid two">
+        <article class="card">
+          <span class="label">本方案覆盖</span>
+          <ul class="facts">
+            <li>沪、深、北 A 股上市公司公开事件及其文档关系。</li>
+            <li>公告、业绩预告、业绩快报、限售解禁、股本变动、股东增减持。</li>
+            <li>真实上游、字段、时间、修订、同步、恢复、质量、拟议领域表和 API 查询需求。</li>
+            <li>当前代码、身份模型、财务 PIT 和服务边界的兼容影响。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="label">本方案不覆盖</span>
+          <ul class="facts">
+            <li>不修改代码、迁移、OpenAPI、配置、依赖或调度。</li>
+            <li>不承诺抓取全部公告正文、附件、图片 OCR 或自然语言事实抽取。</li>
+            <li>不把定期报告最终值、行情收益、舆情、诉讼或回购扩入本批。</li>
+            <li>不定义跨专题证券、来源、批次、质量、publication、checkpoint 共享表。</li>
+          </ul>
+        </article>
+      </div>
+
+      <aside class="callout">
+        <strong>边界不变量</strong>
+        Provider SDK、URL、中文字段和单位修正只存在于 Adapter。
+        <code>service-api</code> 不直读 data-sync PostgreSQL、对象存储或 Provider；
+        <code>service-web</code> 只访问 <code>service-api</code>。本方案继承
+        <a href="../../decisions/0002-data-sync-ownership-and-access.md">ADR-0002</a>、
+        <a href="../../decisions/0004-market-data-provider-adapters.md">ADR-0004</a>和
+        <a href="../../decisions/0009-equity-data-source-and-serving-boundary.md">ADR-0009</a>。
+      </aside>
+
+      <p>
+        <span class="badge assumption">容量假设</span>
+        全历史公告目录可能达到百万级文档，数值型领域事件预计十万至数十万级、修订和文档关系进一步放大。
+        该估算只用于分区与接口上限设计；实施前必须以三所各 100 只证券、至少 10 年样本测量。
+      </p>
+    </section>
+
+    <section id="sources">
+      <h2>3. 权威来源、AKShare 候选与证据</h2>
+
+      <h3>3.1 来源优先级</h3>
+      <ol class="steps">
+        <li>
+          <strong>公开文档事实：</strong>交易所披露站点、巨潮资讯法定披露平台和发行人公告。
+          文档 ID、标题、公开时间、正文、公告编号和修订说明以此为准。
+        </li>
+        <li>
+          <strong>交易所监管填报：</strong>沪深北交易所董监高及相关人员股份变动栏目。
+          其真实上游是上市公司填报；上交所页面明确提示“由各上市公司自行填报，仅供参考”，数量单位为股。
+        </li>
+        <li>
+          <strong>结构化聚合：</strong>东方财富、新浪等只能作为发现、结构化候选或对账来源。
+          它们不能替代公开文档身份，也不能把“当前汇总”宣称为完整历史修订。
+        </li>
+      </ol>
+
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>领域</th>
+              <th>AKShare 1.18.78 候选</th>
+              <th>直接上游</th>
+              <th>真实业务来源</th>
+              <th>历史 / 增量</th>
+              <th>已知风险</th>
+              <th>建议角色</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>公告目录</td>
+              <td><code>stock_zh_a_disclosure_report_cninfo</code></td>
+              <td>巨潮资讯公告查询</td>
+              <td>发行人向交易所/法定平台披露的公告</td>
+              <td>按证券、类别和日期范围分页；完整起点未证明</td>
+              <td>格式化 DataFrame 丢弃独立 <code>announcementId</code>/<code>orgId</code> 列，只把它们嵌入链接；类别可能不覆盖所有更正</td>
+              <td><strong>P0 主候选</strong>；Adapter 必须保留 raw ID</td>
+            </tr>
+            <tr>
+              <td>公告目录对照</td>
+              <td><code>stock_notice_report</code>、<code>stock_individual_notice_report</code></td>
+              <td>东方财富公告大全</td>
+              <td>其展示的发行人公告；东财为分发方</td>
+              <td>按日/证券/类型，100 条分页；深度未证明</td>
+              <td>日期降为 date；即时公开时间未知；类型由聚合方分类</td>
+              <td>发现 / 对账；不作唯一权威</td>
+            </tr>
+            <tr>
+              <td>业绩预告</td>
+              <td><code>stock_yjyg_em(date)</code></td>
+              <td>东方财富 <code>RPT_PUBLIC_OP_NEWPREDICT</code></td>
+              <td>发行人业绩预告及修正公告</td>
+              <td>官方文档称报告期从 2008-12-31 起；500 条分页</td>
+              <td>当前聚合行无公告文档 ID、版本链和上下界拆分；相同事件可有多指标行</td>
+              <td>结构化候选；必须关联官方文档</td>
+            </tr>
+            <tr>
+              <td>业绩快报</td>
+              <td><code>stock_yjkb_em(date)</code></td>
+              <td>东方财富 <code>RPT_FCI_PERFORMANCEE</code></td>
+              <td>发行人业绩快报及更正公告</td>
+              <td>官方文档称报告期从 2010-03-31 起；500 条分页</td>
+              <td>当前聚合值不证明修订完整；部分行业/板块覆盖和公告时间精度待验</td>
+              <td>结构化候选；正式财报不覆盖快报</td>
+            </tr>
+            <tr>
+              <td>限售解禁</td>
+              <td>
+                <code>stock_restricted_release_queue_em</code><br>
+                <code>stock_restricted_release_stockholder_em</code><br>
+                <code>stock_restricted_release_detail_em</code>
+              </td>
+              <td>东方财富 <code>RPT_LIFT_STAGE</code>/<code>RPT_LIFT_GD</code></td>
+              <td>发行人解除限售公告、交易所上市流通安排</td>
+              <td>按证券或日期范围；父批次再取股东明细</td>
+              <td>父接口缺公告 ID；子接口不重复证券和解禁日；含解禁后 20 日收益等事后字段</td>
+              <td>P1 候选；父子请求血缘必须绑定</td>
+            </tr>
+            <tr>
+              <td>解禁对照</td>
+              <td><code>stock_restricted_release_queue_sina</code></td>
+              <td>新浪财经</td>
+              <td>发行人解除限售公告</td>
+              <td>单证券历史</td>
+              <td>含公告日和批次但单位不同；不能静默拼入东财序列</td>
+              <td>独立对账源，不作 fallback</td>
+            </tr>
+            <tr>
+              <td>股本变动</td>
+              <td><code>stock_share_change_cninfo</code></td>
+              <td>巨潮 API <code>p_stock2215</code></td>
+              <td>发行人股本变动披露</td>
+              <td>按证券、变动日期范围</td>
+              <td>宽表单位未在 AKShare 文档标清；固定镜像本次因 <code>py_mini_racer</code> 本地库不可用而失败</td>
+              <td>P1；单位、变动原因编码先过门禁</td>
+            </tr>
+            <tr>
+              <td>大股东增减持</td>
+              <td><code>stock_ggcg_em</code></td>
+              <td>东方财富 <code>RPT_SHARE_HOLDER_INCREASE</code></td>
+              <td>股东计划、进展、完成公告</td>
+              <td>无日期参数，全量分页</td>
+              <td>超大分页；计划和结果关系不稳定；含最新价、涨跌幅等非事件字段</td>
+              <td>P2 发现源；官方文档链为事实源</td>
+            </tr>
+            <tr>
+              <td>董监高实际变动</td>
+              <td>
+                <code>stock_share_hold_change_sse</code><br>
+                <code>stock_share_hold_change_szse</code><br>
+                <code>stock_share_hold_change_bse</code>
+              </td>
+              <td>沪、深、北交易所监管公开栏目</td>
+              <td>上市公司/相关人员向交易所填报</td>
+              <td>按证券全量分页；起点和修订机制各所不同</td>
+              <td>字段、单位、关系人和填报日不同；姓名不是稳定主体 ID</td>
+              <td>P2，三所独立 Adapter / methodology</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>3.2 固定环境短探针</h3>
+      <p>
+        <span class="badge fact">事实</span>
+        项目镜像固定 <code>akshare==1.18.78</code>。2026-07-28 在
+        <code>quant-v2/service-data-sync:test</code> 只读容器核验函数签名、源码和小样本；
+        AKShare 在线文档当日显示 1.18.80，因此本文只把在线文档用于接口语义参考，不建议升级依赖。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>探针</th><th>结果</th><th>可证明</th><th>不可证明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>stock_yjyg_em("20250630")</code></td>
+              <td>4,307 行、11 列；样本含 000656 的修正后数值与 2025-08-30 公告日</td>
+              <td>报告期批量响应、字段形状和金额/百分比候选</td>
+              <td>原始预告值、完整修订链、官方文档身份、生产稳定性</td>
+            </tr>
+            <tr>
+              <td><code>stock_yjkb_em("20250630")</code></td>
+              <td>112 行、16 列；在 2026-07-28 探针中出现 2026-07-29 公告日</td>
+              <td>必须设置“未来公开时间”硬质量规则</td>
+              <td>该日期为何出现、未来是否真实可见；不得直接发布</td>
+            </tr>
+            <tr>
+              <td>CNINFO 000656、业绩预告、2025-07-01 至 08-30</td>
+              <td>2 个文档：原始预告 <code>1224164626</code>、修正公告 <code>1224626759</code></td>
+              <td>文档 ID 可区分原始与更正；标题可辅助建立关系</td>
+              <td>仅靠类别可识别所有关系；“补充更正”类别同窗口返回 0</td>
+            </tr>
+            <tr>
+              <td>浦发银行东财解禁父/子</td>
+              <td>父 4 行，2020-09-04 子 2 行；子结果不重复证券/日期</td>
+              <td>父子请求 provenance 是恢复和去重必需</td>
+              <td>全市场历史完整、公告时点或不同来源单位一致</td>
+            </tr>
+            <tr>
+              <td><code>stock_share_change_cninfo</code></td>
+              <td>固定镜像报 <code>py_mini_racer</code> native library unavailable</td>
+              <td>当前镜像不能把“函数存在”当“可运行”</td>
+              <td>上游 API 本身不可用；修复镜像后仍需连续探针</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout warn">
+        <strong>生产准入解释</strong>
+        单次调通、源码中存在 URL、非空 DataFrame 或官方页面可打开，都不代表授权、限流、完整性、修订语义和长期稳定性已满足。
+        公共接口未承诺 SLA 或配额；生产必须自设低并发、速率预算、指数退避、熔断和 5/30 交易日观察门。
+      </aside>
+
+      <h3>3.3 字段真实上游</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>字段族</th><th>权威证据</th><th>候选提取</th><th>禁止推断</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>公告 ID、编号、标题、发布时间、文档链接</td>
+              <td>交易所/巨潮公开记录与公告文件</td>
+              <td>CNINFO raw <code>announcementId</code>/<code>announcementTime</code>；东财 raw <code>art_code</code></td>
+              <td>用标题 hash 代替官方 ID；用抓取时间倒推公告时间</td>
+            </tr>
+            <tr>
+              <td>预告金额/区间、指标、方向、原因</td>
+              <td>发行人预告或修正公告</td>
+              <td>东财预告结构化行，经官方文档对账后进入候选</td>
+              <td>把单值当上下界；把最后修正值写回第一次公告</td>
+            </tr>
+            <tr>
+              <td>快报主要财务值</td>
+              <td>发行人快报/更正公告</td>
+              <td>东财快报结构化行；官方 PDF/XBRL 对账</td>
+              <td>用正式定期报告覆盖快报；把初步值称为审计值</td>
+            </tr>
+            <tr>
+              <td>解禁日、数量、比例、股东、限售类型</td>
+              <td>发行人解除限售上市流通公告及交易所安排</td>
+              <td>东财父/子接口或新浪对照</td>
+              <td>把解禁日等同实际卖出日；用后 20 日收益丰富事件</td>
+            </tr>
+            <tr>
+              <td>总股本、流通/受限构成、变动原因/日期</td>
+              <td>发行人股本变动公告、巨潮结构化披露</td>
+              <td><code>p_stock2215</code> 候选</td>
+              <td>用“最新记录标识”代替修订链；单位未知时默认股或万股</td>
+            </tr>
+            <tr>
+              <td>股东计划、实际数量、交易均价、填报日</td>
+              <td>股东公告、交易所董监高填报</td>
+              <td>东财计划/结果候选；三所实际变动栏目</td>
+              <td>按同名主体跨公司合并；把计划上限当实际完成值</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="grain">
+      <h2>4. 数据粒度、身份、唯一键与字段字典</h2>
+
+      <h3>4.1 三层身份</h3>
+      <pre class="flow" aria-label="公司事件三层身份">证券身份（现有 0014）
+  └─ security_id：按事实日期 + known_at 解析
+
+公开文档
+  └─ disclosure_document_id：source_code + upstream_announcement_id
+       ├─ ORIGINAL
+       ├─ CORRECTION
+       ├─ SUPPLEMENT
+       ├─ PROGRESS / RESULT
+       └─ OFFICIAL_WITHDRAWAL（仅有公开证据时）
+
+业务事件
+  └─ event_id：稳定 UUID，不随状态和值变化
+       └─ revision 1..N：每个公开文档或来源变化追加，不覆盖旧值</pre>
+
+      <ul class="facts">
+        <li>
+          <span class="badge decision">建议</span>
+          一份公告可包含多个业务事件，一个业务事件也可由多个公告推进；使用多对多文档关系，禁止假设一对一。
+        </li>
+        <li>
+          <span class="badge decision">建议</span>
+          官方公告 ID 是文档身份，不直接充当业务事件身份；修正公告拥有自己的文档 ID，但关联同一业务事件。
+        </li>
+        <li>
+          <span class="badge risk">风险</span>
+          没有稳定上游事件 ID 时，候选 key 只能使用首次公告 ID 加领域维度；状态、数值、最新日期和标题全文不得进入永久 ID。
+        </li>
+      </ul>
+
+      <h3>4.2 领域粒度与候选唯一键</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>数据集</th>
+              <th>一行粒度</th>
+              <th>业务事件候选键</th>
+              <th>修订唯一键</th>
+              <th>关系</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>corporate.disclosure.document</code></td>
+              <td>一个公开文档</td>
+              <td><code>(source_code, upstream_announcement_id)</code></td>
+              <td>文档自身不可变；内容变动追加 observation / 新文档版本，不改 ID</td>
+              <td>可关联多个 event</td>
+            </tr>
+            <tr>
+              <td><code>corporate.earnings.guidance</code></td>
+              <td>证券 + 报告期 + 一次预告业务事件</td>
+              <td><code>(security_id, report_period, event_family, first_disclosure_id)</code></td>
+              <td><code>(event_id, revision)</code></td>
+              <td>一 revision 可含多个预测指标 item</td>
+            </tr>
+            <tr>
+              <td><code>corporate.earnings.express</code></td>
+              <td>证券 + 报告期 + 一次快报业务事件</td>
+              <td><code>(security_id, report_period, event_family, first_disclosure_id)</code></td>
+              <td><code>(event_id, revision)</code></td>
+              <td>一 revision 对多个快报 metric</td>
+            </tr>
+            <tr>
+              <td><code>corporate.restricted.unlock</code></td>
+              <td>证券 + 解禁批次/日期 + 限售类型</td>
+              <td>优先上游批次 ID；否则 <code>(security_id, planned_unlock_on, lock_type, first_disclosure_id)</code></td>
+              <td><code>(event_id, revision)</code></td>
+              <td>一 revision 对多个 holder item</td>
+            </tr>
+            <tr>
+              <td><code>corporate.share.capital.change</code></td>
+              <td>证券 + 一次生效的股本结构变动</td>
+              <td><code>(security_id, effective_on, upstream_reason_code, first_disclosure_id)</code></td>
+              <td><code>(event_id, revision)</code></td>
+              <td>可与解禁、转股、增发、回购注销等事件关联但不合表</td>
+            </tr>
+            <tr>
+              <td><code>corporate.shareholder.holding.plan</code></td>
+              <td>证券 + 股东 + 一次增/减持计划</td>
+              <td><code>(security_id, holder_source_key_or_name, direction, first_disclosure_id)</code></td>
+              <td><code>(event_id, revision)</code></td>
+              <td>计划、进展、完成通过文档关系推进</td>
+            </tr>
+            <tr>
+              <td><code>corporate.insider.holding.change</code></td>
+              <td>证券 + 相关人员 + 单日一次填报交易</td>
+              <td>优先交易所 row ID；否则来源内 fingerprint：证券、人员原文、变动日、数量、均价、填报日</td>
+              <td><code>(event_id, revision)</code></td>
+              <td>各所 methodology 隔离；不与大股东计划混合</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>4.3 公共事件字段</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>字段</th><th>类型</th><th>含义 / 单位</th><th>空值语义</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>event_id</code></td><td>UUID</td><td>平台稳定业务事件 ID</td><td>不可空</td></tr>
+            <tr><td><code>event_family</code></td><td>VARCHAR(48)</td><td>受治理领域枚举</td><td>不可空，不用自由文本</td></tr>
+            <tr><td><code>security_id</code></td><td>BIGINT</td><td>引用现有证券身份</td><td>发布前不可空</td></tr>
+            <tr><td><code>revision</code></td><td>INTEGER</td><td>事件内单调递增</td><td>不可空，起始 1</td></tr>
+            <tr><td><code>event_status</code></td><td>VARCHAR(24)</td><td>ANNOUNCED / CORRECTED / IN_PROGRESS / COMPLETED / CANCELLED / WITHDRAWN</td><td>未知用 UNKNOWN，不猜</td></tr>
+            <tr><td><code>occurred_on</code></td><td>DATE</td><td>业务实际发生日；不等于公告日</td><td>尚未发生或文档未给出可空</td></tr>
+            <tr><td><code>effective_on</code></td><td>DATE</td><td>规则/股本/解禁实际生效日</td><td>计划阶段可空</td></tr>
+            <tr><td><code>report_period</code></td><td>DATE</td><td>财务报告期末</td><td>非财务事件可空</td></tr>
+            <tr><td><code>source_visible_at</code></td><td>TIMESTAMPTZ</td><td>市场公开可见时刻</td><td>日期精度不足时仍填保守推导值</td></tr>
+            <tr><td><code>visible_time_precision</code></td><td>VARCHAR(16)</td><td>EXACT / DATE_ONLY / OBSERVED_ONLY</td><td>不可空</td></tr>
+            <tr><td><code>public_usable_at</code></td><td>TIMESTAMPTZ</td><td>按版本化保守规则计算的最早回测可用时刻</td><td>未通过可见性门禁时不可发布</td></tr>
+            <tr><td><code>known_from</code>/<code>known_to</code></td><td>TIMESTAMPTZ</td><td>平台实际知识半开区间</td><td><code>known_to</code> 当前行可空</td></tr>
+            <tr><td><code>methodology_code/version</code></td><td>VARCHAR / INTEGER</td><td>来源映射、时间推导、单位转换方法</td><td>不可空</td></tr>
+            <tr><td><code>quality_status</code></td><td>VARCHAR(16)</td><td>VERIFIED / LIMITED / QUARANTINED</td><td>公开只允许策略批准状态</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>4.4 领域字段与单位</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr><th>领域</th><th>字段</th><th>标准单位 / 口径</th><th>关键空值或约束</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>业绩预告</td>
+              <td><code>guidance_type</code>、<code>metric_code</code>、<code>amount_low/high</code>、<code>yoy_low/high</code>、<code>prior_period_value</code>、<code>reason_text</code></td>
+              <td>金额 CNY 元；同比百分数以 percent 存十进制字符串；范围上下界独立</td>
+              <td>文本只给单值时不伪造区间；上下界同时存在则 low ≤ high；预测不等于实际</td>
+            </tr>
+            <tr>
+              <td>业绩快报</td>
+              <td>营业收入、营业利润、利润总额、净利润、扣非净利润、总资产、净资产、EPS、每股净资产、ROE</td>
+              <td>金额 CNY 元；每股值 CNY/share；ROE percent；合并范围和会计口径显式</td>
+              <td>初步值；未知审计状态写 PRELIMINARY；缺失不写 0</td>
+            </tr>
+            <tr>
+              <td>限售解禁</td>
+              <td><code>planned_shares</code>、<code>actual_shares</code>、<code>remaining_restricted_shares</code>、<code>ratio_total</code>、<code>ratio_float</code>、<code>holder_count</code>、<code>lock_type</code></td>
+              <td>股；比例需明确分母和百分数/比值规范</td>
+              <td>计划与实际分列；实际值只能从实际披露 revision 起可见；无交易不等于 0</td>
+            </tr>
+            <tr>
+              <td>股本变动</td>
+              <td><code>total_shares_before/after</code>、<code>tradable_shares_before/after</code>、<code>restricted_shares_before/after</code>、细分类构成、<code>reason_code/text</code></td>
+              <td>股；同一 revision 所有构成必须同单位、同生效日</td>
+              <td>上游单位未验证则隔离；before 缺失不由上一条静默填充</td>
+            </tr>
+            <tr>
+              <td>股东计划</td>
+              <td><code>holder_name_source</code>、<code>holder_type</code>、<code>direction</code>、计划/实际数量与比例、价格上下界、计划起止、完成日</td>
+              <td>股、CNY/share、明确分母的比例</td>
+              <td>主体 ID 不明时保留原文；计划上限、累计实际、单次成交严格分列</td>
+            </tr>
+            <tr>
+              <td>董监高变动</td>
+              <td>人员原文、职务、关系、变动日、填报日、变动前后持股、变动数、均价、原因、股票种类、币种</td>
+              <td>股、CNY/share；若来源明确其他币种则 ISO 4217</td>
+              <td>三所 AKShare 文档标注单位存在差异，必须按 raw 和官方页逐所校准</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="temporal">
+      <h2>5. 交易日、公告、可见、有效与修订语义</h2>
+
+      <h3>5.1 六类时间不可互换</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>时间</th><th>定义</th><th>示例</th><th>查询用途</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>report_period</code></td><td>会计期末</td><td>2025-06-30</td><td>筛报告期；绝不代表当时可见</td></tr>
+            <tr><td><code>occurred_on</code></td><td>业务发生日/交易日</td><td>董监高成交日</td><td>事件回放与交易日对齐</td></tr>
+            <tr><td><code>announced_at</code></td><td>公告标注发布时间</td><td>平台毫秒时间或公告日期</td><td>来源事实；精度单独记录</td></tr>
+            <tr><td><code>source_visible_at</code></td><td>公开平台首次可见时间</td><td>公告发布到媒体时刻</td><td>市场 PIT</td></tr>
+            <tr><td><code>effective_on</code></td><td>规则或数量实际生效日</td><td>限售股上市流通日</td><td>业务有效视图</td></tr>
+            <tr><td><code>observed_at / known_from</code></td><td>平台抓取成功 / 平台知识开始</td><td>回补执行时间</td><td>平台审计 PIT；不能倒填</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>5.2 保守可见规则</h3>
+      <ol class="steps">
+        <li>官方源提供可信精确时间时，保存原始时区和 raw 值，转换为 UTC；<code>visible_time_precision=EXACT</code>。</li>
+        <li>
+          只提供公告日期时，标记 <code>DATE_ONLY</code>，默认
+          <code>public_usable_at = 公告日后的下一交易时段开盘</code>；不得假定公告日在开盘前已公开。
+        </li>
+        <li>
+          只有聚合行、没有可信公告时间时，标记 <code>OBSERVED_ONLY</code>，
+          <code>public_usable_at = observed_at</code>；不得按报告期或事件日回填。
+        </li>
+        <li>
+          <code>known_from</code> 永远不早于本平台首次成功观测。
+          后来找到历史官方公告时间时，追加知识修订，不改写原平台知识历史。
+        </li>
+        <li>
+          回测可选择“市场可见重建”：<code>public_usable_at ≤ T</code> 且使用当前可审计 revision；
+          若要求重演平台当时知识，则同时要求 <code>known_from ≤ T &lt; known_to</code>。
+          两种模式必须在响应中标明，不能混称。
+        </li>
+      </ol>
+
+      <h3>5.3 修正、补充、撤回和结果</h3>
+      <pre class="flow" aria-label="事件修订时间线">2025-07-15 原始业绩预告（document A）
+  └─ event E / revision 1 / public_usable_at = A 的保守可见时刻
+
+2025-08-30 修正公告（document B，CORRECTS A）
+  └─ event E / revision 2 / 新金额只从 B 的可见时刻生效
+
+正式半年度报告（document C）
+  └─ financial.statement.reported 的独立事实
+     不成为 event E 的 revision 3，不覆盖预告历史</pre>
+
+      <ul class="facts">
+        <li>
+          更正公告：若明确修正原事件，关闭旧 revision 的市场可见区间并追加新 revision；
+          原文档和旧值永久保留。
+        </li>
+        <li>
+          补充公告：默认只补充指定字段；未被明确替代的旧字段继续有效。
+          只有版本化字段合并规则可生成“当前视图”，禁止通用整行覆盖。
+        </li>
+        <li>
+          进展/结果公告：追加事件阶段。计划数量仍是计划事实，累计实际值只从进展或结果公告公开时起可见。
+        </li>
+        <li>
+          已经媒体确认发布的公告若上游后来缺失，不自动标记撤回或删除。
+          只有官方公开撤回/取消/作废证据才进入 <code>WITHDRAWN</code> 或 <code>CANCELLED</code> revision。
+        </li>
+        <li>
+          发布前被撤回的申请没有形成公开市场事件；raw 运维证据若依法取得，只留受限区，不进入 consumer publication。
+        </li>
+      </ul>
+
+      <aside class="callout good">
+        <strong>官方规则支持</strong>
+        上交所 2026 股票上市规则要求业绩预告、快报出现重大差异时及时发布更正公告；
+        深交所业务指南说明公告经媒体确认发布后不得修改或撤销，已披露错误应通过补充或更正处理。
+        因此“追加文档 + 追加事件 revision”比覆盖一行更贴合真实披露流程。
+      </aside>
+    </section>
+
+    <section id="sync">
+      <h2>6. 同步模式、分区、增量、回补、幂等与恢复</h2>
+
+      <h3>6.1 建议任务合同</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr><th>任务</th><th>分区键</th><th>增量水位</th><th>频率建议</th><th>发布边界</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>corporate.disclosure.scan</code></td>
+              <td><code>source|market|announcement_date|page</code></td>
+              <td>最后完整日期 + 页集合 fingerprint</td>
+              <td>披露窗口内 15–30 分钟；其余每小时，属待压测假设</td>
+              <td>日期分区全页完成、计数一致才候选发布</td>
+            </tr>
+            <tr>
+              <td><code>corporate.event.extract</code></td>
+              <td><code>document_id|extractor_version</code></td>
+              <td>文档 hash + 提取方法版本</td>
+              <td>新文档到达后触发</td>
+              <td>一个文档失败不阻断无关文档；关联事件不发布半成品</td>
+            </tr>
+            <tr>
+              <td><code>corporate.earnings.refresh</code></td>
+              <td><code>report_period|page</code> 或 <code>security|report_period</code></td>
+              <td>公告 ID/日期 + 聚合行 hash</td>
+              <td>报告季加密；普通日每日</td>
+              <td>文档与结构化值完成关联后发布</td>
+            </tr>
+            <tr>
+              <td><code>corporate.unlock.refresh</code></td>
+              <td><code>security|unlock_year</code></td>
+              <td>解禁批次 key + 父子页 hash</td>
+              <td>每日；未来 90 日滚动复查，历史受控回补</td>
+              <td>父批次及所有 holder 页完整后发布</td>
+            </tr>
+            <tr>
+              <td><code>corporate.capital.refresh</code></td>
+              <td><code>security|change_year</code></td>
+              <td>变动日 + 来源记录 key/hash</td>
+              <td>每日或公告触发</td>
+              <td>单位、原因码和构成平衡通过</td>
+            </tr>
+            <tr>
+              <td><code>corporate.holding.refresh</code></td>
+              <td><code>source|market|security|year</code></td>
+              <td>交易/公告/填报日期 + page checkpoint</td>
+              <td>P2；每日低并发</td>
+              <td>三所和大股东计划分别 publication</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>6.2 正常写入顺序</h3>
+      <ol class="steps">
+        <li>调度创建 run/partition；按 capability、市场、日期、页或证券取得 advisory lock。</li>
+        <li>Adapter 仅调用对应 Provider，保存原始字节、请求参数摘要、响应头摘要、schema fingerprint 和 <code>observed_at</code>。</li>
+        <li>raw 持久化成功后才解析；禁止“先写 canonical，随后补证据”。</li>
+        <li>公告先按来源文档 ID 去重，再按标题、报告期和领域规则建立业务事件候选关系。</li>
+        <li>按事件事实日期调用 0014 date-aware identity resolver；歧义和代码复用进入隔离。</li>
+        <li>领域 Normalizer 明确单位、阶段、空值、时间精度和禁用字段；未知列或未来公开时间进入 quarantine。</li>
+        <li>同一事务追加 event revision、领域 item、文档关系、质量结果和 publication；成功后推进 checkpoint。</li>
+        <li>重复抓取内容相同只追加 observation 证据，不新增业务 revision；文档关系或值变化才追加 revision。</li>
+      </ol>
+
+      <h3>6.3 分页、幂等和快照一致性</h3>
+      <ul class="facts">
+        <li>
+          页级幂等键建议为
+          <code>capability|source|market|window_start|window_end|page_no|schema_version</code>；
+          payload hash 只作字节查重，不能折叠独立观测。
+        </li>
+        <li>
+          第一页记录 <code>total_hits/pages</code>；全部页结束后复核页数、行数、首末排序键、重复 key 和窗口覆盖。
+          页数在运行中变化时，本批失败并用重叠窗口重跑，不发布混合快照。
+        </li>
+        <li>
+          <code>stock_ggcg_em</code> 无日期参数且全量页数大，不得每次从头盲拉。
+          未取得稳定上游行 ID、可复验排序键或受控分页水位前保持 P2 关闭。
+        </li>
+        <li>
+          东财解禁 holder 子请求必须保存父证券、解禁日、父 source batch 和父事件候选 ID；
+          子行不可脱离请求上下文单独去重。
+        </li>
+      </ul>
+
+      <h3>6.4 回补与恢复</h3>
+      <div class="grid two">
+        <article class="card">
+          <h3>回补</h3>
+          <ul class="facts">
+            <li>显式给数据集、来源、市场、证券范围、公告/报告/事件日期范围和理由。</li>
+            <li>公告从近到远按月回补；领域事件按文档触发，聚合接口只作交叉验证。</li>
+            <li>历史回补保留真实公告时间；若只有日期则使用保守规则，不用回补时间伪装官方时间。</li>
+            <li>每批形成独立 dataVersion；禁止一次全市场超长事务。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>失败恢复</h3>
+          <ul class="facts">
+            <li>超时/429/断连按 Retry-After 或指数退避加 jitter；最多 3 次，预算耗尽留待下一 run。</li>
+            <li>schema、单位、身份、未来时间、页集合变化不自动重试，直接隔离。</li>
+            <li>DB 事务失败保持上一 publication；raw 可重放，同 partition 新 attempt 不复用 observation sequence。</li>
+            <li>僵尸任务由 lease/reaper 回收；checkpoint 只在 publication 事务后推进。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3>6.5 删除、保留与回滚</h3>
+      <ul class="facts">
+        <li>已发布文档元数据、事件 revision、关系、质量结果和审计证据默认不物理删除。</li>
+        <li>公告正文/附件是否长期保留由数据权利与容量策略决定；未通过合规门时只存元数据、官方链接和合法取得的 hash。</li>
+        <li>来源下架只产生来源缺失质量状态，不删除旧事实；官方撤回通过新 revision 表达。</li>
+        <li>回滚只切回上一 verified publication 或关闭 capability；禁止覆盖 revision、改写可见时间或 destructive downgrade。</li>
+      </ul>
+    </section>
+
+    <section id="quality">
+      <h2>7. 数据质量、未来函数与口径隔离</h2>
+
+      <h3>7.1 发布质量规则</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr><th>规则</th><th>阈值</th><th>失败处置</th><th>原因</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>文档身份</td><td>公开文档 ID 唯一；同 ID 内容 hash 冲突为 0</td><td>隔离来源分区</td><td>防止把不同公告折叠或静默替换</td></tr>
+            <tr><td>修订关系</td><td>关系图无环；CORRECTS/SUPERSEDES 有可解析目标</td><td>事件不发布，保留文档</td><td>避免错误覆盖旧值</td></tr>
+            <tr><td>证券身份</td><td>按事实日期和 knownAt 唯一命中 100%</td><td>identity quarantine</td><td>防代码复用和退市误绑</td></tr>
+            <tr><td>未来可见时间</td><td><code>source_visible_at ≤ observed_at + 允许时钟偏差</code></td><td>硬隔离，不发布</td><td>本次快报探针已出现次日公告日期</td></tr>
+            <tr><td>时间精度</td><td>EXACT 有来源证据；DATE_ONLY 使用版本化保守推导</td><td>降级 OBSERVED_ONLY 或隔离</td><td>防开盘前后混淆</td></tr>
+            <tr><td>金额区间</td><td>low ≤ high；Decimal 可解析率 100%</td><td>隔离 metric item</td><td>防区间方向错误和 float 精度污染</td></tr>
+            <tr><td>计划/实际</td><td>字段和阶段全部显式；实际值不得出现在早期 revision</td><td>事件不发布</td><td>防完成值倒填</td></tr>
+            <tr><td>单位</td><td>每数值有标准单位、原单位和 scale；未知 0 条进入 publication</td><td>隔离来源/字段</td><td>AKShare 文档与源码可能存在股/万股差异</td></tr>
+            <tr><td>分页完整</td><td>页数、行数、首末 key、重复和重叠窗口全部一致</td><td>整分区失败</td><td>防半页被解释为无事件</td></tr>
+            <tr><td>空响应</td><td>只有合法、完整、已知覆盖的空页才记 EMPTY_SUCCESS</td><td>否则 retryable/limited</td><td>空集不等于无公告</td></tr>
+            <tr><td>构成平衡</td><td>股本分类和与总股本在版本化容差内一致</td><td>隔离该 revision</td><td>防单位或口径错位</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>7.2 明确禁止的未来函数</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>危险字段 / 行为</th><th>为什么是未来信息</th><th>正确处理</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>解禁后 20 日涨跌幅</td>
+              <td>解禁日后 20 日才能计算</td>
+              <td>不进入公司事件；需要时由独立派生行情数据集按方法学计算</td>
+            </tr>
+            <tr>
+              <td>东财高管持股的最新价、当前涨跌幅</td>
+              <td>是抓取当下快照，不是历史事件时点价格</td>
+              <td>Adapter 丢弃；消费者按 event date 查询版本化行情</td>
+            </tr>
+            <tr>
+              <td>实际解禁数量/市值回填原计划</td>
+              <td>实际值常在后续实施或结果阶段才确认</td>
+              <td>追加 RESULT revision；原计划 revision 不变</td>
+            </tr>
+            <tr>
+              <td>正式财报值覆盖业绩快报</td>
+              <td>定期报告晚于快报公开</td>
+              <td>财报留在 financial dataset；仅保存可审计关联和偏差派生</td>
+            </tr>
+            <tr>
+              <td>修正后的预告数值使用原预告可见时间</td>
+              <td>市场当时只知道原值</td>
+              <td>修正数值从修正公告的 <code>public_usable_at</code> 起生效</td>
+            </tr>
+            <tr>
+              <td>后来补齐公告时间原地改旧 knownFrom</td>
+              <td>抹去平台当时不知道该事实的历史</td>
+              <td>追加知识 revision；平台知识区间不倒填</td>
+            </tr>
+            <tr>
+              <td>当前股本结构反填历史分母</td>
+              <td>忽略增发、转股、回购注销和解禁过程</td>
+              <td>按 effective_on 选择股本 revision</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>7.3 口径隔离</h3>
+      <ul class="facts">
+        <li>业绩预告的预测区间、业绩快报初步值、正式财报披露值三类物理和方法学隔离。</li>
+        <li>解除限售表示可流通，不表示卖出；大股东减持计划、董监高实际成交和持股存量不得混为一种“减持”。</li>
+        <li>股本结构是某生效日的数量状态；解禁是限制状态变化事件。两者可关联，但不把总股本/流通盘静默互算。</li>
+        <li>沪深北交易所董监高填报分别保留来源方法学，单位校准前不组成一条无标记全市场序列。</li>
+        <li>东财、新浪、交易所同名字段不自动 fallback；若切源，形成新 methodology/dataVersion 并显式披露。</li>
+      </ul>
+
+      <aside class="callout danger">
+        <strong>最小回测不变量</strong>
+        对任意查询时刻 T，响应中的每一个数值都必须指向一份在 T 前公开的文档 revision，
+        或明确标记为 <code>OBSERVED_ONLY</code> 且平台在 T 前已取得；找不到证据即不得出现在回测/实时视图。
+      </aside>
+    </section>
+
+    <section id="canonical">
+      <h2>8. 建议的 canonical dataset 输入与消费需求</h2>
+      <p>
+        本节只给第 9 项统一数据模型任务的领域输入，不定义共享表。
+        证券身份、来源批次、raw、质量、隔离、checkpoint、publication 和方法学基础设施由统一模型方案复用。
+      </p>
+
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>Canonical dataset</th>
+              <th>输入批次</th>
+              <th>标准粒度</th>
+              <th>必须携带</th>
+              <th>主要消费者</th>
+              <th>隔离边界</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>disclosure.document</code></td>
+              <td>CNINFO/交易所公告目录</td>
+              <td>一个公开文档</td>
+              <td>来源 ID、证券、标题、类别、公开时间/精度、链接、hash、抓取证据</td>
+              <td>全部公司事件、审计、详情页</td>
+              <td>正文/附件权限与目录元数据分离</td>
+            </tr>
+            <tr>
+              <td><code>equity.corporate_event.earnings_guidance.reported</code></td>
+              <td>官方预告文档 + 东财结构化候选</td>
+              <td>业务事件 revision + metric item</td>
+              <td>报告期、指标、区间、方向、原因、文档关系、可见时间</td>
+              <td>基本面因子、预期变化、风险提示</td>
+              <td>不与快报/财报共表</td>
+            </tr>
+            <tr>
+              <td><code>equity.corporate_event.earnings_express.reported</code></td>
+              <td>官方快报文档 + 东财结构化候选</td>
+              <td>业务事件 revision + metric item</td>
+              <td>报告期、初步指标、范围、审计/初步状态、修正链</td>
+              <td>财报前快照、快报与正式值偏差研究</td>
+              <td>不覆盖 financial report</td>
+            </tr>
+            <tr>
+              <td><code>equity.corporate_event.restricted_unlock.reported</code></td>
+              <td>官方解禁公告 + 东财父子候选</td>
+              <td>解禁批次 revision + holder item</td>
+              <td>计划/实际、上市流通日、数量、比例分母、限售类型、阶段</td>
+              <td>供给冲击、流通盘、风险日历</td>
+              <td>排除行情表现和市值快照</td>
+            </tr>
+            <tr>
+              <td><code>equity.corporate_event.share_capital_change.reported</code></td>
+              <td>巨潮股本变动 + 官方公告</td>
+              <td>一次生效变动 revision</td>
+              <td>before/after 结构、原因码、公告日、变动日、生效日、单位</td>
+              <td>每股指标、比例分母、公司行动对账</td>
+              <td>不静默派生解禁或持股行为</td>
+            </tr>
+            <tr>
+              <td><code>equity.corporate_event.shareholder_holding_plan.reported</code></td>
+              <td>官方计划/进展/结果文档 + 东财发现</td>
+              <td>一次计划 revision</td>
+              <td>主体原文/类型、方向、计划/实际、窗口、状态、文档链</td>
+              <td>股东行为、治理风险、事件研究</td>
+              <td>与董监高逐笔变动隔离</td>
+            </tr>
+            <tr>
+              <td><code>equity.corporate_event.insider_holding_change.reported</code></td>
+              <td>SSE/SZSE/BSE 监管填报</td>
+              <td>单日单主体交易 revision</td>
+              <td>主体原文、关系、交易/填报日、前后持股、数量、均价、原因、所别</td>
+              <td>治理监控、董监高交易研究</td>
+              <td>三所 methodology 不静默混并</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>统一模型任务需要决策的接口</h3>
+      <ul class="facts">
+        <li>是否将公司事件文档抽象为全平台共享 disclosure 表；本专题只提交领域需求，不抢先定义共享表。</li>
+        <li>统一 <code>data_version</code> 与领域 revision 的关系：一个 publication 可冻结多事件、多文档和质量结果。</li>
+        <li>日期/月份分区与证券查询的索引取舍；公告文档按公开月份，事件 revision 按报告/生效年份候选。</li>
+        <li>文档关系图和业务事件 revision 的外键、无环校验、当前行唯一约束与历史保留。</li>
+        <li>全文、PDF、XBRL 和抽取结果的对象存储保留/权限边界；canonical 仅保存引用和受治理结构化值。</li>
+      </ul>
+    </section>
+
+    <section id="tables">
+      <h2>9. 建议领域表草案</h2>
+      <p>
+        表名为拟议逻辑名，最终由 <a href="../0018-sqlalchemy-orm-persistence-models/index.html">0018 ORM 基线</a>
+        和后续 canonical 方案统一。每张逻辑表需一表一 Declarative 模型、中文字段注释、显式 registry 和 Alembic migration；
+        本文不创建模型或 migration。
+      </p>
+
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr><th>表</th><th>用途 / 粒度</th><th>领域字段</th><th>唯一性 / 关系</th><th>分区 / 索引建议</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>corporate_event</code></td>
+              <td>公司事件稳定身份；一行一个业务事件</td>
+              <td><code>event_id UUID</code>、<code>public_ref UUID</code>、<code>security_id</code>、<code>event_family</code>、<code>first_disclosure_id</code>、创建时间</td>
+              <td>PK event_id；public_ref unique；领域逻辑 key 由 family-specific unique 管理</td>
+              <td><code>(security_id,event_family)</code>；小表不分区</td>
+            </tr>
+            <tr>
+              <td><code>corporate_disclosure_document</code></td>
+              <td>公司事件域内公开文档目录；一行一个来源文档</td>
+              <td>source、upstream ID、证券、公告编号、标题、类别、announced/sourceVisible/usable 时间、精度、URL、document hash</td>
+              <td><code>UNIQUE(source_code,upstream_announcement_id)</code>；同 ID hash 冲突禁止覆盖</td>
+              <td>按 <code>source_visible_month</code> 分区；证券+时间、标题检索索引</td>
+            </tr>
+            <tr>
+              <td><code>corporate_event_document_link</code></td>
+              <td>事件与文档多对多关系</td>
+              <td>event_id、document_id、relation_type、target_document_id、relation_confidence、rule_version</td>
+              <td><code>UNIQUE(event_id,document_id,relation_type)</code>；关系图无环</td>
+              <td>event/document 双向索引；不分区</td>
+            </tr>
+            <tr>
+              <td><code>corporate_event_revision</code></td>
+              <td>公共事件修订；一行一个公开/知识 revision</td>
+              <td>event_id、revision、status、occurred/effective/report period、sourceVisible/usable、known 区间、methodology、quality、source batch、hash</td>
+              <td><code>UNIQUE(event_id,revision)</code>；每 event 一条 current partial unique；时间区间不重叠</td>
+              <td>按 <code>public_usable_year</code> 分区；证券通过 event join</td>
+            </tr>
+            <tr>
+              <td><code>earnings_guidance_revision</code></td>
+              <td>预告 revision 头</td>
+              <td>event_revision_id、guidance_type、report_period、basis、scope、currency、reason_text、uncertainty_text</td>
+              <td>PK/FK event_revision_id；family check</td>
+              <td>按 event revision 同分区；报告期索引</td>
+            </tr>
+            <tr>
+              <td><code>earnings_guidance_metric</code></td>
+              <td>预告 revision 内一个预测指标</td>
+              <td>metric_code、amount_low/high、yoy_low/high、prior_value、unit、currency、null_reason、source_text</td>
+              <td><code>UNIQUE(event_revision_id,metric_code)</code>；low≤high</td>
+              <td>metric+report_period 查询索引</td>
+            </tr>
+            <tr>
+              <td><code>earnings_express_revision</code></td>
+              <td>快报 revision 头</td>
+              <td>event_revision_id、report_period、scope、basis、currency、preliminary_status、audit_status、notes</td>
+              <td>PK/FK event_revision_id；不得标记为正式财报</td>
+              <td>按 event revision 同分区</td>
+            </tr>
+            <tr>
+              <td><code>earnings_express_metric</code></td>
+              <td>快报一个治理指标</td>
+              <td>metric_code、current_value、prior_value、yoy、qoq、unit、currency、null_reason</td>
+              <td><code>UNIQUE(event_revision_id,metric_code)</code></td>
+              <td>metric+report_period 查询索引</td>
+            </tr>
+            <tr>
+              <td><code>restricted_unlock_revision</code></td>
+              <td>解禁批次 revision</td>
+              <td>planned/actual unlock on、planned/actual/remaining shares、ratio_total/float、holder_count、lock_type、phase</td>
+              <td>PK/FK event_revision_id；数量非负；计划/实际阶段 check</td>
+              <td>按解禁年份；<code>(security_id,planned_unlock_on)</code> 读取索引</td>
+            </tr>
+            <tr>
+              <td><code>restricted_unlock_holder_item</code></td>
+              <td>解禁 revision 的股东明细</td>
+              <td>holder_seq、holder_name_source、holder_source_key、planned/actual/remaining shares、lock_months、lock_type、phase</td>
+              <td><code>UNIQUE(event_revision_id,holder_seq)</code>；不按姓名跨批次唯一</td>
+              <td>event revision 索引；大表可随父分区</td>
+            </tr>
+            <tr>
+              <td><code>share_capital_change_revision</code></td>
+              <td>一次股本结构变动 revision</td>
+              <td>effective_on、reason_code/text、总股本/已流通/受限 before/after、分类构成、unit、scope</td>
+              <td>PK/FK event_revision_id；构成平衡与单位 check</td>
+              <td>按 effective year；证券+生效日索引</td>
+            </tr>
+            <tr>
+              <td><code>shareholder_holding_plan_revision</code></td>
+              <td>大股东增减持计划、进展、结果 revision</td>
+              <td>holder 原文/类型/来源 key、direction、phase、计划/实际数量比例、价格区间、start/end/completed on</td>
+              <td>PK/FK event_revision_id；计划与实际字段组合 check</td>
+              <td>按公告年份；证券+阶段+时间索引</td>
+            </tr>
+            <tr>
+              <td><code>insider_holding_change_revision</code></td>
+              <td>交易所董监高及相关人员单日变动</td>
+              <td>person 原文/来源 key、duty、relationship、share class、currency、change/trade/filed date、before/change/after shares、avg_price、reason</td>
+              <td>PK/FK event_revision_id；来源 row ID/fingerprint 唯一；before+change≈after 仅作有条件质量规则</td>
+              <td>按 change year；证券+变动日、人员来源 key 索引</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout warn">
+        <strong>不自行定义共享表</strong>
+        本草案只描述公司事件域。<code>security_id</code>、source batch、raw object、methodology、quality、
+        quarantine、checkpoint、dataset publication、交易日历和访问审计均引用后续统一模型；
+        不在 0024 重复建表。
+      </aside>
+
+      <h3>查询与容量取舍</h3>
+      <ul class="facts">
+        <li>公告详情按稳定 document/event UUID 查询，避免把长 URL、标题或数据库 BIGINT 暴露为公开 ID。</li>
+        <li>列表主排序为 <code>public_usable_at DESC, event_id, revision</code>，建立覆盖索引；禁止 offset pagination。</li>
+        <li>文档目录按月分区有利于增量和保留；财务事件按 report/effective year 分区有利于 PIT 扫描。</li>
+        <li>自由文本标题/原因首期只做前缀或受控全文索引；不得让任意关键词查询拖垮主库。</li>
+        <li>一份快报/预告的 metric item 保持窄表和受治理字典，避免宽 JSON 绕过单位与 schema 门。</li>
+      </ul>
+    </section>
+
+    <section id="api">
+      <h2>10. 对 service-api 的查询、分页与权限需求</h2>
+      <p>
+        本专题只给第 10 项跨服务契约设计输入，不改现有 OpenAPI。
+        内部通信选择仍由 data-access-contract 统一方案决定；当前 ADR 基线优先版本化内部 HTTP。
+      </p>
+
+      <h3>10.1 建议公开 POST 用例</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr><th>拟议 POST 路由</th><th>用途</th><th>请求筛选</th><th>响应重点</th><th>PIT 支持</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>POST /api/v1/equities/{exchange}/{symbol}/corporate-events/search</code></td>
+              <td>事件列表与日历</td>
+              <td>families、status、reportPeriod、occurred/effective/announced 范围、asOf、knownAt、quality、sort、cursor、limit</td>
+              <td>eventRef、摘要、阶段、真实时间、document refs、dataVersion、来源/方法/质量</td>
+              <td>全部已通过可见性门的数据集</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/equities/{exchange}/{symbol}/corporate-events/{eventRef}</code></td>
+              <td>单事件 revision 与文档链</td>
+              <td>asOf、knownAt、includeRevisions、includeDocuments、fieldSelection</td>
+              <td>领域字段、旧/新 revision、CORRECTS/SUPPLEMENTS/RESULT 关系、免责声明</td>
+              <td>默认当前；显式请求可返回历史</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/equities/{exchange}/{symbol}/corporate-disclosures/search</code></td>
+              <td>公告目录</td>
+              <td>category、keyword allowlist、announced 范围、document relation、cursor、limit</td>
+              <td>标题、公告号、官方链接、公开时间精度、关联事件</td>
+              <td>按 sourceVisible/knownAt</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        <span class="badge decision">兼容建议</span>
+        现有 <code>POST .../corporate-actions</code> 继续只返回分红送转。
+        不把新事件塞进旧响应，也不重命名旧路由；是否后续建立聚合入口或弃用别名，由契约方案单独评审。
+      </p>
+
+      <h3>10.2 请求约束</h3>
+      <ul class="facts">
+        <li><code>families</code> 1–8 个，<code>fieldSelection</code> 只允许受治理公开字段，禁止任意列名或表达式。</li>
+        <li>默认时间窗 1 年，普通用户最大 10 年；全历史需专门权限或异步导出方案，不在本接口隐式支持。</li>
+        <li><code>limit</code> 默认 50、最大 100；cursor HMAC 绑定证券、筛选、asOf、knownAt、排序、methodology 和 dataVersion。</li>
+        <li><code>knownAt</code> 未来时刻拒绝；<code>asOf</code> 与 <code>marketVisibilityMode</code> 必须形成明确组合。</li>
+        <li>金额、数量、比例和价格均以十进制字符串输出，带 unit、currency、ratio basis；不输出二进制 float。</li>
+        <li>只有日期精度的公告必须返回 <code>visibleTimePrecision=DATE_ONLY</code> 和推导后的 <code>publicUsableAt</code>。</li>
+      </ul>
+
+      <h3>10.3 响应最小审计字段</h3>
+      <pre aria-label="拟议响应结构">{
+  "eventRef": "uuid",
+  "family": "EARNINGS_GUIDANCE",
+  "revision": 2,
+  "status": "CORRECTED",
+  "reportPeriod": "2025-06-30",
+  "sourceVisibleAt": "2025-08-30T01:30:00Z",
+  "visibleTimePrecision": "DATE_ONLY",
+  "publicUsableAt": "2025-09-01T01:30:00Z",
+  "methodology": {"code": "cninfo-disclosure-v1", "version": 1},
+  "source": {"owner": "CNINFO", "documents": [{"relation": "CORRECTION", "url": "..."}]},
+  "quality": {"status": "VERIFIED", "warnings": []},
+  "dataVersion": "uuid",
+  "publishedAt": "2026-07-28T10:00:00Z",
+  "disclaimer": "业绩预告和快报为初步或预测信息，不等于正式财务报告。"
+}</pre>
+
+      <h3>10.4 鉴权、限额、缓存与错误映射</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>控制</th><th>需求</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>鉴权</td><td>沿用有效 JWT / ACTIVE 用户；建议权限 <code>MARKET_DATA.CORPORATE_EVENTS.READ</code>，全文/批量导出另设 scope</td></tr>
+            <tr><td>内部身份</td><td>service-api → data-sync 使用服务 Bearer/mTLS 候选、最小权限、轮换和审计；不转发用户 token</td></tr>
+            <tr><td>超时/重试</td><td>只读内部请求超时、连接错误、502/503 在未响应前安全重试 1 次；429 尊重 Retry-After</td></tr>
+            <tr><td>限流</td><td>按用户、证券、窗口、字段数和详情展开计数；大窗口和 includeRevisions 成本加权</td></tr>
+            <tr><td>缓存</td><td>强 ETag 由规范查询 + dataVersion 生成；公开 POST 条件命中返回 204；缓存不是权威数据</td></tr>
+            <tr><td>错误</td><td>400 参数/时间、401/403 鉴权权限、404 证券/事件、409 cursor/version、422 visibility 未验证、429 限流、503 无可用 publication/下游失败</td></tr>
+            <tr><td>审计</td><td>记录 requestId、subject、scope、证券、筛选摘要、dataVersion、耗时和结果码；不记录 token、全文或敏感 raw</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout">
+        <strong>实际消费路径</strong>
+        service-web → service-api POST Controller → Service → 类型化 data-sync client →
+        service-data-sync 已发布视图。任何为了性能提出的直连数据库方案都不在可选范围；
+        若 HTTP 成为瓶颈，应通过后续 ADR 评审 service-api 自有读模型或事件，而不是授予同步库权限。
+      </aside>
+    </section>
+
+    <section id="gates">
+      <h2>11. 技术硬门禁与非技术风险</h2>
+
+      <h3>11.1 技术硬门禁</h3>
+      <p>
+        以下门禁只阻断对应 capability 的生产发布，不阻断其他专题建模、契约设计、fixture 和 shadow 运行。
+      </p>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>门禁</th>
+              <th>准入条件</th>
+              <th>可验证证据</th>
+              <th>验证人</th>
+              <th>退出条件</th>
+              <th>失败兜底</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>G1 文档与事件身份</td>
+              <td>发布任何事件前，可稳定取得文档 ID，并建立原始/更正/补充/结果关系</td>
+              <td>每类 ≥100 个文档 fixture，含 ≥20 条修正/补充链；ID 唯一、关系无环、重复重放 0 新 revision</td>
+              <td>data-sync 领域维护者 + 数据质量维护者</td>
+              <td>全部 fixture 和 5 日 shadow 通过；异常文档 100% 隔离</td>
+              <td>只发布公告目录，不发布结构化事件</td>
+            </tr>
+            <tr>
+              <td>G2 可见时间与防未来</td>
+              <td>每条数值有 sourceVisible/precision/publicUsable/knownFrom；未来值硬拒绝</td>
+              <td>至少 30 个精确、日期-only、收盘后、周末、修正样本；时区/下一开盘 fixture；未来公告故障注入</td>
+              <td>量化研究验证人 + 数据质量维护者</td>
+              <td>无一条值早于其公开证据；两种 PIT 模式输出可复算</td>
+              <td>降为 OBSERVED_ONLY；不进入历史回测视图</td>
+            </tr>
+            <tr>
+              <td>G3 单位、阶段和口径</td>
+              <td>每来源字段映射明确股/万股、元/万元、百分数分母；计划与实际隔离</td>
+              <td>三所各 ≥30 条、业绩/解禁/股本各 ≥100 条与官方公告逐字段对账；Decimal/空值/边界测试</td>
+              <td>数据治理维护者 + 领域维护者</td>
+              <td>关键字段映射 100%，数值容差和转换规则版本化</td>
+              <td>只保留 raw/文档元数据，结构化值 quarantine</td>
+            </tr>
+            <tr>
+              <td>G4 分页完整与恢复</td>
+              <td>Provider 页集合有稳定计数、排序和 checkpoint；中断可从未发布页恢复</td>
+              <td>5/30 交易日探针、页数变化/重复/缺页故障注入、进程中断重放；最终行数与来源 count 一致</td>
+              <td>同步平台维护者</td>
+              <td>连续 5 日试运行和 30 日生产观察无静默缺页；恢复不推进半批 publication</td>
+              <td>关闭高容量来源；按证券/日期小窗或官方文档触发</td>
+            </tr>
+            <tr>
+              <td>G5 证券身份与主体边界</td>
+              <td>证券按事实日期唯一解析；人员/股东无官方 ID 时不模糊合并</td>
+              <td>代码复用、退市、名称变更、同名人员 fixture；发布行 security resolution 100%</td>
+              <td>证券身份维护者 + 数据质量维护者</td>
+              <td>无临时公开身份、无按名称误绑；歧义全隔离</td>
+              <td>保留来源原文和文档，不发布主体聚合查询</td>
+            </tr>
+            <tr>
+              <td>G6 事务、重放与回滚</td>
+              <td>raw、revision、质量、publication、checkpoint 顺序可恢复；旧版可切回</td>
+              <td>各写入阶段失败注入、并发锁、重复 run、raw replay、旧 dataVersion 读取和回滚演练</td>
+              <td>data-sync 平台维护者 + 数据库维护者</td>
+              <td>0 半发布、0 重复 current row、回滚不删历史</td>
+              <td>feature flag/source policy 关闭，保留上一 publication</td>
+            </tr>
+            <tr>
+              <td>G7 文档存储与再分发合规</td>
+              <td>保存/公开正文、附件或大段文本前，数据处理边界与授权证据可验证</td>
+              <td>逐来源权利矩阵、允许的缓存/留存/再分发范围、访问控制和删除/下架流程测试</td>
+              <td>数据治理负责人 + 合规验证人 + 安全维护者</td>
+              <td>技术策略与证据一致；越权路径测试为 0</td>
+              <td>仅存元数据、官方链接、必要 hash；不代理正文</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>11.2 非技术风险与跟进</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr><th>风险 / 跟进项</th><th>负责人</th><th>时间点</th><th>影响</th><th>技术兜底</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>P0/P1/P2 业务排序和首批指标白名单未确认</td>
+              <td>市场数据产品负责人</td>
+              <td>P0 实现设计评审前</td>
+              <td>影响实现范围，不影响模型可行性</td>
+              <td>按本文默认 P0，仅交付公告目录、预告净利润/扣非净利润和快报核心指标</td>
+            </tr>
+            <tr>
+              <td>Provider 调用预算、限流和授权状态未确认</td>
+              <td>数据源运营负责人</td>
+              <td>shadow 连续探针前</td>
+              <td>影响 cadence、历史速度和来源选择</td>
+              <td>低并发、近窗口、断点回补；来源不可用保留上一版本，不阻断其他数据集</td>
+            </tr>
+            <tr>
+              <td>公告全文、PDF、OCR 的存储预算</td>
+              <td>平台成本负责人</td>
+              <td>全文能力立项前</td>
+              <td>影响对象存储和抽取覆盖</td>
+              <td>首期只存目录元数据、官方链接和结构化事实；OCR 延后</td>
+            </tr>
+            <tr>
+              <td>主体身份治理人力不足</td>
+              <td>数据治理负责人</td>
+              <td>P2 评审前</td>
+              <td>影响跨文档股东聚合和同名消歧</td>
+              <td>P2 响应只返回来源原文，不提供跨事件主体汇总</td>
+            </tr>
+            <tr>
+              <td>运营告警和回补值班安排</td>
+              <td>同步服务运维负责人</td>
+              <td>生产开关前两周</td>
+              <td>影响恢复时效，不影响正确性</td>
+              <td>fail closed、旧 publication 保持、自动 reaper、下一 run 恢复</td>
+            </tr>
+            <tr>
+              <td>全历史深度与商业需求不匹配</td>
+              <td>量化研究负责人</td>
+              <td>P0 pilot 完成后</td>
+              <td>可能要求更深回补</td>
+              <td>先发布有官方证据的时间段；缺口显式返回 coverage，不以聚合当前值补历史</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout">
+        <strong>分类原则</strong>
+        审批、预算、人力、排期和干系人响应都不是技术硬门禁；
+        只有继续发布会造成未来信息、身份错绑、半页缺失、数据破坏、不可恢复或越权再分发时，
+        才由上表 G1–G7 阻断对应 capability。
+      </aside>
+    </section>
+
+    <section id="acceptance">
+      <h2>12. 引用、未决事项与验收清单</h2>
+
+      <h3>12.1 官方与项目依据</h3>
+      <p class="muted">外部链接访问日期均为 2026-07-28；项目文档读取当前工作树版本。</p>
+      <ol class="facts">
+        <li>
+          <a href="https://www.csrc.gov.cn/shanghai/c105565/c7549909/content.shtml">
+            中国证监会令第 226 号《上市公司信息披露管理办法》
+          </a>：
+          2025-07-01 起施行；信息披露的真实、准确、完整、及时、公平是公告事实治理上位约束。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/mainipo/c/c_20260424_10816589.shtml">
+            上海证券交易所股票上市规则（2026 年 4 月修订）
+          </a>：
+          业绩预告/快报内容、更正义务、解除限售公告和股本变动要求。
+        </li>
+        <li>
+          <a href="https://docs.static.szse.cn/www/lawrules/rule/stock/supervision/mb/W020250425730780478873.pdf">
+            深圳证券交易所股票上市规则（2025 年修订）
+          </a>：
+          业绩预告合理、谨慎、客观、准确及重大差异修正要求。
+        </li>
+        <li>
+          <a href="https://www.bse.cn/cxjg_list/200025675.html">
+            北京证券交易所上市公司业务办理指南第 6 号——定期报告相关事项
+          </a>：
+          业绩快报/预告与实际差异达到 20% 或方向变化时及时修正。
+        </li>
+        <li>
+          <a href="https://docs.static.szse.cn/www/disclosure/notice/general/W020230804631480613363.pdf">
+            深交所上市公司自律监管指南第 1 号——业务办理
+          </a>：
+          经媒体确认发布的公告不得修改或撤销，错误/遗漏应补充或更正。
+        </li>
+        <li>
+          <a href="https://www.cninfo.com.cn/new/commonUrl?url=disclosure%2Flist%2Fnotice">
+            巨潮资讯信息披露公告查询
+          </a>：
+          深交所法定信息披露平台，可作为公告文档身份和公开记录候选。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/disclosure/credibility/supervision/change/">
+            上交所董监高及核心技术人员股份变动栏目
+          </a>：
+          页面说明数据由上市公司自行填报、数量单位为股。
+        </li>
+        <li>
+          <a href="https://www.szse.cn/disclosure/supervision/change/index.html">
+            深交所董监高人员股份变动栏目
+          </a>、
+          <a href="https://www.bse.cn/disclosure/djg_sharehold_change.html">
+            北交所董监高及相关人员持股变动栏目
+          </a>：
+          三所实际变动来源候选。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/mainipo/c/c_20250516_10779135.shtml">
+            上交所上市公司自律监管指引第 8 号——股份变动管理（2025 年 4 月修订）
+          </a>、
+          <a href="https://investor.szse.cn/lawrules/rule/allrules/bussiness/t20250425_613260.html">
+            深交所上市公司自律监管指引第 10 号——股份变动管理（2025 年修订）
+          </a>：
+          股本变化导致股东比例变化和股份变动披露边界。
+        </li>
+        <li>
+          <a href="https://akshare.akfamily.xyz/data/stock/stock.html">
+            AKShare 股票数据官方文档
+          </a>：
+          业绩预告/快报、公告、解禁、股本和三所董监高函数、字段与候选历史深度。
+          在线文档版本与项目固定 1.18.78 不同，故已在固定镜像额外核验源码。
+        </li>
+        <li>
+          项目依据：
+          <a href="../0007-akshare-b05-initial-research/index.html">0007 B05 首轮调研</a>、
+          <a href="../0010-akshare-round2-verification/index.html">0010 二轮验证</a>、
+          <a href="../0014-equity-instrument-master/index.html">0014 证券身份</a>、
+          <a href="../0016-financial-statements-valuation/index.html">0016 财务 PIT</a>、
+          <a href="../../decisions/0015-financial-point-in-time-and-valuation.md">ADR-0015</a>、
+          <a href="../../decisions/0018-service-api-post-only-http-method.md">ADR-0018</a>。
+        </li>
+      </ol>
+
+      <h3>12.2 事实、推断、建议、未决</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>类型</th><th>内容</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="badge fact">事实</span></td>
+              <td>固定 AKShare 1.18.78 提供本文列出的函数；预告/快报直接上游为东方财富，公告/股本候选可到巨潮，董监高可到三所。</td>
+            </tr>
+            <tr>
+              <td><span class="badge fact">事实</span></td>
+              <td>000656 的 CNINFO 样本存在原始预告和不同公告 ID 的修正公告；东财预告聚合样本只呈现修正后的当前值。</td>
+            </tr>
+            <tr>
+              <td><span class="badge fact">事实</span></td>
+              <td>现有生产能力只有分红送转公司行动，没有本专题其余事件 capability；现有公司行动 API 无 asOf/knownAt。</td>
+            </tr>
+            <tr>
+              <td><span class="badge assumption">推断</span></td>
+              <td>全历史公告目录为百万级、领域事件为十万至数十万级；须由 pilot 实测修正。</td>
+            </tr>
+            <tr>
+              <td><span class="badge decision">建议</span></td>
+              <td>采用文档—事件—revision 三层模型，官方文档为证据，结构化聚合只作候选/对账。</td>
+            </tr>
+            <tr>
+              <td><span class="badge open">未决</span></td>
+              <td>公告文档是否由统一 canonical 模型提升为跨领域共享表；由第 9 项方案决定。</td>
+            </tr>
+            <tr>
+              <td><span class="badge open">未决</span></td>
+              <td>官方文档 PDF/XBRL 的首批结构化提取方式、全文留存范围和授权边界。</td>
+            </tr>
+            <tr>
+              <td><span class="badge open">未决</span></td>
+              <td>CNINFO/交易所历史起点、精确发布时间、撤回标记和结构化 ID 在连续样本中的稳定性。</td>
+            </tr>
+            <tr>
+              <td><span class="badge open">未决</span></td>
+              <td>三所董监高单位/关系字段统一规则、股东官方主体 ID 可得性、东财大股东计划的稳定增量水位。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>12.3 方案评审验收</h3>
+      <ul class="facts">
+        <li>明确给出 P0/P1/P2、建议接入和不建议字段；没有把 Provider 可用性当整套方案阻塞。</li>
+        <li>每个字段族写明真实业务来源与 AKShare 直接上游；不把 AKShare 当唯一业务来源。</li>
+        <li>公告日、报告期、发生日、有效日、公开可见、平台观测、知识区间和 revision 已分离。</li>
+        <li>更正、补充、进展、结果、撤回均采用追加语义；完成值不覆盖原计划。</li>
+        <li>领域粒度、候选唯一键、字段、单位、空值、关系和表草案完整；未自行定义共享基础表。</li>
+        <li>同步分区、分页、增量、回补、幂等、恢复、回滚、质量和未来函数规则可测试。</li>
+        <li>service-api 查询需求全部为 POST，含 PIT、字段选择、分页、权限、来源、版本和质量。</li>
+        <li>技术门禁均写明准入条件、证据、验证人、退出条件和失败兜底；非技术风险另表管理。</li>
+        <li>实现测试只列为未来计划；本文未声称运行生产稳定性、数据库迁移、接口契约或端到端测试。</li>
+      </ul>
+
+      <h3>12.4 未来实现测试计划</h3>
+      <pre aria-label="未来测试计划">Adapter fixture
+  - 公告原始 / 更正 / 补充 / 结果 / 上游缺失
+  - 业绩区间、多指标、日期-only、未来公告时间
+  - 解禁父子、空页、缺页、事后字段丢弃
+  - 股本单位、构成平衡、原因码漂移
+  - 三所董监高字段与单位差异、同名主体
+
+Domain / persistence
+  - 文档唯一、关系无环、revision 追加、知识区间不重叠
+  - Decimal、单位、空值、计划/实际阶段
+  - date-aware security identity、代码复用、退市
+  - raw replay、事务失败、重复 run、concurrency、rollback
+
+Contract / service-api
+  - POST-only、JWT/scope、字段投影、请求上限
+  - asOf / knownAt / marketVisibilityMode
+  - cursor 与 dataVersion 绑定、ETag 204、错误映射
+  - 响应不暴露 raw URI、source batch、内部主键或越权全文</pre>
+
+      <aside class="callout good">
+        <strong>评审建议</strong>
+        接受 P0 的文档证据层和业绩两类事件模型；接受 P1/P2 的数据域与门禁，但在固定来源、单位、
+        完整性和权限证据前保持 capability 关闭。第 9、10 项统一方案应复用本文时间与修订不变量，
+        不把未验证的通信或物理表选择写成已接受决策。
+      </aside>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      0024 公司事件数据技术方案 · Proposed · 仅调研、拟议模型与消费需求；
+      未修改生产代码、迁移、配置、依赖、OpenAPI 或 Docker。
+    </div>
+  </footer>
+</body>
+</html>

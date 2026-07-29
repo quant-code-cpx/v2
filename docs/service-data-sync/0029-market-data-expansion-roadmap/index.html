@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="quant-v2 八类高价值市场数据、统一数据模型与跨服务访问的 Proposed 实施路线图。">
+  <title>0029｜高价值市场数据扩展路线图（Proposed）</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17212b;
+      --muted: #5f6b76;
+      --line: #dce3e9;
+      --paper: #f4f7f9;
+      --surface: #fff;
+      --brand: #155f52;
+      --brand-soft: #e7f3ef;
+      --blue: #1d5d88;
+      --blue-soft: #eaf3f9;
+      --amber: #8b5a00;
+      --amber-soft: #fff2d5;
+      --red: #a52c26;
+      --red-soft: #fbeceb;
+      --green: #197447;
+      --shadow: 0 10px 28px rgb(28 56 70 / 6%);
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--paper); scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 1200px;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 92% 2%, rgb(21 95 82 / 11%), transparent 28rem),
+        var(--paper);
+      font: 15px/1.68 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Microsoft YaHei", sans-serif;
+    }
+    a { color: var(--blue); text-underline-offset: 3px; }
+    a:hover { color: var(--brand); }
+    a:focus-visible { outline: 3px solid rgb(29 93 136 / 28%); outline-offset: 3px; }
+    code {
+      padding: .08em .35em;
+      border-radius: 5px;
+      background: #edf3f2;
+      color: #174f48;
+      font: .9em/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+    h1, h2, h3, h4 { line-height: 1.25; letter-spacing: -.022em; }
+    h1 { max-width: 920px; margin: 10px 0 14px; font-size: 44px; }
+    h2 { margin: 0 0 17px; font-size: 29px; }
+    h3 { margin: 22px 0 8px; font-size: 19px; }
+    h4 { margin: 18px 0 7px; font-size: 15px; }
+    p { margin: 8px 0; }
+    ul, ol { padding-left: 22px; }
+    li + li { margin-top: 5px; }
+    .shell { width: 1120px; margin: 0 auto; }
+    header {
+      padding: 48px 0 34px;
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 91%);
+    }
+    .eyebrow {
+      color: var(--brand);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+    .lead { max-width: 930px; color: var(--muted); font-size: 17px; }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .meta div, .card {
+      min-width: 0;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--surface);
+    }
+    .meta dt { color: var(--muted); font-size: 11px; font-weight: 700; }
+    .meta dd { margin: 2px 0 0; font-weight: 750; }
+    .status { color: var(--amber); }
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 96%);
+      box-shadow: 0 4px 18px rgb(25 52 66 / 6%);
+    }
+    nav ol {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 0;
+      margin: 0;
+      padding: 8px 0;
+      list-style: none;
+    }
+    nav a {
+      display: block;
+      padding: 4px 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      text-decoration: none;
+    }
+    main { padding: 22px 0 68px; }
+    section {
+      margin-top: 18px;
+      padding: 29px;
+      scroll-margin-top: 92px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; }
+    .card strong { display: block; margin: 5px 0; font-size: 17px; }
+    .tag {
+      display: inline-block;
+      min-width: 2.5em;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      text-align: center;
+    }
+    .p0 { color: var(--red); background: var(--red-soft); }
+    .p1 { color: var(--amber); background: var(--amber-soft); }
+    .p2 { color: var(--muted); background: #edf0f3; }
+    .good { color: var(--green); background: #e7f5ed; }
+    .callout {
+      margin: 14px 0;
+      padding: 13px 16px;
+      border-left: 4px solid var(--brand);
+      border-radius: 7px;
+      background: var(--brand-soft);
+    }
+    .callout.warn { border-color: var(--amber); background: var(--amber-soft); }
+    .callout.bad { border-color: var(--red); background: var(--red-soft); }
+    .flow {
+      margin: 14px 0;
+      padding: 16px;
+      border: 1px solid #bdd6ce;
+      border-radius: 10px;
+      background: #f1f8f5;
+      color: #22453f;
+      font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+    }
+    .table-wrap {
+      margin: 13px 0;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+    }
+    table { width: 100%; min-width: 940px; border-collapse: collapse; font-size: 13px; }
+    table.wide { min-width: 1420px; }
+    th, td {
+      padding: 10px 11px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: #344754; background: #f1f5f7; font-size: 12px; }
+    tr:last-child td { border-bottom: 0; }
+    .small { color: var(--muted); font-size: 12px; }
+    .yes { color: var(--green); font-weight: 750; }
+    .no { color: var(--red); font-weight: 750; }
+    footer {
+      padding: 24px 0 38px;
+      border-top: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    @media print {
+      @page { size: A4 landscape; margin: 9mm; }
+      body { min-width: 0; background: #fff; font-size: 9pt; }
+      .shell { width: auto; margin: 0; }
+      nav { display: none; }
+      header { padding: 14px 0; }
+      h1 { font-size: 24pt; }
+      section { margin: 8px 0; padding: 13px; box-shadow: none; break-inside: auto; }
+      .table-wrap { overflow: visible; }
+      table, table.wide { min-width: 0; font-size: 6.7pt; }
+      th, td { padding: 4px 5px; }
+      a { color: #000; text-decoration: none; }
+      .card, .callout, .flow { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <div class="eyebrow">quant-v2 · market data expansion</div>
+      <h1>高价值市场数据扩展路线图</h1>
+      <p class="lead">汇总八类专题、统一 canonical model、PostgreSQL 物理设计和 data-sync → service-api 访问契约，形成可评审、可分阶段实施、可独立回滚的方案包。</p>
+      <dl class="meta">
+        <div><dt>状态</dt><dd class="status">Proposed</dd></div>
+        <div><dt>编号</dt><dd>0029</dd></div>
+        <div><dt>日期</dt><dd>2026-07-29</dd></div>
+        <div><dt>专题输入</dt><dd>0019–0028</dd></div>
+        <div><dt>实施状态</dt><dd>核心 canonical、P0 发布、受控 CLI、内部 typed reader 与测试已实现；个人内部研究的 AKShare 入口已固定为禁止再分发，业务构成仅 shadow。service-api 已有认证后的通用 query 网关；来源空缺或暂不可用返回空结果，不再阻断同步→入库→API 链路。各 capability 的 schema、连续探针与 PIT 仍可独立提升质量，但不阻断空结果消费。</dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="文档导航">
+    <div class="shell">
+      <ol>
+        <li><a href="#summary">结论</a></li>
+        <li><a href="#portfolio">八域组合</a></li>
+        <li><a href="#priority">优先级</a></li>
+        <li><a href="#foundation">基础设施</a></li>
+        <li><a href="#mapping">表与契约</a></li>
+        <li><a href="#stages">阶段路线</a></li>
+        <li><a href="#quality">质量时序</a></li>
+        <li><a href="#gates">技术门禁</a></li>
+        <li><a href="#rollback">回滚恢复</a></li>
+        <li><a href="#risks">风险跟进</a></li>
+        <li><a href="#open">未决事项</a></li>
+        <li><a href="#deliverables">产物验收</a></li>
+      </ol>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>1. 总结论</h2>
+      <div class="grid-3">
+        <article class="card">
+          <span class="tag p0">P0</span>
+          <strong>先建共享证据与发布边界</strong>
+          <p>统一身份、日历、来源、raw、双时态、质量、隔离、checkpoint、不可变 publication 和 fencing；任何专题不得复制一套。</p>
+        </article>
+        <article class="card">
+          <span class="tag p0">P0</span>
+          <strong>按 capability 分区接入</strong>
+          <p>每个交易所、来源、字段族独立过门禁。单一 Provider 失败只关闭对应 capability，不阻断其他已达标域。</p>
+        </article>
+        <article class="card">
+          <span class="tag p1">P1</span>
+          <strong>HTTP-only v1 对外供数</strong>
+          <p>data-sync 通过内部 POST catalog/query 提供不可变版本；service-api 映射领域 POST API，不直连数据库、对象存储或 Provider。</p>
+        </article>
+      </div>
+      <div class="callout">
+        <strong>推荐裁决：</strong>个人使用场景固定 AKShare 为采集入口，仅内部研究、禁止再分发；真实上游仍逐 capability 记录。先落共享模型与 P0 小规模 shadow，schema、连续探针和 PIT 证据达标后逐 capability 发布；事件总线、实时 IOPV、供应商估算资金流和事后表现不进入 v1。
+      </div>
+      <pre class="flow" aria-label="从上游证据到公开 API 的实施边界">交易所 / 指数公司 / 基金公司 / 监管披露
+          │ 仅经版本化 Provider Adapter
+          ▼
+raw object + source_batch observation
+          ▼
+typed canonical revision + PIT + quality / quarantine
+          ▼
+immutable release + dataset publication + dataVersion
+          ▼
+POST /internal/v1/market-data/query
+          ▼
+service-api 领域 DTO + 权限 / 限额 / 缓存 / Problem
+          ▼
+service-web（只访问 service-api）</pre>
+    </section>
+
+    <section id="portfolio">
+      <h2>2. 八类数据组合结论</h2>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead>
+            <tr>
+              <th>专题</th><th>接入结论</th><th>首要价值</th><th>推荐事实源</th><th>历史/制度边界</th><th>核心质量与未来函数风险</th><th>总体复杂度</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><a href="../0019-index-constituents/index.html">指数成分与权重</a></td>
+              <td><span class="tag p0">P0 条件接入</span> 先 6–10 条高价值宽基</td>
+              <td>PIT 指数池、归因、基准重建</td>
+              <td>中证、国证及交易所官方；AKShare 仅 Adapter</td>
+              <td>公告日与生效日不同；历史档案深度逐管理人验证</td>
+              <td>当前成分倒推历史、观察快照冒充正式有效、收盘权重冒充目标权重</td>
+              <td>中高</td>
+            </tr>
+            <tr>
+              <td><a href="../0020-etf-market-data/index.html">ETF</a></td>
+              <td><span class="tag p0">P0 核心</span>；份额/关系/折溢价 P1</td>
+              <td>跨资产交易工具、NAV 与价格偏离、状态监控</td>
+              <td>沪深交易所、基金管理人/托管人</td>
+              <td>基金、份额类别、listing 生命周期分层；来源历史不等于生产 SLA</td>
+              <td>价格/NAV/IOPV 混算，份额单位错，停牌/申赎状态合并，拆分分红误复权</td>
+              <td>高</td>
+            </tr>
+            <tr>
+              <td><a href="../0021-margin-trading/index.html">融资融券</a></td>
+              <td><span class="tag p0">P0 沪深</span>；北交 P1；系统风险 P2</td>
+              <td>杠杆拥挤、融资动量、融券压力</td>
+              <td>沪深北交易所官方披露</td>
+              <td>北交所自 2023-02-13；交易所字段/单位不同</td>
+              <td>市场汇总由当前标的明细求和、偿还派生冒充直报、缺失填零</td>
+              <td>中</td>
+            </tr>
+            <tr>
+              <td><a href="../0022-stock-connect/index.html">沪深港通</a></td>
+              <td><span class="tag p0">P0 官方统计</span>；持股 P1；估算流 P2</td>
+              <td>跨境交易活跃、存量持股与制度变化</td>
+              <td>上交所、深交所、港交所官方</td>
+              <td>2024 披露制度断点；北向/南向频率和日历不同</td>
+              <td>流量、存量、活跃榜混算；旧字段在新制度后为结构性空值</td>
+              <td>高</td>
+            </tr>
+            <tr>
+              <td><a href="../0023-business-composition/index.html">主营构成</a></td>
+              <td><span class="tag p1">P1 条件接入</span>；P0 先做来源/PIT 证据</td>
+              <td>收入结构、毛利率、基本面因子</td>
+              <td>法定报告、交易所/巨潮公告；聚合结构化源仅 shadow</td>
+              <td>年报/半年报优先；历史重述和公告版本需保留</td>
+              <td>报告期当可见日、合并/单体、币种/单位、行业/产品/地区静默混算</td>
+              <td>高</td>
+            </tr>
+            <tr>
+              <td><a href="../0024-corporate-events/index.html">公司事件</a></td>
+              <td><span class="tag p0">P0 公告/预告/快报</span>；解禁/股本 P1</td>
+              <td>预期差、事件链、风险提示</td>
+              <td>交易所、巨潮、监管与发行人官方披露</td>
+              <td>更正、补充、撤回、结果形成追加式修订链</td>
+              <td>事后完成量/结果覆盖首次披露，撤回删除历史，公告前可见</td>
+              <td>高</td>
+            </tr>
+            <tr>
+              <td><a href="../0025-trading-events/index.html">龙虎榜与大宗交易</a></td>
+              <td><span class="tag p0">P0 明细</span>；固定版本派生 P1</td>
+              <td>异常交易披露、席位与逐笔成交分析</td>
+              <td>交易所公开信息；AKShare Adapter 候选保留 raw ID</td>
+              <td>逐市场验证官方窗口；完整日 release 表达空日和重数</td>
+              <td>供应商未来收益/成功率/最新价、同股同日多原因串席位、相同逐笔误去重</td>
+              <td>中高</td>
+            </tr>
+            <tr>
+              <td><a href="../0026-derivatives/index.html">期货与期权</a></td>
+              <td><span class="tag p0">P0 独立试点</span>；期权/仓单/交割 P1；连续 P2</td>
+              <td>风险管理、跨资产研究、期限与波动率</td>
+              <td>各期货/期权交易所与结算官方数据</td>
+              <td>产品各异；夜盘 trade date、上市到期和换月独立</td>
+              <td>股票身份复用、真实合约与连续序列混表、主力切换使用未来持仓、结算价混淆</td>
+              <td>很高</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="priority">
+      <h2>3. P0 / P1 / P2 实施优先级</h2>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>层级</th><th>数据能力</th><th>价值</th><th>成本</th><th>历史深度</th><th>质量风险</th><th>进入条件</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="tag p0">P0 基座</span></td>
+              <td>跨域身份、日历、source/raw、方法学、PIT、质量隔离、fencing、release/publication、内部 POST 合同</td>
+              <td>八域共同前置</td><td>高，一次建设</td><td>不适用</td><td>若缺失会系统性制造未来函数与不可恢复发布</td><td>0027/0028/ADR 经评审；DDL、并发、PIT、安全门禁可测试</td>
+            </tr>
+            <tr>
+              <td><span class="tag p0">P0 数据</span></td>
+              <td>指数白名单、ETF 核心、沪深两融、互联互通官方统计、公告/预告/快报、龙虎榜/大宗、衍生品基础隔离试点</td>
+              <td>高</td><td>中至很高</td><td>按 capability 证据回补</td><td>来源漂移、时间精度、身份与单位</td><td>固定版本探针、官方对账、PIT fixture、恢复演练逐 capability 达标</td>
+            </tr>
+            <tr>
+              <td><span class="tag p1">P1 扩展</span></td>
+              <td>指数历史/权重、ETF 份额/跟踪/行动/收盘折溢价、北交两融、互联互通持股、主营构成、解禁/股本、事件派生统计、期权/持仓/仓单/交割</td>
+              <td>中高</td><td>高</td><td>官方档案或授权源决定</td><td>完整快照、重述、方法学与非同频数据</td><td>P0 稳定发布；每域新增 snapshot/methodology/权限门禁</td>
+            </tr>
+            <tr>
+              <td><span class="tag p2">P2 延后</span></td>
+              <td>实时 IOPV、系统风险聚合、供应商估算跨境资金流、股东/董监高复杂事件、连续合约与平台 Greeks</td>
+              <td>选择性高</td><td>很高</td><td>常有限或方法不透明</td><td>实时、授权、推导因果性和不可比性</td><td>独立方法学/授权/实时 SLO/容量证据；另行方案或 ADR</td>
+            </tr>
+            <tr>
+              <td><span class="tag p2">永久排除</span></td>
+              <td>公告后收益、未来 1/5/10/20 日表现、席位“成功率”、当前名单倒推历史、后续完成量提前可见</td>
+              <td>无合规回测价值</td><td>不实施</td><td>事后字段</td><td>确定性未来函数</td><td>Adapter allowlist 与契约负向测试持续拒绝</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="foundation">
+      <h2>4. 可复用基础设施与必须隔离的数据域</h2>
+      <div class="grid-3">
+        <article class="card">
+          <span class="tag good">共享</span>
+          <strong>证据、治理与运行支撑</strong>
+          <ul>
+            <li>跨域根身份、版本化标识与类型化关系</li>
+            <li>场所、交易日历、产品/通道 session</li>
+            <li>source capability、raw object、source batch</li>
+            <li>methodology、lineage、quality、quarantine</li>
+            <li>checkpoint、lease/fencing、release/publication</li>
+            <li>source document 不可变版本与权限外壳</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="tag p0">强类型</span>
+          <strong>禁止万能 JSON/EAV</strong>
+          <ul>
+            <li>八域事实使用 typed revision/snapshot/item 表</li>
+            <li>Provider 字段只存在于 Adapter/raw/normalization 血缘</li>
+            <li>集合型数据都有完整 snapshot/release 头</li>
+            <li>reported、observed、derived 分 dataset/methodology</li>
+            <li>NULL、零、无记录、合法空集分别表达</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="tag p1">隔离</span>
+          <strong>不可静默合表</strong>
+          <ul>
+            <li>股票、ETF、衍生品日行情</li>
+            <li>指数观察快照与正式有效成员</li>
+            <li>两融市场/证券/系统风险</li>
+            <li>互联互通流量/活跃榜/持股</li>
+            <li>公司事件与交易事件</li>
+            <li>真实衍生品合约与连续序列</li>
+          </ul>
+        </article>
+      </div>
+      <div class="callout warn">
+        <strong>身份裁决：</strong>A 股库内大事实表继续使用现有 <code>security_id BIGINT</code>，跨服务使用稳定 UUID；ETF 拆法律基金、份额类别和 listing；指数是非交易实体；期货/期权使用 product → real contract，continuous 是独立 derived entity。不得把港股或衍生品塞入当前 A 股代码解析器。
+      </div>
+    </section>
+
+    <section id="mapping">
+      <h2>5. Dataset → 表 → 内部合同 → 公开路由映射</h2>
+      <p>表名是 0027 的逻辑草案；实现期按 migration 拆批。机器合同只暴露稳定 dataset code 与 schemaVersion，不暴露物理表名。</p>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>域</th><th>稳定 dataset code 示例</th><th>核心领域表</th><th>内部消费</th><th>service-api 拟议业务 POST</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>指数</td>
+              <td><code>index.catalog</code><br><code>index.constituent.membership.reported</code><br><code>index.weight.close.reported</code></td>
+              <td>index_instrument、constituent snapshot/item、membership revision、weight snapshot/item、adjustment event/item</td>
+              <td rowspan="8"><code>POST /internal/v1/market-data/datasets/search</code><br><br><code>POST /internal/v1/market-data/query</code><br><br>一次一个 dataset；typed oneOf；固定 UUID dataVersion；HMAC cursor</td>
+              <td>indices/search、index-constituents/query、index-weights/query</td>
+            </tr>
+            <tr>
+              <td>ETF</td>
+              <td><code>fund.etf.profile</code><br><code>fund.etf.bar.1d.reported</code><br><code>fund.etf.nav.1d.reported</code></td>
+              <td>fund legal product、share class、listing profile、tracking、bar/nav/share/state/action/premium revision</td>
+              <td>etfs/search、etf-bars/query、etf-nav/query、etf-shares/query、etf-market-state/query</td>
+            </tr>
+            <tr>
+              <td>融资融券</td>
+              <td><code>market.margin.market.1d.reported</code><br><code>market.margin.instrument.1d.reported</code><br><code>market.margin.eligibility</code></td>
+              <td>margin market daily、security daily、eligibility、system risk revision</td>
+              <td>margin-market/query、margin-instruments/query、margin-eligibility/query</td>
+            </tr>
+            <tr>
+              <td>沪深港通</td>
+              <td><code>market.stock_connect.market_stat.reported</code><br><code>market.stock_connect.holding.snapshot</code></td>
+              <td>market stat revision、active security snapshot/item、holding snapshot/item</td>
+              <td>stock-connect-market/query、active-securities/query、holdings/query</td>
+            </tr>
+            <tr>
+              <td>主营构成</td>
+              <td><code>equity.business_composition.reported</code></td>
+              <td>business composition statement、revision、line revision</td>
+              <td>equity-business-composition/query</td>
+            </tr>
+            <tr>
+              <td>公司事件</td>
+              <td><code>equity.corporate_event.&lt;family&gt;.reported</code><br><code>disclosure.document</code></td>
+              <td>corporate event、document link、event revision、family subtype/metric/item</td>
+              <td>corporate-events/search/detail、disclosures/search</td>
+            </tr>
+            <tr>
+              <td>交易事件</td>
+              <td><code>equity.dragon_tiger.event.reported</code><br><code>equity.block_trade.execution.reported</code></td>
+              <td>trading event release、dragon-tiger event/seat、block execution、reason map</td>
+              <td>dragon-tiger/query、block-trades/query</td>
+            </tr>
+            <tr>
+              <td>衍生品</td>
+              <td><code>derivative.contract</code><br><code>derivative.bar.1d.reported</code><br><code>derivative.continuous.1d.derived</code></td>
+              <td>product、contract/spec、daily bar、option risk、position/warehouse snapshot、delivery、continuous series/bar</td>
+              <td>derivative-contracts/search、derivative-bars/query、option-chain/query、derivative-continuous/query</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">关联：[0027 canonical model](../0027-canonical-data-model/index.html) · [0028 内部访问方案](../0028-data-access-contract/index.html) · [service-api 0005 影响方案](../../service-api/0005-market-data-access-impact/index.html) · [机器合同](../../contracts/data-sync-market-data-v1.yaml)</p>
+    </section>
+
+    <section id="stages">
+      <h2>6. 分阶段实施路线、依赖与验收</h2>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>阶段</th><th>范围</th><th>前置依赖</th><th>实施动作</th><th>验收条件</th><th>失败时继续路径</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>S0 · 方案冻结</strong></td>
+              <td>身份、时间、dataset、quality、dataVersion、HTTP-only ADR</td>
+              <td>0019–0028 完成评审</td>
+              <td>接受/调整 Proposed ADR；冻结字段语义、dataset registry、门禁与 fixture 清单</td>
+              <td>跨专题映射零歧义；破坏性决策均有 ADR</td>
+              <td>保持文档 Proposed；不启动 migration 或公开路由</td>
+            </tr>
+            <tr>
+              <td><strong>S1 · Shared expand</strong></td>
+              <td>共享表、fencing、raw、quality、release</td>
+              <td>S0；现有 Alembic/72 模型 parity 基线</td>
+              <td>新增 additive migration、模型、registry；seed 现有 UUID 身份；预建分区</td>
+              <td>DDL/约束真实 PostgreSQL 可建；零孤儿；旧 72 表行为不变</td>
+              <td>回滚应用写入；保留 additive 空表，不做 destructive down</td>
+            </tr>
+            <tr>
+              <td><strong>S2 · P0 Adapter + shadow</strong></td>
+              <td>各域 P0 capability</td>
+              <td>S1；来源白名单、fixture、raw 保留策略</td>
+              <td>Adapter-only 获取；raw-first；小白名单/短窗口 backfill；typed canonical shadow</td>
+              <td>连续探针、单位/行数/完整性对账、PIT golden、幂等 replay 通过</td>
+              <td>关闭失败 capability；raw/research 数据保留，其他域继续</td>
+            </tr>
+            <tr>
+              <td><strong>S3 · Publication 灰度</strong></td>
+              <td>P0 dataset release/publication</td>
+              <td>S2 质量门；恢复演练；容量预算</td>
+              <td>按 dataset allowlist 发布；1%→10%→50%→100%；监测 dataVersion、延迟、隔离率</td>
+              <td>无部分发布、无未来泄漏、checkpoint/fence 正确、SLO 基线稳定</td>
+              <td>写新 rollback publication 或切回前一 verified version</td>
+            </tr>
+            <tr>
+              <td><strong>S4 · Internal POST</strong></td>
+              <td>catalog/query 与 MarketDataAccessClient</td>
+              <td>S3；安全/合同/容量门禁</td>
+              <td>新 POST 与 26 条旧 GET 并行；shadow 双读；cursor 不跨协议</td>
+              <td>typed contract、固定版本跨页、错误映射、token/cursor 轮换与故障注入通过</td>
+              <td>feature flag 回旧 client；无安全旧路径则 fail-closed 503</td>
+            </tr>
+            <tr>
+              <td><strong>S5 · Public domain POST</strong></td>
+              <td>低成本 latest，再逐域 PIT</td>
+              <td>S4；entitlement、字段许可、免责声明</td>
+              <td>领域 DTO 映射；用户/route/dataset 成本限额；私有缓存；公开灰度</td>
+              <td>无内部 schema/Provider 泄漏；权限负向、缓存隔离、端到端回滚通过</td>
+              <td>关闭公开 projection，不影响内部 research/shadow</td>
+            </tr>
+            <tr>
+              <td><strong>S6 · P1/P2</strong></td>
+              <td>历史、复杂快照、派生方法学、独立衍生品能力</td>
+              <td>P0 稳定；逐域新增门禁</td>
+              <td>按价值/成本矩阵逐项扩展；事件或实时需求另立 ADR</td>
+              <td>方法学、历史、容量、授权和 PIT 证据独立通过</td>
+              <td>保持 P0，不让 P1/P2 失败污染稳定发布</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="quality">
+      <h2>7. 数据质量、时序防未来函数与运行恢复</h2>
+      <div class="grid-3">
+        <article class="card">
+          <strong>三层 PIT</strong>
+          <ul>
+            <li>MARKET_PIT：业务有效 + <code>publicUsableAt</code></li>
+            <li>KNOWLEDGE_PIT：再限定 canonical <code>knownFrom/To</code></li>
+            <li>OPERATIONAL_REPLAY：再限定 publication 激活区间</li>
+          </ul>
+        </article>
+        <article class="card">
+          <strong>时间不可替代</strong>
+          <ul>
+            <li>报告期、交易日、估值日、持股日使用专名</li>
+            <li>sourcePublished 只保存有证据的精度</li>
+            <li>observedAt 回补不回拨</li>
+            <li>日期-only 用保守可见规则与 basis</li>
+          </ul>
+        </article>
+        <article class="card">
+          <strong>质量与空值</strong>
+          <ul>
+            <li>outcome、coverage、disposition、maturity 分维度</li>
+            <li>quarantine 永不 publication</li>
+            <li>真实 0 与 NULL/无记录/空 snapshot 分离</li>
+            <li>字段级 null reason 与分区 gap reason 分离</li>
+          </ul>
+        </article>
+      </div>
+      <h3>统一写入与恢复顺序</h3>
+      <ol>
+        <li>Adapter 获取；raw object 先落存储并校验 SHA/etag/version。</li>
+        <li>每次获取新增独立 source_batch observation；相同字节也不折叠观测。</li>
+        <li>partition 获取 lease + fencing token；发布事务锁定 dataset/partition、checkpoint 和 current publication。</li>
+        <li>写 canonical batch、typed revision、snapshot/item 和 M:N lineage；身份失败进入 quarantine。</li>
+        <li>执行版本化质量规则。blocking 只保存候选/隔离，不推进 durable watermark 或 publication。</li>
+        <li>同内容 no-op 复用 dataVersion；变化时创建新不可变 publication 并关闭旧激活区间。</li>
+        <li>同事务推进 checkpoint、attempt/run 状态并释放 lease；僵尸 worker 因 token/expiry 校验无法提交。</li>
+      </ol>
+      <div class="callout bad">
+        <strong>统一红线：</strong>禁止当前名单倒推历史；禁止事后收益/结果进入当时可见记录；禁止后续修订覆盖首次披露；禁止跨来源、口径、币种、单位、粒度或方法学静默混算。
+      </div>
+    </section>
+
+    <section id="gates">
+      <h2>8. 技术硬门禁</h2>
+      <p>门禁只阻止不安全 capability 进入下一状态，不阻止其他已达标能力继续。审批、预算、人力不进入此表。</p>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>门禁</th><th>准入条件</th><th>可验证证据</th><th>验证人</th><th>退出条件 / 技术兜底</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>G0 身份与 DDL</td>
+              <td>S1 migration / model 合并前</td>
+              <td>现有 security_id FK 不变；UUID seed 100%；PK/UK/FK/CHECK/EXCLUDE/partition 在真实 PostgreSQL 建立；Alembic/registry parity</td>
+              <td>数据架构负责人 + DBA</td>
+              <td>零类型冲突、零孤儿、零跨分区漏约束；失败则只保留文档与空 additive 表</td>
+            </tr>
+            <tr>
+              <td>G1 来源与 schema</td>
+              <td>某 capability 进入 shadow 前</td>
+              <td>固定版本连续探针、raw hash、字段指纹、分页/限流、官方逐字段/单位/历史对账</td>
+              <td>data-sync 负责人 + 数据 QA</td>
+              <td>成功率、漂移、单位和完整性达到专题阈值；失败只关闭该 source/capability</td>
+            </tr>
+            <tr>
+              <td>G2 PIT 与未来函数</td>
+              <td>publication 或 PIT 开放前</td>
+              <td>公告前/等于/后、迟到回补、修订撤回、指数调样、T+1 NAV、制度断点、夜盘换月 golden fixture</td>
+              <td>量化验证人 + 数据 QA</td>
+              <td>零未来字段、零提前可见、三层 PIT 结果正确；失败则 latest-only 或不发布</td>
+            </tr>
+            <tr>
+              <td>G3 并发与恢复</td>
+              <td>S3 灰度前</td>
+              <td>双 worker、租约过期接管、首次发布竞态、幂等 replay、部分失败、checkpoint、rollback publication 故障注入</td>
+              <td>SRE + data-sync 负责人 + DBA</td>
+              <td>僵尸提交=0、无部分可见、同内容不增 revision；失败保持前一 verified version</td>
+            </tr>
+            <tr>
+              <td>G4 合同与安全</td>
+              <td>internal POST 预发前</td>
+              <td>OpenAPI 3.1.1/ref/opId/typed oneOf/仅 POST；service token 双钥轮换、cursor 独立 keyring、TLS/allowlist、日志脱敏、无 DB/Provider 凭据</td>
+              <td>两服务负责人 + 安全验证人 + API QA</td>
+              <td>零旁路、零 secret 泄漏、错误 fail-closed；失败不注册新 client/route</td>
+            </tr>
+            <tr>
+              <td>G5 容量与韧性</td>
+              <td>每次 1%→更高流量前</td>
+              <td>真实规模 EXPLAIN、分区裁剪、p95/p99、连接池、64KiB/2MiB 上限、timeout/retry/429/circuit 故障注入</td>
+              <td>性能负责人 + SRE + DBA</td>
+              <td>达到批准预算且无重试风暴；失败缩窗/降页/关闭 bulk 或高成本域</td>
+            </tr>
+            <tr>
+              <td>G6 数据权利与对外字段</td>
+              <td>某来源/字段进入公开 projection 前</td>
+              <td>真实上游、自动访问、存储、再分发、单位/口径和字段级公开清单的可复核依据</td>
+              <td>合规验证人 + 数据负责人</td>
+              <td>证据覆盖目标用途；未满足保持内部 research/shadow 或关闭字段，不影响其他来源</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="rollback">
+      <h2>9. 回滚、恢复与兼容策略</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>层级</th><th>回滚动作</th><th>必须保留</th><th>禁止动作</th></tr></thead>
+          <tbody>
+            <tr><td>来源/Adapter</td><td>关闭 route/capability，checkpoint 停在最后 verified publication</td><td>raw、source batch、错误、探针和 quarantine</td><td>改由 service-api 直连 Provider</td></tr>
+            <tr><td>Canonical 写入</td><td>停 writer；修复后 raw replay；新修订追加</td><td>旧 revision、known range、quality、lineage</td><td>原地覆盖、回拨 observedAt、删除失败证据</td></tr>
+            <tr><td>Publication</td><td>创建新 rollback release/publication，引用上一 verified content</td><td>旧 dataVersion 与所有激活历史</td><td>把旧 supersededAt 清空伪造第二次激活</td></tr>
+            <tr><td>Internal POST</td><td>feature flag 切回旧 client 或关闭新 dataset</td><td>旧 26 条 GET、独立 cursor、shadow diff</td><td>在安全/数据 4xx/5xx 时静默 fallback 掩盖故障</td></tr>
+            <tr><td>Public API</td><td>关闭领域 projection；返回稳定 503 或保留旧 API</td><td>Problem、requestId、审计、不可变 publication</td><td>暴露 internal generic query 或绕过权限</td></tr>
+            <tr><td>Schema migration</td><td>停止新写，回到兼容读；additive 表保留待修复</td><td>existing 72-table behavior、migration history</td><td>有生产数据后 destructive drop/历史重写</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="risks">
+      <h2>10. 非技术风险与跟进项</h2>
+      <p>下列事项影响范围、成本或节奏，但不得作为整套方案执行阻断；每项都有负责人、时间点和技术兜底。</p>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>风险/跟进</th><th>负责人</th><th>时间点</th><th>技术兜底</th></tr></thead>
+          <tbody>
+            <tr><td>P0 指数/ETF/衍生品白名单未最终确定</td><td>量化研究 + 数据产品负责人</td><td>S0 评审后 5 个工作日</td><td>采用专题默认小白名单，只启用来源证据最完整对象</td></tr>
+            <tr><td>自动访问、历史存储、再分发授权确认滞后</td><td>数据采购/合规负责人</td><td>对应 dataset 公开前</td><td>官方公开字段、内部 research/shadow、字段/来源独立开关</td></tr>
+            <tr><td>生产 SLO、容量和缓存 TTL 尚无基线</td><td>SRE + 性能负责人</td><td>首个 P0 shadow 结束时</td><td>保守 5s deadline、页/窗口/响应上限和 dataset allowlist，压测后调整</td></tr>
+            <tr><td>PIT、bulk、derivatives 用户套餐未定</td><td>service-api 产品负责人</td><td>S5 公开路由设计前</td><td>仅 ACTIVE 用户低成本 latest；高级 scope 默认 fail-closed</td></tr>
+            <tr><td>历史采购预算与人力优先级未定</td><td>数据产品负责人</td><td>P1 规划评审</td><td>从实际 observedAt 起可见；不伪造公告时点或当前快照历史</td></tr>
+            <tr><td>新旧客户端迁移排期未定</td><td>两服务负责人</td><td>S4 实施计划评审</td><td>旧 GET 合同持续；新 POST additive、游标不互通、feature flag 回退</td></tr>
+            <tr><td>事件通知需求可能增加</td><td>架构负责人</td><td>触发 ADR-0020 量化阈值时</td><td>继续 HTTP-only；满足 broker/outbox/replay/DLQ/read-model 门禁后另立 Proposed ADR</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="open">
+      <h2>11. 未决问题</h2>
+      <div class="grid-3">
+        <article class="card">
+          <strong>来源与历史</strong>
+          <ul>
+            <li>指数管理人正式历史成分/权重的授权和深度</li>
+            <li>ETF NAV/份额/状态的长期可复核发布时间</li>
+            <li>主营构成稳定结构化生产主源</li>
+            <li>交易事件与公司事件官方分页/ID 长期稳定性</li>
+          </ul>
+        </article>
+        <article class="card">
+          <strong>模型与运行</strong>
+          <ul>
+            <li><code>market_entity</code> 命名是否单独立身份 ADR</li>
+            <li>约 53 张领域逻辑表的 migration 拆批边界</li>
+            <li>ETF/两融/衍生品容量实测后的分区阈值</li>
+            <li>publication 二次激活采用新 dataVersion 或独立 activation 表</li>
+          </ul>
+        </article>
+        <article class="card">
+          <strong>接口与权限</strong>
+          <ul>
+            <li>workload identity 采用短期 JWT、mTLS 绑定 token 或 service mesh</li>
+            <li>公开路由 entitlement 与成本分级</li>
+            <li>deprecated GET 的最终 Sunset 条件</li>
+            <li>未来事件通知的消费者与延迟阈值</li>
+          </ul>
+        </article>
+      </div>
+      <div class="callout">所有未决项都有安全默认值：来源不明不发布、时间证据不足从 observedAt 起可见、权限未实现只开放低成本 latest、容量未证明则缩窗限页、事件条件未满足继续 HTTP-only。</div>
+    </section>
+
+    <section id="deliverables">
+      <h2>12. 方案包、验收状态与实现计划</h2>
+      <h3>专题与统一方案</h3>
+      <ul>
+        <li><a href="../0019-index-constituents/index.html">0019 指数成分与权重</a> · <a href="../0020-etf-market-data/index.html">0020 ETF</a> · <a href="../0021-margin-trading/index.html">0021 融资融券</a></li>
+        <li><a href="../0022-stock-connect/index.html">0022 沪深港通</a> · <a href="../0023-business-composition/index.html">0023 主营构成</a> · <a href="../0024-corporate-events/index.html">0024 公司事件</a></li>
+        <li><a href="../0025-trading-events/index.html">0025 交易事件</a> · <a href="../0026-derivatives/index.html">0026 衍生品</a> · <a href="../0027-canonical-data-model/index.html">0027 Canonical Model</a></li>
+        <li><a href="../0028-data-access-contract/index.html">0028 data-sync 数据访问</a> · <a href="../../service-api/0005-market-data-access-impact/index.html">service-api 0005 影响方案</a></li>
+        <li><a href="../../contracts/data-sync-market-data-v1.yaml">拟议机器合同</a> · <a href="../../decisions/0020-data-sync-market-data-access.md">ADR-0020</a></li>
+      </ul>
+      <h3>文档级验收</h3>
+      <ul>
+        <li>☑ 全部方案状态为 Proposed；未把单次 Provider 探针写成生产准入。</li>
+        <li>☑ 八域均覆盖来源、粒度、字段、时态、同步、质量、未来函数、领域表、API 需求、门禁、风险与引用。</li>
+        <li>☑ 统一模型消除身份、日历、来源、时间、版本、质量和 checkpoint 重复，并给出 DDL/迁移/回滚/验收 SQL。</li>
+        <li>☑ 跨服务裁决为 POST-only internal HTTP v1；机器合同、service-api 影响与 Proposed ADR 互链。</li>
+        <li>☑ service-api 不直连 data-sync DB/对象存储/Provider；service-web 只访问 service-api。</li>
+      </ul>
+      <h3>尚未执行的实现工作</h3>
+      <ul>
+        <li>☐ 未创建数据库 migration、ORM 模型、Adapter、同步任务、路由、客户端、权限或缓存实现。</li>
+        <li>☐ 未修改现有 OpenAPI、配置、依赖、Docker 或生产基础设施。</li>
+        <li>☐ 连续探针、官方对账、PIT golden、真实 PostgreSQL DDL、负载、故障注入、契约、集成和 E2E 测试均为计划执行。</li>
+        <li>☐ 外部授权、最终白名单、SLO、用户权限与排期仍需按上表跟进；它们不改变安全默认值。</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">0029 · 高价值市场数据扩展路线图 · Proposed · 仅供技术评审，不代表实现、来源准入、外部 API 承诺或架构决策已接受。</div>
+  </footer>
+</body>
+</html>

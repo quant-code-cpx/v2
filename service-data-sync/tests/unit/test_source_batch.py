@@ -97,6 +97,25 @@ def test_existing_run_partition_appends_source_evidence_without_creating_new_run
     assert "max(source_batch.observation_seq)" in sql
 
 
+def test_source_observation_optionally_links_real_source_dataset() -> None:
+    """新能力可以把 adapter 观察关联到真实上游产品，旧调用仍保持兼容。"""
+    connection = RecordingConnection()
+    observed_at = datetime(2026, 7, 27, 9, tzinfo=UTC)
+
+    record_source_observation(
+        cast(Session, connection),
+        provider_id="fixture-provider",
+        capability="index.catalog.snapshot",
+        source_payload_sha256="a" * 64,
+        raw_uri="s3://fixture/payload.json",
+        observed_at=observed_at,
+        created_at=observed_at,
+        source_dataset_id=uuid4(),
+    )
+
+    assert "source_dataset_id" in _compile(connection.calls[0])
+
+
 def test_source_observation_requires_complete_execution_context() -> None:
     """run 与 partition 缺一不可，避免来源 batch 指向不存在或错误恢复边界。"""
     connection = RecordingConnection()

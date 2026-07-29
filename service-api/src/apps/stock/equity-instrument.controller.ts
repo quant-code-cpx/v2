@@ -24,7 +24,7 @@ import { EquityInstrumentService } from './equity-instrument.service.js';
 /** 表示已经经过全局请求标识中间件的认证请求。 */
 type CorrelatedAuthenticatedRequest = AuthenticatedRequest & { requestId: string };
 
-type VersionedBody = { dataVersion: string };
+type VersionedBody = { dataVersion: string | null };
 
 /** 暴露给已认证用户的证券目录、详情和上市生命周期读取路由。 */
 @ApiTags('equity-instruments')
@@ -92,6 +92,8 @@ export function writeConditionalResponse<T extends VersionedBody>(
     response.status(204).send();
     return undefined;
   }
-  response.setHeader('X-Data-Version', result.body.dataVersion);
+  if (result.body.dataVersion !== null) {
+    response.setHeader('X-Data-Version', result.body.dataVersion);
+  }
   return result.body;
 }

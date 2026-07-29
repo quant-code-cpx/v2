@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+from datetime import UTC, datetime
+from typing import cast
+
 import pytest
 
+from service_data_sync.application.ports.data_source import ProviderBatch, SourceRequest
 from service_data_sync.application.ports.market_data import RawPayload
 from service_data_sync.infrastructure.object_storage.client import ObjectStorageClient
-from service_data_sync.infrastructure.object_storage.raw_payload_store import S3RawPayloadStore
+from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    FailureEvidenceDataSource,
+    S3RawPayloadStore,
+    retain_failure_evidence,
+)
 
 
 class FakeS3Client:
@@ -38,8 +48,31 @@ class FakeBody:
         return self._payload
 
 
-def test_raw_payload_store_writes_checksum_metadata_and_returns_private_s3_uri() -> None:
-    """在标准发布开始前持久化带血缘元数据的原始字节。"""
+class FakeSource:
+    """返回固定原始与标准载荷，验证解码前暂存边界。"""
+
+    provider_id = "akshare-test"
+
+    def capabilities(self) -> frozenset[str]:
+        """声明唯一测试能力，保持来源端口完整形状。"""
+        return frozenset({"test.raw"})
+
+    async def fetch(self, request: SourceRequest) -> ProviderBatch:
+        """返回含不同 raw 与标准字节的一次来源观察。"""
+        assert request.capability == "test.raw"
+        return ProviderBatch(
+            provider_id=self.provider_id,
+            capability=request.capability,
+            payload=b'{"normalized":true}',
+            observed_at=datetime.now(UTC),
+            content_type="application/vnd.quant-v2.test+json",
+            raw_payload=b'{"akshare":true}',
+            raw_content_type="application/json",
+        )
+
+
+def test_raw_payload_store_defers_success_payload_and_returns_unretained_marker() -> None:
+    """成功路径仅返回摘要标记，不能把来源字节写入对象存储。"""
     client = FakeS3Client()
     store = S3RawPayloadStore(ObjectStorageClient(client=client, bucket="raw-evidence"))
 
@@ -52,16 +85,88 @@ def test_raw_payload_store_writes_checksum_metadata_and_returns_private_s3_uri()
         )
     )
 
-    assert uri == "s3://raw-evidence/raw/equity/test.json"
-    assert client.calls == [
-        {
-            "Bucket": "raw-evidence",
-            "Key": "raw/equity/test.json",
-            "Body": b'{"raw":true}',
-            "ContentType": "application/json",
-            "Metadata": {"sha256": "a" * 64},
-        }
-    ]
+    assert uri == f"unretained://sha256/{'a' * 64}"
+    assert client.calls == []
+
+
+def test_raw_payload_store_persists_staged_payload_and_manifest_on_failure() -> None:
+    """失败路径将暂存来源字节及无敏感错误文本的清单一起写入失败目录。"""
+    client = FakeS3Client()
+    store = S3RawPayloadStore(ObjectStorageClient(client=client, bucket="raw-evidence"))
+    store.put(
+        RawPayload(
+            object_key="raw/equity/test.json",
+            content_sha256="a" * 64,
+            content_type="application/json",
+            payload=b'{"raw":true}',
+        )
+    )
+
+    manifest_uri = store.persist_failure(RuntimeError("provider failed"))
+
+    assert manifest_uri is not None and manifest_uri.startswith("s3://raw-evidence/failures/")
+    assert len(client.calls) == 2
+    assert client.calls[0]["Body"] == b'{"raw":true}'
+    manifest = json.loads(cast(bytes, client.calls[1]["Body"]))
+    assert manifest["errorType"] == "RuntimeError"
+    assert manifest["objects"][0]["sha256"] == "a" * 64
+
+
+def test_retain_failure_evidence_discards_success_and_archives_exception() -> None:
+    """统一执行包装器在成功时释放内存，在异常时固化原始排障证据。"""
+    client = FakeS3Client()
+    store = S3RawPayloadStore(ObjectStorageClient(client=client, bucket="raw-evidence"))
+
+    def successful_operation() -> str:
+        """模拟成功同步期间暂存一份来源载荷。"""
+        store.put(
+            RawPayload(
+                object_key="raw/equity/success.json",
+                content_sha256="b" * 64,
+                content_type="application/json",
+                payload=b'{"success":true}',
+            )
+        )
+        return "published"
+
+    def failing_operation() -> None:
+        """模拟写入失败，保留已暂存来源载荷。"""
+        store.put(
+            RawPayload(
+                object_key="raw/equity/failure.json",
+                content_sha256="c" * 64,
+                content_type="application/json",
+                payload=b'{"failure":true}',
+            )
+        )
+        raise RuntimeError("database failed")
+
+    assert retain_failure_evidence(store, successful_operation) == "published"
+    assert client.calls == []
+
+    with pytest.raises(RuntimeError, match="database failed"):
+        retain_failure_evidence(store, failing_operation)
+
+    assert len(client.calls) == 2
+
+
+def test_failure_evidence_source_stages_batch_before_a_decode_failure() -> None:
+    """来源已返回但标准解码失败时，也必须能保存 AKShare 原始字节。"""
+    client = FakeS3Client()
+    store = S3RawPayloadStore(ObjectStorageClient(client=client, bucket="raw-evidence"))
+    source = FailureEvidenceDataSource(FakeSource(), store)
+
+    def failing_operation() -> None:
+        """模拟应用层解码在调用 `put` 前失败的路径。"""
+        asyncio.run(source.fetch(SourceRequest(capability="test.raw")))
+        raise ValueError("schema drift")
+
+    with pytest.raises(ValueError, match="schema drift"):
+        retain_failure_evidence(store, failing_operation)
+
+    assert len(client.calls) == 3
+    assert client.calls[0]["Body"] == b'{"akshare":true}'
+    assert client.calls[1]["Body"] == b'{"normalized":true}'
 
 
 def test_raw_payload_store_reads_only_the_configured_private_bucket() -> None:
@@ -74,3 +179,6 @@ def test_raw_payload_store_reads_only_the_configured_private_bucket() -> None:
 
     with pytest.raises(ValueError, match="configured"):
         store.get("s3://another-bucket/raw/equity/test.json")
+
+    with pytest.raises(ValueError, match="not retained"):
+        store.get(f"unretained://sha256/{'a' * 64}")

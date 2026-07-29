@@ -44,6 +44,7 @@ class SourceBatch(Base):
             "capability",
             "payload_sha256",
         ),
+        Index("ix_source_batch_source_dataset", "source_dataset_id"),
         {"comment": "外部来源的一次独立观察；相同 payload 也保留独立审计身份。"},
     )
 
@@ -55,6 +56,12 @@ class SourceBatch(Base):
     )
     capability: Mapped[str] = mapped_column(
         String(100), nullable=False, comment="本次观察对应的 provider-neutral capability。"
+    )
+    source_dataset_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("source_dataset.source_dataset_id", ondelete="RESTRICT"),
+        nullable=True,
+        comment="真实上游数据产品；历史观察兼容期内允许为空。",
     )
     payload_sha256: Mapped[str] = mapped_column(
         CHAR(64), nullable=False, comment="原始来源载荷的 SHA-256 十六进制摘要。"

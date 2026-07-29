@@ -168,6 +168,10 @@ def _patch_runtime(
         build_repository,
     )
     monkeypatch.setattr(money_flow_tasks, "S3RawPayloadStore", build_raw_store)
+    # 任务组合测试不触及对象存储；留证语义由原始载荷存储专用测试覆盖。
+    monkeypatch.setattr(
+        money_flow_tasks, "retain_failure_evidence", lambda _store, operation: operation()
+    )
 
 
 def test_tasks_register_idempotently_and_disabled_probe_stays_offline() -> None:

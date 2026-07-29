@@ -16,6 +16,9 @@ const publication = {
   symbol: '600519',
   dataVersion: '00000000-0000-4000-8000-000000000001',
   publishedAt: '2026-07-28T00:00:00Z',
+  availability: 'AVAILABLE',
+  observedAt: null,
+  reasonCode: null,
   qualityStatus: 'passed',
   stale: false,
 } as const;
@@ -168,6 +171,51 @@ describe('EquityMarketDataClient', () => {
     expect(actions.status === 200 && actions.body.items[0]?.status).toBe('实施');
     expect(profile.status === 200 && profile.body.profile.industry).toBe('白酒');
     expect(requestedUrl(fetcher.mock.calls[2]?.[0]).pathname).toContain('company-profile');
+  });
+
+  /** 验证没有 canonical 事实时仍把内部成功空页透传给公开领域服务。 */
+  it('accepts a successful empty bar page', async () => {
+    const client = new EquityMarketDataClient(
+      config,
+      vi.fn<typeof fetch>().mockResolvedValue(
+        jsonResponse({
+          exchange: 'SSE',
+          symbol: '600519',
+          period: '1d',
+          adjustmentMode: 'none',
+          adjustAsOf: null,
+          factorVersion: null,
+          formulaVersion: null,
+          dataVersion: null,
+          publishedAt: null,
+          availability: 'SOURCE_UNAVAILABLE',
+          observedAt: '2026-07-29T00:00:00Z',
+          reasonCode: 'unavailable',
+          qualityStatus: null,
+          stale: false,
+          items: [],
+          nextCursor: null,
+        }),
+      ),
+    );
+
+    const result = await client.listBars({
+      exchange: 'SSE',
+      symbol: '600519',
+      period: '1d',
+      start: '2026-07-01',
+      end: '2026-07-29',
+      adjust: 'none',
+      limit: 100,
+      requestId: 'req-empty',
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.status === 200 && result.body).toMatchObject({
+      availability: 'SOURCE_UNAVAILABLE',
+      dataVersion: null,
+      items: [],
+    });
   });
 
   /** 验证 304 保留 ETag，供公开 POST 映射为 204。 */

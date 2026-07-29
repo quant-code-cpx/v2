@@ -1,0 +1,1109 @@
+<!doctype html><html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="期货与期权独立资产域的数据源、合约身份、日行情、连续合约、库存交割、点时质量和 API 消费需求调研方案。">
+  <title>0026｜期货与期权独立资产域调研方案</title>
+  <style>
+    :root { color-scheme: light; --ink:#172033; --muted:#667085; --line:#dfe4ec; --surface:#f6f8fb; --accent:#3157d5; --accent-soft:#eef2ff; --fact:#245e8d; --fact-soft:#e9f2fa; --ok:#176b4d; --ok-soft:#e8f4ec; --warn:#8a4b08; --warn-soft:#fff6e5; --danger:#a1392f; --danger-soft:#fff0ee; --radius:12px; --shadow:0 10px 26px rgb(23 32 51 / 7%); }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin:0; min-width:1200px; color:var(--ink); background:#fff; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif; font-size:15px; line-height:1.68; }
+    a { color:var(--accent); text-underline-offset:.2em; }
+    a:focus-visible { outline:3px solid rgb(49 87 213 / 28%); outline-offset:3px; border-radius:3px; }
+    code { color:#293d78; font:.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; overflow-wrap:anywhere; }
+    .shell { width:min(1120px,calc(100% - 40px)); margin:0 auto; }
+    header { padding:44px 0 30px; border-bottom:1px solid var(--line); background:var(--surface); }
+    .eyebrow,.label { color:var(--accent); font-size:.75rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+    .eyebrow { margin:0 0 8px; }
+    h1,h2,h3,h4 { line-height:1.28; letter-spacing:-.02em; }
+    h1 { max-width:920px; margin:0; font-size:clamp(2rem,4vw,3.15rem); }
+    h2 { margin:0 0 18px; font-size:clamp(1.45rem,2.5vw,1.95rem); }
+    h3 { margin:0 0 8px; font-size:1.07rem; }
+    h4 { margin:20px 0 7px; font-size:.98rem; }
+    p { max-width:90ch; }
+    .lede { max-width:930px; margin:14px 0 0; color:var(--muted); font-size:1.05rem; }
+    .meta { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin:24px 0 0; }
+    .meta div,.card { min-width:0; padding:16px; border:1px solid var(--line); border-radius:var(--radius); background:#fff; }
+    .meta div { padding:11px 13px; }
+    .meta dt { color:var(--muted); font-size:.76rem; }
+    .meta dd { margin:3px 0 0; font-weight:700; overflow-wrap:anywhere; }
+    .status { color:var(--warn); }
+    nav { position:sticky; top:0; z-index:5; overflow-x:auto; border-bottom:1px solid var(--line); background:rgb(255 255 255 / 95%); backdrop-filter:blur(10px); }
+    nav ul { display:flex; gap:18px; width:max-content; margin:0; padding:11px 0; list-style:none; }
+    nav a { color:var(--muted); font-size:.82rem; font-weight:700; text-decoration:none; }
+    nav a:hover { color:var(--accent); }
+    main { padding:16px 0 64px; }
+    section { padding:42px 0; border-bottom:1px solid var(--line); scroll-margin-top:50px; }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+    .grid.two { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .grid.four { grid-template-columns:repeat(4,minmax(0,1fr)); }
+    .card { box-shadow:var(--shadow); overflow-wrap:anywhere; }
+    .card p:last-child,.card ul:last-child { margin-bottom:0; }
+    .label { display:inline-block; margin-bottom:7px; }
+    .tag { display:inline-block; margin-right:5px; padding:2px 7px; border-radius:99px; font-size:.72rem; font-weight:800; white-space:nowrap; }
+    .tag.fact { color:var(--fact); background:var(--fact-soft); }
+    .tag.proposal { color:var(--ok); background:var(--ok-soft); }
+    .tag.assumption { color:var(--warn); background:var(--warn-soft); }
+    .tag.open { color:var(--danger); background:var(--danger-soft); }
+    .priority { display:inline-block; min-width:2.5em; padding:1px 7px; border:1px solid currentColor; border-radius:99px; font-weight:800; text-align:center; }
+    .p0 { color:var(--danger); } .p1 { color:var(--accent); } .p2 { color:var(--muted); }
+    .callout { margin:18px 0; padding:17px 19px; border-left:4px solid var(--accent); border-radius:0 var(--radius) var(--radius) 0; background:var(--accent-soft); }
+    .callout.warn { border-left-color:var(--warn); background:var(--warn-soft); }
+    .callout.danger { border-left-color:var(--danger); background:var(--danger-soft); }
+    .callout strong { display:block; margin-bottom:4px; }
+    .table-wrap { overflow-x:auto; margin:14px 0; border:1px solid var(--line); border-radius:var(--radius); }
+    table { width:100%; min-width:820px; border-collapse:collapse; font-size:.85rem; }
+    .wide table { min-width:1180px; }
+    th,td { padding:10px 11px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { background:var(--surface); font-size:.79rem; white-space:nowrap; }
+    tr:last-child td { border-bottom:0; }
+    ul,ol { padding-left:1.2rem; }
+    li + li { margin-top:5px; }
+    .flow,pre { overflow-x:auto; padding:18px; border:1px solid #253247; border-radius:var(--radius); background:#111827; color:#e5e7eb; font:.84rem/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    .small { color:var(--muted); font-size:.88rem; }
+    .checklist { columns:2; column-gap:36px; }
+    .checklist li { break-inside:avoid; padding-bottom:5px; }
+    footer { padding:26px 0 42px; color:var(--muted); font-size:.82rem; }
+    @media print {
+      @page { size:A4; margin:13mm; }
+      body { min-width:0; font-size:9.4pt; }
+      nav,footer { display:none; }
+      header,main,section { padding-top:16px; }
+      .shell { width:100%; }
+      .meta { grid-template-columns:repeat(3,minmax(0,1fr)); }
+      .card { box-shadow:none; break-inside:avoid; }
+      .table-wrap,pre,.callout { break-inside:avoid; }
+      .table-wrap { overflow:visible; }
+      table { min-width:0; font-size:7.2pt; }
+      th,td { padding:4px 5px; }
+      a { color:inherit; text-decoration:none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Technical solution · service-data-sync · 0026</p>
+      <h1>期货与期权：独立资产域与可回放衍生品数据设计</h1>
+      <p class="lede">
+        建议接入，但必须作为独立 <strong>derivatives</strong> 资产域分阶段建设。P0 只做交易所合约主数据、
+        交易日历和单合约官方日行情；P1 再做期权链、持仓排名、仓单、库存、行权与交割；
+        主力连续和复权连续属于平台方法学产品，列为 P2，绝不冒充交易所可交易合约或原始结算价。
+      </p>
+      <dl class="meta">
+        <div><dt>状态</dt><dd class="status">Proposed</dd></div>
+        <div><dt>推荐</dt><dd>P0/P1 分阶段接入</dd></div>
+        <div><dt>资产域</dt><dd>Futures · Options</dd></div>
+        <div><dt>最后修改</dt><dd>2026-07-29</dd></div>
+        <div><dt>实施状态</dt><dd>已实现真实合约日线 P0 发布、受控 CLI 与内部 typed reader；个人内部部署首次可信日线可建立最小合约身份，未知产品与挂牌日保持为空，完整规格目录仍按独立门禁推进。</dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">结论</a></li>
+        <li><a href="#boundary">价值与边界</a></li>
+        <li><a href="#sources">来源事实</a></li>
+        <li><a href="#probe">固定样本</a></li>
+        <li><a href="#identity">粒度与身份</a></li>
+        <li><a href="#fields">字段与单位</a></li>
+        <li><a href="#temporal">时态与连续</a></li>
+        <li><a href="#sync">同步与质量</a></li>
+        <li><a href="#canonical">Canonical 输入</a></li>
+        <li><a href="#tables">领域表草案</a></li>
+        <li><a href="#api">API 需求</a></li>
+        <li><a href="#gates">门禁与风险</a></li>
+        <li><a href="#delivery">路线与验收</a></li>
+        <li><a href="#references">引用</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>1. 结论：值得接入，但不能扩写成“股票行情的另一张表”</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label">架构结论</span>
+          <h3>独立衍生品资产域</h3>
+          <p>
+            期货和期权有产品、月份、到期、行权、交割、合约单位、结算价与夜盘交易日语义。
+            不复用 A 股 <code>security_id</code>，不把合约代码送入股票身份解析器。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">来源结论</span>
+          <h3>交易所为数值与规则证据锚</h3>
+          <p>
+            六家期货交易场所及 SSE/SZSE 股票期权页面是首选权威证据。
+            AKShare 是采集库；新浪、东方财富连续/快照只能作为 research/shadow 候选。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">最大风险</span>
+          <h3>连续序列制造未来函数</h3>
+          <p>
+            用当日收盘后的持仓量选择当日主力、按未来换月回调全部历史价格，
+            或把连续价当作可成交结算价，都会污染回测和实时消费。
+          </p>
+        </article>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>优先级</th><th>范围</th><th>建议</th><th>生产退出条件</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="priority p0">P0</span></td>
+              <td>产品/合约主数据、衍生品交易日历、单合约交易所日行情、结算价和持仓量</td>
+              <td><strong>建议接入</strong>；先实现可回放的真实合约事实。</td>
+              <td>身份、夜盘交易日、单位、官方来源、恢复和发布门禁通过。</td>
+            </tr>
+            <tr>
+              <td><span class="priority p1">P1</span></td>
+              <td>期权链、交易所风险指标、成交持仓排名、仓单、交割、期转现和行权统计</td>
+              <td><strong>建议有条件接入</strong>；各数据集独立发布。</td>
+              <td>粒度、历史覆盖、空值、修订和场所差异逐项验收。</td>
+            </tr>
+            <tr>
+              <td><span class="priority p2">P2</span></td>
+              <td>主力/指数连续、前后调整连续、平台计算 Greeks/隐含波动率</td>
+              <td>暂不作为 reported 数据接入；独立 derived methodology。</td>
+              <td>因果换月、版本化、可复算和消费者免责声明通过 G4。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout danger">
+        <strong>不可违反的不变量</strong>
+        股票、ETF、指数只能作为期权的 <em>underlying reference</em>，不能让期权合约继承股票代码身份；
+        真实月合约、主力连续、指数连续和后调整连续是四种不同对象；
+        收盘价、结算价、交割结算价也不得静默互换。
+      </aside>
+    </section>
+
+    <section id="boundary">
+      <h2>2. 业务价值、消费者与独立资产域边界</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>目标用户</h3>
+          <ul>
+            <li>期货研究员：期限结构、基差、持仓和换月分析。</li>
+            <li>期权研究员：期权链、波动率曲面、到期与行权分析。</li>
+            <li>量化研究员：无未来信息的合约/连续序列回测。</li>
+            <li>数据运营：交易所覆盖、规格变化、仓单与交割质量审计。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>首期消费场景</h3>
+          <ul>
+            <li>按场所、品种、月份检索存续合约与生命周期。</li>
+            <li>读取真实合约 OHLC、结算价、成交量和持仓量。</li>
+            <li>在指定 <code>asOf + knownAt</code> 下重建期权链。</li>
+            <li>对比仓单库存、交割量与持仓变化，不混成一个“库存”。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>明确非目标</h3>
+          <ul>
+            <li>不建设分钟、Tick、实时交易或订单簿。</li>
+            <li>不提供交易、下单、保证金计算或组合风险引擎。</li>
+            <li>不把 Provider 连续代码当交易所合约代码。</li>
+            <li>不在本文定义跨域统一 instrument 或共享运行表。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3>资产域地图</h3>
+      <pre class="flow" aria-label="衍生品资产域地图">derivatives
+├─ futures
+│  ├─ product / contract / lifecycle
+│  ├─ exchange-reported daily bar / settlement / open interest
+│  ├─ member position rank / warehouse receipt / delivery / EFP
+│  └─ derived continuous series（独立 methodology）
+└─ options
+   ├─ product / contract / chain / lifecycle
+   ├─ exchange-reported daily bar / exercise / risk indicator
+   └─ underlying reference
+      ├─ FUTURE_CONTRACT → derivatives
+      └─ ETF / EQUITY / INDEX → 仅逻辑引用其他资产域
+
+禁止：equity.security_id = derivative_contract_id
+禁止：contract_code = continuous_series_code
+禁止：warehouse receipt quantity = commercial inventory</pre>
+
+      <h3>任务定义卡</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>维度</th><th>拟议定义</th></tr></thead>
+          <tbody>
+            <tr><td>场所</td><td>CFFEX、SHFE、INE、DCE、CZCE、GFEX；股票期权另含 SSE、SZSE。</td></tr>
+            <tr><td>业务时区</td><td><code>Asia/Shanghai</code>；时间戳持久化为 UTC <code>timestamptz</code>。</td></tr>
+            <tr><td>核心粒度</td><td>产品/合约版本；交易所 × 合约 × 交易日；统计数据按其真实产品、仓库、会员或交割周期粒度。</td></tr>
+            <tr><td>交易日</td><td>交易所业务日，不等于自然日；夜盘可从前一工作日开始。</td></tr>
+            <tr><td>发布分区</td><td><code>dataset + venue + trade_date</code>；合约目录按 venue + observation date。</td></tr>
+            <tr><td>容量假设</td><td>约 8 个场所、数千活跃合约、每日低万级行情行；期权链和排名是主要增长项，pilot 后修正。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="sources">
+      <h2>3. 权威来源、AKShare 函数、历史与授权</h2>
+      <div class="grid four">
+        <article class="card">
+          <span class="tag fact">事实</span>
+          <h3>交易所发布合约与结算行情</h3>
+          <p>CFFEX 规则明确发布合约、开高低收、结算、成交量、持仓量及排名，交易信息所有权归交易所。</p>
+        </article>
+        <article class="card">
+          <span class="tag fact">事实</span>
+          <h3>夜盘跨自然日</h3>
+          <p>郑商所指引把交易日定义为前一工作日 21:00 至当日 15:00；上期所资料给出同类边界。</p>
+        </article>
+        <article class="card">
+          <span class="tag proposal">建议</span>
+          <h3>官方直源优先</h3>
+          <p>交易所日数据与规则是 production 首选；AKShare 官方交易所 wrapper 可作为 adapter 候选。</p>
+        </article>
+        <article class="card">
+          <span class="tag open">未决</span>
+          <h3>统一商业主源</h3>
+          <p>官方站点、Tushare 或商业行情源尚未被批准；按 capability 独立门禁，不阻断 schema 和 fixture。</p>
+        </article>
+      </div>
+
+      <h3>来源矩阵</h3>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>来源</th><th>真实上游与函数</th><th>覆盖与历史</th><th>稳定性/限流</th><th>授权</th><th>建议角色</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>六家期货交易场所</td>
+              <td>
+                CFFEX/SHFE/INE/DCE/CZCE/GFEX 官方合约、日行情、结算、排名；
+                AKShare <code>futures_contract_info_*</code>、<code>get_futures_daily</code>。
+              </td>
+              <td>多数按交易日查询；历史深度因场所和接口代际不同。CFFEX 另有历史 Level-1/2 申购服务。</td>
+              <td>无统一 API/SLA；日期循环、站点防护、格式改版和节假日空集需来源级治理。</td>
+              <td>公开页面不自动授权批量留存/再分发；CFFEX 明确信息所有权归交易所。</td>
+              <td><strong>P0 数值与规则证据锚</strong>。</td>
+            </tr>
+            <tr>
+              <td>SSE / SZSE 股票期权</td>
+              <td>
+                当日/挂牌合约、行情、每日统计、风险指标、行权交收；
+                AKShare <code>option_current_day_sse/szse</code>、
+                <code>option_daily_stats_sse/szse</code>、<code>option_risk_indicator_sse</code>。
+              </td>
+              <td>SSE 风险指标文档称自 2015-02-09；挂牌和摘牌历史需按公告验证。</td>
+              <td>页面/API 可能超时或按日无数据；没有批量稳定性承诺。</td>
+              <td>交易所和中国结算规则适用；批量使用与投影权限仍需核查。</td>
+              <td><strong>P1 股票期权权威候选</strong>。</td>
+            </tr>
+            <tr>
+              <td>AKShare 官方交易所 wrapper</td>
+              <td>
+                <code>option_hist_shfe/dce/czce/gfex</code>、<code>get_rank_sum_daily</code>、
+                <code>futures_*_warehouse_receipt</code>、<code>futures_delivery_*</code>。
+              </td>
+              <td>函数通常按单日、单品种或单月返回；不能由文档外推全历史完整性。</td>
+              <td>固定 1.18.78；本轮同一环境既有成功也有超时、断连、JSON/TLS 错误。</td>
+              <td>AKShare MIT 是代码许可，不替代真实上游数据许可。</td>
+              <td>通过 R3 后可做<strong>受控 adapter</strong>。</td>
+            </tr>
+            <tr>
+              <td>新浪 / 东方财富二次源</td>
+              <td>
+                <code>futures_main_sina</code>、<code>futures_zh_daily_sina</code>、
+                <code>option_current_em</code>、<code>futures_inventory_em</code>。
+              </td>
+              <td>连续序列或当前快照；方法学、修订和完整历史边界不足。</td>
+              <td>无公开稳定配额；本轮东方财富期权快照远端断连。</td>
+              <td>需核查自动化访问、raw 留存和 API 再投影权。</td>
+              <td><strong>research/shadow</strong>，不得给官方字段补洞。</td>
+            </tr>
+            <tr>
+              <td>Tushare Pro</td>
+              <td>
+                <code>fut_basic</code>、<code>fut_daily</code>、<code>fut_mapping</code>、
+                <code>fut_holding</code>、<code>fut_wsr</code>、<code>opt_basic</code>、<code>opt_daily</code>。
+              </td>
+              <td>文档称期货日线自 1996、持仓排名自 2002、仓单自 2006；期权称全部历史。</td>
+              <td>合约 10,000、日线 2,000、mapping 2,000 行上限；积分与真实账号权限待验证。</td>
+              <td>积分可调用不等于任意再分发；合同/订阅边界必须保存证据。</td>
+              <td>结构化主源或对账源候选；与交易所来源保持独立 methodology。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout warn">
+        <strong>库存口径不可替换</strong>
+        交易所“仓单日报”、上期所“库存周报”、东方财富“期货库存”和商业现货库存并非同一事实。
+        名称相近也必须分 dataset、单位、地点、品级、更新时间和方法学；禁止逐格 fallback。
+      </aside>
+    </section>
+
+    <section id="probe">
+      <h2>4. 固定 AKShare 环境小样本：只证明本次函数形状</h2>
+      <p>
+        观测环境为仓库已有 <code>quant-v2/service-data-sync:test</code>，AKShare 1.18.78；
+        访问日期 2026-07-28。没有写数据库、对象存储、配置或服务代码。
+      </p>
+      <div class="table-wrap wide">
+        <table>
+          <thead><tr><th>探针</th><th>结果</th><th>允许结论</th><th>禁止结论</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>futures_contract_info_shfe("20260724")</code></td>
+              <td>302 行；合约代码、上市/到期、交割起止、挂牌基准价、交易日、更新时间。</td>
+              <td>该日上期所官方 endpoint 可形成生命周期候选。</td>
+              <td>不能证明其他场所、其他日期或长期稳定。</td>
+            </tr>
+            <tr>
+              <td><code>get_futures_daily(..., market="SHFE")</code></td>
+              <td>305 行；OHLC、volume、open_interest、turnover、settle、pre_settle、variety。</td>
+              <td>单日可形成真实合约日行情候选；成交量和持仓量字段存在。</td>
+              <td>不能据样本假定所有价格/金额单位一致。</td>
+            </tr>
+            <tr>
+              <td><code>futures_main_sina("RB0")</code></td>
+              <td>2026-07-01 至 07-24 共 18 行；含 OHLC、成交量、持仓量和“动态结算价”。</td>
+              <td>新浪存在连续序列形状。</td>
+              <td>不能证明所选月合约、换月规则、可交易性或官方结算口径。</td>
+            </tr>
+            <tr>
+              <td><code>option_hist_shfe("铝期权","20260724")</code></td>
+              <td>25 秒预算内未完成。</td>
+              <td>记录为本次 timeout，进入来源可观测性样本。</td>
+              <td>不能写成“上期所期权不可用”或全局失败。</td>
+            </tr>
+            <tr>
+              <td><code>option_daily_stats_sse("20260724")</code></td>
+              <td>25 秒预算内未完成。</td>
+              <td>需按官方页面/API 继续独立验证。</td>
+              <td>不能用另一 Provider 结果填补并保留 SSE 标签。</td>
+            </tr>
+            <tr>
+              <td>期权快照、仓单、交割</td>
+              <td><code>option_current_em</code> 断连；SHFE 仓单 JSON 解析失败；交割月数据 TLS EOF。</td>
+              <td>三类失败需分别映射 connection/schema/TLS，不视作合法空集。</td>
+              <td>单次失败不是技术硬阻塞，也不能被吞掉为 0 行。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="identity">
+      <h2>5. 数据集、业务粒度与候选唯一键</h2>
+      <h3>候选 canonical dataset</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Dataset</th><th>粒度</th><th>优先级</th><th>消费者</th></tr></thead>
+          <tbody>
+            <tr><td><code>derivative.product</code></td><td>场所 × 产品代码 × 知识版本</td><td>P0</td><td>目录、单位、规则关联</td></tr>
+            <tr><td><code>derivative.contract</code></td><td>场所 × 真实合约代码 × 生命周期版本</td><td>P0</td><td>合约检索、身份、到期</td></tr>
+            <tr><td><code>derivative.bar.1d.reported</code></td><td>合约 × 交易日 × 来源/methodology</td><td>P0</td><td>行情、期限结构、持仓</td></tr>
+            <tr><td><code>derivative.option.chain</code></td><td>标的 × 到期日 × 交易日 × 合约</td><td>P1</td><td>链、波动率分析</td></tr>
+            <tr><td><code>derivative.position_rank</code></td><td>交易日 × 合约/产品 × 排名类型 × 会员</td><td>P1</td><td>持仓结构</td></tr>
+            <tr><td><code>derivative.warehouse_receipt</code></td><td>交易日 × 产品 × 仓库/地区/品级</td><td>P1</td><td>可交割资源观察</td></tr>
+            <tr><td><code>derivative.delivery</code></td><td>日期/月份 × 产品/合约 × 交割类型</td><td>P1</td><td>交割与期转现</td></tr>
+            <tr><td><code>derivative.continuous.1d</code></td><td>连续序列 × 交易日 × methodology version</td><td>P2</td><td>长期研究，不作成交价</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>身份规则</h3>
+      <div class="grid">
+        <article class="card">
+          <span class="label">Product</span>
+          <h3>场所内品种</h3>
+          <p>
+            候选键 <code>(venue, product_code)</code>。CU、IF、RB 等只在场所和资产类别内解释，
+            名称不是身份，规则修订追加版本。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">Contract</span>
+          <h3>真实挂牌合约</h3>
+          <p>
+            候选键 <code>(venue, contract_code)</code>；期权还保存 call/put、strike、expiry 与 underlying。
+            不仅靠字符串解析合约月份。
+          </p>
+        </article>
+        <article class="card">
+          <span class="label">Synthetic</span>
+          <h3>连续序列</h3>
+          <p>
+            候选键 <code>(product_id, series_kind, methodology_id)</code>。
+            RB0、RB88、RB888、RB99 不等于 RB2608 等真实合约。
+          </p>
+        </article>
+      </div>
+
+      <pre aria-label="候选唯一键">真实合约：
+(asset_class, venue, exchange_contract_code)
+
+合约规格版本：
+(derivative_contract_id, known_from)
+
+交易所日行情：
+(derivative_contract_id, trade_date, methodology_id)
+
+期权风险指标：
+(option_contract_id, trade_date, methodology_id)
+
+仓单：
+(venue, trade_date, product_id, location_key, grade_key, methodology_id)
+
+连续序列：
+(continuous_series_id, trade_date, data_version)
+
+注意：
+- source rank、中文简称、当前主力标志不参与永久身份；
+- 合约代码解析失败进入 quarantine，不猜交易所、月份、call/put 或行权价；
+- underlying 只能通过显式类型引用，不与股票 security_id 复用。</pre>
+    </section>
+
+    <section id="fields">
+      <h2>6. 字段字典、单位和空值语义</h2>
+      <div class="table-wrap wide">
+        <table>
+          <thead><tr><th>字段组</th><th>Canonical 字段</th><th>单位/类型</th><th>真实上游</th><th>空值与约束</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>身份</td>
+              <td><code>asset_class / venue / product_code / contract_code</code></td>
+              <td>受控枚举 + 原始代码</td>
+              <td>交易所合约信息、交易参数；Provider 代码先经 adapter。</td>
+              <td>不可空；未知场所或冲突代码隔离。</td>
+            </tr>
+            <tr>
+              <td>期权结构</td>
+              <td><code>underlying_kind/ref, call_put, strike_price</code></td>
+              <td>显式类型；价格单位随产品</td>
+              <td>交易所当日/挂牌合约和合约条款。</td>
+              <td>期权 production 必填；不得只靠简称猜测。</td>
+            </tr>
+            <tr>
+              <td>规格</td>
+              <td><code>contract_multiplier, trade_unit, quote_currency, price_unit, tick_size</code></td>
+              <td>Decimal + 单位码</td>
+              <td>交易所规则/参数；Tushare fut_basic 可作结构化候选。</td>
+              <td>未知单位时行情只进 research，不默认“元/吨”。</td>
+            </tr>
+            <tr>
+              <td>生命周期</td>
+              <td><code>list_date, last_trade_date, expiry_date, exercise_date, delivery_start/end</code></td>
+              <td>交易所业务日期</td>
+              <td>官方合约参数与调整公告。</td>
+              <td>规则更正追加 revision；日期不同义，不相互填充。</td>
+            </tr>
+            <tr>
+              <td>结算方式</td>
+              <td><code>exercise_style, settlement_type, delivery_method</code></td>
+              <td>EUROPEAN/AMERICAN；CASH/PHYSICAL 等</td>
+              <td>合约条款。ETF 期权通常实物交割；股指期权现金交割。</td>
+              <td>UNKNOWN 不进入行权/交割 production 查询。</td>
+            </tr>
+            <tr>
+              <td>行情时间</td>
+              <td><code>trade_date, session_start_at, session_end_at</code></td>
+              <td>date + UTC timestamp</td>
+              <td>交易所日行情和品种交易时间公告。</td>
+              <td>trade_date 不从 UTC 日期截断；夜盘按交易所业务日。</td>
+            </tr>
+            <tr>
+              <td>价格</td>
+              <td><code>open/high/low/close, pre_close</code></td>
+              <td>Decimal；quote price unit</td>
+              <td>交易所日行情；AKShare get_futures_daily。</td>
+              <td>无成交可为空并带 reason；不以前一行 close 强补 pre_close。</td>
+            </tr>
+            <tr>
+              <td>结算价格</td>
+              <td><code>settlement, pre_settlement, delivery_settlement</code></td>
+              <td>Decimal；同合约报价单位</td>
+              <td>交易所结算/日统计；CFFEX 明确交割日今结算有特殊语义。</td>
+              <td>三者独立；不得用 close 替代 settlement。</td>
+            </tr>
+            <tr>
+              <td>量额</td>
+              <td><code>volume_lots, open_interest_lots, oi_change_lots, turnover_amount</code></td>
+              <td>手；金额需 currency + raw unit</td>
+              <td>交易所日统计。CFFEX 量/持仓按单边，金额万元。</td>
+              <td>统计方向和单位必须来源化；无值不写 0。</td>
+            </tr>
+            <tr>
+              <td>期权指标</td>
+              <td><code>exercise_volume, delta, gamma, theta, vega, rho, implied_volatility</code></td>
+              <td>手或方法学数值</td>
+              <td>交易所风险指标/日行情；SSE 指标按当日收盘计算。</td>
+              <td>exchange-reported 与 platform-derived 分 methodology，不补算覆盖。</td>
+            </tr>
+            <tr>
+              <td>仓单</td>
+              <td><code>receipt_quantity, change_quantity, location, grade</code></td>
+              <td>来源单位：吨/张/手等</td>
+              <td>各商品交易所仓单日报。</td>
+              <td>地点/品级未知不聚合；库存来源不同不得拼接。</td>
+            </tr>
+            <tr>
+              <td>交割</td>
+              <td><code>delivery_type, delivery_period, delivery_quantity, delivery_amount</code></td>
+              <td>来源量纲 + 币种</td>
+              <td>交易所交割、期转现、行权交收统计。</td>
+              <td>实物、现金、期转现、行权分别编码。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="temporal">
+      <h2>7. 交易日、可见时间、修订与连续合约因果性</h2>
+      <h3>时间轴</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>字段</th><th>定义</th><th>规则</th><th>消费作用</th></tr></thead>
+          <tbody>
+            <tr><td><code>trade_date</code></td><td>交易所归属业务日。</td><td>夜盘属于次一业务日；不可用自然日推断。</td><td>行情、排名、仓单主筛选。</td></tr>
+            <tr><td><code>effective_from/to</code></td><td>合约规格或生命周期事实有效区间。</td><td>上市、到期、交易时间和合约单位调整均版本化。</td><td><code>asOf</code> 选择当时规则。</td></tr>
+            <tr><td><code>published_at</code></td><td>交易所公开该批数据的可验证时刻。</td><td>只有日期时保持 null，不猜 15:00。</td><td>事件回放和最终性。</td></tr>
+            <tr><td><code>observed_at</code></td><td>adapter 成功取得 payload 的 UTC 时刻。</td><td>每次 fetch 独立 source observation。</td><td>来源延迟与审计。</td></tr>
+            <tr><td><code>known_from/to</code></td><td>平台实际知道 revision 的知识区间。</td><td>known_from 不早于 observed_at；回补不倒灌。</td><td><code>knownAt</code> 防未来信息。</td></tr>
+            <tr><td><code>finalized_at</code></td><td>平台在质量/等待窗口后发布最终版本的时刻。</td><td>表示平台 finality，不宣称交易所永不修订。</td><td>final-only 查询和缓存。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>连续序列方法学</h3>
+      <div class="grid two">
+        <article class="card">
+          <h3>允许的因果换月</h3>
+          <ul>
+            <li>只使用截至 T 日收盘已发布的成交量/持仓量。</li>
+            <li>T 日判定，最早 T+1 生效；不把新主力回写到 T 日。</li>
+            <li>保存候选合约、阈值、旧/新合约和 roll reason。</li>
+            <li>每个连续 bar 携带真实 <code>source_contract_ref</code>。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>必须隔离的序列</h3>
+          <ul>
+            <li>简单拼接：价格跳空保留，量/持仓来自当日所选合约。</li>
+            <li>差值/比例后调：历史价格会随未来 roll 改写，只用于研究。</li>
+            <li>全合约加权指数：量价聚合规则与主力不同。</li>
+            <li>Provider 连续：方法不透明时仅 research/shadow。</li>
+          </ul>
+        </article>
+      </div>
+
+      <pre class="flow" aria-label="连续合约点时状态机">T 日收盘前
+  → 当前主力沿用，不查看 T 日完整持仓终值
+
+T 日官方日行情已发布且 quality passed
+  → 计算 roll candidate
+  → 保存 signal_known_from = 实际 observed_at
+  → 若规则满足，effective_trade_date = next_exchange_trade_date(T)
+
+T+1 发布
+  → continuous bar 引用 T+1 真实月合约
+  → 保存 source_contract_ref / rule_version / data_version
+
+未来新换月
+  → UNADJUSTED 历史不改
+  → BACK_ADJUSTED 形成新 immutable dataVersion
+  → 旧 knownAt 仍选择旧版本，禁止把未来 adjustment 注入过去</pre>
+
+      <aside class="callout danger">
+        <strong>未来函数清单</strong>
+        禁止用全样本最活跃月份回标历史主力；禁止 T 日收盘持仓决定 T 日整根 K 线；
+        禁止用未来 roll 因子覆盖旧 <code>knownAt</code>；禁止把当前合约目录回填为历史当时已挂牌；
+        禁止把行权后标的表现、到期结算结果或后续修订放进更早切片。
+      </aside>
+    </section>
+
+    <section id="sync">
+      <h2>8. 同步、分区、回补、恢复与质量</h2>
+      <h3>正常路径</h3>
+      <pre class="flow" aria-label="衍生品同步流程">exchange calendar / controlled backfill trigger
+  → 建立 run + dataset/venue/trade_date partition
+  → 获取 venue/date lease
+  → DataSourcePort.fetch(provider-neutral capability)
+  → adapter 内调用唯一批准的交易所/Provider
+  → raw evidence 先落对象存储 + schema fingerprint
+  → 合约身份、业务交易日、单位与枚举标准化
+  → 批内唯一性、OHLC、结算、量额、生命周期与覆盖质量
+  → 单 partition 事务追加 canonical revision
+  → 推进 immutable dataVersion / publication
+  → checkpoint + 指标 + run terminal state</pre>
+
+      <h3>执行语义</h3>
+      <div class="table-wrap wide">
+        <table>
+          <thead><tr><th>项目</th><th>设计</th><th>失败与恢复</th><th>验收证据</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>任务</td>
+              <td>contract catalog、daily bar、option、rank、warehouse、delivery 分 capability；不做万能任务。</td>
+              <td>一个数据集失败不推进该 publication，不阻止其他独立数据集。</td>
+              <td>run/partition/source batch 可全链关联。</td>
+            </tr>
+            <tr>
+              <td>分区</td>
+              <td><code>dataset/venue/trade_date</code>；合约详情可再按 product 分片。</td>
+              <td>单场所失败保留上一版本，不形成跨场所混合“全市场”。</td>
+              <td>部分失败 fixture 和 publication 指针测试。</td>
+            </tr>
+            <tr>
+              <td>增量</td>
+              <td>按交易日拉行情；目录每日快照做 content diff；显式公告触发规格 revision。</td>
+              <td>目录缺失不代表合约退市；需要到期/摘牌证据。</td>
+              <td>缺席合约不被误关的回归测试。</td>
+            </tr>
+            <tr>
+              <td>幂等</td>
+              <td><code>capability + provider + venue + partition + payload_sha256</code>。</td>
+              <td>同 payload 新增 observation，不重复 canonical/dataVersion。</td>
+              <td>连续运行两次业务行数不变。</td>
+            </tr>
+            <tr>
+              <td>去重</td>
+              <td>完全重复折叠并告警；同键异值 quarantine，不以最后一行获胜。</td>
+              <td>不同来源不在同一 publication 逐行补洞。</td>
+              <td>duplicate-equal/conflict 双 fixture。</td>
+            </tr>
+            <tr>
+              <td>回补</td>
+              <td>按 venue × date window 限速回补；从 raw replay；历史 known_from 从实际观测起。</td>
+              <td>无历史版本证据标 <code>OBSERVATION_ONLY</code>。</td>
+              <td>known_from 不早于 source observed_at。</td>
+            </tr>
+            <tr>
+              <td>重试</td>
+              <td>timeout/429/5xx/TLS 可指数退避加抖动，最多 3 次并遵守 Retry-After。</td>
+              <td>schema、单位、身份冲突不重试，直接隔离。</td>
+              <td>失败注入验证次数、延迟和终态。</td>
+            </tr>
+            <tr>
+              <td>恢复</td>
+              <td>checkpoint 保存 raw URI、hash、已提交分片和上一 publication。</td>
+              <td>DB 失败从原 observed_at 的 raw 重放，不再次调用 Provider。</td>
+              <td>raw 后、normalize 后、commit 前、publish 前中断演练。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>发布质量规则</h3>
+      <div class="table-wrap wide">
+        <table>
+          <thead><tr><th>规则</th><th>阈值/不变量</th><th>处置</th><th>原因</th></tr></thead>
+          <tbody>
+            <tr><td>合约身份</td><td>production 行 100% 命中唯一 venue/contract；期权结构字段齐全。</td><td>未解析或冲突阻断分区。</td><td>避免股票/期货/连续代码误绑。</td></tr>
+            <tr><td>交易日</td><td>必须存在于该 venue/product session calendar；夜盘归属已验证。</td><td>未知日历只进 research。</td><td>避免自然日错位和重复。</td></tr>
+            <tr><td>价格</td><td>high ≥ open/close/low；非负规则按产品；结算价独立。</td><td>异常 quarantine，不自动改值。</td><td>价差与结算用途不同。</td></tr>
+            <tr><td>量额</td><td>volume/open interest 非负整数手；金额单位、单双边口径可追溯。</td><td>未知单位阻断 production。</td><td>跨场所同名字段不等量纲。</td></tr>
+            <tr><td>覆盖</td><td>与当日官方合约清单对账；到期/停牌/无成交需受控原因。</td><td>部分覆盖发布 partial 或保留旧版。</td><td>空集可能是来源失败。</td></tr>
+            <tr><td>期权链</td><td>underlying、expiry、call/put、strike 唯一；行权价精度符合规格。</td><td>链冲突隔离。</td><td>不能靠显示简称构链。</td></tr>
+            <tr><td>仓单/交割</td><td>产品、地点、品级、单位、日期完整；汇总值与明细容差对账。</td><td>不可比不聚合。</td><td>仓单、库存、交割是不同事实。</td></tr>
+            <tr><td>连续</td><td>T 日信号最早 T+1 生效；每行引用真实合约和规则版本。</td><td>违反即阻断 derived publication。</td><td>核心未来函数门。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="canonical">
+      <h2>9. 建议的 provider-neutral canonical 输入</h2>
+      <pre aria-label="canonical 输入示意">dataset: derivative.bar.1d.reported
+schema_version: 1
+source:
+  provider_id: open string
+  upstream_source: CFFEX | SHFE | INE | DCE | CZCE | GFEX | SSE | SZSE | ...
+  adapter_version: immutable string
+  schema_fingerprint: sha256
+observation:
+  observed_at: UTC timestamp
+  source_batch_ref: opaque reference
+record:
+  asset_class: FUTURE | OPTION
+  venue: controlled code
+  product_code: exact exchange code
+  contract_code: exact exchange contract code
+  trade_date: exchange business date
+  prices:
+    open / high / low / close: optional decimal
+    settlement / pre_settlement / delivery_settlement: optional decimal
+    price_unit: explicit
+  activity:
+    volume_lots / open_interest_lots / oi_change_lots: optional integer
+    turnover_amount: optional decimal
+    turnover_currency / raw_unit: explicit
+  option:
+    underlying_kind / underlying_ref / call_put / strike / expiry: conditional
+  lifecycle:
+    list_date / last_trade_date / exercise_date / delivery_start / delivery_end: optional
+  visibility:
+    published_at: optional evidence-backed timestamp
+    observed_at: required
+  provenance:
+    methodology_code / methodology_version / quality_status</pre>
+
+      <h3>消费者必须收到的元数据</h3>
+      <ul class="checklist">
+        <li><code>dataVersion</code>：不可变发布版本。</li>
+        <li><code>methodologyCode/Version</code>：reported 或 derived 方法。</li>
+        <li><code>qualityStatus</code>：passed/warned/partial。</li>
+        <li><code>pitCoverage</code>：official-history/observation-only。</li>
+        <li><code>tradeDate</code>：交易所业务日。</li>
+        <li><code>observedAt/knowledgeCutoff</code>：知识边界。</li>
+        <li><code>priceUnit/currency</code>：精确价额口径。</li>
+        <li><code>volumeConvention</code>：手、单双边。</li>
+        <li><code>contractRef/sourceContractRef</code>：真实合约引用。</li>
+        <li><code>seriesKind/rollRule</code>：连续序列专用。</li>
+      </ul>
+    </section>
+
+    <section id="tables">
+      <h2>10. 领域表草案：不定义跨专题共享表</h2>
+      <p>
+        下表仅作为统一 canonical 方案输入；不创建 migration，不重定义 source_batch、raw、quality、
+        checkpoint、calendar 或 publication。最终共享 identity 与物理 DDL 由后续统一数据模型方案收敛。
+      </p>
+
+      <div class="table-wrap wide">
+        <table>
+          <thead><tr><th>拟议表</th><th>粒度与候选唯一键</th><th>核心字段</th><th>关系与隔离</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>derivative_product</code></td>
+              <td>venue × product_code；唯一 <code>(venue, product_code)</code></td>
+              <td>product_ref、asset_class、名称、underlying_kind、currency、default_unit</td>
+              <td>本域产品锚；不复用 equity_instrument。</td>
+            </tr>
+            <tr>
+              <td><code>derivative_contract</code></td>
+              <td>venue × contract_code；唯一 <code>(venue, contract_code)</code></td>
+              <td>contract_ref、product_id、asset_class、underlying_ref、call_put、strike、expiry</td>
+              <td>期权可引用期货或外域 underlying；引用类型显式。</td>
+            </tr>
+            <tr>
+              <td><code>derivative_contract_revision</code></td>
+              <td>contract × known_from；双时态无重叠</td>
+              <td>list/last trade/exercise/delivery dates、multiplier、tick、session、known/effective 区间</td>
+              <td>规格和日期更正追加，不覆盖。</td>
+            </tr>
+            <tr>
+              <td><code>derivative_daily_bar</code></td>
+              <td>contract × trade_date × methodology；唯一</td>
+              <td>OHLC、pre_close、settlement/pre_settlement、volume、OI、turnover、source_batch</td>
+              <td>真实合约 reported 数据；不存连续行。</td>
+            </tr>
+            <tr>
+              <td><code>derivative_option_risk_daily</code></td>
+              <td>option contract × trade_date × methodology</td>
+              <td>delta/gamma/theta/vega/rho/IV、exercise_volume、calculation_basis</td>
+              <td>交易所 reported 与平台 derived 不同 methodology。</td>
+            </tr>
+            <tr>
+              <td><code>derivative_member_position_rank</code></td>
+              <td>venue × date × contract/product × side × rank × member</td>
+              <td>volume/long/short lots、change、rank_scope、member_label</td>
+              <td>会员展示名不是跨场所统一机构身份。</td>
+            </tr>
+            <tr>
+              <td><code>derivative_warehouse_receipt_daily</code></td>
+              <td>venue × date × product × location × grade × methodology</td>
+              <td>quantity、change、unit、warehouse/region、subtotal_flag</td>
+              <td>仓单与商业库存、库存周报隔离。</td>
+            </tr>
+            <tr>
+              <td><code>derivative_delivery_stat</code></td>
+              <td>venue × period/date × product/contract × delivery_type</td>
+              <td>PHYSICAL/CASH/EFP/EXERCISE、quantity、amount、unit、settlement price</td>
+              <td>不同交割类型不聚合；可空合同引用需受控原因。</td>
+            </tr>
+            <tr>
+              <td><code>derivative_continuous_series</code></td>
+              <td>product × series_kind × methodology</td>
+              <td>series_ref、selection rule、threshold、adjustment mode、version</td>
+              <td>P2 derived identity；不是交易所 contract。</td>
+            </tr>
+            <tr>
+              <td><code>derivative_continuous_bar</code></td>
+              <td>series × trade_date × data_version</td>
+              <td>source_contract_id、OHLC、volume/OI semantics、roll_signal_ref、adjustment</td>
+              <td>每行必须回溯真实合约；back-adjusted 版本不可变。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>约束、索引和规模输入</h3>
+      <ul>
+        <li>价格和金额使用 Decimal/NUMERIC；volume/OI 使用非负 BIGINT，禁止 float。</li>
+        <li>行情候选索引 <code>(contract_id, trade_date DESC)</code> 与 <code>(venue, trade_date, product_id)</code>。</li>
+        <li>期权链候选索引 <code>(underlying_ref, expiry_date, trade_date, strike_price, call_put)</code>。</li>
+        <li>日行情超过 2,000 万行或 50GB 后再考虑按 trade_date 年/月分区；先以基准测试决定。</li>
+        <li>raw payload 留在对象存储；不把 Provider JSON 塞入 canonical JSONB 绕过字段治理。</li>
+      </ul>
+    </section>
+
+    <section id="api">
+      <h2>11. 对 service-api 的 POST 查询需求</h2>
+      <aside class="callout">
+        <strong>边界</strong>
+        本文不改现有 OpenAPI，也不批准 endpoint。service-api 不得读取 data-sync 数据库、对象存储或 Provider；
+        service-web 只访问 service-api。最终内部 HTTP 与公开 POST 契约由统一跨服务方案决定。
+      </aside>
+
+      <h3>候选公开查询族</h3>
+      <ul>
+        <li><code>POST /api/v1/derivatives/contracts/search</code></li>
+        <li><code>POST /api/v1/derivatives/bars/query</code></li>
+        <li><code>POST /api/v1/derivatives/options/chain/query</code></li>
+        <li><code>POST /api/v1/derivatives/continuous-series/query</code></li>
+        <li><code>POST /api/v1/derivatives/warehouse-receipts/query</code></li>
+        <li><code>POST /api/v1/derivatives/delivery/query</code></li>
+      </ul>
+
+      <pre aria-label="候选 service-api 请求">POST /api/v1/derivatives/bars/query
+Authorization: Bearer &lt;user-session&gt;
+Content-Type: application/json
+
+{
+  "assetClass": "FUTURE",
+  "venue": "SHFE",
+  "contractCodes": ["CU2608"],
+  "tradeDateFrom": "2026-07-01",
+  "tradeDateTo": "2026-07-24",
+  "priceFields": ["OPEN", "HIGH", "LOW", "CLOSE", "SETTLEMENT"],
+  "asOf": "2026-07-24",
+  "knownAt": "2026-07-25T00:00:00Z",
+  "methodologyCode": "exchange-reported",
+  "qualityStatuses": ["PASSED", "WARNED"],
+  "sort": "TRADE_DATE_ASC",
+  "limit": 200,
+  "cursor": null
+}</pre>
+
+      <div class="table-wrap wide">
+        <table>
+          <thead><tr><th>方面</th><th>消费需求</th><th>失败/隔离语义</th></tr></thead>
+          <tbody>
+            <tr><td>身份</td><td>assetClass + venue + contractCode 或 opaque contractRef。</td><td>不暴露数据库键；股票路径不能解析期货代码。</td></tr>
+            <tr><td>筛选</td><td>场所、品种、合约、到期、call/put、strike、日期、dataset、methodology、quality。</td><td>reported 与 derived 不同页；不同连续方法不混合。</td></tr>
+            <tr><td>点时</td><td>支持 <code>asOf + knownAt</code>；最新查询可省略。</td><td>超出 PIT 覆盖 409；不回落到当前快照。</td></tr>
+            <tr><td>分页</td><td>键集 cursor 绑定 filters、sort、time、dataVersion；默认 100、最大 500。</td><td>篡改 400，版本变化 409；不用 offset。</td></tr>
+            <tr><td>响应</td><td>contract、tradeDate、价格/量额单位、methodology、source summary、observedAt、quality、dataVersion。</td><td>不返回 raw URI、Provider URL、source batch 或 quarantine。</td></tr>
+            <tr><td>期权链</td><td>underlying、expiry、strike、call/put、quoted/risk fields 和 chain snapshotVersion。</td><td>链不完整显式 partial；不能用邻日合约补齐。</td></tr>
+            <tr><td>连续</td><td>seriesKind、rollRuleVersion、sourceContractRef、adjustmentMode 和免责声明。</td><td>禁止让连续 code 进入交易/下单语义。</td></tr>
+            <tr><td>权限</td><td>有效 JWT + ACTIVE；建议独立 <code>market.derivatives.read</code> entitlement。</td><td>未冻结前默认关闭；401/403 不泄露资源。</td></tr>
+            <tr><td>限额</td><td>按用户/IP/route/日期跨度/合约数限流；在线查询最大 10 年、100 合约。</td><td>429 带 Retry-After；批量导出另行设计。</td></tr>
+            <tr><td>缓存</td><td>私有 ETag 绑定 projection + dataVersion，必须重新验证。</td><td>下游不可用 503；不返回未标旧值。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="gates">
+      <h2>12. 技术硬门禁与非技术风险</h2>
+      <p>门禁只阻止受影响 dataset 进入 production publication；不阻止文档、fixture、research/shadow 和其他已通过数据集。</p>
+
+      <h3>技术硬门禁</h3>
+      <div class="table-wrap wide">
+        <table>
+          <thead><tr><th>门禁</th><th>准入条件</th><th>可验证证据</th><th>验证人</th><th>退出条件</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>G1 合约身份与生命周期</strong></td>
+              <td>场所、产品、真实合约、期权结构、上市/到期/交割和规格修订可唯一解析。</td>
+              <td>六期货场所 + SSE/SZSE 样本；代码冲突、调整期权、到期和日期更正 fixture。</td>
+              <td>数据架构负责人 + 衍生品研究负责人</td>
+              <td>production 行身份覆盖 100%，冲突 0；连续与真实合约架构测试隔离。</td>
+            </tr>
+            <tr>
+              <td><strong>G2 交易日与夜盘</strong></td>
+              <td>每品种 session calendar、节假日、夜盘归属和 next trade date 有权威规则。</td>
+              <td>跨午夜、长假前无夜盘、临时调整和新品种 fixture；交易所日历对账。</td>
+              <td>市场数据治理负责人</td>
+              <td>自然日误分区 0；所有行情 trade_date 可复算并命中有效 session。</td>
+            </tr>
+            <tr>
+              <td><strong>G3 单位、结算与质量</strong></td>
+              <td>报价、乘数、手数单双边、金额单位、close/settlement/delivery settlement 语义有证据。</td>
+              <td>每场所至少 3 产品、期货/期权、无成交/到期样本；官方日统计逐字段对账。</td>
+              <td>衍生品研究负责人 + 数据质量负责人</td>
+              <td>单位未知 0；价格/量额不变量和总分对账达标，异口径无静默混算。</td>
+            </tr>
+            <tr>
+              <td><strong>G4 连续序列 PIT</strong></td>
+              <td>roll 只用当时已知数据且 T+1 生效；每行引用真实合约；adjusted 版本不可变。</td>
+              <td>跨换月 golden fixture、knownAt 回放、未来 roll 到达前后版本对比和可复算 hash。</td>
+              <td>回测负责人 + 数据架构负责人</td>
+              <td>未来函数回归 0；同输入重算 hash 一致；免责声明与 lineage 完整。</td>
+            </tr>
+            <tr>
+              <td><strong>G5 来源与恢复</strong></td>
+              <td>来源在目标披露窗口达到冻结 SLO；schema drift、空集和网络错误可区分，raw 可重放。</td>
+              <td>至少 30 日 shadow、一次到期/换月窗口、成功率/延迟/漂移指标和四中断点演练。</td>
+              <td>data-sync 负责人 + SRE</td>
+              <td>实测阈值冻结并达标；未知漂移 0；replay canonical hash 一致。</td>
+            </tr>
+            <tr>
+              <td><strong>G6 来源权利与安全</strong></td>
+              <td>允许自动访问、必要 raw 留存、内部计算与 API 投影；凭据、egress 和频率受控。</td>
+              <td>合同/条款记录、数据保留矩阵、secret/egress/限流检查。</td>
+              <td>合规验证人 + 安全负责人</td>
+              <td>该来源有书面可验证边界，或替换为通过同门禁的 adapter；否则 research only。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>非技术风险与跟进</h3>
+      <div class="table-wrap wide">
+        <table>
+          <thead><tr><th>事项</th><th>分类</th><th>负责人</th><th>时间点</th><th>技术兜底</th></tr></thead>
+          <tbody>
+            <tr><td>交易所历史数据、Tushare 或商业行情预算</td><td>预算/采购</td><td>产品负责人</td><td>P0 shadow 前</td><td>只做公开日数据 research；不承诺全历史或开放 production。</td></tr>
+            <tr><td>衍生品公开权限和免责声明</td><td>产品/合规跟进</td><td>service-api 产品负责人</td><td>公开契约评审前</td><td>feature flag 关闭，默认仅内部研究用户。</td></tr>
+            <tr><td>品种优先级与历史回补起点</td><td>产品范围</td><td>量化研究负责人</td><td>P0 pilot 评审</td><td>先选 IF、CU、RB 等跨场所小样本，不影响 schema。</td></tr>
+            <tr><td>规格、交割和单位人工复核排期</td><td>人力/排期</td><td>衍生品研究负责人</td><td>G1/G3 验收</td><td>缩小 production 场所/品种，其余 quarantine。</td></tr>
+            <tr><td>连续序列采用何种方法</td><td>研究方法跟进</td><td>回测负责人</td><td>P2 立项前</td><td>P0/P1 只提供真实合约；消费者自行显式选月。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="delivery">
+      <h2>13. 实施路线、回滚、未决与验收</h2>
+      <p>本文不创建表、migration、配置、依赖、OpenAPI、任务或 adapter；以下全部是计划执行。</p>
+
+      <ol>
+        <li><strong>P0-1 证据：</strong>冻结产品/合约/bar fixture，覆盖六期货场所、SSE/SZSE、夜盘、到期和无成交。</li>
+        <li><strong>P0-2 Shadow：</strong>接入一个通过 G6 的官方/许可来源，跑 raw、schema、质量、replay 和 publication。</li>
+        <li><strong>P0-3 Serving：</strong>只开放真实合约目录与日行情；point-in-time、权限、限流和契约测试通过后灰度。</li>
+        <li><strong>P1：</strong>期权链、风险指标、排名、仓单、交割各自独立 capability 和 publication，不绑成同批上线。</li>
+        <li><strong>P2：</strong>独立评审连续合约方法学；先发布 unadjusted，再决定 back-adjusted 和加权指数。</li>
+      </ol>
+
+      <h3>迁移与回滚原则</h3>
+      <div class="grid">
+        <article class="card">
+          <h3>Expand</h3>
+          <p>新增独立 derivatives 表和读取路径；不修改 equity identity、行情表、OpenAPI 或历史 publication。</p>
+        </article>
+        <article class="card">
+          <h3>故障回滚</h3>
+          <p>关闭 capability，把 publication 指回上一验证 dataVersion；保留 raw、revision、质量和 roll lineage。</p>
+        </article>
+        <article class="card">
+          <h3>不可逆边界</h3>
+          <p>已有 production revision 后禁止删表降级；来源或方法失效时停止新发布并 roll forward。</p>
+        </article>
+      </div>
+
+      <h3>未决事项</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>问题</th><th>触发条件</th><th>当前安全默认</th></tr></thead>
+          <tbody>
+            <tr><td>生产主源是官方直源还是 Tushare/商业源？</td><td>G3/G5/G6 证据完成。</td><td>均为 research/shadow。</td></tr>
+            <tr><td>跨资产统一 identity 是否需要共享根？</td><td>统一 canonical 方案评审。</td><td>derivative 独立 ID，显式 underlying reference。</td></tr>
+            <tr><td>连续序列选持仓、成交量还是阈值切换？</td><td>P2 回测和稳定性比较。</td><td>不发布平台连续序列。</td></tr>
+            <tr><td>期权 Greeks 采用交易所值还是平台计算？</td><td>来源覆盖和定价模型评审。</td><td>只保留来源值；derived 另版本。</td></tr>
+            <tr><td>仓单、库存和可交割资源如何聚合？</td><td>地点、品级、单位和历史完整性验证。</td><td>按来源独立展示，不给“总库存”。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>验收清单</h3>
+      <ul class="checklist">
+        <li>状态为 Proposed，事实、建议、假设和未决分开。</li>
+        <li>P0/P1/P2 与接入结论明确。</li>
+        <li>六期货场所及 SSE/SZSE 边界明确。</li>
+        <li>合约、期权、连续序列身份不混用。</li>
+        <li>交易日、夜盘、可见和知识时间分离。</li>
+        <li>close、settlement、delivery settlement 分离。</li>
+        <li>仓单、库存、交割和持仓量不混算。</li>
+        <li>连续合约具备 T+1 因果换月与 lineage。</li>
+        <li>仅定义本域表草案，不重定义共享表。</li>
+        <li>service-api 候选全部为 POST。</li>
+        <li>每个技术门禁含准入、证据、验证人、退出。</li>
+        <li>非技术风险含负责人、时间和技术兜底。</li>
+        <li>引用可点击并标明访问日期。</li>
+        <li>实现测试明确为计划，未虚报执行。</li>
+      </ul>
+
+      <p class="small">
+        实现后计划执行：service-data-sync 容器内 format、lint、pyright、unit、architecture、integration；
+        service-api 容器内 format、lint、typecheck、unit、build；另执行合约、夜盘、换月、raw replay、
+        publication、权限、限流和 E2E 测试。本次纯文档调研未运行这些实现检查。
+      </p>
+    </section>
+
+    <section id="references">
+      <h2>14. 引用与关联资料</h2>
+      <p>外部资料访问日期均为 <strong>2026-07-28</strong>。</p>
+
+      <h3>交易所与官方规则</h3>
+      <ul>
+        <li><a href="https://www.cffex.com.cn/cn/rtj.html">中国金融期货交易所日统计</a> — 字段、成交量/持仓量按手单边、成交额万元及交割日结算说明。</li>
+        <li><a href="https://www.cffex.com.cn/jygz/20240206/43076.html">中国金融期货交易所交易规则</a> — 合约条款、信息发布和信息所有权。</li>
+        <li><a href="https://www.cffex.com.cn/lssjfw/">中国金融期货交易所历史数据服务</a> — Level-1/2 与分钟历史产品申购边界。</li>
+        <li><a href="https://www.cffex.com.cn/ssxz/20221214/43100.html">中金所股指期权合约交易细则</a> — 到期自动行权和现金交割。</li>
+        <li><a href="https://www.shfe.com.cn/">上海期货交易所数据入口</a> — 合约参数、日周数据、仓单、库存和交割入口。</li>
+        <li><a href="https://edu.shfe.com.cn/TradingAssistant/RulesIntroduction/518.html">上海期货交易所交易规则</a> — 规格、结算价与期转现定义。</li>
+        <li><a href="https://www.czce.com.cn/cn/rootfiles/2014/11/24/1415698818159779-1415698818161921.pdf">郑商所夜盘交易业务操作指引</a> — 夜盘交易日跨自然日定义。</li>
+        <li><a href="https://www.dce.com.cn/dalianshangpin/fgfz/6142914/6142926/6262877/%E5%A4%A7%E8%BF%9E%E5%95%86%E5%93%81%E4%BA%A4%E6%98%93%E6%89%80%E7%94%9F%E7%8C%AA%E6%9C%9F%E8%B4%A7%E4%B8%9A%E5%8A%A1%E7%BB%86%E5%88%99%EF%BC%88%E6%A0%B9%E6%8D%AE2025%E5%B9%B46%E6%9C%8824%E6%97%A5%E3%80%942025%E3%80%9559%E5%8F%B7%E6%96%87%E4%BB%B6%E4%BF%AE%E6%94%B9%EF%BC%89.pdf">大商所生猪期货业务细则</a> — 合约、结算和多种交割方式样例。</li>
+        <li><a href="https://www.gfex.com.cn/gfex/llbb/202402/e91439278d3a44b4aefe7ca126167e1a/files/%E5%B9%BF%E5%B7%9E%E6%9C%9F%E8%B4%A7%E4%BA%A4%E6%98%93%E6%89%80%E4%BA%A4%E6%98%93%E8%A7%84%E5%88%99%EF%BC%882022%E5%B9%B44%E6%9C%8829%E6%97%A5%E7%89%88%EF%BC%89.pdf">广州期货交易所交易规则</a> — 期货/期权信息和交割统计发布范围。</li>
+        <li><a href="https://www.sse.com.cn/lawandrules/sselawsrules2025/option/c/c_20250610_10781448.shtml">上海证券交易所股票期权试点交易规则</a> — 合约条款、结算和行权。</li>
+        <li><a href="https://www.sse.com.cn/assortment/options/disclo/info/">上交所股票期权挂牌信息</a> — 新挂、摘牌、调整和生命周期字段。</li>
+        <li><a href="https://www.sse.com.cn/assortment/options/risk/">上交所股票期权风险指标</a> — 收盘后 Greeks 的官方解释。</li>
+        <li><a href="https://www.szse.cn/option/quotation/contract/daycontract/index.html">深交所股票期权合约信息</a>、<a href="https://www.szse.cn/option/notice/notify/">行权交收通知</a>。</li>
+      </ul>
+
+      <h3>Provider 官方文档</h3>
+      <ul>
+        <li><a href="https://akshare.akfamily.xyz/data/futures/futures.html">AKShare 期货数据文档</a> — 合约、交易所日行情、连续合约、仓单和交割函数。</li>
+        <li><a href="https://akshare.akfamily.xyz/data/option/option.html">AKShare 期权数据文档</a> — 金融/商品期权合约、日行情和风险指标。</li>
+        <li><a href="https://github.com/akfamily/akshare/blob/main/docs/data/futures/futures.md">AKShare 官方仓库期货文档</a>、<a href="https://github.com/akfamily/akshare">代码许可与使用声明</a>。</li>
+        <li><a href="https://tushare.pro/document/2?doc_id=135">Tushare 期货合约</a>、<a href="https://tushare.pro/document/2?doc_id=138">期货日线</a>、<a href="https://tushare.pro/document/2?doc_id=189">主力映射</a>。</li>
+        <li><a href="https://tushare.pro/document/1?doc_id=108">Tushare 数据权限目录</a> — 期货/期权历史、积分和更新频率声明。</li>
+      </ul>
+
+      <h3>仓库基线与边界</h3>
+      <ul>
+        <li><a href="../0002-data-catalog-and-akshare-research/index.html">0002：同步数据总纲与 AKShare 调研计划</a></li>
+        <li><a href="../0003-akshare-b01-initial-research/index.html">0003：主数据与期权目录首轮调研</a></li>
+        <li><a href="../0004-akshare-b02-initial-research/index.html">0004：核心日行情与期权样本调研</a></li>
+        <li><a href="../0010-akshare-round2-verification/index.html">0010：AKShare 第二轮独立验证</a></li>
+        <li><a href="../0018-sqlalchemy-orm-persistence-models/index.html">0018：SQLAlchemy ORM 持久化基线</a></li>
+        <li><a href="../../decisions/0002-data-sync-ownership-and-access.md">ADR-0002：data-sync 数据归属与跨服务访问</a></li>
+        <li><a href="../../decisions/0004-market-data-provider-adapters.md">ADR-0004：多数据源适配与路由</a></li>
+        <li><a href="../../decisions/0013-equity-instrument-identity-lifecycle.md">ADR-0013：A 股身份边界（不可直接复用于衍生品）</a></li>
+        <li><a href="../../contracts/0009-data-sync-equity-instrument-internal.openapi.yaml">Contract 0009：现有内部 identity/point-in-time 模式参考</a></li>
+        <li><a href="../../contracts/0010-service-api-equity-instrument.openapi.yaml">Contract 0010：现有公开 POST、权限和游标模式参考</a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      0026 期货与期权独立资产域调研方案 · Proposed ·
+      变更摘要：形成官方来源、合约身份、日行情、夜盘交易日、仓单交割、连续序列、质量门、
+      领域表草案、POST API 消费需求和 P0/P1/P2 路线。
+    </div>
+  </footer>
+</body>
+</html>

@@ -15,7 +15,9 @@ from service_data_sync.infrastructure.object_storage.client import (
     ObjectStorageClient,
 )
 from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    FailureEvidenceDataSource,
     S3RawPayloadStore,
+    retain_failure_evidence,
 )
 from service_data_sync.infrastructure.persistence.money_flow_repository import (
     SqlAlchemyMoneyFlowRepository,
@@ -100,17 +102,22 @@ def register_money_flow_tasks(app: Celery, *, settings: Settings) -> None:
             mode=mode,
         )
         try:
-            result = asyncio.run(
-                MoneyFlowSyncService(
-                    source=providers[0],
-                    repository=SqlAlchemyMoneyFlowRepository(database),
-                    raw_payload_store=S3RawPayloadStore(object_storage),
-                ).sync(
-                    capability=capability,
-                    parameters=parameter_items,
-                    run_id=run.run_id,
-                    partition_key=run.partition_key,
-                )
+            raw_payload_store = S3RawPayloadStore(object_storage)
+            result = retain_failure_evidence(
+                raw_payload_store,
+                # 任务失败时才把来源响应写入 S3，成功时释放暂存字节。
+                lambda: asyncio.run(
+                    MoneyFlowSyncService(
+                        source=FailureEvidenceDataSource(providers[0], raw_payload_store),
+                        repository=SqlAlchemyMoneyFlowRepository(database),
+                        raw_payload_store=raw_payload_store,
+                    ).sync(
+                        capability=capability,
+                        parameters=parameter_items,
+                        run_id=run.run_id,
+                        partition_key=run.partition_key,
+                    )
+                ),
             )
             ledger.finish(run=run, result=result)
             return {

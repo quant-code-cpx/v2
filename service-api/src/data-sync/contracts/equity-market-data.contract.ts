@@ -18,6 +18,9 @@ const publicationFields = {
   symbol: symbolSchema,
   dataVersion: z.string().uuid(),
   publishedAt: dateTimeSchema,
+  availability: z.literal('AVAILABLE'),
+  observedAt: dateTimeSchema.nullable(),
+  reasonCode: z.string().max(80).nullable(),
   qualityStatus: z.literal('passed'),
   stale: z.literal(false),
 };
@@ -39,7 +42,7 @@ const equityBarSchema = z
   .strict();
 
 /** 校验一个已发布行情页及复权方法身份。 */
-export const equityBarPageSchema = z
+const availableEquityBarPageSchema = z
   .object({
     ...publicationFields,
     period: z.enum(EQUITY_BAR_PERIODS),
@@ -51,6 +54,43 @@ export const equityBarPageSchema = z
     nextCursor: z.string().max(1024).nullable(),
   })
   .strict();
+
+/** 校验来源空集或暂不可用时返回的成功空页，避免伪造业务事实。 */
+const emptyEquityBarPageSchema = z
+  .object({
+    exchange: exchangeSchema,
+    symbol: symbolSchema,
+    period: z.enum(EQUITY_BAR_PERIODS),
+    adjustmentMode: z.enum(EQUITY_ADJUSTMENT_MODES),
+    adjustAsOf: dateSchema.nullable(),
+    factorVersion: z.null(),
+    formulaVersion: z.null(),
+    dataVersion: z.null(),
+    publishedAt: z.null(),
+    availability: z.enum(['EMPTY', 'SOURCE_UNAVAILABLE']),
+    observedAt: dateTimeSchema,
+    reasonCode: z.string().min(1).max(80),
+    qualityStatus: z.null(),
+    stale: z.literal(false),
+    items: z.array(equityBarSchema).length(0),
+    nextCursor: z.null(),
+  })
+  .strict();
+
+/** 校验保留最后可用版本、同时报告来源暂不可用的安全降级页。 */
+const staleEquityBarPageSchema = availableEquityBarPageSchema.extend({
+  availability: z.literal('SOURCE_UNAVAILABLE'),
+  observedAt: dateTimeSchema,
+  reasonCode: z.string().min(1).max(80),
+  stale: z.literal(true),
+});
+
+/** 校验可发布事实页、成功空页或保留历史版本的安全降级页。 */
+export const equityBarPageSchema = z.union([
+  availableEquityBarPageSchema,
+  emptyEquityBarPageSchema,
+  staleEquityBarPageSchema,
+]);
 
 /** 校验稀疏累计后复权因子页。 */
 export const equityAdjustmentFactorPageSchema = z

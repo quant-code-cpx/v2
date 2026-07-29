@@ -17,7 +17,11 @@ from service_data_sync.bootstrap.container import build_container
 from service_data_sync.bootstrap.logging import configure_logging
 from service_data_sync.bootstrap.settings import load_settings
 from service_data_sync.domain.equity import EquityIdentifier
-from service_data_sync.infrastructure.object_storage.raw_payload_store import S3RawPayloadStore
+from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    FailureEvidenceDataSource,
+    S3RawPayloadStore,
+    retain_failure_evidence,
+)
 from service_data_sync.infrastructure.persistence.equity_market_data_repository import (
     SqlAlchemyEquityMarketDataRepository,
 )
@@ -56,28 +60,40 @@ def main(argv: Sequence[str] | None = None) -> int:
         repository = SqlAlchemyEquityMarketDataRepository(container.database)
         raw_payload_store = S3RawPayloadStore(container.object_storage)
         if arguments.capability == "equity.adjustment_factor":
-            result = asyncio.run(
-                EquityAdjustmentFactorSyncService(
-                    source=sources[0],
-                    repository=repository,
-                    raw_payload_store=raw_payload_store,
-                ).sync(identifier=identifier, start=start, end=end)
+            result = retain_failure_evidence(
+                raw_payload_store,
+                # 同一执行边界仅在同步异常时将暂存来源字节固化为排障证据。
+                lambda: asyncio.run(
+                    EquityAdjustmentFactorSyncService(
+                        source=FailureEvidenceDataSource(sources[0], raw_payload_store),
+                        repository=repository,
+                        raw_payload_store=raw_payload_store,
+                    ).sync(identifier=identifier, start=start, end=end)
+                ),
             )
         elif arguments.capability == "equity.corporate_action":
-            result = asyncio.run(
-                EquityCorporateActionSyncService(
-                    source=sources[0],
-                    repository=repository,
-                    raw_payload_store=raw_payload_store,
-                ).sync(identifier=identifier, start=start, end=end)
+            result = retain_failure_evidence(
+                raw_payload_store,
+                # 同一执行边界仅在同步异常时将暂存来源字节固化为排障证据。
+                lambda: asyncio.run(
+                    EquityCorporateActionSyncService(
+                        source=FailureEvidenceDataSource(sources[0], raw_payload_store),
+                        repository=repository,
+                        raw_payload_store=raw_payload_store,
+                    ).sync(identifier=identifier, start=start, end=end)
+                ),
             )
         else:
-            result = asyncio.run(
-                EquityCompanyProfileSyncService(
-                    source=sources[0],
-                    repository=repository,
-                    raw_payload_store=raw_payload_store,
-                ).sync(identifier=identifier)
+            result = retain_failure_evidence(
+                raw_payload_store,
+                # 同一执行边界仅在同步异常时将暂存来源字节固化为排障证据。
+                lambda: asyncio.run(
+                    EquityCompanyProfileSyncService(
+                        source=FailureEvidenceDataSource(sources[0], raw_payload_store),
+                        repository=repository,
+                        raw_payload_store=raw_payload_store,
+                    ).sync(identifier=identifier)
+                ),
             )
     finally:
         container.close()

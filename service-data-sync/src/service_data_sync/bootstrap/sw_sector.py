@@ -13,7 +13,10 @@ from service_data_sync.application.sector.sw_snapshot_sync import SwSnapshotSync
 from service_data_sync.bootstrap.settings import Settings
 from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.object_storage.client import ObjectStorageClient
-from service_data_sync.infrastructure.object_storage.raw_payload_store import S3RawPayloadStore
+from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    FailureEvidenceDataSource,
+    S3RawPayloadStore,
+)
 from service_data_sync.infrastructure.persistence.sw_sector_repository import (
     SqlAlchemySwSectorRepository,
 )
@@ -41,12 +44,18 @@ def build_sw_sync_service(
     database: DatabaseClient,
     object_storage: ObjectStorageClient,
     replay_only: bool = False,
+    raw_payload_store: S3RawPayloadStore | None = None,
 ) -> SwSnapshotSyncService:
-    """组合中立来源、canonical 仓储与私有 raw evidence 存储。"""
+    """组合中立来源、canonical 仓储与单次失败证据暂存区。"""
+    store = raw_payload_store or S3RawPayloadStore(object_storage)
     return SwSnapshotSyncService(
-        source=_ReplayOnlySource() if replay_only else build_sw_source(settings),
+        source=(
+            _ReplayOnlySource()
+            if replay_only
+            else FailureEvidenceDataSource(build_sw_source(settings), store)
+        ),
         repository=SqlAlchemySwSectorRepository(database),
-        raw_payload_store=S3RawPayloadStore(object_storage),
+        raw_payload_store=store,
     )
 
 

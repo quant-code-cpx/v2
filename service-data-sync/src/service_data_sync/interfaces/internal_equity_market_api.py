@@ -18,6 +18,7 @@ from fastapi import Depends, FastAPI, Header, Path, Query, Request
 from fastapi.responses import JSONResponse, Response
 
 from service_data_sync.application.ports.market_data import (
+    EquityAvailabilityObservation,
     EquityDatasetPublication,
     EquityIdentityReadConflictError,
     EquityMarketDataRepository,
@@ -73,19 +74,67 @@ def register_equity_market_routes(
         anchor = adjust_as_of or end
         identity_start = min(start, anchor) if adjustment_mode != "none" else start
         identity_end = max(end, anchor) if adjustment_mode != "none" else end
-        identifier, instrument = _instrument_or_problem(
-            repository,
-            exchange,
-            symbol,
-            fact_start=identity_start,
-            fact_end=identity_end,
+        identifier = _identifier_or_problem(exchange, symbol)
+        try:
+            instrument = repository.get_instrument_by_identifier(
+                identifier,
+                fact_start=identity_start,
+                fact_end=identity_end,
+            )
+        except EquityIdentityReadConflictError as error:
+            raise InternalProblem(
+                status=409,
+                code="identity-boundary-conflict",
+                detail="Equity identifier spans multiple canonical securities",
+            ) from error
+        availability = repository.get_daily_bar_availability(
+            identifier=identifier,
+            start=start,
+            end=end,
         )
-        bar_publication = _publication_or_problem(
-            repository,
+        if instrument is None:
+            if availability is not None:
+                return _empty_bar_response(
+                    request=request,
+                    identifier=identifier,
+                    period=selected_period,
+                    adjustment_mode=adjustment_mode,
+                    anchor=anchor,
+                    observation=availability,
+                )
+            raise InternalProblem(
+                status=404,
+                code="not-found",
+                detail="Equity instrument is not found",
+            )
+        if availability is not None and availability.availability == "empty":
+            return _empty_bar_response(
+                request=request,
+                identifier=identifier,
+                period=selected_period,
+                adjustment_mode=adjustment_mode,
+                anchor=anchor,
+                observation=availability,
+            )
+        bar_publication = repository.get_current_publication(
             dataset=selected_period.capability,
             instrument=instrument,
-            detail="Equity bars are not published",
         )
+        if bar_publication is None:
+            if availability is not None:
+                return _empty_bar_response(
+                    request=request,
+                    identifier=identifier,
+                    period=selected_period,
+                    adjustment_mode=adjustment_mode,
+                    anchor=anchor,
+                    observation=availability,
+                )
+            raise InternalProblem(
+                status=503,
+                code="dependency-unavailable",
+                detail="Equity bars are not published",
+            )
         bars = tuple(
             repository.list_bars(
                 security_id=instrument.security_id,
@@ -149,8 +198,23 @@ def register_equity_market_routes(
             "formulaVersion": None if adjustment_mode == "none" else _FORMULA_VERSION,
             "dataVersion": str(bar_publication.data_version),
             "publishedAt": _timestamp(bar_publication),
+            "availability": (
+                "SOURCE_UNAVAILABLE"
+                if availability is not None and availability.availability == "source_unavailable"
+                else "AVAILABLE"
+            ),
+            "observedAt": (
+                None
+                if availability is None or availability.availability != "source_unavailable"
+                else availability.observed_at.isoformat().replace("+00:00", "Z")
+            ),
+            "reasonCode": (
+                None
+                if availability is None or availability.availability != "source_unavailable"
+                else availability.reason_code
+            ),
             "qualityStatus": "passed",
-            "stale": False,
+            "stale": availability is not None and availability.availability == "source_unavailable",
             "items": [
                 _bar_resource(
                     row,
@@ -430,10 +494,7 @@ def _instrument_or_problem(
     fact_end: date | None,
 ) -> tuple[EquityIdentifier, StoredEquityInstrument]:
     """按事实窗口和当前知识解析唯一确认身份，并拒绝代码复用歧义。"""
-    try:
-        identifier = EquityIdentifier.parse(f"{exchange}.{symbol}")
-    except ValueError as error:
-        raise _validation_problem("equity identifier is invalid") from error
+    identifier = _identifier_or_problem(exchange, symbol)
     try:
         instrument = repository.get_instrument_by_identifier(
             identifier,
@@ -453,6 +514,14 @@ def _instrument_or_problem(
             detail="Equity instrument is not found",
         )
     return identifier, instrument
+
+
+def _identifier_or_problem(exchange: str, symbol: str) -> EquityIdentifier:
+    """解析交易所限定代码，避免空观测路径绕开身份输入校验。"""
+    try:
+        return EquityIdentifier.parse(f"{exchange}.{symbol}")
+    except ValueError as error:
+        raise _validation_problem("equity identifier is invalid") from error
 
 
 def _page[PageRow](
@@ -607,6 +676,43 @@ def _bar_resource(
     }
 
 
+def _empty_bar_response(
+    *,
+    request: Request,
+    identifier: EquityIdentifier,
+    period: EquityBarPeriod,
+    adjustment_mode: str,
+    anchor: date,
+    observation: EquityAvailabilityObservation,
+) -> Response:
+    """返回不含伪造事实和 publication 版本的成功空页。"""
+    body = {
+        "exchange": identifier.exchange.value,
+        "symbol": identifier.symbol,
+        "period": period.value,
+        "adjustmentMode": adjustment_mode,
+        "adjustAsOf": None if adjustment_mode == "none" else anchor.isoformat(),
+        "factorVersion": None,
+        "formulaVersion": None,
+        "dataVersion": None,
+        "publishedAt": None,
+        "availability": observation.availability.upper(),
+        "observedAt": observation.observed_at.isoformat().replace("+00:00", "Z"),
+        "reasonCode": observation.reason_code,
+        "qualityStatus": None,
+        "stale": False,
+        "items": [],
+        "nextCursor": None,
+    }
+    return JSONResponse(
+        content=body,
+        headers={
+            "Cache-Control": "no-store",
+            "X-Request-Id": _request_id(request),
+        },
+    )
+
+
 def _factor_at(
     factors: Sequence[StoredAdjustmentFactor],
     target: date,
@@ -646,21 +752,23 @@ def _conditional_response(
     body: Mapping[str, Any],
 ) -> Response:
     """命中 ETag 时返回 304，否则返回带数据版本的私有可复验 JSON。"""
-    supplied_request_id = request.headers.get("X-Request-Id")
-    request_id = (
-        supplied_request_id
-        if supplied_request_id is not None and 1 <= len(supplied_request_id) <= 128
-        else str(uuid4())
-    )
     headers = {
         "ETag": etag,
         "Cache-Control": _PRIVATE_REVALIDATE,
-        "X-Request-Id": request_id,
+        "X-Request-Id": _request_id(request),
         "X-Data-Version": str(publication.data_version),
     }
     if if_none_match == etag:
         return Response(status_code=304, headers=headers)
     return JSONResponse(content=dict(body), headers=headers)
+
+
+def _request_id(request: Request) -> str:
+    """复用调用方的有界关联标识，缺失或畸形时生成新的 UUID。"""
+    supplied_request_id = request.headers.get("X-Request-Id")
+    if supplied_request_id is not None and 1 <= len(supplied_request_id) <= 128:
+        return supplied_request_id
+    return str(uuid4())
 
 
 def _etag(

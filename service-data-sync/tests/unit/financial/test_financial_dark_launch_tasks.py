@@ -102,6 +102,14 @@ class FakeRawStore:
         """保存对象存储资源以证明组合根传参正确。"""
         self.object_storage = object_storage
 
+    def persist_failure(self, error: Exception) -> None:
+        """不写入测试对象存储，仅验证原始同步异常仍会向上传播。"""
+        del error
+        return None
+
+    def discard(self) -> None:
+        """模拟一次同步结束后释放临时来源字节。"""
+
 
 class FakeFinancialSyncService:
     """返回确定性三能力摘要，或按测试开关模拟同步失败。"""

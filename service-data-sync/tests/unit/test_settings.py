@@ -92,6 +92,38 @@ def test_financial_dark_launch_loads_explicit_policy_and_budgets(
     assert settings.financial_request_timeout_seconds == 1
 
 
+def test_index_dark_launch_requires_akshare_and_exact_source_policy(
+    configured_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """指数影子探测必须显式依赖 AKShare 和已审核的中证来源策略。"""
+    monkeypatch.setenv("DATA_SYNC_INDEX_ENABLED", "true")
+
+    with pytest.raises(ConfigurationError, match="invalid service-data-sync configuration"):
+        load_settings()
+
+    monkeypatch.setenv("DATA_SYNC_AKSHARE_ENABLED", "true")
+    monkeypatch.setenv("DATA_SYNC_INDEX_SOURCE_POLICY", "another-source")
+
+    with pytest.raises(ConfigurationError, match="invalid service-data-sync configuration"):
+        load_settings()
+
+
+def test_index_dark_launch_loads_only_explicit_approved_policy(
+    configured_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """固定中证与国证 adapter 策略通过时，指数能力仍由独立开关控制。"""
+    monkeypatch.setenv("DATA_SYNC_AKSHARE_ENABLED", "true")
+    monkeypatch.setenv("DATA_SYNC_INDEX_ENABLED", "true")
+    monkeypatch.setenv("DATA_SYNC_INDEX_SOURCE_POLICY", "AKSHARE-CSINDEX-CNINDEX")
+
+    settings = load_settings()
+
+    assert settings.index_enabled is True
+    assert settings.index_source_policy == "akshare-csindex-cnindex"
+
+
 def test_settings_hides_validation_details(monkeypatch: pytest.MonkeyPatch) -> None:
     """将原始 Pydantic 错误替换为安全的配置领域错误。"""
     monkeypatch.delenv("DATA_SYNC_DATABASE_URL", raising=False)

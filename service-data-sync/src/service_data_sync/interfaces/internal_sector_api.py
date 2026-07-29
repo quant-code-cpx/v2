@@ -18,6 +18,9 @@ from fastapi.responses import JSONResponse, Response
 from service_data_sync.application.ports.equity_master_read import EquityMasterReadRepository
 from service_data_sync.application.ports.financial_read import FinancialReadRepository
 from service_data_sync.application.ports.market_data import EquityMarketDataRepository
+from service_data_sync.application.ports.market_data_access import (
+    MarketDataAccessRepository,
+)
 from service_data_sync.application.ports.money_flow import MoneyFlowReadRepository
 from service_data_sync.application.ports.sector_eod import SectorEodRepository
 from service_data_sync.application.ports.sector_market_data import (
@@ -39,6 +42,9 @@ from service_data_sync.infrastructure.persistence.equity_master_read_repository 
 from service_data_sync.infrastructure.persistence.financial_read_repository import (
     SqlAlchemyFinancialReadRepository,
 )
+from service_data_sync.infrastructure.persistence.market_data_access_repository import (
+    CatalogMarketDataAccessRepository,
+)
 from service_data_sync.infrastructure.persistence.money_flow_read_repository import (
     SqlAlchemyMoneyFlowReadRepository,
 )
@@ -50,6 +56,9 @@ from service_data_sync.infrastructure.persistence.sector_market_data_repository 
 )
 from service_data_sync.infrastructure.persistence.sector_membership_repository import (
     SqlAlchemySectorMembershipRepository,
+)
+from service_data_sync.infrastructure.persistence.sqlalchemy_market_data_access_repository import (
+    SqlAlchemyMarketDataAccessRepository,
 )
 from service_data_sync.infrastructure.persistence.sw_sector_repository import (
     SqlAlchemySwSectorRepository,
@@ -81,6 +90,7 @@ def create_app(
     financial_repository: FinancialReadRepository | None = None,
     sw_repository: SwSectorRepository | None = None,
     money_flow_repository: MoneyFlowReadRepository | None = None,
+    market_data_repository: MarketDataAccessRepository | None = None,
 ) -> FastAPI:
     """构造共享只读内部应用；运行时独占 `canonical` 数据读取与服务凭据校验。"""
     resolved_settings = settings or load_settings()
@@ -106,6 +116,13 @@ def create_app(
                 cursor_secret=resolved_settings.internal_api_bearer_token.get_secret_value().encode(),
             )
     credential = resolved_settings.internal_api_bearer_token.get_secret_value()
+    # 正常运行使用 release-aware typed reader；注入假 repository 的测试仍可无数据库运行。
+    # 目录可发现但没有合格发布时必须 503，禁止回退到 raw 或研究态表。
+    resolved_market_data_repository = market_data_repository or (
+        SqlAlchemyMarketDataAccessRepository(container.database)
+        if container is not None
+        else CatalogMarketDataAccessRepository()
+    )
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.exception_handler(InternalProblem)
@@ -225,6 +242,16 @@ def create_app(
         validation_problem=money_flow_validation_problem,
         conflict_problem=money_flow_conflict_problem,
         repository=money_flow_repository,
+    )
+
+    # 新市场数据合同与旧 GET 路由并行；尚无 typed reader 的数据集保持 fail-closed。
+    from service_data_sync.interfaces.internal_market_data_api import register_market_data_routes
+
+    register_market_data_routes(
+        app,
+        repository=resolved_market_data_repository,
+        require_service_bearer=require_service_bearer,
+        cursor_secret=credential.encode(),
     )
 
     # 财务路由只在精确 `publication` 已存在时读取，

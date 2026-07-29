@@ -58,8 +58,10 @@ def test_sw_cli_replays_exact_date_and_closes_container(monkeypatch, capsys) -> 
         database: object,
         object_storage: object,
         replay_only: bool,
+        raw_payload_store: object,
     ) -> FakeSwSyncService:
         """捕获 CLI 组合参数并返回无外部 I/O 的 replay 服务。"""
+        del raw_payload_store
         captured.update(
             {
                 "database": database,
@@ -70,6 +72,9 @@ def test_sw_cli_replays_exact_date_and_closes_container(monkeypatch, capsys) -> 
         return FakeSwSyncService()
 
     monkeypatch.setattr(sw_sector, "build_sw_sync_service", build_service)
+    monkeypatch.setattr(sw_sector, "S3RawPayloadStore", lambda _storage: object())
+    # 入口组合测试不触及对象存储；留证语义由原始载荷存储专用测试覆盖。
+    monkeypatch.setattr(sw_sector, "retain_failure_evidence", lambda _store, operation: operation())
 
     assert sw_sector.main(["--snapshot-date", _DATE.isoformat(), "--replay-raw"]) == 0
 

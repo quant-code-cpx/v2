@@ -59,7 +59,7 @@ class SectorCatalogSyncService:
         raw_payload = batch.raw_payload if batch.raw_payload is not None else batch.payload
         raw_content_type = batch.raw_content_type or batch.content_type
         raw_digest = hashlib.sha256(raw_payload).hexdigest()
-        # 目录名称会决定公开可见性，canonical 变更必须能回链至原始快照。
+        # 目录名称会决定公开可见性，canonical 变更保留来源摘要而非成功原始快照。
         raw_uri = self._raw_payload_store.put(
             RawPayload(
                 object_key=(

@@ -7,6 +7,11 @@ from service_data_sync.application.ports.data_source import (
     ProviderErrorCode,
     SourceRequest,
 )
+from service_data_sync.application.ports.dataset_availability import (
+    DatasetAvailability,
+    DatasetAvailabilityRepository,
+)
+from service_data_sync.application.ports.index_shadow import IndexShadowRepository
 from service_data_sync.application.ports.market_data import (
     EquityMarketDataRepository,
     RawPayloadStore,
@@ -16,7 +21,10 @@ from service_data_sync.application.ports.sector_membership import SectorMembersh
 
 __all__ = [
     "DataSourcePort",
+    "DatasetAvailability",
+    "DatasetAvailabilityRepository",
     "EquityMarketDataRepository",
+    "IndexShadowRepository",
     "ProviderBatch",
     "ProviderError",
     "ProviderErrorCode",

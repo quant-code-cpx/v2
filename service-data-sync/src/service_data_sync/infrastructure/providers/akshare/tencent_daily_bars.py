@@ -60,10 +60,6 @@ class AkshareTencentDailyBarsAdapter:
             raise ProviderError(
                 ProviderErrorCode.UNAVAILABLE, "provider request failed", retryable=True
             ) from error
-        if frame.empty:
-            raise ProviderError(
-                ProviderErrorCode.SCHEMA, "provider returned no daily bars", retryable=False
-            )
         try:
             raw_records = frame.to_dict(orient="records")
             bars = [_normalize_record(record) for record in raw_records]

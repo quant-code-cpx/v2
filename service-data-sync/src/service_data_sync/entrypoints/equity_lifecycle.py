@@ -13,11 +13,17 @@ from service_data_sync.application.equity.lifecycle_sync import (
     EquityLifecycleSyncResult,
     EquityLifecycleSyncService,
 )
+from service_data_sync.application.ports.equity_master import PublishedCnAAggregate
 from service_data_sync.bootstrap.container import build_container
 from service_data_sync.bootstrap.logging import configure_logging
 from service_data_sync.bootstrap.settings import load_settings
 from service_data_sync.domain.equity import Exchange
-from service_data_sync.infrastructure.object_storage.raw_payload_store import S3RawPayloadStore
+from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    FailureEvidenceDataSource,
+    S3RawPayloadStore,
+    retain_failure_evidence,
+)
 from service_data_sync.infrastructure.persistence.equity_lifecycle_repository import (
     SqlAlchemyEquityLifecycleRepository,
 )
@@ -45,23 +51,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         sources = container.source_registry.for_capability(_CAPABILITY)
         if not arguments.replay_last and len(sources) != 1:
             raise SystemExit("exactly one equity lifecycle provider must be enabled")
+        raw_payload_store = S3RawPayloadStore(container.object_storage)
         service = EquityLifecycleSyncService(
-            source=None if arguments.replay_last else sources[0],
+            source=(
+                None
+                if arguments.replay_last
+                else FailureEvidenceDataSource(sources[0], raw_payload_store)
+            ),
             repository=SqlAlchemyEquityLifecycleRepository(container.database),
-            raw_payload_store=S3RawPayloadStore(container.object_storage),
+            raw_payload_store=raw_payload_store,
         )
-        results = asyncio.run(
-            _sync_exchanges(
+        results, aggregate = retain_failure_evidence(
+            raw_payload_store,
+            # 同一执行边界仅在同步异常时将暂存来源字节固化为排障证据。
+            lambda: _sync_and_publish(
                 service,
+                database=container.database,
                 exchanges=exchanges,
                 target_date=target_date,
                 replay_last=arguments.replay_last,
-            )
-        )
-        aggregate = (
-            SqlAlchemyEquityMasterRepository(container.database).publish_cn_a_aggregate()
-            if arguments.all_exchanges
-            else None
+                publish_aggregate=arguments.all_exchanges,
+            ),
         )
     finally:
         container.close()
@@ -105,6 +115,32 @@ async def _sync_exchanges(
         )
         results.append(result)
     return tuple(results)
+
+
+def _sync_and_publish(
+    service: EquityLifecycleSyncService,
+    *,
+    database: DatabaseClient,
+    exchanges: tuple[Exchange, ...],
+    target_date: date,
+    replay_last: bool,
+    publish_aggregate: bool,
+) -> tuple[tuple[EquityLifecycleSyncResult, ...], PublishedCnAAggregate | None]:
+    """在同一失败证据边界内同步生命周期并可选发布全市场聚合。"""
+    results = asyncio.run(
+        _sync_exchanges(
+            service,
+            exchanges=exchanges,
+            target_date=target_date,
+            replay_last=replay_last,
+        )
+    )
+    aggregate = (
+        SqlAlchemyEquityMasterRepository(database).publish_cn_a_aggregate()
+        if publish_aggregate
+        else None
+    )
+    return results, aggregate
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:

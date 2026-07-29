@@ -15,6 +15,10 @@ from service_data_sync.bootstrap.settings import Settings
 from service_data_sync.bootstrap.sw_sector import build_sw_source, build_sw_sync_service
 from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.object_storage.client import ObjectStorageClient
+from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    S3RawPayloadStore,
+    retain_failure_evidence,
+)
 
 _PROBE_TASK = "service_data_sync.sw_sector.probe"
 _SYNC_TASK = "service_data_sync.sw_sector.sync_current"
@@ -61,12 +65,19 @@ def register_sw_sector_tasks(app: Celery, *, settings: Settings) -> None:
         database = DatabaseClient.from_settings(settings)
         object_storage = ObjectStorageClient.from_settings(settings)
         try:
-            result = build_sw_sync_service(
+            raw_payload_store = S3RawPayloadStore(object_storage)
+            service = build_sw_sync_service(
                 settings,
                 database=database,
                 object_storage=object_storage,
                 replay_only=True,
-            ).replay(snapshot_date=parsed_date)
+                raw_payload_store=raw_payload_store,
+            )
+            result = retain_failure_evidence(
+                raw_payload_store,
+                # replay 不会新增来源字节；包装器统一释放单次执行资源。
+                lambda: service.replay(snapshot_date=parsed_date),
+            )
             return _task_result(
                 result.publications.taxonomy.data_version,
                 result.publications.valuation.data_version,
@@ -94,12 +105,17 @@ def _run_sync(settings: Settings, *, snapshot_date: date) -> dict[str, object]:
     database = DatabaseClient.from_settings(settings)
     object_storage = ObjectStorageClient.from_settings(settings)
     try:
-        result = asyncio.run(
-            build_sw_sync_service(
-                settings,
-                database=database,
-                object_storage=object_storage,
-            ).sync(snapshot_date=snapshot_date)
+        raw_payload_store = S3RawPayloadStore(object_storage)
+        service = build_sw_sync_service(
+            settings,
+            database=database,
+            object_storage=object_storage,
+            raw_payload_store=raw_payload_store,
+        )
+        result = retain_failure_evidence(
+            raw_payload_store,
+            # 成功释放来源字节；同步或解码失败时才归档本次申万响应。
+            lambda: asyncio.run(service.sync(snapshot_date=snapshot_date)),
         )
         return _task_result(
             result.publications.taxonomy.data_version,

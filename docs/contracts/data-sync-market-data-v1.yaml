@@ -1,0 +1,2393 @@
+openapi: 3.1.1
+info:
+  title: service-data-sync market data access internal API
+  version: 1.0.0
+  x-contract-status: Proposed
+  description: |
+    Proposed machine-readable contract for service-api to discover and query the
+    canonical market-data publications owned by service-data-sync.
+
+    This is a design artifact, not an implemented OpenAPI surface. Every proposed
+    endpoint uses POST. service-api must not read the service-data-sync database,
+    object storage, or a Provider directly.
+  contact:
+    name: quant-v2 service-data-sync / service-api
+x-http-method-policy: post-only
+x-owner: service-data-sync
+x-consumer:
+  - service-api
+x-related-proposals:
+  - ../service-data-sync/0027-canonical-data-model/index.html
+  - ../service-data-sync/0028-data-access-contract/index.html
+  - ../service-api/0005-market-data-access-impact/index.html
+  - ../decisions/0020-data-sync-market-data-access.md
+  - ../decisions/0022-empty-observation-and-consumer-contract.md
+x-compatibility:
+  additiveOptionalFields: consumer-first rollout required
+  breakingChanges: new URI major version required
+  minimumDeprecationDays: 90
+servers:
+  - url: http://service-data-sync:8000
+    description: Logical internal service address; runtime configuration remains environment-owned.
+security:
+  - serviceBearer: []
+tags:
+  - name: Market data catalog
+    description: Discover queryable datasets, fields, filters, coverage, and publication state.
+  - name: Market data query
+    description: Read immutable or point-in-time canonical market-data publications.
+paths:
+  /internal/v1/market-data/datasets/search:
+    post:
+      tags:
+        - Market data catalog
+      operationId: searchInternalMarketDataDatasets
+      summary: Search the published canonical dataset catalog
+      description: |
+        Returns only datasets that the calling service identity may discover. A
+        dataset descriptor is the authoritative whitelist for selectable fields,
+        filters, sort keys, time dimensions, sources, and point-in-time modes.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatasetSearchRequest'
+            examples:
+              p0AvailableDatasets:
+                summary: Discover available P0 datasets
+                value:
+                  priorities:
+                    - P0
+                  availability:
+                    - AVAILABLE
+                  page:
+                    limit: 50
+      responses:
+        '200':
+          description: Authorized dataset descriptors
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetSearchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+        '504':
+          $ref: '#/components/responses/Timeout'
+
+  /internal/v1/market-data/query:
+    post:
+      tags:
+        - Market data query
+      operationId: queryInternalMarketData
+      summary: Query a canonical dataset with a stable publication boundary
+      x-max-request-body-bytes: 65536
+      x-max-response-body-bytes: 2097152
+      x-initial-query-limits:
+        datasetsPerRequest: 1
+        identifiers: 100
+        fields: 64
+        sortKeys: 3
+        cursorBytes: 2048
+        defaultPageSize: 100
+        maximumPageSize: 500
+        defaultDailyRangeDays: 366
+      description: |
+        Selects exactly one dataset publication and never mixes dataVersion,
+        source methodology, or visibility semantics silently. The opaque cursor
+        binds the normalized request, caller, schema version, ordering, and
+        dataVersion. A cursor must not be reused with a changed request.
+
+        Decimal facts are returned as strings and interpreted using the field
+        descriptor in the dataset catalog. Quarantined records are never returned.
+        The operation is side-effect-free and retry-safe; idempotency follows from
+        the normalized body, the explicit or selected dataVersion, and the stable
+        cursor. It does not create a server-side idempotency record.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarketDataQueryRequest'
+            examples:
+              indexConstituentsPublicPit:
+                summary: Reconstruct public-visible index constituents
+                value:
+                  dataset:
+                    code: index.constituent.membership.reported
+                    schemaVersion: 1
+                  businessScope: INDEX
+                  identity:
+                    identifiers:
+                      - scheme: administrator_code
+                        value: '000300'
+                        authority: CSI
+                  time:
+                    dimension: EFFECTIVE_AT
+                    from: '2025-06-01T00:00:00+08:00'
+                    to: '2025-06-30T23:59:59+08:00'
+                  visibility:
+                    mode: PUBLIC_PIT
+                    asOf: '2025-06-30T07:00:00Z'
+                    knownAt: '2025-06-30T07:00:00Z'
+                  selection:
+                    methodology:
+                      code: official-effective-membership
+                      version: '1'
+                    qualityStatuses:
+                      - PASSED
+                  fields:
+                    - constituentEntityRef
+                    - effectiveFrom
+                    - effectiveTo
+                  sort:
+                    - field: constituentEntityRef
+                      direction: ASC
+                  page:
+                    limit: 200
+              etfNavLatest:
+                summary: Query current ETF NAV publication
+                value:
+                  dataset:
+                    code: fund.etf.nav.1d.reported
+                    schemaVersion: 1
+                  businessScope: FUND
+                  identity:
+                    identifiers:
+                      - scheme: exchange_symbol
+                        venue: XSHG
+                        value: '510300'
+                  time:
+                    dimension: TRADE_DATE
+                    from: '2026-07-01'
+                    to: '2026-07-28'
+                  visibility:
+                    mode: CURRENT
+                  selection:
+                    methodology:
+                      code: official-unit-nav
+                      version: '1'
+                    qualityStatuses:
+                      - PASSED
+                      - WARNED
+                  fields:
+                    - tradeDate
+                    - unitNav
+                    - accumulatedNav
+                  sort:
+                    - field: tradeDate
+                      direction: DESC
+                  page:
+                    limit: 100
+      responses:
+        '200':
+          description: A page from one selected canonical publication
+          headers:
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketDataQueryResponse'
+              examples:
+                indexConstituentPage:
+                  summary: Stable point-in-time constituent page
+                  value:
+                    meta:
+                      requestId: 0198f0f1-23d0-7d5b-a8bb-6c6d9b8a7001
+                      contractVersion: 1.0.0
+                      dataset:
+                        code: index.constituent.membership.reported
+                        schemaVersion: 1
+                      release:
+                        dataVersion: 0198f104-6a25-7d6e-b46a-4c7cfbd5d101
+                        publishedAt: '2025-06-16T10:30:00Z'
+                        knowledgeCutoff: '2025-06-30T07:00:00Z'
+                        publicUsableAt: '2025-06-13T10:30:00Z'
+                        effectiveFrom: '2025-06-15T16:00:00Z'
+                        effectiveTo: null
+                        methodology:
+                          code: official-effective-membership
+                          version: '1'
+                          kind: REPORTED
+                        sources:
+                          - sourceRef: src_csi_official_constituent
+                            publisher: 中证指数有限公司
+                            sourceDataset: constituent-adjustment
+                            authoritative: true
+                            redistribution: ALLOWED
+                            coverageNote: null
+                        quality:
+                          status: PASSED
+                          issueCodes: []
+                        completeness: COMPLETE
+                      visibility:
+                        mode: PUBLIC_PIT
+                        asOf: '2025-06-30T07:00:00Z'
+                        knownAt: '2025-06-30T07:00:00Z'
+                      page:
+                        limit: 200
+                        hasMore: false
+                      coverage:
+                        from: '2025-06-01T00:00:00+08:00'
+                        to: '2025-06-30T23:59:59+08:00'
+                        pitCoverage: COMPLETE
+                        gaps: []
+                      warnings: []
+                      disclaimers:
+                        - 权重与正式生效成分属于不同数据集，不得据此推导目标权重。
+                    records:
+                      - recordRef: rec_01JZ8R7DT8M66CWD4HPZP3N9FQ
+                        recordType: INDEX
+                        entity:
+                          entityRef: 0198f0e6-34ef-74cb-83cd-33cc70459201
+                          entityType: INDEX
+                          identifiers:
+                            - scheme: administrator_code
+                              value: '000300'
+                              authority: CSI
+                        time:
+                          effectiveAt: '2025-06-16T00:00:00+08:00'
+                        publicUsableAt: '2025-06-13T10:30:00Z'
+                        availabilityBasis: EXACT
+                        sourcePublishedAt: '2025-06-13T10:00:00Z'
+                        observedAt: '2025-06-13T10:06:12Z'
+                        dataVersion: 0198f104-6a25-7d6e-b46a-4c7cfbd5d101
+                        sourceRef: src_csi_official_constituent
+                        methodologyVersion: '1'
+                        qualityStatus: PASSED
+                        revision:
+                          revisionNumber: 1
+                          currentInPublication: true
+                        values:
+                          constituentEntityRef: 0198f0e9-b580-7977-97ad-70f6c0860981
+                          effectiveFrom: '2025-06-16T00:00:00+08:00'
+                          effectiveTo: null
+        '204':
+          description: selection.knownDataVersion already equals the selected publication; response body is intentionally empty.
+          headers:
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+        '504':
+          $ref: '#/components/responses/Timeout'
+
+components:
+  securitySchemes:
+    serviceBearer:
+      type: http
+      scheme: bearer
+      description: |
+        Dedicated service identity injected at runtime. The caller must not forward
+        an end-user token. The audience is service-data-sync, the only allowed
+        caller is service-api, and the identity must map to market-data:read.
+        Token format and future mTLS binding are deployment concerns.
+
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: true
+      description: UUID/UUIDv7 correlation identifier generated by service-api.
+      schema:
+        type: string
+        format: uuid
+  headers:
+    RequestId:
+      description: Server-echoed request correlation identifier.
+      schema:
+        type: string
+        format: uuid
+    DataVersion:
+      description: Stable identifier of the immutable dataset publication used by this response.
+      schema:
+        $ref: '#/components/schemas/DataVersion'
+    RetryAfter:
+      description: Minimum number of seconds before a retry.
+      schema:
+        type: integer
+        minimum: 1
+
+  responses:
+    BadRequest:
+      description: Malformed JSON, invalid field syntax, invalid range, or cursor syntax.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: urn:quant-v2:problem:market-data:request-invalid
+            title: 市场数据查询参数无效
+            status: 400
+            code: MARKET_DATA_VALIDATION_FAILED
+            detail: time.from 必须早于或等于 time.to。
+            requestId: 0198f0f1-23d0-7d5b-a8bb-6c6d9b8a7001
+            retryable: false
+            violations:
+              - path: time.from
+                reason: RANGE_INVERTED
+    Unauthorized:
+      description: Missing, invalid, expired, or untrusted service identity.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: urn:quant-v2:problem:market-data:unauthorized
+            title: 内部服务身份无效
+            status: 401
+            code: MARKET_DATA_UNAUTHORIZED
+            detail: service bearer 已过期或 audience 不匹配。
+            requestId: 0198f0f1-23d0-7d5b-a8bb-6c6d9b8a7001
+            retryable: false
+    Forbidden:
+      description: Service identity lacks the required dataset, field, PIT, or replay scope.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: urn:quant-v2:problem:market-data:scope-denied
+            title: 数据访问范围不足
+            status: 403
+            code: MARKET_DATA_FORBIDDEN
+            detail: OPERATIONAL_REPLAY 只允许具备审计重放权限的服务身份。
+            requestId: 0198f0f1-23d0-7d5b-a8bb-6c6d9b8a7001
+            retryable: false
+    NotFound:
+      description: Dataset, identity, publication, or requested dataVersion does not exist in visible storage.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: urn:quant-v2:problem:market-data:not-found
+            title: 未找到可见数据发布
+            status: 404
+            code: MARKET_DATA_NOT_FOUND
+            detail: 请求身份和时间范围内没有可见记录。
+            requestId: 0198f0f1-23d0-7d5b-a8bb-6c6d9b8a7001
+            retryable: false
+    Conflict:
+      description: Cursor, schema, publication, or methodology conflicts with the request.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: urn:quant-v2:problem:market-data:cursor-version-mismatch
+            title: 游标与数据版本不一致
+            status: 409
+            code: MARKET_DATA_CURSOR_MISMATCH
+            detail: 游标绑定的数据版本与请求中的 dataVersion 不一致。
+            requestId: 0198f0f1-23d0-7d5b-a8bb-6c6d9b8a7001
+            retryable: false
+    PayloadTooLarge:
+      description: Request body, identifier set, projection, or page limit exceeds the published bound.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: urn:quant-v2:problem:market-data:payload-too-large
+            title: 市场数据请求过大
+            status: 413
+            code: MARKET_DATA_PAYLOAD_TOO_LARGE
+            detail: 请求体超过 65536 字节上限。
+            requestId: 0198f0f1-23d0-7d5b-a8bb-6c6d9b8a7001
+            retryable: false
+    Unprocessable:
+      description: |
+        The dataset exists but does not support the requested field,
+        methodology, time dimension, quality status, or PIT coverage.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: urn:quant-v2:problem:market-data:pit-coverage-unavailable
+            title: 不具备所需时点覆盖
+            status: 422
+            code: MARKET_DATA_PIT_COVERAGE_UNAVAILABLE
+            detail: 该数据集在请求时间段内不具备完整的 PUBLIC_PIT 覆盖。
+            requestId: 0198f0f1-23d0-7d5b-a8bb-6c6d9b8a7001
+            retryable: false
+    TooManyRequests:
+      description: Service or dataset cost budget is exhausted.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: urn:quant-v2:problem:market-data:rate-limited
+            title: 市场数据读取预算已用尽
+            status: 429
+            code: MARKET_DATA_RATE_LIMITED
+            detail: 当前 dataset 成本配额不足，请按 Retry-After 稍后重试。
+            requestId: 0198f0f1-23d0-7d5b-a8bb-6c6d9b8a7001
+            retryable: true
+            retryAfterSeconds: 3
+    Unavailable:
+      description: No publishable version is available or a required internal dependency is unavailable.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: urn:quant-v2:problem:market-data:dependency-unavailable
+            title: 市场数据发布暂不可用
+            status: 503
+            code: MARKET_DATA_DEPENDENCY_UNAVAILABLE
+            detail: 当前没有达到质量门槛的可发布 dataVersion。
+            requestId: 0198f0f1-23d0-7d5b-a8bb-6c6d9b8a7001
+            retryable: true
+            retryAfterSeconds: 5
+    Timeout:
+      description: Query execution exceeded the server deadline; no partial page is returned.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: urn:quant-v2:problem:market-data:query-timeout
+            title: 市场数据查询超时
+            status: 504
+            code: MARKET_DATA_QUERY_TIMEOUT
+            detail: 查询超过内部执行截止时间，未返回部分数据。
+            requestId: 0198f0f1-23d0-7d5b-a8bb-6c6d9b8a7001
+            retryable: true
+
+  schemas:
+    DatasetSearchRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        codes:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/DatasetCode'
+        domains:
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/DatasetDomain'
+        priorities:
+          type: array
+          maxItems: 3
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/Priority'
+        availability:
+          type: array
+          maxItems: 3
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/DatasetAvailability'
+        supportsVisibilityMode:
+          $ref: '#/components/schemas/VisibilityMode'
+        page:
+          $ref: '#/components/schemas/PageRequest'
+
+    DatasetSearchResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - requestId
+        - contractVersion
+        - datasets
+        - page
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        contractVersion:
+          type: string
+          const: 1.0.0
+        datasets:
+          type: array
+          items:
+            $ref: '#/components/schemas/DatasetDescriptor'
+        page:
+          $ref: '#/components/schemas/PageResult'
+
+    DatasetDescriptor:
+      type: object
+      additionalProperties: false
+      required:
+        - dataset
+        - domain
+        - priority
+        - availability
+        - allowedTimeDimensions
+        - visibilityModes
+        - fields
+        - filters
+        - sortFields
+        - sources
+        - methodologies
+      properties:
+        dataset:
+          $ref: '#/components/schemas/DatasetRef'
+        title:
+          type: string
+          minLength: 1
+          maxLength: 160
+        domain:
+          $ref: '#/components/schemas/DatasetDomain'
+        priority:
+          $ref: '#/components/schemas/Priority'
+        availability:
+          $ref: '#/components/schemas/DatasetAvailability'
+        availabilityReason:
+          type:
+            - string
+            - 'null'
+          maxLength: 500
+        allowedTimeDimensions:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/TimeDimension'
+        visibilityModes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/VisibilityMode'
+        maxRangeDays:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+        maxIdentifiers:
+          type: integer
+          minimum: 1
+          maximum: 100
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldDescriptor'
+        filters:
+          type: array
+          items:
+            $ref: '#/components/schemas/FilterDescriptor'
+        sortFields:
+          type: array
+          items:
+            type: string
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceDescriptor'
+        methodologies:
+          type: array
+          items:
+            $ref: '#/components/schemas/MethodologyRef'
+        coverage:
+          $ref: '#/components/schemas/Coverage'
+        latestDataVersion:
+          oneOf:
+            - $ref: '#/components/schemas/DataVersion'
+            - type: 'null'
+        latestPublishedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        requiredServiceScopes:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            pattern: '^market-data:[a-z0-9:*_-]+$'
+
+    FieldDescriptor:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - logicalType
+        - nullable
+        - selectable
+        - unit
+      properties:
+        name:
+          type: string
+          pattern: '^[A-Za-z][A-Za-z0-9]{0,63}$'
+        title:
+          type: string
+          maxLength: 120
+        logicalType:
+          type: string
+          enum:
+            - STRING
+            - BOOLEAN
+            - INTEGER
+            - DECIMAL_STRING
+            - DATE
+            - DATE_TIME
+            - ENTITY_REF
+            - CODE
+        precision:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+        scale:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+        unit:
+          type:
+            - string
+            - 'null'
+          description: Explicit unit such as CNY, SHARE, CONTRACT, PERCENT_POINT, or null for dimensionless values.
+        nullable:
+          type: boolean
+        nullMeaning:
+          type:
+            - string
+            - 'null'
+          maxLength: 300
+        selectable:
+          type: boolean
+        filterOperators:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/FilterOperator'
+        sortable:
+          type: boolean
+          default: false
+        requiredServiceScope:
+          type:
+            - string
+            - 'null'
+
+    FilterDescriptor:
+      type: object
+      additionalProperties: false
+      required:
+        - field
+        - operators
+      properties:
+        field:
+          type: string
+        operators:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/FilterOperator'
+        maxValues:
+          type: integer
+          minimum: 1
+          maximum: 500
+
+    SourceDescriptor:
+      type: object
+      additionalProperties: false
+      required:
+        - sourceRef
+        - publisher
+        - sourceDataset
+        - authoritative
+        - redistribution
+      properties:
+        sourceRef:
+          $ref: '#/components/schemas/SourceRef'
+        publisher:
+          type: string
+          minLength: 1
+          maxLength: 160
+        sourceDataset:
+          type: string
+          minLength: 1
+          maxLength: 160
+        authoritative:
+          type: boolean
+        redistribution:
+          type: string
+          enum:
+            - ALLOWED
+            - RESTRICTED
+            - INTERNAL_ONLY
+            - UNKNOWN
+        coverageNote:
+          type:
+            - string
+            - 'null'
+          maxLength: 500
+
+    MarketDataQueryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - dataset
+        - businessScope
+        - time
+        - visibility
+        - selection
+        - fields
+        - sort
+        - page
+      properties:
+        dataset:
+          $ref: '#/components/schemas/DatasetRef'
+        businessScope:
+          $ref: '#/components/schemas/BusinessScope'
+        identity:
+          $ref: '#/components/schemas/IdentityFilter'
+        time:
+          $ref: '#/components/schemas/TimeRange'
+        visibility:
+          $ref: '#/components/schemas/VisibilitySelection'
+        selection:
+          $ref: '#/components/schemas/PublicationSelection'
+        filters:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/Filter'
+        fields:
+          type: array
+          minItems: 1
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+            pattern: '^[A-Za-z][A-Za-z0-9]{0,63}$'
+        sort:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/Sort'
+        page:
+          $ref: '#/components/schemas/PageRequest'
+
+    DatasetRef:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - schemaVersion
+      properties:
+        code:
+          $ref: '#/components/schemas/DatasetCode'
+        schemaVersion:
+          type: integer
+          minimum: 1
+          example: 1
+
+    DatasetCode:
+      type: string
+      minLength: 5
+      maxLength: 120
+      pattern: '^[a-z][a-z0-9_-]*(\.[a-z0-9][a-z0-9_-]*)+$'
+      description: Stable canonical dataset code; schema major is carried separately and must not be embedded as a .vN suffix.
+      examples:
+        - index.constituent.membership.reported
+        - fund.etf.nav.1d.reported
+        - market.margin.instrument.1d.reported
+        - market.stock_connect.holding.snapshot
+        - equity.business_composition.reported
+        - disclosure.document
+        - equity.block_trade.execution.reported
+        - derivative.bar.1d.reported
+
+    DatasetDomain:
+      type: string
+      enum:
+        - INDEX
+        - ETF
+        - MARGIN
+        - STOCK_CONNECT
+        - BUSINESS_COMPOSITION
+        - CORPORATE_EVENT
+        - TRADING_EVENT
+        - DERIVATIVE
+        - UNKNOWN
+
+    Priority:
+      type: string
+      enum:
+        - P0
+        - P1
+        - P2
+
+    DatasetAvailability:
+      type: string
+      enum:
+        - AVAILABLE
+        - DEGRADED
+        - DISABLED
+        - UNKNOWN
+
+    BusinessScope:
+      type: string
+      description: Dataset-defined semantic scope; it is not a SQL table or Provider discriminator.
+      enum:
+        - MARKET
+        - SECURITY
+        - INDEX
+        - FUND
+        - CHANNEL
+        - REPORT
+        - EVENT
+        - CONTRACT
+
+    IdentityFilter:
+      type: object
+      additionalProperties: false
+      properties:
+        entityTypes:
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/EntityType'
+        entityRefs:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        identifiers:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/Identifier'
+      anyOf:
+        - required:
+            - entityTypes
+        - required:
+            - entityRefs
+        - required:
+            - identifiers
+
+    EntityType:
+      type: string
+      enum:
+        - EQUITY
+        - INDEX
+        - FUND
+        - ETF_SHARE_CLASS
+        - DERIVATIVE_PRODUCT
+        - FUTURE_CONTRACT
+        - OPTION_CONTRACT
+        - VENUE
+        - UNKNOWN
+
+    Identifier:
+      type: object
+      additionalProperties: false
+      required:
+        - scheme
+        - value
+      properties:
+        scheme:
+          type: string
+          enum:
+            - exchange_symbol
+            - administrator_code
+            - fund_code
+            - venue_contract_code
+            - isin
+        value:
+          type: string
+          minLength: 1
+          maxLength: 64
+        venue:
+          type:
+            - string
+            - 'null'
+          maxLength: 24
+        authority:
+          type:
+            - string
+            - 'null'
+          maxLength: 64
+
+    TimeRange:
+      type: object
+      additionalProperties: false
+      required:
+        - dimension
+        - from
+        - to
+      properties:
+        dimension:
+          $ref: '#/components/schemas/TimeDimension'
+        from:
+          $ref: '#/components/schemas/TemporalValue'
+        to:
+          $ref: '#/components/schemas/TemporalValue'
+        timezone:
+          type: string
+          const: Asia/Shanghai
+          default: Asia/Shanghai
+
+    TimeDimension:
+      type: string
+      enum:
+        - TRADE_DATE
+        - REPORT_PERIOD_END
+        - POSITION_DATE
+        - EVENT_DATE
+        - EFFECTIVE_AT
+        - VISIBLE_AT
+        - OBSERVED_AT
+        - EXPIRY_DATE
+
+    TemporalValue:
+      oneOf:
+        - type: string
+          format: date
+        - type: string
+          format: date-time
+
+    VisibilitySelection:
+      type: object
+      additionalProperties: false
+      required:
+        - mode
+      properties:
+        mode:
+          $ref: '#/components/schemas/VisibilityMode'
+        asOf:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+          description: RFC 3339 UTC instant ending in Z.
+        knownAt:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+          description: RFC 3339 UTC knowledge cutoff ending in Z.
+      allOf:
+        - if:
+            properties:
+              mode:
+                enum:
+                  - PUBLIC_PIT
+                  - OPERATIONAL_REPLAY
+            required:
+              - mode
+          then:
+            required:
+              - asOf
+              - knownAt
+        - if:
+            properties:
+              mode:
+                const: CURRENT
+            required:
+              - mode
+          then:
+            not:
+              anyOf:
+                - required:
+                    - asOf
+                - required:
+                    - knownAt
+
+    VisibilityMode:
+      type: string
+      enum:
+        - CURRENT
+        - PUBLIC_PIT
+        - OPERATIONAL_REPLAY
+
+    PublicationSelection:
+      type: object
+      additionalProperties: false
+      required:
+        - qualityStatuses
+      properties:
+        dataVersion:
+          $ref: '#/components/schemas/DataVersion'
+        knownDataVersion:
+          $ref: '#/components/schemas/DataVersion'
+          description: |
+            Private application-level freshness hint. When it equals the selected
+            publication the server returns 204. This is not If-None-Match and does
+            not establish shared-cache semantics for POST.
+        methodology:
+          $ref: '#/components/schemas/MethodologyRef'
+        qualityStatuses:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/SelectableQualityStatus'
+
+    DataVersion:
+      type: string
+      format: uuid
+      description: Immutable dataset_publication identifier defined by proposal 0027.
+      example: 0198f104-6a25-7d6e-b46a-4c7cfbd5d101
+
+    SourceRef:
+      type: string
+      minLength: 2
+      maxLength: 80
+      pattern: '^src_[a-z0-9_]+$'
+
+    MethodologyRef:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - version
+      properties:
+        code:
+          type: string
+          minLength: 2
+          maxLength: 100
+          pattern: '^[a-z][a-z0-9-]*$'
+        version:
+          type: string
+          minLength: 1
+          maxLength: 40
+        kind:
+          type: string
+          enum:
+            - REPORTED
+            - DERIVED
+            - UNKNOWN
+
+    SelectableQualityStatus:
+      type: string
+      enum:
+        - PASSED
+        - WARNED
+
+    Filter:
+      type: object
+      additionalProperties: false
+      required:
+        - field
+        - operator
+        - values
+      properties:
+        field:
+          type: string
+          pattern: '^[A-Za-z][A-Za-z0-9]{0,63}$'
+        operator:
+          $ref: '#/components/schemas/FilterOperator'
+        values:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/ScalarValue'
+
+    FilterOperator:
+      type: string
+      enum:
+        - EQ
+        - IN
+        - GTE
+        - LTE
+        - RANGE
+
+    Sort:
+      type: object
+      additionalProperties: false
+      required:
+        - field
+        - direction
+      properties:
+        field:
+          type: string
+          pattern: '^[A-Za-z][A-Za-z0-9]{0,63}$'
+        direction:
+          type: string
+          enum:
+            - ASC
+            - DESC
+
+    PageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - limit
+      properties:
+        cursor:
+          type: string
+          minLength: 16
+          maxLength: 2048
+          description: |
+            Opaque, HMAC-authenticated token binding caller, normalized request,
+            dataset, schemaVersion, dataVersion, and stable sort tuple. It expires
+            after the dataset-advertised bounded TTL and must never be parsed by
+            service-api.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+
+    MarketDataQueryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - meta
+        - records
+      properties:
+        meta:
+          $ref: '#/components/schemas/QueryMeta'
+        records:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/CanonicalRecord'
+
+    QueryMeta:
+      type: object
+      additionalProperties: false
+      required:
+        - requestId
+        - contractVersion
+        - dataset
+        - availability
+        - release
+        - visibility
+        - page
+        - coverage
+        - warnings
+        - disclaimers
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        contractVersion:
+          type: string
+          const: 1.0.0
+        dataset:
+          $ref: '#/components/schemas/DatasetRef'
+        availability:
+          $ref: '#/components/schemas/QueryAvailability'
+        release:
+          oneOf:
+            - $ref: '#/components/schemas/ReleaseMetadata'
+            - $ref: '#/components/schemas/EmptyResultMetadata'
+        visibility:
+          $ref: '#/components/schemas/VisibilitySelection'
+        page:
+          $ref: '#/components/schemas/PageResult'
+        coverage:
+          $ref: '#/components/schemas/Coverage'
+        warnings:
+          type: array
+          items:
+            type: string
+            maxLength: 500
+
+    QueryAvailability:
+      type: string
+      description: |
+        AVAILABLE has a canonical publication. EMPTY is a successful, zero-record
+        observation. SOURCE_UNAVAILABLE is a successful consumer fallback for an
+        enabled capability whose Provider could not be reached; records must be empty.
+      enum:
+        - AVAILABLE
+        - EMPTY
+        - SOURCE_UNAVAILABLE
+
+    EmptyResultMetadata:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - observedAt
+        - reasonCode
+      properties:
+        state:
+          $ref: '#/components/schemas/QueryAvailability'
+        observedAt:
+          type: [string, "null"]
+          format: date-time
+          pattern: 'Z$'
+        reasonCode:
+          type: string
+          enum:
+            - NO_MATCHING_FACTS
+            - PROVIDER_UNAVAILABLE
+            - CAPABILITY_NOT_CONFIGURED
+            - PUBLICATION_NOT_AVAILABLE
+      description: |
+        Metadata for a successful empty response. It never substitutes for a
+        canonical fact release and intentionally has no dataVersion.
+
+    ReleaseMetadata:
+      type: object
+      additionalProperties: false
+      required:
+        - dataVersion
+        - publishedAt
+        - knowledgeCutoff
+        - publicUsableAt
+        - effectiveFrom
+        - effectiveTo
+        - methodology
+        - sources
+        - quality
+        - completeness
+      properties:
+        dataVersion:
+          $ref: '#/components/schemas/DataVersion'
+        publishedAt:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+        knowledgeCutoff:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+          description: Latest public knowledge instant included in this release.
+        publicUsableAt:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+          description: Earliest UTC instant at which the release may be consumed without future leakage.
+        effectiveFrom:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          pattern: 'Z$'
+        effectiveTo:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          pattern: 'Z$'
+        methodology:
+          $ref: '#/components/schemas/MethodologyRef'
+        sources:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/SourceDescriptor'
+        quality:
+          $ref: '#/components/schemas/QualitySummary'
+        completeness:
+          type: string
+          enum:
+            - COMPLETE
+            - PARTIAL
+            - UNKNOWN
+        disclaimers:
+          type: array
+          items:
+            type: string
+            maxLength: 500
+
+    PageResult:
+      type: object
+      additionalProperties: false
+      required:
+        - limit
+        - hasMore
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+        hasMore:
+          type: boolean
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          maxLength: 2048
+
+    Coverage:
+      type: object
+      additionalProperties: false
+      required:
+        - pitCoverage
+        - gaps
+      properties:
+        from:
+          oneOf:
+            - $ref: '#/components/schemas/TemporalValue'
+            - type: 'null'
+        to:
+          oneOf:
+            - $ref: '#/components/schemas/TemporalValue'
+            - type: 'null'
+        pitCoverage:
+          type: string
+          enum:
+            - COMPLETE
+            - PARTIAL
+            - NOT_SUPPORTED
+        gaps:
+          type: array
+          items:
+            $ref: '#/components/schemas/CoverageGap'
+
+    CoverageGap:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - reason
+      properties:
+        from:
+          oneOf:
+            - $ref: '#/components/schemas/TemporalValue'
+            - type: 'null'
+        to:
+          oneOf:
+            - $ref: '#/components/schemas/TemporalValue'
+            - type: 'null'
+        code:
+          type: string
+          maxLength: 80
+        reason:
+          type: string
+          maxLength: 500
+
+    QualitySummary:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - issueCodes
+      properties:
+        status:
+          $ref: '#/components/schemas/RecordQualityStatus'
+        issueCodes:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            maxLength: 80
+
+    RecordQualityStatus:
+      type: string
+      description: UNKNOWN is a forward-compatible fallback and must be treated as not servable.
+      enum:
+        - PASSED
+        - WARNED
+        - UNKNOWN
+
+    CanonicalRecord:
+      oneOf:
+        - $ref: '#/components/schemas/IndexRecord'
+        - $ref: '#/components/schemas/EtfRecord'
+        - $ref: '#/components/schemas/MarginRecord'
+        - $ref: '#/components/schemas/StockConnectRecord'
+        - $ref: '#/components/schemas/BusinessCompositionRecord'
+        - $ref: '#/components/schemas/CorporateEventRecord'
+        - $ref: '#/components/schemas/TradingEventRecord'
+        - $ref: '#/components/schemas/DerivativeRecord'
+      discriminator:
+        propertyName: recordType
+        mapping:
+          INDEX: '#/components/schemas/IndexRecord'
+          ETF: '#/components/schemas/EtfRecord'
+          MARGIN: '#/components/schemas/MarginRecord'
+          STOCK_CONNECT: '#/components/schemas/StockConnectRecord'
+          BUSINESS_COMPOSITION: '#/components/schemas/BusinessCompositionRecord'
+          CORPORATE_EVENT: '#/components/schemas/CorporateEventRecord'
+          TRADING_EVENT: '#/components/schemas/TradingEventRecord'
+          DERIVATIVE: '#/components/schemas/DerivativeRecord'
+
+    CanonicalRecordBase:
+      type: object
+      required:
+        - recordRef
+        - recordType
+        - entity
+        - time
+        - publicUsableAt
+        - availabilityBasis
+        - observedAt
+        - dataVersion
+        - sourceRef
+        - methodologyVersion
+        - qualityStatus
+        - revision
+      properties:
+        recordRef:
+          type: string
+          minLength: 8
+          maxLength: 80
+        recordType:
+          $ref: '#/components/schemas/RecordType'
+        entity:
+          $ref: '#/components/schemas/EntityRef'
+        time:
+          $ref: '#/components/schemas/RecordTime'
+        publicUsableAt:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+          description: Earliest UTC instant this record may be consumed under the selected visibility mode.
+        availabilityBasis:
+          $ref: '#/components/schemas/AvailabilityBasis'
+        sourcePublishedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          pattern: 'Z$'
+        observedAt:
+          type: string
+          format: date-time
+          pattern: 'Z$'
+        dataVersion:
+          $ref: '#/components/schemas/DataVersion'
+        sourceRef:
+          $ref: '#/components/schemas/SourceRef'
+        methodologyVersion:
+          type: string
+          minLength: 1
+          maxLength: 40
+        qualityStatus:
+          $ref: '#/components/schemas/RecordQualityStatus'
+        revision:
+          $ref: '#/components/schemas/Revision'
+
+    RecordType:
+      type: string
+      enum:
+        - INDEX
+        - ETF
+        - MARGIN
+        - STOCK_CONNECT
+        - BUSINESS_COMPOSITION
+        - CORPORATE_EVENT
+        - TRADING_EVENT
+        - DERIVATIVE
+
+    AvailabilityBasis:
+      type: string
+      description: |
+        Basis used to derive publicUsableAt. DATE_ONLY_CONSERVATIVE means a
+        disclosure date lacked an exact time and the configured conservative
+        market-close rule was applied; OBSERVED_ONLY means no reliable upstream
+        publication time was available.
+      enum:
+        - EXACT
+        - DATE_ONLY_CONSERVATIVE
+        - OBSERVED_ONLY
+
+    IndexRecord:
+      allOf:
+        - $ref: '#/components/schemas/CanonicalRecordBase'
+        - type: object
+          required:
+            - values
+          properties:
+            recordType:
+              const: INDEX
+            values:
+              $ref: '#/components/schemas/IndexValues'
+      unevaluatedProperties: false
+
+    EtfRecord:
+      allOf:
+        - $ref: '#/components/schemas/CanonicalRecordBase'
+        - type: object
+          required:
+            - values
+          properties:
+            recordType:
+              const: ETF
+            values:
+              $ref: '#/components/schemas/EtfValues'
+      unevaluatedProperties: false
+
+    MarginRecord:
+      allOf:
+        - $ref: '#/components/schemas/CanonicalRecordBase'
+        - type: object
+          required:
+            - values
+          properties:
+            recordType:
+              const: MARGIN
+            values:
+              $ref: '#/components/schemas/MarginValues'
+      unevaluatedProperties: false
+
+    StockConnectRecord:
+      allOf:
+        - $ref: '#/components/schemas/CanonicalRecordBase'
+        - type: object
+          required:
+            - values
+          properties:
+            recordType:
+              const: STOCK_CONNECT
+            values:
+              $ref: '#/components/schemas/StockConnectValues'
+      unevaluatedProperties: false
+
+    BusinessCompositionRecord:
+      allOf:
+        - $ref: '#/components/schemas/CanonicalRecordBase'
+        - type: object
+          required:
+            - values
+          properties:
+            recordType:
+              const: BUSINESS_COMPOSITION
+            values:
+              $ref: '#/components/schemas/BusinessCompositionValues'
+      unevaluatedProperties: false
+
+    CorporateEventRecord:
+      allOf:
+        - $ref: '#/components/schemas/CanonicalRecordBase'
+        - type: object
+          required:
+            - values
+          properties:
+            recordType:
+              const: CORPORATE_EVENT
+            values:
+              $ref: '#/components/schemas/CorporateEventValues'
+      unevaluatedProperties: false
+
+    TradingEventRecord:
+      allOf:
+        - $ref: '#/components/schemas/CanonicalRecordBase'
+        - type: object
+          required:
+            - values
+          properties:
+            recordType:
+              const: TRADING_EVENT
+            values:
+              $ref: '#/components/schemas/TradingEventValues'
+      unevaluatedProperties: false
+
+    DerivativeRecord:
+      allOf:
+        - $ref: '#/components/schemas/CanonicalRecordBase'
+        - type: object
+          required:
+            - values
+          properties:
+            recordType:
+              const: DERIVATIVE
+            values:
+              $ref: '#/components/schemas/DerivativeValues'
+      unevaluatedProperties: false
+
+    IndexValues:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        indexEntityRef:
+          type: string
+          format: uuid
+        constituentEntityRef:
+          type: string
+          format: uuid
+        administrator:
+          type:
+            - string
+            - 'null'
+        indexCode:
+          type:
+            - string
+            - 'null'
+        indexName:
+          type:
+            - string
+            - 'null'
+        lifecycleStatus:
+          type:
+            - string
+            - 'null'
+        observationDate:
+          type:
+            - string
+            - 'null'
+          format: date
+        weightDate:
+          type:
+            - string
+            - 'null'
+          format: date
+        effectiveFrom:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        effectiveTo:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        weightPercent:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        adjustmentKind:
+          type:
+            - string
+            - 'null'
+
+    EtfValues:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        fundEntityRef:
+          type: string
+          format: uuid
+        shareClassEntityRef:
+          type: string
+          format: uuid
+        trackingIndexEntityRef:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        fundCategory:
+          type:
+            - string
+            - 'null'
+        lifecycleStatus:
+          type:
+            - string
+            - 'null'
+        tradeDate:
+          type:
+            - string
+            - 'null'
+          format: date
+        open:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        high:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        low:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        close:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        volumeShares:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        turnoverCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        unitNav:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        accumulatedNav:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        iopv:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        premiumDiscountPercent:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        sharesOutstanding:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        tradingStatus:
+          type:
+            - string
+            - 'null'
+        splitFactor:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        cashDividendCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+
+    MarginValues:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        aggregationLevel:
+          type:
+            - string
+            - 'null'
+          enum:
+            - MARKET
+            - SECURITY
+            - null
+        venue:
+          type:
+            - string
+            - 'null'
+        securityEntityRef:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        tradeDate:
+          type:
+            - string
+            - 'null'
+          format: date
+        financingBalanceCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        financingBuyCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        financingRepaymentCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        lendingBalanceQuantity:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        lendingBalanceCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        lendingSellQuantity:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        lendingRepaymentQuantity:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        eligibilityKind:
+          type:
+            - string
+            - 'null'
+        eligible:
+          type:
+            - boolean
+            - 'null'
+        effectiveFrom:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        effectiveTo:
+          type:
+            - string
+            - 'null'
+          format: date-time
+
+    StockConnectValues:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        channel:
+          type:
+            - string
+            - 'null'
+        direction:
+          type:
+            - string
+            - 'null'
+        venue:
+          type:
+            - string
+            - 'null'
+        tradeDate:
+          type:
+            - string
+            - 'null'
+          format: date
+        positionDate:
+          type:
+            - string
+            - 'null'
+          format: date
+        securityEntityRef:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        buyTurnoverCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        sellTurnoverCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        totalTurnoverCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        quotaBalanceCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        holdingQuantity:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        holdingMarketValueCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        holdingRatioPercent:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        active:
+          type:
+            - boolean
+            - 'null'
+        disclosureRegimeVersion:
+          type:
+            - string
+            - 'null'
+
+    BusinessCompositionValues:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        equityEntityRef:
+          type: string
+          format: uuid
+        reportPeriodEnd:
+          type:
+            - string
+            - 'null'
+          format: date
+        statementScope:
+          type:
+            - string
+            - 'null'
+        dimensionType:
+          type:
+            - string
+            - 'null'
+          enum:
+            - INDUSTRY
+            - PRODUCT
+            - REGION
+            - null
+        lineLabel:
+          type:
+            - string
+            - 'null'
+        revenue:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        cost:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        grossProfit:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        grossMarginPercent:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        currency:
+          type:
+            - string
+            - 'null'
+        unitScale:
+          type:
+            - integer
+            - 'null'
+        statementRevision:
+          type:
+            - integer
+            - 'null'
+
+    CorporateEventValues:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: Post-event returns and fields first observable after publicUsableAt are intentionally absent.
+      properties:
+        eventRef:
+          type:
+            - string
+            - 'null'
+        documentRef:
+          type:
+            - string
+            - 'null'
+        eventType:
+          type:
+            - string
+            - 'null'
+        eventStatus:
+          type:
+            - string
+            - 'null'
+        title:
+          type:
+            - string
+            - 'null'
+        announcementAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        eventDate:
+          type:
+            - string
+            - 'null'
+          format: date
+        effectiveDate:
+          type:
+            - string
+            - 'null'
+          format: date
+        amountCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        quantityShares:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        ratioPercent:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+
+    TradingEventValues:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: Future returns, later performance, and hindsight labels are intentionally absent.
+      properties:
+        eventRef:
+          type:
+            - string
+            - 'null'
+        eventKind:
+          type:
+            - string
+            - 'null'
+          enum:
+            - DRAGON_TIGER
+            - BLOCK_TRADE
+            - null
+        tradeDate:
+          type:
+            - string
+            - 'null'
+          format: date
+        reasonCode:
+          type:
+            - string
+            - 'null'
+        seatRole:
+          type:
+            - string
+            - 'null'
+        seatName:
+          type:
+            - string
+            - 'null'
+        buyerName:
+          type:
+            - string
+            - 'null'
+        sellerName:
+          type:
+            - string
+            - 'null'
+        priceCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        volumeShares:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        turnoverCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        buyAmountCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        sellAmountCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        netAmountCny:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        premiumDiscountPercent:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+
+    DerivativeValues:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        productEntityRef:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        contractEntityRef:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        underlyingEntityRef:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        venue:
+          type:
+            - string
+            - 'null'
+        contractCode:
+          type:
+            - string
+            - 'null'
+        contractKind:
+          type:
+            - string
+            - 'null'
+        listedDate:
+          type:
+            - string
+            - 'null'
+          format: date
+        expiryDate:
+          type:
+            - string
+            - 'null'
+          format: date
+        tradeDate:
+          type:
+            - string
+            - 'null'
+          format: date
+        open:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        high:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        low:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        close:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        settlement:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        deliverySettlement:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        volumeContracts:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        openInterestContracts:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        optionRight:
+          type:
+            - string
+            - 'null'
+        strikePrice:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        inventoryQuantity:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        deliveryQuantity:
+          oneOf:
+            - $ref: '#/components/schemas/DecimalString'
+            - type: 'null'
+        continuousSeriesCode:
+          type:
+            - string
+            - 'null'
+        rollMethodologyVersion:
+          type:
+            - string
+            - 'null'
+
+    DecimalString:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+      description: Exact decimal encoded as a base-10 string; scale and unit come from the dataset catalog.
+
+    EntityRef:
+      type: object
+      additionalProperties: false
+      required:
+        - entityRef
+        - entityType
+        - identifiers
+      properties:
+        entityRef:
+          type: string
+          format: uuid
+        entityType:
+          $ref: '#/components/schemas/EntityType'
+        identifiers:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Identifier'
+
+    RecordTime:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        tradeDate:
+          type: string
+          format: date
+        reportPeriodEnd:
+          type: string
+          format: date
+        positionDate:
+          type: string
+          format: date
+        eventDate:
+          type:
+            - string
+            - 'null'
+          format: date
+        effectiveAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        expiryDate:
+          type:
+            - string
+            - 'null'
+          format: date
+
+    Revision:
+      type: object
+      additionalProperties: false
+      required:
+        - revisionNumber
+        - currentInPublication
+      properties:
+        sourceRevisionKey:
+          type:
+            - string
+            - 'null'
+          maxLength: 160
+        revisionNumber:
+          type: integer
+          minimum: 1
+        currentInPublication:
+          type: boolean
+        supersedesRecordRef:
+          type:
+            - string
+            - 'null'
+          maxLength: 80
+
+    ScalarValue:
+      oneOf:
+        - type: string
+        - type: integer
+        - type: boolean
+        - type: 'null'
+
+    ProblemDetails:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - title
+        - status
+        - code
+        - detail
+        - requestId
+        - retryable
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+          maxLength: 160
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        code:
+          type: string
+          enum:
+            - MARKET_DATA_VALIDATION_FAILED
+            - MARKET_DATA_UNAUTHORIZED
+            - MARKET_DATA_FORBIDDEN
+            - MARKET_DATA_NOT_FOUND
+            - MARKET_DATA_CURSOR_MISMATCH
+            - MARKET_DATA_DATA_VERSION_CONFLICT
+            - MARKET_DATA_PIT_COVERAGE_UNAVAILABLE
+            - MARKET_DATA_QUALITY_NOT_SERVABLE
+            - MARKET_DATA_PAYLOAD_TOO_LARGE
+            - MARKET_DATA_RATE_LIMITED
+            - MARKET_DATA_DEPENDENCY_UNAVAILABLE
+            - MARKET_DATA_CONTRACT_VERSION_UNSUPPORTED
+            - MARKET_DATA_SCHEMA_DRIFT
+            - MARKET_DATA_QUERY_TIMEOUT
+        detail:
+          type: string
+          maxLength: 1000
+        instance:
+          type: string
+          format: uri-reference
+        requestId:
+          type: string
+          format: uuid
+        retryable:
+          type: boolean
+        retryAfterSeconds:
+          type: integer
+          minimum: 1
+        violations:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/Violation'
+
+    Violation:
+      type: object
+      additionalProperties: false
+      required:
+        - path
+        - reason
+      properties:
+        path:
+          type: string
+          maxLength: 160
+        reason:
+          type: string
+          maxLength: 80

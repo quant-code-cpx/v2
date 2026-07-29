@@ -240,6 +240,10 @@ def test_run_task_executes_shadow_sync_and_closes_resources(
     monkeypatch.setattr(sector_eod_tasks, "build_container", build)
     monkeypatch.setattr(sector_eod_tasks, "SqlAlchemySectorEodRepository", FakeRepository)
     monkeypatch.setattr(sector_eod_tasks, "S3RawPayloadStore", raw_payload_store)
+    # 任务组合测试不触及对象存储；留证语义由原始载荷存储专用测试覆盖。
+    monkeypatch.setattr(
+        sector_eod_tasks, "retain_failure_evidence", lambda _store, operation: operation()
+    )
     monkeypatch.setattr(sector_eod_tasks, "SectorEodSnapshotSyncService", FakeSyncService)
     monkeypatch.setattr(sector_eod_tasks, "_LOGGER", logger)
 
@@ -322,6 +326,10 @@ def test_run_task_logs_retryable_provider_failure_with_backoff(
     monkeypatch.setattr(sector_eod_tasks, "build_container", build)
     monkeypatch.setattr(sector_eod_tasks, "SqlAlchemySectorEodRepository", FakeRepository)
     monkeypatch.setattr(sector_eod_tasks, "S3RawPayloadStore", raw_payload_store)
+    # 任务组合测试不触及对象存储；留证语义由原始载荷存储专用测试覆盖。
+    monkeypatch.setattr(
+        sector_eod_tasks, "retain_failure_evidence", lambda _store, operation: operation()
+    )
     monkeypatch.setattr(sector_eod_tasks, "SectorEodSnapshotSyncService", FakeSyncService)
     monkeypatch.setattr(sector_eod_tasks, "_LOGGER", logger)
     monkeypatch.setattr(task, "retry", retry)

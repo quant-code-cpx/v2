@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from service_data_sync.application.ports.financial_read import FinancialReadRepository
 from service_data_sync.application.ports.market_data import (
+    EquityAvailabilityObservation,
     EquityDatasetPublication,
     EquityIdentityReadConflictError,
     EquityMarketDataRepository,
@@ -54,6 +55,7 @@ class FakeMarketRepository:
         self.missing_dataset: str | None = None
         self.identity_conflict = False
         self.identity_requests: list[tuple[date | None, date | None]] = []
+        self.availability: EquityAvailabilityObservation | None = None
         self.publications = {
             "equity.bar.1w.raw": _publication(_BAR_VERSION),
             "equity.adjustment_factor": _publication(_FACTOR_VERSION),
@@ -83,6 +85,18 @@ class FakeMarketRepository:
         """按数据集返回当前发布，并验证永久证券分区。"""
         assert instrument.security_id == 1
         return None if dataset == self.missing_dataset else self.publications.get(dataset)
+
+    def get_daily_bar_availability(
+        self,
+        *,
+        identifier: EquityIdentifier,
+        start: date,
+        end: date,
+    ) -> EquityAvailabilityObservation | None:
+        """仅为精确的测试证券和请求窗口返回可用性观测。"""
+        assert identifier == self.instrument.identifier
+        assert start <= end
+        return self.availability
 
     def list_bars(
         self,
@@ -203,6 +217,7 @@ def test_bars_use_direct_weekly_rows_adjustment_and_conditional_etag(
     assert response.json()["period"] == "1w"
     assert response.json()["factorVersion"] == str(_FACTOR_VERSION)
     assert response.json()["formulaVersion"] == "cumulative-hfq-v1"
+    assert response.json()["availability"] == "AVAILABLE"
     assert response.json()["items"][0]["open"] == "5.000000"
     assert response.json()["items"][1]["open"] == "20.000000"
     assert response.headers["x-data-version"] == str(_BAR_VERSION)
@@ -320,6 +335,54 @@ def test_market_routes_fail_closed_for_auth_validation_and_missing_publication(
     assert bad_range.status_code == 400
     assert unpublished.status_code == 503
     assert unpublished.headers["retry-after"] == "5"
+
+
+def test_market_routes_return_successful_empty_page_for_recorded_availability(
+    configured_environment: None,
+) -> None:
+    """首次 publication 尚未建立时，可用性观测必须被 API 映射为空页而非 503。"""
+    del configured_environment
+    client, headers, repository = _client()
+    repository.missing_dataset = "equity.bar.1w.raw"
+    repository.availability = EquityAvailabilityObservation(
+        availability="source_unavailable",
+        reason_code="unavailable",
+        observed_at=datetime(2026, 7, 29, 12, tzinfo=UTC),
+    )
+
+    response = client.get(
+        "/internal/v1/equities/SSE/600519/bars?period=1w&start=2026-01-01&end=2026-07-28",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["availability"] == "SOURCE_UNAVAILABLE"
+    assert response.json()["dataVersion"] is None
+    assert response.json()["items"] == []
+    assert "x-data-version" not in response.headers
+
+
+def test_market_routes_keep_last_publication_when_source_becomes_unavailable(
+    configured_environment: None,
+) -> None:
+    """来源失败不能用空结果覆盖已发布事实，读取方仍须看见 stale 状态。"""
+    del configured_environment
+    client, headers, repository = _client()
+    repository.availability = EquityAvailabilityObservation(
+        availability="source_unavailable",
+        reason_code="rate_limited",
+        observed_at=datetime(2026, 7, 29, 12, tzinfo=UTC),
+    )
+
+    response = client.get(
+        "/internal/v1/equities/SSE/600519/bars?period=1w&start=2026-01-01&end=2026-07-28",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["availability"] == "SOURCE_UNAVAILABLE"
+    assert response.json()["stale"] is True
+    assert response.json()["dataVersion"] == str(_BAR_VERSION)
 
 
 def _client() -> tuple[TestClient, dict[str, str], FakeMarketRepository]:

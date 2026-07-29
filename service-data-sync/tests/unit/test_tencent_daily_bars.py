@@ -107,3 +107,32 @@ def test_adapter_rejects_a_response_with_unreconcilable_volume_unit(
         )
 
     assert error.value.retryable is False
+
+
+def test_adapter_returns_a_valid_empty_batch_when_akshare_has_no_daily_bars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AKShare 空 DataFrame 是业务空集，不是供应商结构漂移。"""
+    frame = FakeFrame([])
+    # 匿名回调固定返回空窗口，验证适配器交给应用层记录空观测。
+    monkeypatch.setattr(tencent_daily_bars.ak, "stock_zh_a_hist_tx", lambda **_: frame)
+
+    batch = asyncio.run(
+        AkshareTencentDailyBarsAdapter(request_timeout_seconds=5).fetch(
+            SourceRequest(
+                capability="equity.bar.1d.raw",
+                parameters=(
+                    ("instrument", "SSE.600519"),
+                    ("start", "2026-07-01"),
+                    ("end", "2026-07-29"),
+                ),
+            )
+        )
+    )
+
+    assert json.loads(batch.payload) == {
+        "schema": "quant-v2.equity-daily-bar.v1",
+        "instrument": "SSE.600519",
+        "bars": [],
+    }
+    assert batch.raw_payload == b'{"instrument":"SSE.600519","records":[]}'

@@ -50,6 +50,7 @@ class EquityExtensionSyncResult:
     data_version: UUID
     inserted_count: int
     unchanged_count: int
+    availability: str = "available"
 
 
 class EquityPeriodBarSyncService:

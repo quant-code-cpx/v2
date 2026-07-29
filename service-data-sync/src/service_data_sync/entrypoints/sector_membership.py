@@ -14,7 +14,11 @@ from service_data_sync.bootstrap.container import build_container
 from service_data_sync.bootstrap.logging import configure_logging
 from service_data_sync.bootstrap.settings import load_settings
 from service_data_sync.domain.sector import SectorScheme
-from service_data_sync.infrastructure.object_storage.raw_payload_store import S3RawPayloadStore
+from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    FailureEvidenceDataSource,
+    S3RawPayloadStore,
+    retain_failure_evidence,
+)
 from service_data_sync.infrastructure.persistence.sector_membership_repository import (
     SqlAlchemySectorMembershipRepository,
 )
@@ -39,12 +43,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         sources = container.source_registry.for_capability(_CAPABILITY)
         if len(sources) != 1:
             raise SystemExit("exactly one approved sector-membership provider must be enabled")
-        result = asyncio.run(
-            SectorMembershipSyncService(
-                source=sources[0],
-                repository=SqlAlchemySectorMembershipRepository(container.database),
-                raw_payload_store=S3RawPayloadStore(container.object_storage),
-            ).sync_scheme(scheme=scheme, observation_date=observation_date)
+        raw_payload_store = S3RawPayloadStore(container.object_storage)
+        result = retain_failure_evidence(
+            raw_payload_store,
+            # 同一执行边界仅在同步异常时将暂存来源字节固化为排障证据。
+            lambda: asyncio.run(
+                SectorMembershipSyncService(
+                    source=FailureEvidenceDataSource(sources[0], raw_payload_store),
+                    repository=SqlAlchemySectorMembershipRepository(container.database),
+                    raw_payload_store=raw_payload_store,
+                ).sync_scheme(scheme=scheme, observation_date=observation_date)
+            ),
         )
     finally:
         container.close()

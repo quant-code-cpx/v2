@@ -90,6 +90,10 @@ def test_cli_emits_release_summary_and_closes_composition_root(monkeypatch, caps
         lambda _database: object(),
     )
     monkeypatch.setattr(sector_membership, "S3RawPayloadStore", lambda _storage: object())
+    # 入口组合测试不触及对象存储；留证语义由原始载荷存储的专用单元测试覆盖。
+    monkeypatch.setattr(
+        sector_membership, "retain_failure_evidence", lambda _store, operation: operation()
+    )
     monkeypatch.setattr(sector_membership, "SectorMembershipSyncService", FakeSyncService)
 
     assert (

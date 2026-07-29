@@ -1,0 +1,100 @@
+"""基于 PostgreSQL 的通用空集与来源不可用观测仓储。"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from uuid import uuid4
+
+from sqlalchemy import update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+
+from service_data_sync.application.ports.dataset_availability import (
+    DatasetAvailability,
+    DatasetAvailabilityRepository,
+)
+from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.models.publication.dataset_availability_observation import (  # noqa: E501
+    DatasetAvailabilityObservation,
+)
+
+
+class SqlAlchemyDatasetAvailabilityRepository(DatasetAvailabilityRepository):
+    """将空同步结果保存为独立元数据，不干扰既有 canonical release。"""
+
+    def __init__(self, database: DatabaseClient) -> None:
+        """保存服务私有数据库事务工厂，不向应用层暴露 SQLAlchemy 细节。"""
+        self._database = database
+
+    def record(
+        self,
+        *,
+        dataset: str,
+        partition_key: str,
+        availability: str,
+        reason_code: str,
+        provider_id: str | None,
+        observed_at: datetime,
+    ) -> DatasetAvailability:
+        """原子替换同分区当前观测；相同来源时刻重试保持幂等。"""
+        if availability not in {"empty", "source_unavailable"}:
+            raise ValueError("dataset availability is invalid")
+        if not dataset.strip() or not partition_key.strip() or not reason_code.strip():
+            raise ValueError("dataset availability identity is invalid")
+        if observed_at.tzinfo is None:
+            raise ValueError("observed_at must include a timezone")
+        with self._database.transaction() as connection:
+            connection.execute(
+                update(DatasetAvailabilityObservation)
+                .where(
+                    DatasetAvailabilityObservation.dataset == dataset,
+                    DatasetAvailabilityObservation.partition_key == partition_key,
+                    DatasetAvailabilityObservation.superseded_at.is_(None),
+                )
+                .values(superseded_at=observed_at)
+            )
+            connection.execute(
+                postgresql_insert(DatasetAvailabilityObservation)
+                .values(
+                    observation_id=uuid4(),
+                    dataset=dataset,
+                    partition_key=partition_key,
+                    availability=availability,
+                    reason_code=reason_code,
+                    provider_id=provider_id,
+                    observed_at=observed_at,
+                    superseded_at=None,
+                    detail=None,
+                )
+                .on_conflict_do_update(
+                    constraint="uq_dataset_availability_observation_time",
+                    set_={
+                        "availability": availability,
+                        "reason_code": reason_code,
+                        "provider_id": provider_id,
+                        "superseded_at": None,
+                        "detail": None,
+                    },
+                )
+            )
+        return DatasetAvailability(
+            availability=availability,
+            reason_code=reason_code,
+            observed_at=observed_at,
+        )
+
+    def clear(self, *, dataset: str, partition_key: str, cleared_at: datetime) -> None:
+        """成功发布事实后终结旧观测，防止消费者被过期空状态遮蔽。"""
+        if not dataset.strip() or not partition_key.strip():
+            raise ValueError("dataset availability identity is invalid")
+        if cleared_at.tzinfo is None:
+            raise ValueError("cleared_at must include a timezone")
+        with self._database.transaction() as connection:
+            connection.execute(
+                update(DatasetAvailabilityObservation)
+                .where(
+                    DatasetAvailabilityObservation.dataset == dataset,
+                    DatasetAvailabilityObservation.partition_key == partition_key,
+                    DatasetAvailabilityObservation.superseded_at.is_(None),
+                )
+                .values(superseded_at=cleared_at)
+            )

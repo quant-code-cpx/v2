@@ -9,6 +9,8 @@
   service-data-sync 内部 HTTP 契约读取，周/月线不由日线派生。
 - 方案 0012、0016、0017 已分别实现申万三级行业、财务与估值、日频资金流公开 POST API；
   均只读取已发布的内部 HTTP 视图。
+- 个人部署已实现 `POST /api/v1/market-data/query`：它经 `MarketDataAccessClient` 调用 data-sync
+  typed query；已注册但无 publication 时返回带可用性状态的成功空 records。
 - 公开契约：[0019-service-api-equity-market-data.openapi.yaml](../contracts/0019-service-api-equity-market-data.openapi.yaml)
 所有 `service-api` 路由仅允许 `POST`；强制规则与迁移边界见
 [ADR-0018](../decisions/0018-service-api-post-only-http-method.md)。
@@ -19,6 +21,8 @@
 - [0002：用户访问管理与分层鉴权方案](0002-user-access-management/index.html) — Implemented
 - [0003：板块行情 API 访问技术方案](0003-sector-market-data-access/index.html) — Implemented
 - [0004：账户安全与运营查询技术方案](0004-account-security-and-operations/index.html) — Implemented
+- [0005：高价值市场数据访问的 service-api 影响方案](0005-market-data-access-impact/index.html) — Proposed；
+  个人部署的最小通用 query 网关已按 ADR-0023 实现，领域化 DTO、细粒度权限、缓存与导出仍为后续工作。
 
 ## 跨服务关联方案
 
@@ -39,6 +43,15 @@
   `StockModule` 已提供具备 point-in-time 语义的报表、来源指标、平台派生指标与估值查询。
 - [日频资金流向技术方案](../service-data-sync/0017-daily-money-flow/index.html) — Implemented；
   `MoneyFlowModule` 已提供显式方法学约束的日频序列与供应商滚动排行，不包含分钟或分时。
+- [高价值市场数据扩展路线图](../service-data-sync/0029-market-data-expansion-roadmap/index.html) — Proposed；
+  汇总八类数据、统一 canonical model、分阶段门禁与回滚边界。
+- [data-sync 市场数据访问契约方案](../service-data-sync/0028-data-access-contract/index.html) — Proposed；
+  拟议通过 POST-only 内部 HTTP catalog/query 提供不可变版本查询，事件平台延后另行决策。
+- [高价值市场数据访问的 service-api 影响方案](0005-market-data-access-impact/index.html) — Proposed；
+  个人部署已提供认证后的 `POST /api/v1/market-data/query` 最小网关，领域化 DTO、权限、限额、缓存和
+  批量导出仍按方案逐步收敛。
+- [拟议机器合同](../contracts/data-sync-market-data-v1.yaml) 与
+  [ADR-0020](../decisions/0020-data-sync-market-data-access.md) 均为 Proposed。
 
 以上能力均由 `service-api` 经版本化 internal HTTP 读取；不得为读取方便复制 canonical Prisma 表、
 直连同步数据库或把 Redis 作为权威数据源。

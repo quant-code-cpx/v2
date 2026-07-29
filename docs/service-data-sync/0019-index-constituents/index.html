@@ -1,0 +1,2423 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>0019 指数成分与权重数据接入技术方案（Proposed）</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f7fb;
+        --surface: #ffffff;
+        --surface-muted: #f8fafc;
+        --ink: #172033;
+        --muted: #5d6b82;
+        --line: #dce3ee;
+        --primary: #175cd3;
+        --primary-soft: #eef4ff;
+        --good: #067647;
+        --good-soft: #ecfdf3;
+        --warn: #b54708;
+        --warn-soft: #fffaeb;
+        --danger: #b42318;
+        --danger-soft: #fef3f2;
+        --purple: #6938ef;
+        --purple-soft: #f4f3ff;
+        --shadow: 0 10px 28px rgba(16, 24, 40, 0.07);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        min-width: 1200px;
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family:
+          Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", system-ui,
+          sans-serif;
+        font-size: 15px;
+        line-height: 1.72;
+      }
+
+      a {
+        color: var(--primary);
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+
+      code {
+        padding: 0.12rem 0.35rem;
+        border: 1px solid #dbe7fb;
+        border-radius: 5px;
+        background: #f6f9ff;
+        color: #1849a9;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 0.9em;
+      }
+
+      .page {
+        width: 1120px;
+        margin: 0 auto;
+        padding: 28px 0 64px;
+      }
+
+      .hero {
+        overflow: hidden;
+        border: 1px solid #cad8ef;
+        border-radius: 18px;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+
+      .hero-main {
+        padding: 30px 34px 24px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .eyebrow {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 25px;
+        padding: 2px 9px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 750;
+        line-height: 1.4;
+        white-space: nowrap;
+      }
+
+      .badge-proposed {
+        background: var(--purple-soft);
+        color: var(--purple);
+      }
+
+      .badge-p0 {
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+
+      .badge-p1 {
+        background: var(--warn-soft);
+        color: var(--warn);
+      }
+
+      .badge-p2 {
+        background: var(--primary-soft);
+        color: var(--primary);
+      }
+
+      .badge-good {
+        background: var(--good-soft);
+        color: var(--good);
+      }
+
+      h1 {
+        max-width: 850px;
+        margin: 14px 0 10px;
+        font-size: 32px;
+        line-height: 1.25;
+        letter-spacing: -0.025em;
+      }
+
+      .hero-summary {
+        max-width: 940px;
+        margin: 0;
+        color: #344054;
+        font-size: 17px;
+      }
+
+      .hero-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+      }
+
+      .hero-card {
+        min-height: 150px;
+        padding: 20px 24px;
+        border-right: 1px solid var(--line);
+      }
+
+      .hero-card:last-child {
+        border-right: 0;
+      }
+
+      .hero-card .label {
+        margin-bottom: 7px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .hero-card strong {
+        display: block;
+        margin-bottom: 6px;
+        color: #101828;
+        font-size: 16px;
+        line-height: 1.5;
+      }
+
+      .hero-card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 222px minmax(0, 1fr);
+        gap: 22px;
+        margin-top: 22px;
+        align-items: start;
+      }
+
+      nav {
+        position: sticky;
+        top: 16px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--surface);
+        box-shadow: 0 6px 18px rgba(16, 24, 40, 0.04);
+      }
+
+      nav h2 {
+        margin: 0;
+        padding: 17px 18px 11px;
+        border-bottom: 1px solid var(--line);
+        font-size: 13px;
+      }
+
+      nav ol {
+        margin: 0;
+        padding: 9px 10px 13px;
+        list-style: none;
+        counter-reset: section;
+      }
+
+      nav li {
+        counter-increment: section;
+      }
+
+      nav a {
+        display: grid;
+        grid-template-columns: 24px 1fr;
+        gap: 5px;
+        padding: 6px 8px;
+        border-radius: 8px;
+        color: #475467;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      nav a::before {
+        content: counter(section, decimal-leading-zero);
+        color: #98a2b3;
+        font-variant-numeric: tabular-nums;
+      }
+
+      nav a:hover {
+        background: var(--primary-soft);
+        color: var(--primary);
+        text-decoration: none;
+      }
+
+      main {
+        min-width: 0;
+      }
+
+      section {
+        margin-bottom: 18px;
+        padding: 26px 28px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--surface);
+        box-shadow: 0 6px 18px rgba(16, 24, 40, 0.035);
+      }
+
+      h2 {
+        margin: 0 0 14px;
+        color: #101828;
+        font-size: 22px;
+        line-height: 1.35;
+      }
+
+      h3 {
+        margin: 24px 0 9px;
+        color: #1d2939;
+        font-size: 17px;
+        line-height: 1.45;
+      }
+
+      h4 {
+        margin: 18px 0 6px;
+        color: #344054;
+        font-size: 14px;
+      }
+
+      p {
+        margin: 8px 0 12px;
+      }
+
+      ul,
+      ol {
+        margin: 8px 0 14px;
+        padding-left: 22px;
+      }
+
+      li + li {
+        margin-top: 5px;
+      }
+
+      .section-lead {
+        margin-top: -4px;
+        color: var(--muted);
+      }
+
+      .callout {
+        margin: 14px 0;
+        padding: 14px 16px;
+        border-left: 4px solid var(--primary);
+        border-radius: 8px;
+        background: var(--primary-soft);
+      }
+
+      .callout.fact {
+        border-left-color: var(--good);
+        background: var(--good-soft);
+      }
+
+      .callout.risk {
+        border-left-color: var(--warn);
+        background: var(--warn-soft);
+      }
+
+      .callout.danger {
+        border-left-color: var(--danger);
+        background: var(--danger-soft);
+      }
+
+      .callout strong {
+        color: #101828;
+      }
+
+      .label-line {
+        display: inline-block;
+        margin-right: 6px;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+      }
+
+      .label-fact {
+        color: var(--good);
+      }
+
+      .label-decision {
+        color: var(--primary);
+      }
+
+      .label-assumption {
+        color: var(--warn);
+      }
+
+      .label-open {
+        color: var(--purple);
+      }
+
+      .table-wrap {
+        max-width: 100%;
+        margin: 12px 0 18px;
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+
+      table {
+        width: 100%;
+        min-width: 760px;
+        border-collapse: collapse;
+        background: var(--surface);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      table.wide {
+        min-width: 1050px;
+      }
+
+      th,
+      td {
+        padding: 10px 11px;
+        border-right: 1px solid #e9edf3;
+        border-bottom: 1px solid #e9edf3;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th:last-child,
+      td:last-child {
+        border-right: 0;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      th {
+        background: var(--surface-muted);
+        color: #344054;
+        font-size: 12px;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      tbody tr:hover {
+        background: #fbfcfe;
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .mono {
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 0.92em;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 9px;
+        margin: 16px 0;
+      }
+
+      .flow-step {
+        position: relative;
+        min-height: 112px;
+        padding: 13px 11px;
+        border: 1px solid #ccd9ee;
+        border-radius: 9px;
+        background: #f8fbff;
+      }
+
+      .flow-step:not(:last-child)::after {
+        position: absolute;
+        z-index: 2;
+        top: 43px;
+        right: -9px;
+        width: 17px;
+        color: var(--primary);
+        background: var(--surface);
+        content: "→";
+        font-weight: 900;
+        text-align: center;
+      }
+
+      .flow-step strong {
+        display: block;
+        margin-bottom: 5px;
+        color: #1849a9;
+        font-size: 13px;
+      }
+
+      .flow-step span {
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.5;
+      }
+
+      .two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+
+      .mini-card {
+        padding: 15px 16px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--surface-muted);
+      }
+
+      .mini-card h3 {
+        margin: 0 0 8px;
+        font-size: 15px;
+      }
+
+      .mini-card p,
+      .mini-card ul {
+        margin-bottom: 6px;
+        font-size: 13px;
+      }
+
+      .kpi-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin: 15px 0;
+      }
+
+      .kpi {
+        padding: 13px 14px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: var(--surface-muted);
+      }
+
+      .kpi strong {
+        display: block;
+        color: #101828;
+        font-size: 19px;
+      }
+
+      .kpi span {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .timeline {
+        margin: 12px 0 15px;
+        padding-left: 22px;
+        border-left: 2px solid #cdd9ec;
+      }
+
+      .timeline-item {
+        position: relative;
+        padding: 0 0 17px 12px;
+      }
+
+      .timeline-item:last-child {
+        padding-bottom: 0;
+      }
+
+      .timeline-item::before {
+        position: absolute;
+        top: 7px;
+        left: -29px;
+        width: 11px;
+        height: 11px;
+        border: 3px solid var(--surface);
+        border-radius: 50%;
+        background: var(--primary);
+        box-shadow: 0 0 0 1px var(--primary);
+        content: "";
+      }
+
+      .timeline-item strong {
+        color: #1d2939;
+      }
+
+      .footnotes {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      footer {
+        padding: 18px 8px 0;
+        color: var(--muted);
+        font-size: 12px;
+        text-align: center;
+      }
+
+      @media print {
+        @page {
+          size: A4 landscape;
+          margin: 11mm;
+        }
+
+        body {
+          min-width: 0;
+          background: #fff;
+          font-size: 10pt;
+        }
+
+        .page {
+          width: auto;
+          padding: 0;
+        }
+
+        .layout {
+          display: block;
+        }
+
+        nav {
+          display: none;
+        }
+
+        .hero,
+        section {
+          box-shadow: none;
+        }
+
+        section {
+          break-inside: avoid-page;
+          margin-bottom: 10px;
+        }
+
+        a {
+          color: inherit;
+          text-decoration: underline;
+        }
+
+        .table-wrap {
+          overflow: visible;
+        }
+
+        table,
+        table.wide {
+          min-width: 0;
+          font-size: 8pt;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div class="hero-main">
+          <div class="eyebrow">
+            <span class="badge badge-proposed">Proposed</span>
+            <span>方案编号 0019</span>
+            <span>·</span>
+            <span>service-data-sync / 指数域</span>
+            <span>·</span>
+            <span>2026-07-28</span>
+          </div>
+          <h1>指数目录、成分与权重的 point-in-time 数据接入方案</h1>
+          <p class="hero-summary">
+            建议以“少量高价值宽基指数 + 官方生效事件”为 P0，先建立可审计的指数身份、
+            成分生效区间与披露可见时间；当前成分/收盘权重仅作为观测快照，绝不倒推历史。
+            中证与国证保持独立来源策略，统一到 Provider-neutral canonical dataset。
+          </p>
+        </div>
+        <div class="hero-grid">
+          <article class="hero-card">
+            <div class="label">推荐选择</div>
+            <strong>P0 条件接入；拒绝“全量目录一次性接入”</strong>
+            <p>
+              先覆盖中证 300/500/1000、上证 50、深证成指、创业板指等白名单；
+              P1 再扩展历史快照、收盘权重与更多指数。
+            </p>
+          </article>
+          <article class="hero-card">
+            <div class="label">关键理由</div>
+            <strong>研究价值高，但时间语义比抓取本身更重要</strong>
+            <p>
+              选股池、基准归因、ETF 跟踪与 PIT 回测均依赖准确的公告时间、生效时间、
+              修订版本和证券身份。
+            </p>
+          </article>
+          <article class="hero-card">
+            <div class="label">首要风险</div>
+            <strong>把“今天看到的成分”伪装成历史有效成分</strong>
+            <p>
+              AKShare 当前快照不证明历史完整；固定版本与在线文档也存在语义漂移，
+              必须经连续探测、公告对账和回放门禁后才能发布。
+            </p>
+          </article>
+        </div>
+      </header>
+
+      <div class="layout">
+        <nav aria-label="文档目录">
+          <h2>评审目录</h2>
+          <ol>
+            <li><a href="#decision">结论与优先级</a></li>
+            <li><a href="#scope">价值、范围与边界</a></li>
+            <li><a href="#evidence">事实、假设与证据</a></li>
+            <li><a href="#sources">来源与 AKShare</a></li>
+            <li><a href="#datasets">数据集、粒度与字段</a></li>
+            <li><a href="#temporal">时态与 PIT 重建</a></li>
+            <li><a href="#sync">同步、幂等与恢复</a></li>
+            <li><a href="#quality">质量与未来函数</a></li>
+            <li><a href="#tables">领域表草案</a></li>
+            <li><a href="#api">service-api 查询需求</a></li>
+            <li><a href="#roadmap">容量与实施路线</a></li>
+            <li><a href="#gates">硬门禁与风险</a></li>
+            <li><a href="#acceptance">未决事项与验收</a></li>
+            <li><a href="#references">引用与关联资料</a></li>
+          </ol>
+        </nav>
+
+        <main>
+          <section id="decision">
+            <h2>1. 结论与优先级</h2>
+            <p class="section-lead">
+              本文状态为 <strong>Proposed</strong>，仅提出数据接入、模型与消费需求；
+              不代表已批准 Provider、已完成生产接入或已接受跨服务契约。
+            </p>
+
+            <div class="callout">
+              <span class="label-line label-decision">建议</span>
+              接入指数数据，但把“官方有效成分”和“抓取时观察到的当前成分”拆成两种不可互换的语义。
+              P0 只有得到明确生效证据的记录可进入 PIT 数据集；观测快照可以先用于当日展示与差异侦测，
+              但必须标记为 <code>OBSERVED_CURRENT</code>，不得用于历史回测。
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>优先级</th>
+                    <th>范围</th>
+                    <th>建议</th>
+                    <th>发布能力</th>
+                    <th>进入下一阶段的条件</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><span class="badge badge-p0">P0</span></td>
+                    <td>
+                      中证 300/500/1000、上证 50、深证成指、创业板指等 6～10 条高价值
+                      A 股宽基指数；指数身份、方法学版本、正式调样事件
+                    </td>
+                    <td><strong>建议接入</strong></td>
+                    <td>
+                      指数目录；有官方证据的有效成分；公告与生效事件；当前观测快照隔离发布
+                    </td>
+                    <td>固定版本函数验证、证券身份 100% 解析、公告—生效对账、可回放恢复通过</td>
+                  </tr>
+                  <tr>
+                    <td><span class="badge badge-p1">P1</span></td>
+                    <td>
+                      官方收盘权重、更多可投资宽基/行业指数、国证历史样本与历史调样、
+                      中证历史档案补齐
+                    </td>
+                    <td><strong>条件接入</strong></td>
+                    <td>按日权重、完整快照、可配置 PIT 查询、修订版本</td>
+                    <td>历史深度实测、权重口径确认、数据再分发范围确认、连续稳定性达标</td>
+                  </tr>
+                  <tr>
+                    <td><span class="badge badge-p2">P2</span></td>
+                    <td>长尾主题指数、停编/代码链自动化、其他指数管理人和非股票指数目录</td>
+                    <td><strong>按需接入</strong></td>
+                    <td>扩展目录与生命周期；非股票成分仍按资产域隔离</td>
+                    <td>明确消费者、资产身份与日历边界，且增量成本低于独立采购/按需查询</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="two-col">
+              <article class="mini-card">
+                <h3>推荐来源路线</h3>
+                <ul>
+                  <li>业务来源身份：中证指数有限公司、深圳证券信息有限公司（国证指数）。</li>
+                  <li>采集实现：初期允许在 Adapter 内使用仓库固定 AKShare 版本。</li>
+                  <li>时间证据：官方调样/修订公告、方法学文件及其哈希。</li>
+                  <li>不得把 AKShare 名称写入 canonical 字段或对外响应。</li>
+                </ul>
+              </article>
+              <article class="mini-card">
+                <h3>明确不建议</h3>
+                <ul>
+                  <li>不从当前成分文件倒推过去任意日期的成分。</li>
+                  <li>不把收盘权重当成下次调样的目标权重。</li>
+                  <li>不按代码或名称跨管理人静默合并指数。</li>
+                  <li>不在 Adapter 外访问 SDK、URL 或保留供应商字段。</li>
+                </ul>
+              </article>
+            </div>
+          </section>
+
+          <section id="scope">
+            <h2>2. 业务价值、范围与边界</h2>
+            <h3>2.1 目标用户与消费场景</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>目标用户</th>
+                    <th>场景</th>
+                    <th>需要的数据语义</th>
+                    <th>失败代价</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>量化研究员</td>
+                    <td>指数样本池、成分进入/退出事件、基准收益归因、横截面因子评估</td>
+                    <td>交易日有效 + 当时已公开的 PIT 成分；明确修订版本</td>
+                    <td>样本选择偏差、未来函数、回测虚高</td>
+                  </tr>
+                  <tr>
+                    <td>投研/产品用户</td>
+                    <td>指数画像、成分查询、行业/市值暴露、权重集中度</td>
+                    <td>最新已发布版本、来源、质量状态、权重日期</td>
+                    <td>展示错误、口径争议、错误决策</td>
+                  </tr>
+                  <tr>
+                    <td>ETF 分析消费者</td>
+                    <td>跟踪标的映射、理论组合对比、调样影响预估</td>
+                    <td>指数身份链、公告与生效分离、目标/收盘权重分离</td>
+                    <td>误判跟踪差异或调仓窗口</td>
+                  </tr>
+                  <tr>
+                    <td>平台运维与数据治理</td>
+                    <td>来源审计、批次回放、差异检测、质量隔离</td>
+                    <td>原始载荷、批次、方法学、修订、可见时间完整可追溯</td>
+                    <td>无法解释、无法恢复、错误版本持续外发</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3>2.2 领域边界</h3>
+            <ul>
+              <li>
+                本专题负责指数目录、指数生命周期、方法学版本、成分/权重快照、调样与修订事件。
+              </li>
+              <li>
+                股票身份与代码复用由既有
+                <a href="../0014-equity-instrument-master/index.html">0014 股票主数据方案</a>
+                及其后续统一模型负责；本域只保存不可变的身份引用和上游原值。
+              </li>
+              <li>
+                交易日历、来源批次、原始载荷、质量结果、隔离记录、发布版本和 checkpoint
+                为跨专题共享能力，留给后续统一 canonical data model 方案定义。
+              </li>
+              <li>
+                指数行情、ETF NAV、衍生品合约和公司财务不是本专题表；可以通过指数身份关联，
+                不得混表。
+              </li>
+              <li>
+                非股票指数可以进入目录，但其成分必须等对应资产身份域就绪后再发布，避免把债券、
+                期货或基金代码误解为股票代码。
+              </li>
+            </ul>
+
+            <div class="callout risk">
+              <span class="label-line label-assumption">范围假设</span>
+              P0 消费者优先需要 A 股宽基指数，白名单暂按 6～10 条估算。最终白名单由量化研究负责人在
+              P0 开始前确认；若未确认，技术兜底为仅启用中证 300/500/1000、上证 50、深证成指、
+              创业板指，其他指数保持禁用。
+            </div>
+          </section>
+
+          <section id="evidence">
+            <h2>3. 事实、推断、建议与未决</h2>
+            <div class="table-wrap">
+              <table class="wide">
+                <thead>
+                  <tr>
+                    <th>分类</th>
+                    <th>陈述</th>
+                    <th>证据/理由</th>
+                    <th>对方案的影响</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><span class="label-line label-fact">事实</span></td>
+                    <td>
+                      仓库固定 <code>akshare==1.18.78</code>；现有 0005 探测中，中证权重接口对
+                      000300、000016、000905、899050 返回一个 2026-06-30 快照，
+                      399006 失败。
+                    </td>
+                    <td>
+                      <a href="../0005-akshare-b03-initial-research/index.html">0005 B03 调研</a>
+                      的短样本证据；本次仅离线检查固定镜像中的函数签名与实现，未重复联网探测。
+                    </td>
+                    <td>不能把单次成功视作稳定接入，也不能假设中证接口覆盖国证代码。</td>
+                  </tr>
+                  <tr>
+                    <td><span class="label-line label-fact">事实</span></td>
+                    <td>
+                      固定版 <code>index_detail_cni</code> 与
+                      <code>index_detail_hist_cni</code> 实现调用同一
+                      <code>/sample-detail/download-history</code> 地址；当前在线文档却把两者描述为
+                      “近期数据”和“全部历史数据”。
+                    </td>
+                    <td>固定镜像源码检查；AKShare 在线文档当前标示 1.18.80。</td>
+                    <td>函数名不能证明历史范围；必须在固定版本上用日期覆盖率矩阵验真。</td>
+                  </tr>
+                  <tr>
+                    <td><span class="label-line label-fact">事实</span></td>
+                    <td>
+                      官方方法学的调样频率不是全局常量：中证指数可按半年、季度或临时规则调整；
+                      国证公告也存在代码、名称、方法学与生效日同时变化。
+                    </td>
+                    <td>中证股票指数样本调整规则、具体指数方法学及国证官方修订公告。</td>
+                    <td>频率、缓冲区和权重限制必须绑定方法学版本，不可写死在共享任务中。</td>
+                  </tr>
+                  <tr>
+                    <td><span class="label-line label-fact">事实</span></td>
+                    <td>现有代码没有指数目录、指数成分或权重的生产模型、任务与路由。</td>
+                    <td>
+                      CodeGraph 对相关 capability、Adapter、模型与客户端的检索；最近的可复用链路是
+                      板块成分同步与股票身份解析。
+                    </td>
+                    <td>需要新建指数域，不能复用板块表伪装指数。</td>
+                  </tr>
+                  <tr>
+                    <td><span class="label-line label-decision">建议</span></td>
+                    <td>
+                      按管理人和数据集固定来源策略；数据集之间可以组合，但一条记录不得静默混用来源。
+                    </td>
+                    <td>中证与国证覆盖、字段、历史深度和调样文件语义不同。</td>
+                    <td>任务、批次、版本和查询响应均携带来源策略与方法学版本。</td>
+                  </tr>
+                  <tr>
+                    <td><span class="label-line label-assumption">假设</span></td>
+                    <td>
+                      P0 以公开官方文件支撑内部研究使用；是否允许长期存储、对外再分发原始权重或完整成分，
+                      尚未取得逐项确认。
+                    </td>
+                    <td>官网公开可访问不自动等于允许任意再分发。</td>
+                    <td>不阻断方案与影子同步，但阻断对应字段的生产外发，详见 G2。</td>
+                  </tr>
+                  <tr>
+                    <td><span class="label-line label-open">未决</span></td>
+                    <td>中证历史成分/权重的公开可得深度、公告文件稳定 URL 与修订保留策略。</td>
+                    <td>当前 AKShare 中证接口只明确“最新成分/权重”。</td>
+                    <td>P1 回补可能需要官方历史档案或授权数据，不得用当前快照替代。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="sources">
+            <h2>4. 权威来源、AKShare 函数与历史可得性</h2>
+            <p class="section-lead">
+              “真实上游”表示业务事实的发布者；AKShare 只是 Adapter 内的采集实现。
+              下表中的稳定性和历史深度是本次调研结论，不是生产 SLA。
+            </p>
+
+            <div class="table-wrap">
+              <table class="wide">
+                <thead>
+                  <tr>
+                    <th>能力</th>
+                    <th>固定版函数签名</th>
+                    <th>真实上游</th>
+                    <th>粒度/主要字段</th>
+                    <th>历史与稳定性结论</th>
+                    <th>限流/授权结论</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>中证指数目录</td>
+                    <td><code>index_csindex_all()</code></td>
+                    <td>中证指数官网 Excel 导出</td>
+                    <td>指数一行；代码、简称、基日、基点、发布日期、样本数等</td>
+                    <td>
+                      最新目录快照；固定实现向官网导出接口发起请求。目录覆盖范围需按
+                      <code>indexSeries</code> 实测。
+                    </td>
+                    <td rowspan="3">
+                      官方未在所读页面给出可依赖的机器访问 SLA 或限流额度。
+                      生产频率须低速、缓存、带退避；存储与再分发范围需确认。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>中证当前成分</td>
+                    <td><code>index_stock_cons_csindex(symbol="000300")</code></td>
+                    <td>中证官方 OSS 成分文件</td>
+                    <td>指数 × 快照日期 × 证券；证券代码、名称、交易所</td>
+                    <td>
+                      在线文档明确“最新成份股”。不提供日期参数，不具备任意历史回补能力。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>中证当前权重</td>
+                    <td><code>index_stock_cons_weight_csindex(symbol="000300")</code></td>
+                    <td>中证官方 OSS 收盘权重文件</td>
+                    <td>指数 × 权重日期 × 证券；权重单位为百分比</td>
+                    <td>
+                      最新权重快照；仓库既有短探测只见单一日期，不能证明每日更新、历史深度或
+                      P0 全白名单兼容。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>国证指数目录</td>
+                    <td><code>index_all_cni()</code></td>
+                    <td>国证指数网</td>
+                    <td>
+                      指数一行；代码、名称、基日/基点、发布日期、样本数、币种、资产类别和估值指标
+                    </td>
+                    <td>
+                      最新交易日目录。固定实现单次请求 <code>rows=2000</code>，未循环分页；
+                      超过上限时可能静默截断，且目录混合股票、债券、货币、REITs 等类别。
+                    </td>
+                    <td rowspan="4">
+                      未发现可承诺的限流和稳定性 SLA；历史下载规模、HTTP/HTTPS 行为及许可范围需验证。
+                      不因未确认而阻断调研，但未过门禁不得生产外发。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>国证样本明细</td>
+                    <td><code>index_detail_cni(symbol="399001")</code></td>
+                    <td>国证指数网历史下载</td>
+                    <td>指数 × 日期 × 证券；行业、总市值、权重</td>
+                    <td>
+                      在线 1.18.80 文档称 2025-11-25 后“近期数据”；固定 1.18.78 实现与历史函数同源，
+                      真实范围待测。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>国证历史样本</td>
+                    <td><code>index_detail_hist_cni(symbol="399001")</code></td>
+                    <td>国证指数网历史下载</td>
+                    <td>同上</td>
+                    <td>
+                      在线文档称“全部历史数据”；固定实现与前一函数同端点，因此不能把两个函数视为
+                      独立冗余源。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>国证历史调样</td>
+                    <td><code>index_detail_hist_adjust_cni(symbol="399005")</code></td>
+                    <td>国证指数网历史调样下载</td>
+                    <td>指数 × 调样区间 × 证券；起止日、调整类型、行业</td>
+                    <td>
+                      固定实现使用 HTTP 下载并在坏 ZIP 时返回空表；“空表”与“下载失败”必须通过
+                      原始响应和状态码区分。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>官方公告/方法学</td>
+                    <td>专用公告与文件 Adapter，不在现有函数内</td>
+                    <td>中证、上交所披露、国证指数网</td>
+                    <td>公告/文件一行；发布时间、生效日、事件、版本、附件哈希</td>
+                    <td>
+                      是生效时间、代码变更、停编和方法学修订的权威证据；
+                      页面结构与附件链接仍需版本化解析和人工抽检。
+                    </td>
+                    <td>低频抓取、条件请求、留存原文；再分发以链接和必要元数据为默认兜底。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3>4.1 Provider Adapter 约束</h3>
+            <ul>
+              <li>
+                Adapter 对内只实现 Provider-neutral capability：
+                <code>index.catalog.snapshot</code>、
+                <code>index.constituent.snapshot</code>、
+                <code>index.weight.snapshot</code>、
+                <code>index.adjustment.history</code>、
+                <code>index.methodology.document</code>。
+              </li>
+              <li>
+                SDK 名、URL、工作表名、中文原始列名、坏 ZIP 特判、分页参数和请求头只能存在于 Adapter；
+                Adapter 不写数据库。
+              </li>
+              <li>
+                每个 capability 固定 <code>source_policy</code>、固定管理人、固定
+                <code>adapter_version</code> 与 <code>schema_fingerprint</code>；
+                上游异常时不得切到其他来源并沿用同一数据版本。
+              </li>
+              <li>
+                生产启用前至少对 P0 白名单完成 5 个连续交易日短探测和一次正式调样窗口回放；
+                “单次调通”只记为实验事实。
+              </li>
+            </ul>
+
+            <div class="callout danger">
+              <span class="label-line label-decision">版本漂移处理</span>
+              线上 AKShare 文档当前为 1.18.80，而仓库固定 1.18.78。设计与验收以固定镜像真实行为为准；
+              在线文档只作候选说明。任何依赖升级均另立变更，不在本文范围内。
+            </div>
+          </section>
+
+          <section id="datasets">
+            <h2>5. Canonical dataset、粒度与字段字典</h2>
+            <h3>5.1 建议的数据集边界</h3>
+            <div class="table-wrap">
+              <table class="wide">
+                <thead>
+                  <tr>
+                    <th>dataset 标识</th>
+                    <th>业务粒度</th>
+                    <th>候选唯一键</th>
+                    <th>时间主轴</th>
+                    <th>主要消费者</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>index.catalog</code></td>
+                    <td>一个管理人下的一条指数身份版本</td>
+                    <td>
+                      <code>(administrator_code, index_code, valid_from, known_from)</code>
+                    </td>
+                    <td>身份有效区间 + 系统知悉区间</td>
+                    <td>指数检索、ETF 跟踪标的、所有下游外键</td>
+                  </tr>
+                  <tr>
+                    <td><code>index.methodology.version</code></td>
+                    <td>一条指数的一版方法学</td>
+                    <td><code>(index_id, methodology_hash, effective_from)</code></td>
+                    <td>发布、有效、抓取、修订时间</td>
+                    <td>规则解释、权重口径、调样频率审计</td>
+                  </tr>
+                  <tr>
+                    <td><code>index.constituent.observed_snapshot</code></td>
+                    <td>一次观察到的完整快照中的一只证券</td>
+                    <td><code>(snapshot_id, security_id)</code></td>
+                    <td>来源日期 + 观察时间；无证据时无有效区间</td>
+                    <td>最新展示、差异侦测；默认禁止历史回测</td>
+                  </tr>
+                  <tr>
+                    <td><code>index.constituent.effective</code></td>
+                    <td>一条指数在一个有效区间内的一只证券</td>
+                    <td>
+                      <code>(index_id, security_id, effective_from, revision_no)</code>
+                    </td>
+                    <td>生效区间 + 来源可见时间 + 修订知悉区间</td>
+                    <td>PIT 样本池、事件研究、基准归因</td>
+                  </tr>
+                  <tr>
+                    <td><code>index.weight.close</code></td>
+                    <td>一条指数在一个来源日期的一只证券的官方收盘权重</td>
+                    <td>
+                      <code>(index_id, security_id, weight_date, weight_type, revision_no)</code>
+                    </td>
+                    <td>权重日期 + 来源可见时间</td>
+                    <td>权重暴露、集中度、跟踪对比</td>
+                  </tr>
+                  <tr>
+                    <td><code>index.adjustment.event</code></td>
+                    <td>一份公告/修订中的一个指数事件及其证券动作</td>
+                    <td><code>(index_id, upstream_notice_id, revision_no, item_seq)</code></td>
+                    <td>公告、可见、生效、修订时间</td>
+                    <td>调样日历、PIT 重建、代码/停编生命周期</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="callout">
+              <span class="label-line label-decision">语义隔离</span>
+              <code>observed_snapshot</code> 与 <code>effective</code> 是不同数据集：
+              前者回答“系统在何时看见官网当前列表”，后者回答“官方证据表明哪段交易日有效”。
+              即使两者内容相同，也不能通过改字段标志在原位互换。
+            </div>
+
+            <h3>5.2 候选实体身份</h3>
+            <ul>
+              <li>
+                指数全局身份不得只用六位代码；候选业务键为
+                <code>administrator_code + index_code + valid interval</code>。
+                同名不同管理人保持不同 <code>index_id</code>。
+              </li>
+              <li>
+                代码、简称、全称都可随时间变化。代码变更建立 identifier 版本链，不创建无关的新指数；
+                是否延续同一指数以官方公告为证据。
+              </li>
+              <li>
+                成分证券通过交易所、证券代码、事实日期与系统知悉时间调用股票身份解析；
+                不以证券名称匹配，无法唯一解析即隔离整份正式快照。
+              </li>
+              <li>
+                管理人、指数、证券和方法学均保存上游原始标识，便于审计；原始标识不作为跨服务公共 ID。
+              </li>
+            </ul>
+
+            <h3>5.3 领域字段字典</h3>
+            <div class="table-wrap">
+              <table class="wide">
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>建议类型</th>
+                    <th>单位/时区</th>
+                    <th>空值语义</th>
+                    <th>说明与约束</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>index_id</code></td>
+                    <td><code>uuid</code></td>
+                    <td>—</td>
+                    <td>不可为空</td>
+                    <td>平台稳定身份；不对业务猜测赋值。</td>
+                  </tr>
+                  <tr>
+                    <td><code>administrator_code</code></td>
+                    <td><code>text</code></td>
+                    <td>—</td>
+                    <td>不可为空</td>
+                    <td>如 <code>CSI</code>、<code>CNI</code>；受枚举/参考数据约束。</td>
+                  </tr>
+                  <tr>
+                    <td><code>index_code</code></td>
+                    <td><code>text</code></td>
+                    <td>—</td>
+                    <td>不可为空</td>
+                    <td>保留前导零；与管理人和有效区间共同解释。</td>
+                  </tr>
+                  <tr>
+                    <td><code>index_name</code></td>
+                    <td><code>text</code></td>
+                    <td>—</td>
+                    <td>不可为空</td>
+                    <td>版本化名称；简称与英文名独立字段。</td>
+                  </tr>
+                  <tr>
+                    <td><code>asset_scope</code></td>
+                    <td><code>text</code></td>
+                    <td>—</td>
+                    <td>未知时为 <code>UNKNOWN</code>，不得猜测</td>
+                    <td>如 <code>EQUITY_CN_A</code>、<code>BOND</code>、<code>MULTI_ASSET</code>。</td>
+                  </tr>
+                  <tr>
+                    <td><code>currency</code></td>
+                    <td><code>char(3)</code></td>
+                    <td>ISO 4217</td>
+                    <td>来源未披露时为空</td>
+                    <td>不从交易所或名称推断。</td>
+                  </tr>
+                  <tr>
+                    <td><code>base_date</code></td>
+                    <td><code>date</code></td>
+                    <td>指数方法学日期</td>
+                    <td>来源未披露时为空</td>
+                    <td>不是发布日期或首个行情日。</td>
+                  </tr>
+                  <tr>
+                    <td><code>base_value</code></td>
+                    <td><code>numeric(24,8)</code></td>
+                    <td>指数点</td>
+                    <td>来源未披露时为空</td>
+                    <td>必须与基日同一方法学版本。</td>
+                  </tr>
+                  <tr>
+                    <td><code>launch_date</code> / <code>termination_date</code></td>
+                    <td><code>date</code></td>
+                    <td>Asia/Shanghai 业务日</td>
+                    <td>未发布/仍存续时后者为空</td>
+                    <td>停编不删除历史；状态与终止原因另存。</td>
+                  </tr>
+                  <tr>
+                    <td><code>source_as_of_date</code></td>
+                    <td><code>date</code></td>
+                    <td>来源声明的业务日</td>
+                    <td>来源无日期则整批隔离</td>
+                    <td>描述快照/权重属于哪一天，不自动等于生效日。</td>
+                  </tr>
+                  <tr>
+                    <td><code>observed_at</code></td>
+                    <td><code>timestamptz</code></td>
+                    <td>UTC 存储</td>
+                    <td>不可为空</td>
+                    <td>系统实际抓取时间；展示时转 Asia/Shanghai。</td>
+                  </tr>
+                  <tr>
+                    <td><code>announced_at</code></td>
+                    <td><code>timestamptz</code></td>
+                    <td>UTC 存储</td>
+                    <td>无公告的纯观测快照为空</td>
+                    <td>官方发布时刻；只有日期时配合精度与保守可用策略。</td>
+                  </tr>
+                  <tr>
+                    <td><code>source_visible_at</code></td>
+                    <td><code>timestamptz</code></td>
+                    <td>UTC 存储</td>
+                    <td>PIT 数据不可为空</td>
+                    <td>公众最早可获得该版本的时间；不是系统抓取时间。</td>
+                  </tr>
+                  <tr>
+                    <td><code>time_precision</code></td>
+                    <td><code>text</code></td>
+                    <td>—</td>
+                    <td>不可为空</td>
+                    <td><code>EXACT</code>、<code>DATE_ONLY</code>、<code>DERIVED_CONSERVATIVE</code>。</td>
+                  </tr>
+                  <tr>
+                    <td><code>effective_from</code> / <code>effective_to</code></td>
+                    <td><code>date</code></td>
+                    <td>目标市场交易日；左闭右开</td>
+                    <td>观测快照允许为空；存续区间后者为空</td>
+                    <td>只由官方公告/规则确定；不能从抓取时间推断。</td>
+                  </tr>
+                  <tr>
+                    <td><code>system_known_from</code> / <code>system_known_to</code></td>
+                    <td><code>timestamptz</code></td>
+                    <td>UTC 存储；左闭右开</td>
+                    <td>当前版本的 <code>system_known_to</code> 为空</td>
+                    <td>系统何时知悉该修订，支持运行态重放与审计。</td>
+                  </tr>
+                  <tr>
+                    <td><code>security_id</code></td>
+                    <td><code>uuid</code></td>
+                    <td>—</td>
+                    <td>正式发布不可为空</td>
+                    <td>由共享证券身份能力解析；上游代码和交易所原值另存。</td>
+                  </tr>
+                  <tr>
+                    <td><code>weight_value</code></td>
+                    <td><code>numeric(18,8)</code></td>
+                    <td>百分比（0～100）</td>
+                    <td>来源不提供权重时为空；空不等于 0</td>
+                    <td>禁止在归一化时改为 0～1；消费层可显式换算。</td>
+                  </tr>
+                  <tr>
+                    <td><code>weight_type</code></td>
+                    <td><code>text</code></td>
+                    <td>—</td>
+                    <td>有权重时不可为空</td>
+                    <td>
+                      <code>OFFICIAL_CLOSE</code>、<code>TARGET_REBALANCE</code>、
+                      <code>OBSERVED</code>，不得互换。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>source_total_market_cap</code></td>
+                    <td><code>numeric(28,4)</code></td>
+                    <td>由 <code>source_unit</code> 明示</td>
+                    <td>来源不提供或单位未验证时为空</td>
+                    <td>国证候选字段；单位未确认前只保留原始载荷，不发布规范化值。</td>
+                  </tr>
+                  <tr>
+                    <td><code>adjustment_action</code></td>
+                    <td><code>text</code></td>
+                    <td>—</td>
+                    <td>非调样记录为空</td>
+                    <td><code>ADD</code>、<code>REMOVE</code>、<code>CODE_CHANGE</code> 等。</td>
+                  </tr>
+                  <tr>
+                    <td><code>revision_no</code></td>
+                    <td><code>integer</code></td>
+                    <td>从 1 递增</td>
+                    <td>不可为空</td>
+                    <td>同一上游事实的更正追加版本，不覆盖旧值。</td>
+                  </tr>
+                  <tr>
+                    <td><code>methodology_version</code></td>
+                    <td><code>text</code></td>
+                    <td>—</td>
+                    <td>来源未标版本时用文件哈希身份，不伪造编号</td>
+                    <td>权重、选样、频率和缓冲区解释均绑定此版本。</td>
+                  </tr>
+                  <tr>
+                    <td><code>data_version</code></td>
+                    <td><code>text</code></td>
+                    <td>不透明稳定标识</td>
+                    <td>发布记录不可为空</td>
+                    <td>由共享发布层生成；同内容重跑不制造业务新版本。</td>
+                  </tr>
+                  <tr>
+                    <td><code>quality_status</code></td>
+                    <td><code>text</code></td>
+                    <td>—</td>
+                    <td>不可为空</td>
+                    <td>候选状态：<code>RELEASED</code>、<code>WARN</code>、<code>QUARANTINED</code>。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="temporal">
+            <h2>6. 时态、调样与 point-in-time 重建</h2>
+            <p class="section-lead">
+              指数数据至少同时存在“来源何时公开”“规则何时生效”“系统何时知悉”三条时间轴。
+              任一轴缺失都不能用当前记录填补。
+            </p>
+
+            <div class="flow" aria-label="指数调样时间线">
+              <div class="flow-step">
+                <strong>方法学评审</strong>
+                <span>内部计算可能已完成，但对消费者不可见，不进入数据。</span>
+              </div>
+              <div class="flow-step">
+                <strong>公告发布</strong>
+                <span><code>announced_at</code> / <code>source_visible_at</code>，可用于预告。</span>
+              </div>
+              <div class="flow-step">
+                <strong>系统采集</strong>
+                <span><code>system_known_from</code>，记录真实运行态知悉时间。</span>
+              </div>
+              <div class="flow-step">
+                <strong>调整生效</strong>
+                <span><code>effective_from</code>，通常在指定收盘后或下一交易日。</span>
+              </div>
+              <div class="flow-step">
+                <strong>后续修订</strong>
+                <span>新 <code>revision_no</code>，关闭旧知悉区间但保留旧事实。</span>
+              </div>
+            </div>
+
+            <h3>6.1 两种 as-of 语义</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>查询模式</th>
+                    <th>过滤规则</th>
+                    <th>用途</th>
+                    <th>限制</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>PUBLIC_PIT</code></td>
+                    <td>
+                      <code>source_visible_at ≤ as_of</code> 且
+                      <code>effective_from ≤ trade_date &lt; effective_to</code>
+                    </td>
+                    <td>历史回测中模拟当时公开信息；允许后来回补旧公告。</td>
+                    <td>必须保留发布时间精度和保守推导规则，禁止回填假精确时间。</td>
+                  </tr>
+                  <tr>
+                    <td><code>OPERATIONAL_REPLAY</code></td>
+                    <td>
+                      在前述条件上增加
+                      <code>system_known_from ≤ as_of &lt; system_known_to</code>
+                    </td>
+                    <td>复现平台在某一时刻实际对外服务的版本。</td>
+                    <td>历史回补前的运行时刻不会看到后来补录的信息。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3>6.2 成分与权重重建规则</h3>
+            <ol>
+              <li>
+                先按指数身份版本解析查询日期，处理代码变更、停编和同代码复用，再选择成分。
+              </li>
+              <li>
+                调样公告可以在生效前对消费者可见，但新成分只能从
+                <code>effective_from</code> 起进入指数；公告日收益不得归因给尚未生效成分。
+              </li>
+              <li>
+                只有明确的官方公告、历史调样文件或带生效日期的权威快照，才可构造
+                <code>index.constituent.effective</code>。
+              </li>
+              <li>
+                当前快照之间的差异只能生成“候选变更”，不能自动把上次观察日至本次观察日写成真实有效区间。
+              </li>
+              <li>
+                一份不健康或不完整的新快照不能关闭旧有效区间；先隔离，待完整快照或正式事件证据到达。
+              </li>
+              <li>
+                收盘权重按 <code>weight_date</code> 使用。若查询日没有同日权重，默认返回缺失，
+                不插值、不把调样目标权重向后填充；消费者可显式请求“最近已知官方收盘权重”，
+                响应必须携带原权重日期。
+              </li>
+              <li>
+                若公告只有日期、没有时间，保存 <code>DATE_ONLY</code>，PIT 可用时间保守设为官方市场的
+                下一交易日开盘；若能验证当日收盘前已公开，才使用更早时刻。
+              </li>
+            </ol>
+
+            <div class="callout risk">
+              <span class="label-line label-fact">官方示例</span>
+              中证 300 方法学说明半年定期审核通常在 5 月下旬、11 月下旬，调整通常在 6 月、12 月第二个
+              星期五的下一交易日实施；但其他中证指数存在季度、事件触发或跟随母指数调整。
+              因此该规则只属于对应方法学版本，不能成为全域默认值。国证官方公告也证明“公告日期”和
+              “实施日期”是两个字段，且代码与名称可能在实施日同时改变。
+            </div>
+
+            <h3>6.3 修订、撤回、停编与代码变化</h3>
+            <ul>
+              <li>
+                更正和补充披露追加新版本，并通过 <code>supersedes_revision_no</code> 指向旧版本；
+                旧版本仍可用于运行态重放。
+              </li>
+              <li>
+                撤回事件保存为新修订状态，不物理删除原公告；受影响有效区间从最早受影响事件重算。
+              </li>
+              <li>
+                停编设置指数生命周期终点，不删除历史成分、权重和方法学；终止后的查询返回明确状态。
+              </li>
+              <li>
+                代码变化以官方连续性证据连接 identifier 版本；若公告未说明延续，则进入人工复核，
+                不按名称自动合并。
+              </li>
+            </ul>
+          </section>
+
+          <section id="sync">
+            <h2>7. 同步模式、分区、幂等与恢复</h2>
+            <h3>7.1 计划任务与分区</h3>
+            <div class="table-wrap">
+              <table class="wide">
+                <thead>
+                  <tr>
+                    <th>任务</th>
+                    <th>建议频率</th>
+                    <th>逻辑分区键</th>
+                    <th>增量/回补</th>
+                    <th>空结果语义</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>指数目录快照</td>
+                    <td>交易日收盘后每日一次；稳定后可降为每周 + 公告触发</td>
+                    <td><code>(administrator, catalog_date)</code></td>
+                    <td>完整快照比较；生命周期变化追加版本</td>
+                    <td>空目录一律异常，不关闭任何身份</td>
+                  </tr>
+                  <tr>
+                    <td>当前成分/权重</td>
+                    <td>P0 交易日收盘后；按管理人限速串行</td>
+                    <td><code>(administrator, index_code, dataset, source_date)</code></td>
+                    <td>完整快照；同内容只记录新抓取批次，不制造新业务版本</td>
+                    <td>活跃指数空快照隔离；停编也需生命周期证据</td>
+                  </tr>
+                  <tr>
+                    <td>公告与方法学</td>
+                    <td>工作日每 2～4 小时低频轮询；支持人工指定 URL 回补</td>
+                    <td><code>(administrator, notice_date, page)</code></td>
+                    <td>按公告 ID/URL + 内容哈希；附件变化产生修订</td>
+                    <td>无新公告是正常；页面解析为空但结构变更是异常</td>
+                  </tr>
+                  <tr>
+                    <td>历史样本/调样回补</td>
+                    <td>人工控制的限速批次，不与日常任务并发争抢来源</td>
+                    <td><code>(administrator, index_code, year_or_range)</code></td>
+                    <td>由近及远或按年份；每段独立 checkpoint</td>
+                    <td>必须区分“来源确无记录”“下载失败”“解析为空”</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3>7.2 执行链与事务边界</h3>
+            <div class="flow" aria-label="同步执行链">
+              <div class="flow-step">
+                <strong>解析计划</strong>
+                <span>固定白名单、来源策略、schema 与方法学预期；生成幂等键。</span>
+              </div>
+              <div class="flow-step">
+                <strong>抓取原始数据</strong>
+                <span>Adapter 获取；原始响应先写对象存储并计算哈希。</span>
+              </div>
+              <div class="flow-step">
+                <strong>规范化</strong>
+                <span>解析身份、时间、单位和权重类型；不确定值留空。</span>
+              </div>
+              <div class="flow-step">
+                <strong>质量门禁</strong>
+                <span>完整性、身份、时间、权重、差异与 schema 检查。</span>
+              </div>
+              <div class="flow-step">
+                <strong>原子发布</strong>
+                <span>单分区事务写入版本；成功后更新发布指针与 checkpoint。</span>
+              </div>
+            </div>
+
+            <ul>
+              <li>
+                请求幂等键候选：
+                <code>capability|administrator|index_code|dataset|target_date|source_policy|schema_version</code>。
+              </li>
+              <li>
+                同一逻辑分区使用数据库 advisory lock 或任务级互斥锁；不同指数可受控并发，
+                同指数同日期禁止并行发布。
+              </li>
+              <li>
+                每次抓取均生成来源批次；业务内容哈希相同时，不新建 canonical 修订，
+                但保留抓取观测用于稳定性和来源审计。
+              </li>
+              <li>
+                canonical 写入、修订区间关闭、质量结果和发布版本在单事务内完成；
+                对象存储原始载荷先于数据库事务写入。
+              </li>
+              <li>
+                checkpoint 只在事务提交和发布指针更新后推进；失败重试从原始载荷或未完成分区恢复。
+              </li>
+            </ul>
+
+            <h3>7.3 重试、回补与恢复</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>故障</th>
+                    <th>处理</th>
+                    <th>恢复证据</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>网络超时、429、5xx</td>
+                    <td>最多 3 次指数退避并加随机抖动；尊重 <code>Retry-After</code>；不切换来源</td>
+                    <td>重试次数、状态码、耗时与最终批次状态</td>
+                  </tr>
+                  <tr>
+                    <td>schema 漂移、坏 ZIP、活动指数空表</td>
+                    <td>不盲重试；保留原始载荷、隔离分区、触发告警</td>
+                    <td>新旧 fingerprint 差异、解析错误样本、人工/自动判定</td>
+                  </tr>
+                  <tr>
+                    <td>证券身份冲突</td>
+                    <td>整份正式快照不发布；未解析行进入隔离记录</td>
+                    <td>身份解析报告、候选交易所/代码版本、冲突归零</td>
+                  </tr>
+                  <tr>
+                    <td>错误版本已发布</td>
+                    <td>发布指针回退到上一健康版本；错误版本保留并标记撤销，不物理删除</td>
+                    <td>回退前后版本、审计日志、消费者缓存失效记录</td>
+                  </tr>
+                  <tr>
+                    <td>历史修订到达</td>
+                    <td>从最早受影响公告/生效日重算该指数区间；其他指数不受影响</td>
+                    <td>重算范围、前后差异、闭区间/重叠检查、回放快照</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="callout fact">
+              <span class="label-line label-decision">回补边界</span>
+              国证历史能力可在验证后按年份回补；中证当前成分/权重文件没有日期参数，
+              因而中证历史只能来自官方历史档案、正式公告/附件、授权数据，或从系统启用日起持续保存的每日快照。
+              不存在可信来源的日期必须显式留缺口。
+            </div>
+          </section>
+
+          <section id="quality">
+            <h2>8. 数据质量、口径隔离与未来函数</h2>
+            <h3>8.1 发布前质量规则</h3>
+            <div class="table-wrap">
+              <table class="wide">
+                <thead>
+                  <tr>
+                    <th>规则</th>
+                    <th>阻断阈值</th>
+                    <th>告警阈值</th>
+                    <th>处置</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>schema 与列语义</td>
+                    <td>必需列缺失、类型不可解析、fingerprint 未登记</td>
+                    <td>列顺序/可选列变化</td>
+                    <td>原始批次保留，分区隔离，Adapter 映射经评审后升版</td>
+                  </tr>
+                  <tr>
+                    <td>指数身份</td>
+                    <td>管理人 + 代码在事实日不能唯一解析</td>
+                    <td>名称与目录不一致</td>
+                    <td>不按名称自动修复；核对代码变更/公告</td>
+                  </tr>
+                  <tr>
+                    <td>证券身份</td>
+                    <td>正式快照解析率低于 100%，或一行解析到多只证券</td>
+                    <td>仅名称变化</td>
+                    <td>整份正式快照隔离；观测快照可保留原始值但不发布 canonical</td>
+                  </tr>
+                  <tr>
+                    <td>重复</td>
+                    <td>同一快照同一 <code>security_id</code> 超过一行</td>
+                    <td>同源原始重复但可完全等值折叠</td>
+                    <td>记录重复数；只有逐字段等值才允许归一化去重</td>
+                  </tr>
+                  <tr>
+                    <td>时间顺序</td>
+                    <td>
+                      <code>effective_to ≤ effective_from</code>、有效区间重叠、
+                      修订知悉区间重叠、未来来源日期
+                    </td>
+                    <td>公告日与生效日异常接近或超出方法学预期</td>
+                    <td>阻断 PIT 发布；与官方公告和日历对账</td>
+                  </tr>
+                  <tr>
+                    <td>权重范围</td>
+                    <td>非空权重 &lt; 0 或 &gt; 100；单位不明</td>
+                    <td>单一权重超出对应方法学上限</td>
+                    <td>单位不明不做数值转换；方法学上限告警需考虑临时漂移</td>
+                  </tr>
+                  <tr>
+                    <td>权重合计</td>
+                    <td>
+                      仅当来源声明“完整官方权重”时，
+                      <code>|Σw - 100| &gt; max(0.05, n × 0.5 × 10^-p)</code> 个百分点
+                    </td>
+                    <td>接近阈值或较上一日突变</td>
+                    <td>
+                      <code>p</code> 为来源小数位数；阈值需用 5 日样本校准。
+                      非完整数据不得套用 100% 合计规则。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>快照差异</td>
+                    <td>活动指数样本数变为 0，或无公告时超过 30% 成分变化</td>
+                    <td>无公告时任一成分变化；样本数偏离方法学</td>
+                    <td>差异只生成候选事件；不自动关闭旧有效区间</td>
+                  </tr>
+                  <tr>
+                    <td>目录完整性</td>
+                    <td>P0 白名单任一活跃指数缺失</td>
+                    <td>目录总数下降或触及国证 2000 行请求上限</td>
+                    <td>保留上一健康目录；验证分页/过滤策略</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3>8.2 明确禁止的未来函数</h3>
+            <div class="two-col">
+              <article class="mini-card">
+                <h3>不得进入 PIT 数据集</h3>
+                <ul>
+                  <li>公告后收益、调入后表现、未来收益排名等事后字段。</li>
+                  <li>未来已知的成分、权重、调样结果或后续更正版。</li>
+                  <li>使用今天的完整成分回填过去交易日。</li>
+                  <li>把“历史回补日期”伪装成当时公开时间。</li>
+                  <li>用最终修订值覆盖原版本而保留原可见时间。</li>
+                </ul>
+              </article>
+              <article class="mini-card">
+                <h3>不得静默混算</h3>
+                <ul>
+                  <li>中证与国证同名/同码记录。</li>
+                  <li>官方收盘权重与目标调样权重。</li>
+                  <li>观察快照日期与正式生效日期。</li>
+                  <li>股票、债券、基金、期货等不同资产成分。</li>
+                  <li>未确认单位的总市值与平台统一人民币金额。</li>
+                </ul>
+              </article>
+            </div>
+
+            <h3>8.3 可观测性与质量结果</h3>
+            <ul>
+              <li>
+                任务指标：来源请求成功率、429/5xx、延迟、载荷字节、schema fingerprint、
+                批次/分区耗时、重试与失败原因。
+              </li>
+              <li>
+                数据指标：目录数量、每指数样本数、解析率、重复数、权重合计、变化率、
+                公告—快照差异、最大数据新鲜度。
+              </li>
+              <li>
+                发布指标：隔离分区数、当前 <code>data_version</code>、回退次数、修订传播延迟、
+                消费者缓存命中/旧版本拒绝。
+              </li>
+              <li>
+                每条响应必须能追溯到管理人、来源批次、方法学版本、质量状态、可见时间和发布版本；
+                原始 URL 与内部对象键只保留在审计层。
+              </li>
+            </ul>
+          </section>
+
+          <section id="tables">
+            <h2>9. 建议的指数领域表草案</h2>
+            <p class="section-lead">
+              下表只描述指数领域的粒度、唯一性与关系；最终 PostgreSQL 类型、共享基础表、
+              分区和 DDL 由后续统一 canonical data model 方案裁决。本文不创建迁移。
+            </p>
+
+            <div class="table-wrap">
+              <table class="wide">
+                <thead>
+                  <tr>
+                    <th>候选表</th>
+                    <th>用途与粒度</th>
+                    <th>核心字段</th>
+                    <th>主键/唯一性</th>
+                    <th>关系与索引建议</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>index_instrument</code></td>
+                    <td>一条指数的稳定业务身份</td>
+                    <td>
+                      <code>index_id</code>、管理人、资产范围、币种、基日/基点、发布日期、
+                      生命周期状态、终止日
+                    </td>
+                    <td>主键 <code>index_id</code></td>
+                    <td>被身份版本、方法学、快照和事件引用；按管理人/状态索引</td>
+                  </tr>
+                  <tr>
+                    <td><code>index_identifier_version</code></td>
+                    <td>一个指数代码/名称在有效与知悉区间的一版</td>
+                    <td>
+                      <code>index_id</code>、<code>administrator_code</code>、
+                      <code>index_code</code>、名称、<code>valid_range</code>、
+                      <code>known_range</code>、变更公告
+                    </td>
+                    <td>
+                      唯一 <code>(administrator_code, index_code, valid_from, known_from)</code>；
+                      同管理人同代码的有效区间不可重叠
+                    </td>
+                    <td>按管理人 + 代码 + 区间 GiST/等价索引；支持代码变更链</td>
+                  </tr>
+                  <tr>
+                    <td><code>index_methodology_version</code></td>
+                    <td>一条指数的一版官方方法学</td>
+                    <td>
+                      文件 URI/哈希、版本名、发布时间、有效区间、选样/调样摘要、
+                      权重类型、规则结构版本
+                    </td>
+                    <td><code>(index_id, document_hash)</code></td>
+                    <td>事件与快照可引用；按指数 + 生效日索引</td>
+                  </tr>
+                  <tr>
+                    <td><code>index_constituent_snapshot</code></td>
+                    <td>一次完整指数快照的头记录</td>
+                    <td>
+                      来源日期、观察时间、快照类型、可见时间、可选有效区间、修订、
+                      <code>data_version</code>、质量状态
+                    </td>
+                    <td>
+                      业务唯一
+                      <code>(index_id, source_dataset, snapshot_kind, source_as_of_date, revision_no)</code>
+                    </td>
+                    <td>引用共享来源批次/发布版本；按指数 + 来源日期降序索引</td>
+                  </tr>
+                  <tr>
+                    <td><code>index_constituent_snapshot_item</code></td>
+                    <td>快照内一只成分及其可选权重</td>
+                    <td>
+                      <code>snapshot_id</code>、<code>security_id</code>、上游代码/交易所、
+                      权重值/类型、行业、来源总市值及单位
+                    </td>
+                    <td><code>(snapshot_id, security_id)</code></td>
+                    <td>
+                      证券身份引用共享表；按 <code>security_id</code> 反查指数；
+                      大表按 <code>source_as_of_date</code> 月分区候选
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>index_adjustment_event</code></td>
+                    <td>一条指数的一份调样、修订、代码变更或停编事件</td>
+                    <td>
+                      上游公告 ID、事件类型、公告/可见/生效时间、修订号、状态、
+                      文件哈希、方法学引用
+                    </td>
+                    <td><code>(index_id, upstream_notice_id, revision_no)</code></td>
+                    <td>按指数 + 生效日、可见时间索引；修订链不覆盖</td>
+                  </tr>
+                  <tr>
+                    <td><code>index_adjustment_item</code></td>
+                    <td>调样事件中的一只证券动作</td>
+                    <td>
+                      <code>event_id</code>、序号、<code>security_id</code>、
+                      <code>action</code>、可选目标权重、原始动作值
+                    </td>
+                    <td><code>(event_id, item_seq)</code>；同事件证券/动作需唯一</td>
+                    <td>用于从前一健康版本重建有效成分；按证券 + 生效日索引</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3>9.1 物理与保留建议（待统一模型确认）</h3>
+            <ul>
+              <li>
+                元数据、方法学与事件预计低量，不分区；快照 item 按
+                <code>source_as_of_date</code> 月分区，便于回补、归档和日期扫描。
+              </li>
+              <li>
+                原始载荷、来源批次、质量结果、隔离记录、checkpoint、交易日历和发布指针不得在本域重复建表；
+                只保存共享外键。
+              </li>
+              <li>
+                canonical 与修订记录永久保留或按合规策略归档，不通过“最新化”删除；
+                原始载荷保留期须覆盖审计与重放需求，默认建议不少于 7 年，最终以统一模型和授权结论为准。
+              </li>
+              <li>
+                回滚通过发布指针和修订状态完成；迁移计划必须可先双写/影子校验、再切读、最后清理旧读路径。
+              </li>
+            </ul>
+          </section>
+
+          <section id="api">
+            <h2>10. 对 service-api 的查询与权限需求</h2>
+            <p class="section-lead">
+              本节只提出消费者需求，不冻结 endpoint 或跨服务通信方案。
+              data-sync → service-api 的最终 HTTP/事件选择、DTO 和机器可读契约由后续跨服务专题评审。
+            </p>
+
+            <div class="callout">
+              <span class="label-line label-decision">既有架构约束</span>
+              service-api 不得直读 data-sync 数据库，也不得访问中证、国证或 AKShare；
+              service-web 只访问 service-api。当前 ADR 方向为 data-sync 持有数据并提供版本化内部 HTTP，
+              对外 service-api 新路由只能使用 POST。
+            </div>
+
+            <h3>10.1 查询能力矩阵</h3>
+            <div class="table-wrap">
+              <table class="wide">
+                <thead>
+                  <tr>
+                    <th>候选公共能力（仅建议）</th>
+                    <th>关键筛选</th>
+                    <th>PIT 支持</th>
+                    <th>排序/分页</th>
+                    <th>权限与缓存</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>POST /api/v1/market/indices/search</code></td>
+                    <td>管理人、代码/名称、资产范围、状态、发布日期范围</td>
+                    <td>默认最新；可按身份有效日查询</td>
+                    <td>管理人 + 代码稳定排序；游标分页，建议上限 200</td>
+                    <td>登录用户 + 市场数据读权限；目录可短 TTL 缓存</td>
+                  </tr>
+                  <tr>
+                    <td><code>POST /api/v1/market/indices/constituents</code></td>
+                    <td>
+                      指数身份、<code>effectiveAsOf</code>、<code>knownAt</code>、
+                      <code>pitMode</code>、证券/交易所、字段选择、质量状态
+                    </td>
+                    <td><code>PUBLIC_PIT</code> 与 <code>OPERATIONAL_REPLAY</code> 显式选择</td>
+                    <td>交易所 + 证券代码；不透明游标，上限建议 500</td>
+                    <td>细粒度指数数据权限；响应按版本 + 请求摘要缓存</td>
+                  </tr>
+                  <tr>
+                    <td><code>POST /api/v1/market/indices/weights</code></td>
+                    <td>指数、权重日期范围、<code>weightType</code>、证券、字段</td>
+                    <td>只返回当时可见版本；“最近已知”必须显式请求</td>
+                    <td>权重日期降序 + 证券代码；游标分页</td>
+                    <td>权重再分发范围未确认时默认拒绝公共响应</td>
+                  </tr>
+                  <tr>
+                    <td><code>POST /api/v1/market/indices/adjustments</code></td>
+                    <td>指数、公告/生效日期、事件类型、动作、修订状态</td>
+                    <td>按公告可见时间与运行态知悉时间过滤</td>
+                    <td>生效日降序 + 事件 ID；游标分页</td>
+                    <td>登录用户；公告原文以官方链接为主</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3>10.2 DTO 与响应元数据需求</h3>
+            <ul>
+              <li>
+                请求必须严格校验管理人、指数代码、日期范围、时区、<code>pitMode</code>、
+                <code>weightType</code>、字段白名单、排序和页大小；未知字段拒绝。
+              </li>
+              <li>
+                游标绑定过滤摘要、排序、<code>dataVersion</code> 与权限范围；版本过期返回明确冲突错误，
+                不静默跳到最新数据。
+              </li>
+              <li>
+                响应至少携带 <code>dataVersion</code>、<code>sourceAdministrator</code>、
+                <code>methodologyVersion</code>、<code>qualityStatus</code>、
+                <code>sourceVisibleAt</code>、时间精度、权重日期/类型和 PIT 模式。
+              </li>
+              <li>
+                公共响应不暴露内部批次 ID、对象存储键、Provider 实现、数据库 ID 或原始 URL；
+                通过稳定来源标识和官方披露链接提供可解释性。
+              </li>
+              <li>
+                无权访问返回 service-api 统一的 403；参数错误 400；无匹配结果为成功空列表；
+                上游未发布/质量隔离映射为可重试的 503 或业务不可用码，不能退回旧数据而不声明。
+              </li>
+            </ul>
+
+            <h3>10.3 内部消费非功能需求</h3>
+            <ul>
+              <li>服务身份认证默认沿用内部 Bearer token；后续可演进短期凭证，不在本文定案。</li>
+              <li>内部读取须有超时、有限重试、限流、熔断和审计；POST 公共请求的重试不产生写副作用。</li>
+              <li>service-api 只缓存带版本的读结果；data-sync 发布回退时能按版本主动失效或自然到期。</li>
+              <li>
+                如果后续选择事件模式，service-api 只能消费事件构建自己的授权读模型，
+                仍不得读 data-sync 数据库；事件顺序、重放和幂等由跨服务契约专题定义。
+              </li>
+            </ul>
+          </section>
+
+          <section id="roadmap">
+            <h2>11. 数据量、性能与实施路线</h2>
+            <h3>11.1 容量估算与查询模式</h3>
+            <div class="kpi-row">
+              <div class="kpi">
+                <strong>6～10</strong>
+                <span>P0 指数白名单（假设）</span>
+              </div>
+              <div class="kpi">
+                <strong>3k～8k</strong>
+                <span>单日 P0 成分/权重 item 估算</span>
+              </div>
+              <div class="kpi">
+                <strong>0.8M～2.0M</strong>
+                <span>P0 每年交易日快照 item 估算</span>
+              </div>
+              <div class="kpi">
+                <strong>&lt; 50k</strong>
+                <span>P0 目录、方法学、调样事件累计估算</span>
+              </div>
+            </div>
+            <p class="footnotes">
+              估算口径：250 个交易日、每条指数 50～1000 只样本；不含原始文件、副本和索引膨胀。
+              P1 若扩展至 50 条、平均 500 成分，每日权重约 625 万行/年，应采用月分区、
+              覆盖索引和日期裁剪，避免为低频历史查询保留过多复合索引。
+            </p>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>查询模式</th>
+                    <th>主要过滤</th>
+                    <th>建议索引</th>
+                    <th>性能取舍</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>某指数某日全部成分</td>
+                    <td>指数 + 有效日/快照日 + 版本</td>
+                    <td>头表指数/日期降序；item 的 snapshot + security 唯一索引</td>
+                    <td>先定位单一 snapshot，再顺序读取 item，避免 item 全表区间扫描</td>
+                  </tr>
+                  <tr>
+                    <td>某证券历史入选事件</td>
+                    <td>证券 + 生效日期范围</td>
+                    <td>item/security + 日期；event item/security + effective date</td>
+                    <td>属于次要查询，索引按实际使用启用，避免写放大</td>
+                  </tr>
+                  <tr>
+                    <td>某日多指数权重横截面</td>
+                    <td>日期 + 指数白名单</td>
+                    <td>月分区裁剪 + snapshot 日期索引</td>
+                    <td>大范围导出走异步批量消费方案，不由在线 API 无限制返回</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3>11.2 分阶段实施</h3>
+            <div class="timeline">
+              <div class="timeline-item">
+                <strong>P0-A：影子探测与身份基座</strong>
+                <div class="muted">
+                  固定白名单；建立管理人/指数身份与方法学原文；连续 5 个交易日抓取目录、当前成分、
+                  权重；不对外发布。
+                </div>
+              </div>
+              <div class="timeline-item">
+                <strong>P0-B：正式事件与 PIT 成分</strong>
+                <div class="muted">
+                  解析官方公告和生效时间；完成证券身份解析、差异对账、修订与回放；
+                  只发布有明确证据的有效成分。
+                </div>
+              </div>
+              <div class="timeline-item">
+                <strong>P0-C：受控消费</strong>
+                <div class="muted">
+                  经后续跨服务契约接入 service-api；先面向内测权限开放，版本化缓存，
+                  监控空结果、旧游标和回退。
+                </div>
+              </div>
+              <div class="timeline-item">
+                <strong>P1：权重与历史扩展</strong>
+                <div class="muted">
+                  验证国证历史范围和中证历史来源；校准权重单位/合计；回补按年份执行，
+                  与日常任务资源隔离。
+                </div>
+              </div>
+              <div class="timeline-item">
+                <strong>P2：长尾与生命周期自动化</strong>
+                <div class="muted">
+                  按消费者价值扩展指数；自动识别停编、代码链和方法学变化；
+                  非股票成分保持独立资产域。
+                </div>
+              </div>
+            </div>
+
+            <h3>11.3 可复用与必须隔离</h3>
+            <div class="two-col">
+              <article class="mini-card">
+                <h3>可复用基础设施</h3>
+                <ul>
+                  <li>Provider Adapter、原始载荷、来源批次、schema fingerprint。</li>
+                  <li>股票身份解析、交易日历、质量结果、隔离与发布指针。</li>
+                  <li>任务锁、checkpoint、审计、回放与内部服务认证。</li>
+                  <li>既有板块快照“坏快照不关闭旧区间”的安全原则。</li>
+                </ul>
+              </article>
+              <article class="mini-card">
+                <h3>必须隔离的语义</h3>
+                <ul>
+                  <li>指数正式有效成分 vs 板块观察到的当前成员。</li>
+                  <li>中证 vs 国证的管理人、目录、历史和方法学。</li>
+                  <li>权重快照 vs 成分有效区间 vs 调样目标。</li>
+                  <li>股票指数 vs 债券/基金/衍生品指数成分身份。</li>
+                </ul>
+              </article>
+            </div>
+          </section>
+
+          <section id="gates">
+            <h2>12. 技术硬门禁与非技术风险</h2>
+            <h3>12.1 技术硬门禁</h3>
+            <p class="section-lead">
+              门禁只阻断受影响 capability 的生产发布，不阻断本方案、离线研究或合规范围内的影子探测。
+            </p>
+            <div class="table-wrap">
+              <table class="wide">
+                <thead>
+                  <tr>
+                    <th>门禁</th>
+                    <th>准入条件</th>
+                    <th>可验证证据</th>
+                    <th>验证人</th>
+                    <th>退出条件</th>
+                    <th>未通过兜底</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>G1 固定版本与来源稳定性</strong></td>
+                    <td>任一管理人/数据集从实验状态升级为定时生产任务前</td>
+                    <td>
+                      固定 1.18.78 对 P0 白名单连续 5 个交易日探测；成功率、日期覆盖、
+                      schema fingerprint、空表与错误矩阵；一次调样窗口回放
+                    </td>
+                    <td>data-sync 技术负责人 + 数据质量负责人</td>
+                    <td>成功率 100%；必需 schema 无漂移；失败/空表语义可区分；历史范围实测可复现</td>
+                    <td>保持 capability 禁用，仅保留离线 fixture 和人工指定文件验证</td>
+                  </tr>
+                  <tr>
+                    <td><strong>G2 使用与再分发边界</strong></td>
+                    <td>原始/规范化成分或权重进入长期生产存储、公共 API 或跨主体分发前</td>
+                    <td>对应来源条款、书面许可或法律评审记录；允许的字段、保留期、用户范围和引用方式</td>
+                    <td>数据治理/法务验证人 + 安全负责人</td>
+                    <td>每个 capability 的允许操作形成可执行策略并进入配置/验收用例</td>
+                    <td>研究态禁用公共外发；仅返回官方链接、指数身份和允许的摘要元数据</td>
+                  </tr>
+                  <tr>
+                    <td><strong>G3 身份完整性</strong></td>
+                    <td>正式成分/权重快照发布前</td>
+                    <td>
+                      按事实日和知悉时间的指数/证券解析报告；未解析、歧义、代码复用、重复统计；
+                      与官方样本数对账
+                    </td>
+                    <td>股票身份模块维护人 + 数据质量负责人</td>
+                    <td>指数与证券唯一解析率 100%；歧义 0；同快照重复 0</td>
+                    <td>整份快照隔离；保留原始载荷，不关闭上一健康有效区间</td>
+                  </tr>
+                  <tr>
+                    <td><strong>G4 PIT 时间正确性</strong></td>
+                    <td><code>index.constituent.effective</code> 可供回测或 as-of 查询前</td>
+                    <td>
+                      至少 30 个事件样本，覆盖定期、临时、代码变化/方法学修订；
+                      官方公告时间、生效日、交易日历与重建结果逐项对账
+                    </td>
+                    <td>量化研究验证人 + 数据质量负责人</td>
+                    <td>
+                      30/30 无提前生效、无区间重叠、无假精确时间；所有推导规则有方法学/公告证据
+                    </td>
+                    <td>只发布 <code>OBSERVED_CURRENT</code>，响应声明禁止 PIT 回测</td>
+                  </tr>
+                  <tr>
+                    <td><strong>G5 权重口径与完整性</strong></td>
+                    <td>权重数据对外发布或用于组合计算前</td>
+                    <td>
+                      单位、权重类型、来源日期、完整性标记；5 个交易日权重合计与官方页面/文件对账；
+                      方法学上限差异报告
+                    </td>
+                    <td>指数数据负责人 + 量化研究验证人</td>
+                    <td>单位和类型 100% 明确；完整快照合计在校准阈值内；差异可解释</td>
+                    <td>权重字段保持内部隔离，成分查询不携带权重</td>
+                  </tr>
+                  <tr>
+                    <td><strong>G6 幂等、恢复与无损回滚</strong></td>
+                    <td>自动推进发布指针前</td>
+                    <td>
+                      同批重放、重复投递、并发同分区、坏快照、修订重算、发布回退和 checkpoint
+                      故障注入测试
+                    </td>
+                    <td>平台/数据库验证人 + data-sync 技术负责人</td>
+                    <td>
+                      重放不新增业务重复；并发只有一个提交；坏批不污染健康版本；
+                      版本可回退且审计完整
+                    </td>
+                    <td>关闭自动发布，人工评审每批并保留上一健康版本</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3>12.2 非技术风险与跟进项</h3>
+            <p class="section-lead">
+              下列事项影响范围、成本或节奏，但不能成为整套方案执行阻断；每项均有技术兜底。
+            </p>
+            <div class="table-wrap">
+              <table class="wide">
+                <thead>
+                  <tr>
+                    <th>风险/跟进</th>
+                    <th>负责人</th>
+                    <th>时间点</th>
+                    <th>影响</th>
+                    <th>技术兜底</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>P0 指数白名单尚未由业务确认</td>
+                    <td>量化研究负责人</td>
+                    <td>P0-A 启动时</td>
+                    <td>可能产生不必要抓取或遗漏消费者</td>
+                    <td>先使用六条默认宽基白名单，配置化禁用其他指数</td>
+                  </tr>
+                  <tr>
+                    <td>官方历史档案可能需采购或人工申请</td>
+                    <td>数据产品负责人</td>
+                    <td>P1 规划评审</td>
+                    <td>中证历史深度不足</td>
+                    <td>公开公告重建可证区间；从启用日持续保存快照；缺口显式返回</td>
+                  </tr>
+                  <tr>
+                    <td>来源条款/再分发结论响应慢</td>
+                    <td>数据治理负责人</td>
+                    <td>P0-C 外发前</td>
+                    <td>公共 API 可用字段受限</td>
+                    <td>保持研究态；只传稳定身份、质量摘要和官方披露链接</td>
+                  </tr>
+                  <tr>
+                    <td>值班、人力和排期未分配</td>
+                    <td>平台工程负责人</td>
+                    <td>定时任务启用前</td>
+                    <td>异常可能无人及时处理</td>
+                    <td>默认关闭 beat；使用人工触发、失败即隔离、不自动切换来源</td>
+                  </tr>
+                  <tr>
+                    <td>AKShare 后续版本升级需求</td>
+                    <td>data-sync 维护人</td>
+                    <td>独立依赖升级评审</td>
+                    <td>线上文档与固定实现差异持续扩大</td>
+                    <td>Adapter 契约测试绑定 1.18.78；新版本在独立镜像并行验证</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="acceptance">
+            <h2>13. 未决事项与验收清单</h2>
+            <h3>13.1 未决事项</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>问题</th>
+                    <th>建议默认值</th>
+                    <th>解决证据</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>O1</td>
+                    <td>中证历史成分与权重可以公开回补到何时？</td>
+                    <td>未知日期留缺口，仅发布启用后快照和有公告证据的区间</td>
+                    <td>官方历史文件清单/授权数据样本及完整性对账</td>
+                  </tr>
+                  <tr>
+                    <td>O2</td>
+                    <td>固定版国证 detail/history 的真实日期覆盖是否相同？</td>
+                    <td>视为同一来源能力，不宣称冗余或“全部历史”</td>
+                    <td>固定镜像对 P0 代码的首末日期、缺口、行数与请求证据</td>
+                  </tr>
+                  <tr>
+                    <td>O3</td>
+                    <td>官方公告只有日期时，何时可用于盘中/日频回测？</td>
+                    <td>下一交易日开盘；精度标记为保守推导</td>
+                    <td>页面发布时间、RSS/文件元数据或交易所披露时间证据</td>
+                  </tr>
+                  <tr>
+                    <td>O4</td>
+                    <td>中证 “closeweight” 是每日官方收盘权重还是某类定期权重？</td>
+                    <td><code>OFFICIAL_CLOSE</code>，但 capability 保持隔离且不向后填充</td>
+                    <td>5 日日期变化、官方字段定义、与官网页面/文件对账</td>
+                  </tr>
+                  <tr>
+                    <td>O5</td>
+                    <td>公共 API 返回完整成分/权重的授权范围？</td>
+                    <td>默认拒绝权重外发；成分只开放获准字段和官方引用</td>
+                    <td>按数据集和用户范围的许可/治理记录</td>
+                  </tr>
+                  <tr>
+                    <td>O6</td>
+                    <td>最终内部消费采用 HTTP、事件还是组合？</td>
+                    <td>沿用现有 ADR 的版本化内部 HTTP 方向，事件仅作后续比较项</td>
+                    <td>后续 data-access-contract proposal、ADR 与机器可读契约评审</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3>13.2 文档方案验收</h3>
+            <ul>
+              <li>已给出接入结论、P0/P1/P2、目标用户、消费场景和明确不建议项。</li>
+              <li>已逐能力区分 AKShare 函数、真实上游、历史深度、稳定性、限流与授权风险。</li>
+              <li>已定义领域粒度、候选身份、唯一键、字段、单位、空值和时态语义。</li>
+              <li>已给出同步、分区、回补、幂等、去重、质量、恢复、审计与可观测性方案。</li>
+              <li>已隔离观察快照/正式有效成分、收盘/目标权重和不同管理人/资产域。</li>
+              <li>已描述领域表草案，且未自行定义跨专题共享表或创建迁移。</li>
+              <li>已提出 service-api 的 POST 查询、筛选、PIT、分页、权限、缓存和响应元数据需求。</li>
+              <li>技术硬门禁均具备准入条件、证据、验证人、退出条件和失败兜底。</li>
+              <li>非技术事项均有负责人、时间点和技术兜底，不作为方案阻断。</li>
+            </ul>
+
+            <h3>13.3 实施阶段计划验证（本次未执行）</h3>
+            <ul>
+              <li>Adapter 契约测试、固定 AKShare 镜像连续 5 个交易日探测和正式调样窗口回放。</li>
+              <li>canonical DDL、迁移/回滚、分区裁剪、容量压测和 SQL 验收。</li>
+              <li>证券身份 100% 解析、30 个事件 PIT 对账、权重 5 日合计与口径校准。</li>
+              <li>重复投递、并发锁、坏快照、历史修订、发布回退和 checkpoint 故障注入。</li>
+              <li>内部契约测试、service-api POST DTO/鉴权/游标/缓存/错误映射和端到端验收。</li>
+            </ul>
+
+            <div class="callout fact">
+              <span class="label-line label-fact">本次验证边界</span>
+              本次只验证文档 HTML、链接与静态布局基线；没有修改或运行生产代码、数据库迁移、服务配置、
+              依赖、OpenAPI、Docker，也未虚报任何实现测试。
+            </div>
+          </section>
+
+          <section id="references">
+            <h2>14. 引用与关联资料</h2>
+            <p class="section-lead">
+              外部资料访问日期均为 2026-07-28。事实引用优先使用指数管理人、交易所和 AKShare 官方文档；
+              网站公开可访问不等于已确认生产存储或再分发授权。
+            </p>
+
+            <h3>14.1 外部权威来源</h3>
+            <ol>
+              <li>
+                AKShare 官方文档，
+                <a href="https://akshare.akfamily.xyz/data/index/index.html">指数数据接口</a>：
+                中证最新成分/权重、国证目录/历史样本/历史调样的函数签名、字段与当前文档语义。
+              </li>
+              <li>
+                中证指数有限公司，
+                <a
+                  href="https://oss-ch.csindex.com.cn/notice/20251114142128-%E3%80%8A%E4%B8%AD%E8%AF%81%E6%8C%87%E6%95%B0%E6%9C%89%E9%99%90%E5%85%AC%E5%8F%B8%E8%82%A1%E7%A5%A8%E6%8C%87%E6%95%B0%E6%A0%B7%E6%9C%AC%E8%B0%83%E6%95%B4%E8%A7%84%E5%88%99%E3%80%8B.pdf"
+                  >《股票指数样本调整规则》V1.2（2025-11）</a
+                >：定期/临时调整、缓冲区、备选样本和退市处理的通用规则。
+              </li>
+              <li>
+                中证指数有限公司，
+                <a
+                  href="https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000300_Index_Methodology_cn.pdf"
+                  >《沪深 300 指数编制方案》</a
+                >：审核、实施时间和具体指数方法学示例；不得外推到全部指数。
+              </li>
+              <li>
+                上海证券交易所，
+                <a href="https://www.sse.com.cn/market/sseindex/diclosure/c/c_20260529_10820183.shtml"
+                  >2026 年 5 月指数样本定期调整公告</a
+                >：公告日与收盘后实施日期分离的正式示例。
+              </li>
+              <li>
+                国证指数网，
+                <a href="https://www.cnindex.com.cn/module/index-detail.html">指数详情</a>：
+                当前样本、样本权重与历史调样的官方展示入口。
+              </li>
+              <li>
+                国证指数网，
+                <a
+                  href="https://www.cnindex.com.cn/zh_information/notices_news/2020/202012/t20201201_17019.html?act_menu=2"
+                  >2020-12-01 样本调整公告</a
+                >：公告后于 2020-12-14 实施的日期分离示例。
+              </li>
+              <li>
+                国证指数网，
+                <a
+                  href="https://www.cnindex.com.cn/zh_information/notices_news/2023/202302/t20230228_18049.html?act_menu=2"
+                  >2023-02-28 指数修订公告</a
+                >：指数代码、名称、方法学修订并于 2023-03-03 实施的生命周期示例。
+              </li>
+              <li>
+                国证指数网，
+                <a
+                  href="https://www.cnindex.com.cn/zh_information/notices_news/2022/202207/t20220725_17802.html?act_menu=2"
+                  >2022-07-25 编制方案修订公告</a
+                >：方法学与权重规则变更、2022-07-28 生效的示例。
+              </li>
+            </ol>
+
+            <h3>14.2 仓库关联方案与决策</h3>
+            <ul>
+              <li>
+                <a href="../../decisions/0002-data-sync-ownership-and-access.md"
+                  >ADR 0002：data-sync 数据所有权与内部 HTTP 边界</a
+                >
+              </li>
+              <li>
+                <a href="../../decisions/0004-market-data-provider-adapters.md"
+                  >ADR 0004：Provider Adapter 边界</a
+                >
+              </li>
+              <li>
+                <a href="../../decisions/0012-sector-membership-temporal-model.md"
+                  >ADR 0012：板块成员观测时态</a
+                >（只复用安全原则，不复用指数正式生效语义）
+              </li>
+              <li>
+                <a href="../../decisions/0013-equity-instrument-identity-lifecycle.md"
+                  >ADR 0013：股票身份双时态模型</a
+                >
+              </li>
+              <li>
+                <a href="../../decisions/0018-service-api-post-only-http-method.md"
+                  >ADR 0018：service-api 对外仅 POST</a
+                >
+              </li>
+              <li>
+                <a href="../0013-sector-membership-history/index.html">0013 板块成员历史方案</a>、
+                <a href="../0014-equity-instrument-master/index.html">0014 股票主数据方案</a>、
+                <a href="../0018-sqlalchemy-orm-persistence-models/index.html">0018 ORM 方案</a>
+              </li>
+              <li>
+                <a href="../../contracts/0009-data-sync-equity-instrument-internal.openapi.yaml"
+                  >0009 股票身份内部 API 契约</a
+                >、
+                <a href="../../contracts/0007-data-sync-sector-membership-internal.openapi.yaml"
+                  >0007 板块成员内部 API 契约</a
+                >
+                （仅作为后续契约治理样式参考）
+              </li>
+            </ul>
+
+            <h3>14.3 证据限制</h3>
+            <ul>
+              <li>AKShare 在线文档版本高于仓库固定版本，本文已将差异列为硬门禁，而非默认兼容。</li>
+              <li>本次未进行新的联网样本抓取；已有短探测只证明个别函数在一个时点曾返回数据。</li>
+              <li>官方公告示例证明时间和生命周期字段存在，不证明所有历史公告均可机器化完整下载。</li>
+              <li>限流、SLA、长期保留与再分发条款仍需按 capability 获取可验证结论。</li>
+            </ul>
+          </section>
+        </main>
+      </div>
+
+      <footer>
+        quant-v2 · service-data-sync · 0019 index constituents · Proposed ·
+        仅技术方案，不含生产实现或已接受架构决策
+      </footer>
+    </div>
+  </body>
+</html>

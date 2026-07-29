@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>0021 融资融券数据接入技术方案（Proposed）</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --paper: #ffffff;
+      --ink: #182230;
+      --muted: #5f6b7a;
+      --line: #dbe2ea;
+      --brand: #1769aa;
+      --brand-soft: #e8f2fb;
+      --good: #16794a;
+      --good-soft: #e9f7f0;
+      --warn: #9a5b00;
+      --warn-soft: #fff4dc;
+      --bad: #b3261e;
+      --bad-soft: #fdeceb;
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--bg); scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 1200px;
+      color: var(--ink);
+      background: var(--bg);
+      font: 15px/1.72 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Microsoft YaHei", sans-serif;
+    }
+    a { color: var(--brand); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    code {
+      padding: 2px 6px;
+      border: 1px solid #dce7f1;
+      border-radius: 5px;
+      background: #f1f6fa;
+      color: #164d73;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+    .shell { width: 1120px; margin: 0 auto; }
+    header {
+      padding: 46px 0 34px;
+      color: #fff;
+      background: linear-gradient(125deg, #123654, #1769aa 68%, #2688c7);
+    }
+    header h1 { margin: 10px 0 8px; max-width: 850px; font-size: 38px; line-height: 1.25; }
+    header p { margin: 0; max-width: 900px; color: #dceeff; font-size: 17px; }
+    .status, .tag {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .03em;
+    }
+    .status { color: #103a5a; background: #fff; }
+    .tag.p0 { color: var(--bad); background: var(--bad-soft); }
+    .tag.p1 { color: var(--warn); background: var(--warn-soft); }
+    .tag.p2 { color: var(--muted); background: #eef1f4; }
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.96);
+      box-shadow: 0 4px 14px rgba(20,45,70,.05);
+    }
+    nav .shell { display: flex; gap: 20px; align-items: center; min-height: 52px; }
+    nav a { color: #34475a; font-size: 13px; font-weight: 650; text-decoration: none; }
+    main { padding: 24px 0 56px; }
+    section {
+      margin: 18px 0;
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--paper);
+      box-shadow: 0 8px 24px rgba(18,54,84,.045);
+      scroll-margin-top: 70px;
+    }
+    h2 { margin: 0 0 15px; font-size: 25px; line-height: 1.35; }
+    h3 { margin: 22px 0 8px; font-size: 18px; }
+    p, ul { margin: 8px 0; }
+    .lead { color: var(--muted); font-size: 16px; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .card {
+      padding: 17px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fbfcfe;
+    }
+    .card strong { display: block; margin: 5px 0; font-size: 17px; }
+    .callout {
+      margin: 14px 0;
+      padding: 13px 16px;
+      border-left: 4px solid var(--brand);
+      border-radius: 6px;
+      background: var(--brand-soft);
+    }
+    .callout.warn { border-color: var(--warn); background: var(--warn-soft); }
+    .callout.bad { border-color: var(--bad); background: var(--bad-soft); }
+    .callout.good { border-color: var(--good); background: var(--good-soft); }
+    .table-wrap { margin: 13px 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; }
+    table { width: 100%; min-width: 980px; border-collapse: collapse; background: #fff; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: #31465b; background: #f2f6fa; font-size: 13px; }
+    tr:last-child td { border-bottom: 0; }
+    .small { color: var(--muted); font-size: 13px; }
+    footer { padding: 25px 0 38px; color: var(--muted); }
+    @media print {
+      body { min-width: 0; background: #fff; font-size: 10.5pt; }
+      .shell { width: auto; margin: 0; }
+      nav { display: none; }
+      header { padding: 18px 0; color: #000; background: #fff; border-bottom: 2px solid #333; }
+      header p { color: #333; }
+      section { break-inside: avoid; margin: 10px 0; padding: 14px; box-shadow: none; }
+      .table-wrap { overflow: visible; }
+      table { min-width: 0; font-size: 9pt; }
+      a { color: #000; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <span class="status">Proposed</span>
+      <h1>融资融券数据接入技术方案</h1>
+      <p>专题编号 0021 · 研究范围：沪深北交易所融资融券汇总、证券明细、标的资格与系统风险统计 · 评审日期：2026-07-28</p>
+    </div>
+  </header>
+  <nav aria-label="文档导航">
+    <div class="shell">
+      <a href="#decision">结论</a>
+      <a href="#sources">来源</a>
+      <a href="#model">模型</a>
+      <a href="#temporal">时序</a>
+      <a href="#sync">同步</a>
+      <a href="#api">API</a>
+      <a href="#gates">门禁</a>
+      <a href="#references">引用</a>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="decision">
+      <h2>1. 结论、优先级与实施边界</h2>
+      <p class="lead">已实现为独立的 <code>financing_activity</code> 语义族；禁止并入普通资金流、成交或证券行情。P0 场所汇总、证券日明细、资格、canonical 发布、受控 CLI 和内部 typed reader 已落地；真实来源仍需通过许可与稳定性门禁后才启用。</p>
+      <div class="grid">
+        <article class="card">
+          <span class="tag p0">P0 · 条件接入</span>
+          <strong>沪深市场汇总、证券日明细、标的资格</strong>
+          <p>业务价值高、官方披露明确；按交易所分别通过来源稳定性、单位与 PIT 门禁后独立启用。</p>
+        </article>
+        <article class="card">
+          <span class="tag p1">P1 · 条件接入</span>
+          <strong>北交所汇总、明细与标的资格</strong>
+          <p>历史自 2023-02-13 起，单位与沪深不同；不能人为生成此前历史。</p>
+        </article>
+        <article class="card">
+          <span class="tag p2">P2 · 暂不生产接入</span>
+          <strong>账户、担保资金与系统风险统计</strong>
+          <p>AKShare 候选真实上游非交易所且样本历史有限；仅保留独立数据集候选，不与证券日表混合。</p>
+        </article>
+      </div>
+      <div class="callout bad">
+        <strong>关键口径边界：</strong>交易所市场汇总可能包含已调出标的但仍有余额的证券，公开证券明细则可能只覆盖当前标的。市场汇总是独立事实，禁止用证券明细求和覆盖或补齐。
+      </div>
+      <h3>事实、推断、建议与假设</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>类型</th><th>内容</th><th>方案处理</th></tr></thead>
+          <tbody>
+            <tr><td>事实</td><td>沪深北交易所均披露融资融券数据，但字段、单位、历史起点与接口稳定性不同。</td><td>按交易所和 capability 分区准入，不声明“统一来源已生产就绪”。</td></tr>
+            <tr><td>事实</td><td>深市公开证券明细候选没有直接披露融资偿还额、融券偿还量。</td><td>字段保持空值并标注 <code>NOT_PUBLISHED</code>；差分派生字段另名、另方法学版本。</td></tr>
+            <tr><td>事实</td><td>“担保资金”不是交易所证券级日表字段。</td><td>只允许进入 P2 系统风险统计，不向证券日明细添加伪字段。</td></tr>
+            <tr><td>推断</td><td>D 日数据通常在下一交易日开市前披露，具体页面不总提供不可变发布时间。</td><td>回测使用实际 <code>visible_at</code>；没有证据时不得假定 D 日收盘即已可见。</td></tr>
+            <tr><td>建议</td><td>先以沪深各 30 个交易日、含月末和标的调整边界的样本验证。</td><td>单个交易所失败只关闭该分区，不阻断已达标分区。</td></tr>
+            <tr><td>显式假设</td><td>统一身份、来源批次、质量结果等共享表由 0027 定义。</td><td>本专题仅提出字段需求，不自行定义跨专题共享物理表。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="value">
+      <h2>2. 业务价值、目标用户与消费场景</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>用户</th><th>场景</th><th>所需粒度</th><th>防误用约束</th></tr></thead>
+          <tbody>
+            <tr><td>量化研究</td><td>杠杆拥挤、融资动量、融券压力、标的池变化</td><td>证券 × 交易日；资格有效区间</td><td>只用决策时点前已可见版本，不把缺失填零。</td></tr>
+            <tr><td>风险分析</td><td>市场杠杆总量、融资融券余额变化与集中度</td><td>交易所 × 交易日</td><td>直接消费官方汇总，不从当前标的明细聚合。</td></tr>
+            <tr><td>产品与研究平台</td><td>证券详情、横截面对比、历史趋势与来源说明</td><td>日级分页查询</td><td>展示来源、单位、质量、版本、可见时间和免责声明。</td></tr>
+            <tr><td>运维与数据治理</td><td>来源漂移、单位异常、缺口、修订与恢复审计</td><td>来源批次、发布版本、质量记录</td><td>只经共享支撑模型消费，不绕过 Adapter 或直读供应商字段。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="sources">
+      <h2>3. 权威来源、AKShare 候选与历史可得性</h2>
+      <p class="lead">真实业务来源优先级为交易所公开披露，其次才是聚合适配。AKShare 是 Adapter 候选，不是 canonical 字段命名依据，也不是唯一业务来源。</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>范围</th><th>真实上游与 AKShare 1.18.78 候选</th><th>粒度/单位要点</th><th>稳定性、限流、授权、历史</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>上交所汇总</td>
+              <td>上交所汇总页；<code>stock_margin_sse(start_date, end_date)</code></td>
+              <td>市场 × 日；金额以元为目标 canonical 单位。</td>
+              <td>公开页面无生产 SLA；按小窗口、低并发抓取。自动化访问与再分发需逐来源留证。</td>
+            </tr>
+            <tr>
+              <td>上交所明细</td>
+              <td>上交所明细页；<code>stock_margin_detail_sse(date)</code></td>
+              <td>证券 × 日；金额元，数量按股/份/手，必须保留单位代码。</td>
+              <td>2026-07-28 单日探针 45 秒超时，仅证明当次不稳定；不能外推永久不可用。</td>
+            </tr>
+            <tr>
+              <td>深交所汇总</td>
+              <td>深交所融资融券专区；<code>stock_margin_szse(date)</code></td>
+              <td>市场 × 日；按返回元数据确认原始缩放。</td>
+              <td>既有探针出现 TLS/连接错误；必须保留原始响应和字段指纹。</td>
+            </tr>
+            <tr>
+              <td>深交所明细</td>
+              <td>深交所专区；<code>stock_margin_detail_szse(date)</code></td>
+              <td>证券 × 日；金额元、数量股/份；偿还字段非直接披露。</td>
+              <td>不以差分伪装直报；历史深度以连续探针和官方导出验证。</td>
+            </tr>
+            <tr>
+              <td>沪深标的资格</td>
+              <td>深交所标的页；<code>stock_margin_underlying_info_szse(date)</code>；沪市需独立官方 Adapter</td>
+              <td>证券资格事件/有效区间。</td>
+              <td>当前名单不能倒推历史；缺少历史公告证据时仅发布当前观察版本。</td>
+            </tr>
+            <tr>
+              <td>北交所</td>
+              <td>交易信息、标的股票页；<code>stock_margin_bse(date)</code>、<code>stock_margin_detail_bse(date)</code>、<code>stock_margin_underlying_info_bse(date)</code></td>
+              <td>页面汇总万元/万股，明细金额元、数量股；规范化时保留原值、原单位与缩放因子。</td>
+              <td>业务起始 2023-02-13；此前为结构性不存在。2026-07-28 探针连接中断，列为 P1。</td>
+            </tr>
+            <tr>
+              <td>系统风险统计</td>
+              <td><code>stock_margin_account_info()</code>；文档指向东方财富聚合</td>
+              <td>全国/账户统计 × 日，不是证券级。</td>
+              <td>样本文档停在 2024-06，权威性、更新频率和授权均不足；P2，不生产发布。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout warn">固定版本容器的一次成功或失败都不能等同生产接入结论。生产准入证据必须覆盖连续交易日、月末、标的调整、异常重试、单位核对和原始载荷留存。</div>
+    </section>
+
+    <section id="model">
+      <h2>4. Canonical dataset、粒度、身份、唯一键与字段</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>拟议数据集</th><th>粒度</th><th>候选业务键</th><th>核心消费者</th><th>优先级</th></tr></thead>
+          <tbody>
+            <tr><td><code>cn_margin_market_daily_v1</code></td><td>交易所 × 交易日</td><td><code>(exchange, trade_date)</code></td><td>市场杠杆、风险趋势</td><td>P0/P1 分区</td></tr>
+            <tr><td><code>cn_margin_security_daily_v1</code></td><td>证券 × 交易日</td><td><code>(instrument_id, trade_date)</code></td><td>证券详情、横截面、因子</td><td>P0/P1 分区</td></tr>
+            <tr><td><code>cn_margin_eligibility_v1</code></td><td>证券资格有效区间/公告版本</td><td><code>(instrument_id, effective_from, known_from)</code></td><td>PIT 标的池、合规筛选</td><td>P0/P1 分区</td></tr>
+            <tr><td><code>cn_margin_system_risk_daily_v1</code></td><td>统计范围 × 日期</td><td><code>(scope_code, trade_date)</code></td><td>宏观风险观察</td><td>P2</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>发布唯一性在业务键之外必须包含来源路由、方法学版本和修订号；0027 再统一决定物理主键、<code>data_version</code> 与发布区间约束。</p>
+
+      <h3>字段字典与单位</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>字段</th><th>类型建议</th><th>单位/空值语义</th><th>来源与约束</th></tr></thead>
+          <tbody>
+            <tr><td><code>exchange</code></td><td>text/enum</td><td>SSE/SZSE/BSE，非空</td><td>交易所范围；不同市场不可静默合并。</td></tr>
+            <tr><td><code>instrument_id</code></td><td>uuid</td><td>证券明细非空</td><td>由共享身份解析；失败进入隔离，不用供应商代码替代。</td></tr>
+            <tr><td><code>trade_date</code></td><td>date</td><td>交易所当地交易日</td><td>不是抓取日或公告日。</td></tr>
+            <tr><td><code>financing_balance</code></td><td>numeric(24,4)</td><td>元；未披露为 null</td><td>来源直报。</td></tr>
+            <tr><td><code>financing_buy_amount</code></td><td>numeric(24,4)</td><td>元；未披露为 null</td><td>来源直报。</td></tr>
+            <tr><td><code>financing_repayment_amount</code></td><td>numeric(24,4)</td><td>元；深市直报缺失</td><td>直报与派生必须分字段。</td></tr>
+            <tr><td><code>financing_repayment_derived</code></td><td>numeric(24,4)</td><td>元；不可计算为 null</td><td>公式：前余额＋买入－本余额；携带方法学版本。</td></tr>
+            <tr><td><code>securities_lending_balance_qty</code></td><td>numeric(24,4)</td><td>股/份/手，由 <code>quantity_unit</code> 指明</td><td>禁止把不同资产单位相加。</td></tr>
+            <tr><td><code>securities_lending_sell_qty</code></td><td>numeric(24,4)</td><td>股/份/手</td><td>来源直报。</td></tr>
+            <tr><td><code>securities_lending_repayment_qty</code></td><td>numeric(24,4)</td><td>股/份/手；未披露为 null</td><td>不允许零填。</td></tr>
+            <tr><td><code>securities_lending_balance_amount</code></td><td>numeric(24,4)</td><td>元；仅披露时有值</td><td>不能由数量无口径地乘市场价。</td></tr>
+            <tr><td><code>margin_total_balance</code></td><td>numeric(24,4)</td><td>元</td><td>官方口径为融资余额＋融券余额金额。</td></tr>
+            <tr><td><code>eligibility_status</code></td><td>text/enum</td><td>ELIGIBLE/REMOVED/UNKNOWN</td><td>必须关联有效与知悉区间。</td></tr>
+            <tr><td><code>null_reason</code></td><td>text/enum</td><td>非交易日、非标的、未披露、上游失败、身份失败、质量隔离</td><td>零值只代表来源明确披露为零。</td></tr>
+            <tr><td><code>source_unit</code>/<code>scale_factor</code></td><td>text/numeric</td><td>原单位及转元/转基本数量倍数</td><td>北交所万元、万股等必须可审计还原。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>本领域物理表草案</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>表名草案</th><th>用途与关系</th><th>唯一性/分区建议</th><th>明确不承担</th></tr></thead>
+          <tbody>
+            <tr><td><code>margin_market_daily_revision</code></td><td>保存交易所汇总每次可见修订，引用共享来源批次和发布版本。</td><td>业务键＋来源路由＋修订号；按 <code>trade_date</code> 年/月分区。</td><td>不存证券明细聚合替代值。</td></tr>
+            <tr><td><code>margin_security_daily_revision</code></td><td>保存证券级余额、买入、卖出、偿还与单位。</td><td>证券、交易日、来源路由、修订号唯一；按交易日分区。</td><td>不存市场汇总或账户统计。</td></tr>
+            <tr><td><code>margin_eligibility_revision</code></td><td>保存标的加入、调出、公告、有效和知悉区间。</td><td>证券、有效起点、知悉起点、修订号唯一；有效区间不得倒置。</td><td>不从当前名单生成历史事件。</td></tr>
+            <tr><td><code>margin_system_risk_daily_revision</code></td><td>P2 隔离保存全国账户/担保物统计。</td><td>范围、日期、来源路由、修订号唯一。</td><td>不与证券或交易所汇总关联求和。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">证券身份、来源、原始载荷、批次、质量、隔离、checkpoint 和 publication 等共享支撑表不在本专题定义，统一交由 0027 设计。</p>
+    </section>
+
+    <section id="temporal">
+      <h2>5. 交易日、可见时间、有效时间与修订语义</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>时间字段</th><th>语义</th><th>缺失处理</th><th>PIT 规则</th></tr></thead>
+          <tbody>
+            <tr><td><code>trade_date</code></td><td>余额和发生额所属交易日</td><td>不得用抓取日期代替</td><td>D 日数据不可用于 D 日盘中/收盘前决策。</td></tr>
+            <tr><td><code>source_published_at</code></td><td>上游可验证的首次发布时间</td><td>无不可变证据则 null</td><td>不能根据经验批量伪造固定发布时间。</td></tr>
+            <tr><td><code>observed_at</code></td><td>系统成功取得原始载荷的 UTC 时间</td><td>非空</td><td>历史回补至少以此作为系统知悉下界。</td></tr>
+            <tr><td><code>visible_at</code></td><td>质量通过并允许消费者看见的 UTC 时间</td><td>质量隔离时 null</td><td>查询 <code>as_of</code> 只返回不晚于该时点可见的版本。</td></tr>
+            <tr><td><code>effective_from/to</code></td><td>标的资格在业务世界中的生效区间</td><td>开放结束允许 null</td><td>决定某交易日是否具备资格。</td></tr>
+            <tr><td><code>known_from/to</code></td><td>系统可知该资格版本的区间</td><td>当前版本结束允许 null</td><td>公告前禁止提前使用未来已知名单。</td></tr>
+            <tr><td><code>revision_no</code></td><td>同一业务事实的来源修订序号</td><td>从 1 开始</td><td>旧修订不覆盖删除，关闭可见区间后保留审计。</td></tr>
+            <tr><td><code>data_version</code></td><td>一次原子发布的稳定版本</td><td>发布行非空</td><td>跨分页固定版本，防止翻页漂移。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout bad"><strong>未来函数红线：</strong>公告后才能确认的标的调整、后续修订值、回补时才首次观察的数据，均不得写入更早的 <code>visible_at</code>；禁止把当前标的名单反推成历史资格。</div>
+    </section>
+
+    <section id="sync">
+      <h2>6. 同步、分区、增量、回补、幂等、恢复与质量</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>环节</th><th>建议设计</th><th>失败与恢复</th><th>质量规则</th></tr></thead>
+          <tbody>
+            <tr><td>任务划分</td><td>按交易所 × market/security/eligibility capability 分任务；系统风险独立 P2。</td><td>单分区熔断，不影响其他已达标分区。</td><td>不得跨交易所静默换源或字段映射。</td></tr>
+            <tr><td>调度</td><td>D+1 开市前多窗口探测；资格公告日加强轮询；时区固定 Asia/Shanghai。</td><td>指数退避、抖动、最大尝试次数；超限进入人工回补队列。</td><td>先验证交易日，再判断“无记录”语义。</td></tr>
+            <tr><td>原始留存</td><td>Adapter 外禁止 SDK/URL/供应商字段；每次响应先保存原始载荷、哈希和字段指纹。</td><td>规范化失败可从原始载荷重放。</td><td>空响应、HTML 错页、字段漂移不得成为成功批次。</td></tr>
+            <tr><td>增量/checkpoint</td><td>checkpoint 记录最后完整发布交易日，不以“抓取成功”推进。</td><td>从最后发布日重叠回扫 5 个交易日。</td><td>连续性按各交易所日历独立验证。</td></tr>
+            <tr><td>幂等与去重</td><td>业务键＋来源路由＋内容哈希判重；内容相同不新增业务修订。</td><td>重跑只复用原修订或创建内容变化修订。</td><td>同批重复、跨批重复、代码格式差异均需检测。</td></tr>
+            <tr><td>回补</td><td>小日期窗口、低并发、可暂停；保存实际观察时间。</td><td>断点续传，失败日期显式记录。</td><td>无发布时间证据时不得回填历史可见时间。</td></tr>
+            <tr><td>发布事务</td><td>规范化修订、质量结果、可见区间与 publication 在单事务完成。</td><td>事务失败整体回滚；publication 指针可退回前版。</td><td>身份未解析和严重单位异常进入隔离。</td></tr>
+            <tr><td>对账</td><td>官方汇总与证券明细分别对账；公式校验只作诊断。</td><td>差异超阈值暂停对应 capability 发布。</td><td>市场汇总≠明细求和是预期语义，不自动修复。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>最低质量规则</h3>
+      <ul>
+        <li>非负检查：余额、买入、卖出、偿还不应为负；派生差分因修订出现负值时必须隔离并解释。</li>
+        <li>单位检查：原值 × 缩放因子＝canonical 值；数量单位必须与证券资产类型相容。</li>
+        <li>公式检查：融资余额与融券余量前后日公式只在连续、同口径、同证券时计算，并标为诊断或派生。</li>
+        <li>完整性检查：交易日覆盖、证券身份解析、关键字段空值率、源字段指纹、批次行数突变。</li>
+        <li>修订检查：内容变化必须新增修订并保留旧版；不允许原地覆盖或倒退 <code>visible_at</code>。</li>
+        <li>缺失分类：<code>NON_TRADING_DAY</code>、<code>NOT_ELIGIBLE</code>、<code>NOT_PUBLISHED</code>、<code>UPSTREAM_FAILURE</code>、<code>IDENTITY_UNRESOLVED</code>、<code>QUARANTINED</code>。</li>
+      </ul>
+    </section>
+
+    <section id="api">
+      <h2>7. 对 service-api 的查询、分页与权限需求</h2>
+      <p>这里只描述消费需求；端点、DTO、错误码和机器契约由 0028/0005 统一提议。<code>service-api</code> 不得读取 data-sync 数据库或访问 Provider，<code>service-web</code> 只访问 <code>service-api</code>。所有新业务路由必须为 POST。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>能力</th><th>请求筛选</th><th>响应要求</th><th>权限/限制</th></tr></thead>
+          <tbody>
+            <tr><td>市场汇总序列</td><td>exchange、date range、as-of、field selection、quality status</td><td>官方汇总值、单位、来源、方法学、<code>visible_at</code>、<code>data_version</code></td><td>普通授权可读 latest；PIT 需研究权限。</td></tr>
+            <tr><td>证券日明细</td><td>instrument IDs、exchange、date range、sort、cursor、limit</td><td>直报/派生标记、空值原因、质量状态、免责声明</td><td>限制证券数、日期跨度、字段数与导出量。</td></tr>
+            <tr><td>标的资格</td><td>instrument IDs、effective-at、known-at/as-of、status</td><td>有效区间、知悉区间、公告证据、修订号</td><td>历史名单与当前名单分 capability。</td></tr>
+            <tr><td>批量研究</td><td>固定 dataset/version、稳定排序、opaque cursor</td><td>跨分页保持相同 <code>data_version</code></td><td>服务身份、审计、速率限制；禁止无界全量。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout">最新查询可缓存到数据版本变化；PIT 查询的缓存键必须包含 dataset、版本、as-of、筛选、排序、字段、权限范围和质量状态，防止高权限或未来版本污染。</div>
+    </section>
+
+    <section id="gates">
+      <h2>8. 技术硬门禁与非技术风险</h2>
+      <h3>技术硬门禁</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>门禁</th><th>准入条件</th><th>可验证证据</th><th>验证人</th><th>退出条件/失败兜底</th></tr></thead>
+          <tbody>
+            <tr><td>来源稳定性</td><td>对应交易所 capability 在固定版本下连续 20 个交易日完成采集。</td><td>带原始哈希、延迟、成功率、错误分类和字段指纹的探针报告。</td><td>data-sync 维护者</td><td>达标后仅启用该分区；失败则保持关闭并继续离线探测，不阻断其他分区。</td></tr>
+            <tr><td>字段与单位</td><td>至少 30 个边界日期覆盖月末、零值、标的调整和多资产单位。</td><td>官方导出逐字段对账；缩放、舍入、公式和空值样本。</td><td>数据 QA</td><td>误差归零或有批准容差后退出；失败时隔离该字段/来源。</td></tr>
+            <tr><td>PIT 完整性</td><td>历史回补、公告调整和修订不会提前可见。</td><td>固定决策时点重放测试与反未来函数断言。</td><td>量化研究验证人</td><td>全部反例关闭后退出；失败则只发布 latest，不开放 PIT。</td></tr>
+            <tr><td>证券身份</td><td>全部发布明细解析为稳定身份，失败记录显式隔离。</td><td>代码复用、上市/退市、跨资产单位和标的调整样本。</td><td>数据模型负责人</td><td>零未解释身份后退出；失败行不发布。</td></tr>
+            <tr><td>恢复与原子发布</td><td>幂等重跑、checkpoint、故障注入和 publication 回滚通过。</td><td>同输入同结果、半批失败、进程终止、回退前版测试记录。</td><td>服务维护者 + DBA</td><td>无部分可见或重复发布后退出；失败保持前一稳定版本。</td></tr>
+            <tr><td>安全与数据权利</td><td>每条自动访问及再分发路径有可验证依据，凭据不进入载荷或日志。</td><td>来源清单、条款快照、访问方式、安全扫描和字段分发矩阵。</td><td>合规验证人 + 安全负责人</td><td>证据充分后开放相应范围；未满足只保留获准内部研究或关闭该来源。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>非技术风险与跟进项</h3>
+      <p class="small">以下事项影响范围、成本或节奏，但不作为整套设计的技术阻断。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>风险/跟进</th><th>负责人</th><th>时间点</th><th>技术兜底</th></tr></thead>
+          <tbody>
+            <tr><td>公开页面自动访问与再分发边界待确认</td><td>数据治理/法务负责人</td><td>P0 生产准入评审前</td><td>只保留获准字段和内部研究态；按来源关闭，不影响模型与其他分区。</td></tr>
+            <tr><td>第三方限流或接口变更</td><td>数据 sourcing 负责人</td><td>连续探针第 10 日复盘</td><td>低并发、缓存、原始重放、官方文件人工导入 Adapter 候选；不直连消费方。</td></tr>
+            <tr><td>P0 证券白名单和历史深度未最终确认</td><td>量化研究负责人</td><td>实施设计启动后 5 个工作日</td><td>默认沪深全市场日级从可验证起点回补；先限制 2 年窗口。</td></tr>
+            <tr><td>北交所接入优先级可能调整</td><td>数据产品负责人</td><td>P0 验收后路线图评审</td><td>保持独立 P1 capability，不影响沪深表结构与契约版本。</td></tr>
+            <tr><td>系统风险统计权威来源不足</td><td>市场数据负责人</td><td>P1 结束前</td><td>P2 持续关闭；不以东方财富聚合值替代交易所证券事实。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="references">
+      <h2>9. 引用、关联方案、未决事项与验收</h2>
+      <p>外部资料访问日期均为 <strong>2026-07-28</strong>。动态页面用于确认披露入口和当日接口行为，不代表永久历史或生产 SLA。</p>
+      <h3>权威与候选来源</h3>
+      <ul>
+        <li><a href="https://www.sse.com.cn/market/othersdata/margin/sum/">上交所融资融券汇总</a>；<a href="https://www.sse.com.cn/market/othersdata/margin/detail/">上交所融资融券明细</a>。</li>
+        <li><a href="https://www.szse.cn/disclosure/margin/margin/index.html">深交所融资融券专区</a>；<a href="https://www.szse.cn/disclosure/margin/object/index.html">深交所标的证券信息</a>。</li>
+        <li><a href="https://www.bse.cn/disclosure/rzrq_trans_list.html">北交所融资融券交易信息</a>；<a href="https://www.bse.cn/disclosure/rzrq_bdzq_list.html">北交所融资融券标的股票</a>。</li>
+        <li><a href="https://www.csrc.gov.cn/csrc/c106256/c1654005/content.shtml">中国证监会融资融券业务定义与规则资料</a>。</li>
+        <li><a href="https://akshare.akfamily.xyz/data/stock/stock.html">AKShare 股票数据官方文档</a>。</li>
+      </ul>
+      <h3>仓库内依据</h3>
+      <ul>
+        <li><a href="../0002-data-catalog-and-akshare-research/index.html">0002 数据目录与 AKShare 调研总纲</a></li>
+        <li><a href="../0014-equity-instrument-master/index.html">0014 A 股证券身份与生命周期方案</a></li>
+        <li><a href="../0018-sqlalchemy-orm-persistence-models/index.html">0018 SQLAlchemy ORM 持久化方案</a></li>
+        <li><a href="../../decisions/0002-data-sync-ownership-and-access.md">ADR-0002 同步数据归属与跨服务访问</a></li>
+        <li><a href="../../decisions/0004-market-data-provider-adapters.md">ADR-0004 市场数据 Provider Adapter</a></li>
+        <li><a href="../../decisions/0018-service-api-post-only-http-method.md">ADR-0018 service-api POST-only</a></li>
+      </ul>
+      <h3>未决事项</h3>
+      <ul>
+        <li>沪市历史标的资格的机器可读官方档案深度，以及代码变更时的连续身份证据。</li>
+        <li>各交易所页面实际首次发布时间是否有可长期复核的不可变元数据。</li>
+        <li>深市偿还字段是否存在稳定官方替代入口；未确认前保持空值或版本化派生。</li>
+        <li>不同资产类型的融券数量单位映射与历史单位变更边界。</li>
+        <li>系统风险统计的权威来源、授权、历史和更新频率；未解决前保持 P2 关闭。</li>
+      </ul>
+      <h3>专题验收清单</h3>
+      <ul>
+        <li>☑ P0/P1/P2、接入建议、价值、消费者和能力边界明确。</li>
+        <li>☑ 官方来源、AKShare 候选、真实上游、单次探针、限流、授权与历史风险分离。</li>
+        <li>☑ 市场汇总、证券明细、资格、系统风险的粒度、唯一键、字段、单位与空值隔离。</li>
+        <li>☑ 交易日、发布时间、观察、可见、有效、知悉、修订与数据版本语义完整。</li>
+        <li>☑ 同步、增量、回补、幂等、去重、恢复、质量、未来函数和口径边界可执行。</li>
+        <li>☑ 领域表未定义跨专题共享表；service-api 只记录查询需求和 POST-only 边界。</li>
+        <li>☑ 每个技术硬门禁含准入条件、证据、验证人、退出条件；非技术事项含负责人、时间点、技术兜底。</li>
+        <li>☐ 固定容器连续探针、官方对账、PIT 重放、迁移、契约、集成、恢复与性能测试均为后续计划，本专题未执行。</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">0021 · 融资融券数据接入技术方案 · 状态：Proposed · 不代表 Provider 生产准入、授权承诺或既有 API 变更。</div>
+  </footer>
+</body>
+</html>

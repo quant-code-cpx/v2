@@ -92,9 +92,14 @@ class Settings(BaseSettings):
         default=False,
         validation_alias="DATA_SYNC_MONEY_FLOW_ENABLED",
     )
+    index_enabled: bool = Field(default=False, validation_alias="DATA_SYNC_INDEX_ENABLED")
     financial_source_policy: str = Field(
         default="disabled",
         validation_alias="DATA_SYNC_FINANCIAL_SOURCE_POLICY",
+    )
+    index_source_policy: str = Field(
+        default="disabled",
+        validation_alias="DATA_SYNC_INDEX_SOURCE_POLICY",
     )
     financial_max_concurrency: int | None = Field(
         default=None,
@@ -166,6 +171,15 @@ class Settings(BaseSettings):
             raise ValueError("financial source policy must not be blank")
         return "disabled" if normalized.lower() == "disabled" else normalized
 
+    @field_validator("index_source_policy")
+    @classmethod
+    def validate_index_source_policy(cls, value: str) -> str:
+        """规范化指数来源策略，避免空白或大小写造成错误 adapter 注册。"""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("index source policy must not be blank")
+        return normalized.lower()
+
     @field_validator("internal_api_bearer_token")
     @classmethod
     def validate_internal_api_bearer_token(cls, value: SecretStr) -> SecretStr:
@@ -175,8 +189,8 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def validate_financial_dark_launch_settings(self) -> Settings:
-        """启用财务能力前强制声明来源策略和资源预算，缺项时拒绝启动。"""
+    def validate_source_policy_settings(self) -> Settings:
+        """启用受控来源能力前强制声明策略和依赖，避免隐式访问未验证上游。"""
         if self.equity_scheduler_enabled and not self.equity_market_enabled:
             raise ValueError(
                 "DATA_SYNC_EQUITY_SCHEDULER_ENABLED requires DATA_SYNC_EQUITY_MARKET_ENABLED"
@@ -188,6 +202,17 @@ class Settings(BaseSettings):
             )
         if self.money_flow_enabled and not self.akshare_enabled:
             raise ValueError("DATA_SYNC_MONEY_FLOW_ENABLED requires DATA_SYNC_AKSHARE_ENABLED")
+        if self.index_enabled:
+            if not self.akshare_enabled:
+                raise ValueError("DATA_SYNC_INDEX_ENABLED requires DATA_SYNC_AKSHARE_ENABLED")
+            if self.index_source_policy not in {
+                "akshare-csindex",
+                "akshare-cnindex",
+                "akshare-csindex-cnindex",
+            }:
+                raise ValueError(
+                    "DATA_SYNC_INDEX_ENABLED requires an explicit approved index source policy"
+                )
         if not self.financial_enabled:
             return self
         missing: list[str] = []

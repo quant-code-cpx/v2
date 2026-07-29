@@ -79,6 +79,10 @@ def test_cli_runs_one_exchange_catalog_and_closes_composition_root(monkeypatch, 
     monkeypatch.setattr(equity_catalog, "build_container", lambda _settings: container)
     monkeypatch.setattr(equity_catalog, "SqlAlchemyEquityMasterRepository", FakeRepository)
     monkeypatch.setattr(equity_catalog, "S3RawPayloadStore", lambda _storage: object())
+    # 入口组合测试不触及对象存储；留证语义由原始载荷存储的专用单元测试覆盖。
+    monkeypatch.setattr(
+        equity_catalog, "retain_failure_evidence", lambda _store, operation: operation()
+    )
     monkeypatch.setattr(equity_catalog, "EquityCatalogSyncService", FakeSyncService)
 
     assert equity_catalog.main(["--exchange", "SSE", "--target-date", "2026-07-27"]) == 0
@@ -98,6 +102,10 @@ def test_cli_syncs_three_exchanges_before_publishing_aggregate(monkeypatch, caps
     monkeypatch.setattr(equity_catalog, "build_container", lambda _settings: container)
     monkeypatch.setattr(equity_catalog, "SqlAlchemyEquityMasterRepository", FakeRepository)
     monkeypatch.setattr(equity_catalog, "S3RawPayloadStore", lambda _storage: object())
+    # 入口组合测试不触及对象存储；留证语义由原始载荷存储的专用单元测试覆盖。
+    monkeypatch.setattr(
+        equity_catalog, "retain_failure_evidence", lambda _store, operation: operation()
+    )
     monkeypatch.setattr(equity_catalog, "EquityCatalogSyncService", FakeSyncService)
 
     assert equity_catalog.main(["--all-exchanges", "--target-date", "2026-07-27"]) == 0

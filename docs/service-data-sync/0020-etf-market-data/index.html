@@ -1,0 +1,2209 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>0020 ETF 市场数据接入技术调研（Proposed）</title>
+  <style>
+    :root {
+      --bg: #f4f6fa;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --ink: #182230;
+      --muted: #5c6878;
+      --line: #d8e0ea;
+      --accent: #2563eb;
+      --accent-soft: #eaf1ff;
+      --good: #087a55;
+      --good-soft: #e8f7f1;
+      --warn: #9a5b00;
+      --warn-soft: #fff5df;
+      --bad: #b42318;
+      --bad-soft: #fff0ee;
+      --shadow: 0 12px 32px rgba(31, 45, 61, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--bg);
+    }
+
+    body {
+      min-width: 1200px;
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(180deg, #eef3ff 0, var(--bg) 440px),
+        var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.72;
+    }
+
+    a {
+      color: #174ea6;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    a:hover {
+      color: var(--accent);
+    }
+
+    a:focus-visible,
+    [tabindex]:focus-visible {
+      outline: 3px solid rgba(37, 99, 235, 0.3);
+      outline-offset: 3px;
+      border-radius: 4px;
+    }
+
+    code {
+      padding: 0.12em 0.36em;
+      border: 1px solid #dce4ef;
+      border-radius: 5px;
+      color: #23416d;
+      background: #f5f8fc;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.91em;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4 {
+      margin: 0;
+      line-height: 1.3;
+      letter-spacing: -0.02em;
+    }
+
+    h1 {
+      max-width: 880px;
+      font-size: 42px;
+    }
+
+    h2 {
+      margin-bottom: 18px;
+      font-size: 27px;
+    }
+
+    h3 {
+      margin-bottom: 9px;
+      font-size: 18px;
+    }
+
+    h4 {
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+
+    p {
+      margin: 8px 0;
+    }
+
+    ul,
+    ol {
+      margin: 10px 0;
+      padding-left: 22px;
+    }
+
+    li + li {
+      margin-top: 5px;
+    }
+
+    .skip-link {
+      position: fixed;
+      z-index: 20;
+      top: 10px;
+      left: 10px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      color: #fff;
+      background: var(--accent);
+      transform: translateY(-180%);
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    .shell {
+      width: 1120px;
+      margin: 0 auto;
+    }
+
+    .topbar {
+      position: sticky;
+      z-index: 10;
+      top: 0;
+      border-bottom: 1px solid rgba(216, 224, 234, 0.92);
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(10px);
+    }
+
+    .topbar .shell {
+      display: flex;
+      min-height: 58px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+    }
+
+    .brand-mark {
+      display: inline-grid;
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      color: #fff;
+      background: var(--accent);
+      place-items: center;
+      font-size: 12px;
+      letter-spacing: 0;
+    }
+
+    .topnav {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .topnav a {
+      color: #3e4b5d;
+      text-decoration: none;
+    }
+
+    .hero {
+      padding: 54px 0 32px;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 16px;
+      color: #365072;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 10px;
+      border: 1px solid #a9c3ff;
+      border-radius: 999px;
+      color: #1849a9;
+      background: var(--accent-soft);
+      font-weight: 800;
+      letter-spacing: 0.04em;
+    }
+
+    .lead {
+      max-width: 890px;
+      margin-top: 16px;
+      color: #435166;
+      font-size: 18px;
+    }
+
+    .decision-grid {
+      display: grid;
+      grid-template-columns: 1.35fr 1fr 1fr;
+      gap: 14px;
+      margin-top: 28px;
+    }
+
+    .decision-card,
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .decision-card {
+      min-height: 174px;
+      padding: 20px;
+    }
+
+    .decision-card.primary {
+      border-color: #9dbbff;
+      background:
+        linear-gradient(135deg, rgba(234, 241, 255, 0.9), #fff 65%);
+    }
+
+    .metric-label,
+    .label {
+      display: inline-block;
+      margin-bottom: 8px;
+      color: #5f6e81;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .big {
+      display: block;
+      margin: 3px 0 7px;
+      color: #173967;
+      font-size: 25px;
+      font-weight: 800;
+      line-height: 1.25;
+    }
+
+    .hero-alert {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 12px;
+      margin-top: 16px;
+      padding: 15px 18px;
+      border: 1px solid #f1c16b;
+      border-radius: 10px;
+      background: var(--warn-soft);
+    }
+
+    .hero-alert strong {
+      color: #7d4900;
+    }
+
+    main {
+      padding: 8px 0 64px;
+    }
+
+    section {
+      margin-top: 22px;
+      padding: 30px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: 0 7px 22px rgba(31, 45, 61, 0.05);
+      scroll-margin-top: 76px;
+    }
+
+    .section-intro {
+      max-width: 920px;
+      margin-top: -8px;
+      margin-bottom: 18px;
+      color: var(--muted);
+    }
+
+    .grid-2,
+    .grid-3,
+    .grid-4 {
+      display: grid;
+      gap: 14px;
+    }
+
+    .grid-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .grid-4 {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .card {
+      padding: 18px;
+      box-shadow: none;
+    }
+
+    .card.soft {
+      background: var(--surface-soft);
+    }
+
+    .callout {
+      margin: 16px 0 0;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      border-radius: 7px;
+      background: var(--accent-soft);
+    }
+
+    .callout.warn {
+      border-left-color: #d98900;
+      background: var(--warn-soft);
+    }
+
+    .callout.bad {
+      border-left-color: var(--bad);
+      background: var(--bad-soft);
+    }
+
+    .callout.good {
+      border-left-color: var(--good);
+      background: var(--good-soft);
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border: 1px solid #c7d4e4;
+      border-radius: 999px;
+      color: #405065;
+      background: #f6f8fb;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .tag.p0,
+    .tag.good {
+      border-color: #9bd8c4;
+      color: #086447;
+      background: var(--good-soft);
+    }
+
+    .tag.p1,
+    .tag.warn {
+      border-color: #f0ca84;
+      color: #7f4a00;
+      background: var(--warn-soft);
+    }
+
+    .tag.p2,
+    .tag.bad {
+      border-color: #f2afa9;
+      color: #9f271e;
+      background: var(--bad-soft);
+    }
+
+    .table-wrap {
+      width: 100%;
+      margin-top: 12px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+    }
+
+    table {
+      width: 100%;
+      min-width: 940px;
+      border-collapse: collapse;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    th,
+    td {
+      padding: 11px 12px;
+      border-bottom: 1px solid #e6ebf2;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: #344054;
+      background: #f5f7fa;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    tbody tr:hover {
+      background: #fbfcff;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: 1.1fr 36px 1.1fr 36px 1.2fr 36px 1.1fr;
+      align-items: stretch;
+      margin-top: 16px;
+    }
+
+    .flow-node {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-soft);
+    }
+
+    .flow-node strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #23416d;
+    }
+
+    .flow-arrow {
+      display: grid;
+      color: #6f7d90;
+      place-items: center;
+      font-size: 23px;
+    }
+
+    .facts {
+      margin: 8px 0;
+    }
+
+    .facts strong {
+      color: #263b57;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0 18px;
+    }
+
+    .legend .tag {
+      border-radius: 5px;
+    }
+
+    .formula {
+      display: block;
+      margin: 12px 0;
+      padding: 12px 14px;
+      border: 1px dashed #9fb3cc;
+      border-radius: 8px;
+      color: #173967;
+      background: #f7faff;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .small,
+    .muted {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .source-list {
+      columns: 2;
+      column-gap: 34px;
+    }
+
+    .source-list li {
+      break-inside: avoid;
+      margin-bottom: 9px;
+    }
+
+    footer {
+      padding: 24px 0 40px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      background: #fff;
+      font-size: 13px;
+    }
+
+    @media print {
+      body {
+        min-width: 0;
+        color: #000;
+        background: #fff;
+        font-size: 10pt;
+      }
+
+      .shell {
+        width: auto;
+        max-width: none;
+        margin: 0 12mm;
+      }
+
+      .topbar {
+        position: static;
+        border: 0;
+        background: #fff;
+      }
+
+      .topnav,
+      .skip-link {
+        display: none;
+      }
+
+      .hero {
+        padding-top: 16mm;
+      }
+
+      h1 {
+        font-size: 26pt;
+      }
+
+      section,
+      .decision-card,
+      .card {
+        box-shadow: none;
+      }
+
+      section {
+        padding: 8mm;
+        break-inside: avoid-page;
+      }
+
+      .table-wrap {
+        overflow: visible;
+      }
+
+      table {
+        min-width: 0;
+        font-size: 8pt;
+      }
+
+      th,
+      td {
+        padding: 5px 6px;
+      }
+
+      a {
+        color: #000;
+        text-decoration: underline;
+      }
+
+      a[href^="http"]::after {
+        content: " (" attr(href) ")";
+        color: #555;
+        font-size: 7pt;
+        overflow-wrap: anywhere;
+      }
+
+      .flow {
+        grid-template-columns: repeat(7, auto);
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+
+  <header class="topbar">
+    <div class="shell">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">Q2</span>
+        <span>quant-v2 · service-data-sync 方案 0020</span>
+      </div>
+      <nav class="topnav" aria-label="文档导航">
+        <a href="#decision">结论</a>
+        <a href="#sources">数据源</a>
+        <a href="#model">模型</a>
+        <a href="#sync">同步</a>
+        <a href="#pit">时序</a>
+        <a href="#api">API 需求</a>
+        <a href="#gates">门禁</a>
+        <a href="#references">引用</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="hero">
+    <div class="shell">
+      <div class="eyebrow">
+        <span class="status">Proposed</span>
+        <span>2026-07-28 · ETF 市场数据专题调研</span>
+      </div>
+      <h1>ETF 主数据、行情、净值、份额与交易状态接入方案</h1>
+      <p class="lead">
+        为沪深交易所上市 ETF 建立可回放、可修订、无未来函数的独立基金数据域。
+        实施更新：已实现 ETF 身份资料、状态、未复权日线和 NAV 的 canonical 发布、受控 CLI 与内部 typed reader；
+        仍不把 AKShare 的一次成功视为生产准入，真实来源默认关闭。
+      </p>
+
+      <div class="decision-grid" aria-label="首屏结论">
+        <article class="decision-card primary">
+          <span class="metric-label">推荐决策</span>
+          <strong class="big">分层接入，P0 条件推进</strong>
+          <p>
+            先接 ETF 身份/生命周期、未复权日行情、官方单位净值和日级交易状态；
+            份额、跟踪关系和可审计折溢价进入 P1，盘中 IOPV 与实时折溢价留在 P2。
+          </p>
+        </article>
+        <article class="decision-card">
+          <span class="metric-label">领域边界</span>
+          <strong class="big">ETF ≠ LOF ≠ 场外基金</strong>
+          <p>
+            交易所代码标识上市份额，法律基金/份额类别是另一层身份。
+            LOF、公募 REITs、封闭式基金、ETF 联接基金和普通场外开放式基金均不混入本域。
+          </p>
+        </article>
+        <article class="decision-card">
+          <span class="metric-label">最大正确性风险</span>
+          <strong class="big">价格、NAV、IOPV 不同物</strong>
+          <p>
+            收盘价是二级市场事实；单位净值是闭市后估值；IOPV 是盘中参考值。
+            三者必须分数据集、分方法学、分可见时间，累计净值不能作为折溢价分母。
+          </p>
+        </article>
+      </div>
+
+      <div class="hero-alert">
+        <strong>硬约束</strong>
+        <span>
+          任何历史净值、份额、停复牌或跟踪标的若没有可信公开时间，只能从平台
+          <code>observed_at</code> 起可见；不得把回补日取得的现值反填到历史，从而制造虚假的可回测信息。
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <main id="main" class="shell">
+    <section id="decision">
+      <h2>1. 结论、优先级与接入范围</h2>
+      <p class="section-intro">
+        优先级按业务价值、历史可得性、口径风险与运行复杂度综合评估。每个 capability 独立准入；
+        某一来源或字段失败不阻断其他能力的设计、联调与发布。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>优先级</th>
+              <th>建议能力</th>
+              <th>接入结论</th>
+              <th>主要消费者</th>
+              <th>首要风险</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tag p0">P0</span></td>
+              <td>
+                ETF 主数据与上市生命周期；未复权日 OHLCV/成交额；官方单位净值；
+                日级二级市场交易状态、申购状态、赎回状态
+              </td>
+              <td><strong>建议条件接入。</strong>按交易所、来源和方法学独立发布；只发布通过身份、单位、时间与恢复门禁的分区。</td>
+              <td>ETF 筛选、行情分析、资产配置、净值核对、组合估值、基础回测</td>
+              <td>代码身份误绑；成交量单位漂移；净值可见时间缺失；停牌与无成交误判</td>
+            </tr>
+            <tr>
+              <td><span class="tag p1">P1</span></td>
+              <td>
+                每日基金份额；跟踪标的关系；分红、拆分/折算事件；
+                收盘价相对单位净值的日级折溢价
+              </td>
+              <td><strong>建议在 P0 稳定后接入。</strong>份额只用带统计日期和已验证单位的官方快照；折溢价只允许版本化派生。</td>
+              <td>规模/流动性研究、资金流近似分析、跟踪产品比较、折溢价监控</td>
+              <td>份额与“基金规模”混淆；历史快照缺口；拆分导致断点；价格与 NAV 错日</td>
+            </tr>
+            <tr>
+              <td><span class="tag p2">P2</span></td>
+              <td>
+                盘中 IOPV、实时折溢价、申赎清单明细、主动 ETF、
+                跨境/商品/货币 ETF 的复杂交易与估值日历
+              </td>
+              <td><strong>首期不建议生产接入。</strong>保留模型扩展位；待行情授权、时间戳、方法学与吞吐证据齐备后单独立项。</td>
+              <td>盘中交易、套利监控、申赎执行、做市研究</td>
+              <td>实时行情许可；IOPV 只是参考值且方法可变；跨市场休市、汇率与延迟造成不可比</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid-3" style="margin-top:16px">
+        <article class="card soft">
+          <span class="label">纳入</span>
+          <h3>沪深上市 ETF 份额</h3>
+          <p>股票、债券、跨境、商品、货币 ETF；模型预留主动 ETF 类型。公开身份使用 <code>exchange + symbol + asOf</code>。</p>
+        </article>
+        <article class="card soft">
+          <span class="label">明确排除</span>
+          <h3>相邻但不同的基金产品</h3>
+          <p>LOF、公募 REITs、封闭式基金、场外开放式基金、ETF 联接基金；它们必须进入各自数据域。</p>
+        </article>
+        <article class="card soft">
+          <span class="label">不做</span>
+          <h3>本方案没有实施授权</h3>
+          <p>不写 adapter、任务、ORM、迁移、配置、OpenAPI 或 Docker；不批准任何来源生产启用或对外再分发。</p>
+        </article>
+      </div>
+
+      <aside class="callout">
+        <strong>建议：</strong>先以沪深各 20 只、覆盖股票/债券/跨境/商品/货币类型的固定样本做 P0 pilot。
+        样本规模是验证建议，不是生产范围；通过门禁后再按交易所完整目录扩展。
+      </aside>
+    </section>
+
+    <section id="facts">
+      <h2>2. 事实、推断、建议与假设</h2>
+      <div class="legend" aria-label="结论标签说明">
+        <span class="tag good">事实</span>
+        <span class="tag">推断</span>
+        <span class="tag warn">建议</span>
+        <span class="tag bad">未决</span>
+      </div>
+      <div class="grid-2">
+        <article class="card">
+          <span class="tag good">事实</span>
+          <h3>监管与交易所定义支持三类数值隔离</h3>
+          <ul class="facts">
+            <li>开放式基金单位净值在开放日闭市后，以基金资产净值除以当日基金份额余额计算。</li>
+            <li>ETF 在交易所形成实时成交价格；交易所可在交易时间发布 IOPV 供参考。</li>
+            <li>上交所申赎清单披露前一交易日单位净值，官网栏目披露时间与责任主体也有明确说明。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="tag good">事实</span>
+          <h3>仓库固定版本的单次探针不足以准入</h3>
+          <ul class="facts">
+            <li><code>fund_etf_hist_sina</code> 的 510300 样本曾成功返回 3,441 行，但字段单位与后复权字段仍未验证。</li>
+            <li><code>fund_etf_hist_em</code> 的未复权、前复权候选均曾断连。</li>
+            <li>上交所份额候选超时；深交所份额候选出现解析错误；第二轮基金份额与复权行情仍失败。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="tag">推断</span>
+          <h3>官方网页适合 EOD 取证，不等于稳定数据服务</h3>
+          <p>
+            交易所公开页面能够证明字段语义和提供日级快照，但没有为本项目承诺 API SLA、限流或长期历史深度。
+            因此官方来源应优先作事实权威，采集稳定性仍需通过 adapter 观察窗口单独验证。
+          </p>
+        </article>
+        <article class="card">
+          <span class="tag warn">建议</span>
+          <h3>保守知识时间优先于“更长历史”</h3>
+          <p>
+            若历史页面只有净值日期而无可信公告时间，则保留历史数值，但将
+            <code>known_from = observed_at</code>、<code>knowledge_basis = OBSERVED_AT</code>。
+            这会降低历史回测覆盖，却避免未来函数。
+          </p>
+        </article>
+      </div>
+      <aside class="callout warn">
+        <strong>显式假设：</strong>后续统一模型 0027 会提供跨资产身份、来源批次、raw evidence、质量、publication、
+        checkpoint 与方法学公共支撑表。本专题只描述 ETF 领域字段与关系，不自行定义跨专题共享表。
+      </aside>
+    </section>
+
+    <section id="value">
+      <h2>3. 业务价值、用户与消费场景</h2>
+      <div class="grid-4">
+        <article class="card soft">
+          <span class="label">量化研究员</span>
+          <h3>无未来函数回测</h3>
+          <p>按 <code>asOf + knownAt</code> 取得当时已上市、已可见的 ETF、价格、NAV、状态和修订版本。</p>
+        </article>
+        <article class="card soft">
+          <span class="label">资产配置</span>
+          <h3>标的与产品筛选</h3>
+          <p>按资产类别、跟踪标的、管理人、上市状态、规模/份额和流动性筛选可交易产品。</p>
+        </article>
+        <article class="card soft">
+          <span class="label">行情用户</span>
+          <h3>价格与净值核对</h3>
+          <p>查看未复权价格、官方单位净值、派生收盘折溢价，并识别停牌、外盘休市和数据迟到。</p>
+        </article>
+        <article class="card soft">
+          <span class="label">数据运营</span>
+          <h3>修订与来源审计</h3>
+          <p>追踪同一净值/份额的迟到更正、来源批次、方法版本和质量状态，按 publication 回滚。</p>
+        </article>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>场景</th>
+              <th>最小必需数据</th>
+              <th>禁止的捷径</th>
+              <th>可接受降级</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>ETF 历史回测</td>
+              <td>点时身份、未复权日线、交易日历、日级交易状态、数据版本、可见时间</td>
+              <td>用今天 ETF 列表回填历史；停牌日向前填价格；使用未来修订的 NAV</td>
+              <td>缺可信历史公告时间的数据仅从首次观测日起参与</td>
+            </tr>
+            <tr>
+              <td>收盘折溢价</td>
+              <td>同一份额、同一估值日、同币种/拆分基准的收盘价与单位净值</td>
+              <td>累计净值作分母；用盘中 IOPV 冒充单位净值；错位到前/后交易日</td>
+              <td>标记 <code>NOT_COMPARABLE</code>，不输出数值</td>
+            </tr>
+            <tr>
+              <td>份额变化研究</td>
+              <td>官方统计日期、总份额、原始单位、标准化单位、修订与事件</td>
+              <td>用收盘价市值代替份额；从快照缺席推断清盘；对拆分跳变当作申赎</td>
+              <td>输出缺口与覆盖区间，不跨缺口计算变化率</td>
+            </tr>
+            <tr>
+              <td>当前可交易筛选</td>
+              <td>上市生命周期、二级市场状态、申购状态、赎回状态、观测时间</td>
+              <td>把三种状态压成一个布尔值；从成交量为零推断停牌</td>
+              <td>状态未知时保留产品但返回 <code>UNKNOWN</code>，不声称可交易</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="sources">
+      <h2>4. 权威来源、AKShare 候选与真实上游</h2>
+      <p class="section-intro">
+        来源事实按“监管/交易所/基金管理人官方披露 → 授权行情 → 聚合站点”排序。
+        AKShare 是采集库，不是业务来源；每个函数必须映射到真实上游、适用字段与独立方法学。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th>首选事实来源</th>
+              <th>AKShare 候选 / 真实上游</th>
+              <th>历史与限量</th>
+              <th>稳定性 / 授权判断</th>
+              <th>建议</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>fund.etf.master</code><br>身份、分类、上市/退市</td>
+              <td>上交所 ETF 列表/基金档案；深交所 ETF 列表；基金管理人产品资料概要、上市/终止公告</td>
+              <td>
+                <code>fund_etf_scale_sse</code> → 上交所；
+                <code>fund_etf_scale_szse</code> → 深交所；
+                <code>fund_overview_em</code>、<code>fund_info_index_em</code> → 天天基金/东方财富，仅发现与对账
+              </td>
+              <td>交易所当前列表为主；历史生命周期需由上市、变更、终止公告重建，不能把当前快照倒灌</td>
+              <td>公开网页无本项目 SLA；交易所为字段权威。聚合站点许可和长期稳定性未确认</td>
+              <td><span class="tag p0">P0</span> 按交易所独立发布；目录差集不得自动退市</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.bar.1d.raw</code><br>未复权日行情</td>
+              <td>交易所授权 EOD 行情或经授权行情服务；交易所基金行情页作样本核对</td>
+              <td>
+                <code>fund_etf_hist_em</code> → 东方财富；
+                <code>fund_etf_hist_sina</code> → 新浪财经
+              </td>
+              <td>东财支持日期区间及日/周/月；新浪单只全历史。实际深度随产品与上游而异</td>
+              <td>固定 1.18.78 探针中新浪单样本成功，东财断连；当前 AKShare 文档字段与仓库样本形状不一致，存在 schema drift 信号</td>
+              <td><span class="tag p0">P0</span> 只保存未复权；任一来源先做 5 日连续验收与单位核对</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.nav.1d.reported</code><br>单位/累计净值</td>
+              <td>基金管理人、托管人复核后的净值披露；交易所申赎清单中的前一交易日单位净值；证监会规定网站</td>
+              <td>
+                <code>fund_open_fund_info_em</code> → 天天基金/东方财富；
+                <code>fund_etf_category_ths</code>、<code>fund_etf_spot_ths</code> → 同花顺
+              </td>
+              <td>东财历史接口可按基金返回完整日期序列，但单位净值、累计净值为两次调用；通常不含公告时间</td>
+              <td>仓库单样本曾返回 5,970 行；这只证明形状。基金管理人页面更接近事实权威，但需验证可机器采集与修订</td>
+              <td><span class="tag p0">P0</span> 单位与累计净值拆类型；无公告时间则保守使用首次观测时间</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.share.1d.reported</code><br>总份额</td>
+              <td>上交所 ETF 规模页（当日清算后总份额）；深交所基金规模日频页</td>
+              <td>
+                <code>fund_etf_scale_sse(date)</code> → 上交所；
+                <code>fund_scale_daily_szse(start,end,"ETF")</code> → 深交所；
+                <code>fund_etf_scale_szse()</code> → 深交所最近交易日
+              </td>
+              <td>上交所按日期；深交所日频单次窗口不超过 6 个月；最近日接口无查询日期参数</td>
+              <td>仓库探针中上交所候选 76.8 秒后断连、深交所候选解析失败。AKShare 文档未明确上交所输出单位，必须与官网“万份”核对</td>
+              <td><span class="tag p1">P1</span> 保留原单位和缩放因子；“基金规模亿元”不得代替总份额</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.trading_state</code><br>交易/申购/赎回状态</td>
+              <td>上交所基金停复牌、ETF 公告及申赎清单；深交所停复牌公告、基金公告与申赎清单</td>
+              <td><code>fund_etf_spot_em</code> 含现货字段但不是权威停复牌事件；当前无已验证的 AKShare 专用 ETF 状态接口</td>
+              <td>公告可回溯但结构和历史深度需探测；状态可能盘中变化</td>
+              <td>必须由交易所/管理人事件确认；零成交、缺行或上游空集均不是停牌证据</td>
+              <td><span class="tag p0">P0 日级</span>；盘中状态 P1，三个状态维度独立</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.action</code><br>分红、拆分/折算</td>
+              <td>基金管理人公告、交易所基金公告、基金合同与招募说明书</td>
+              <td>
+                <code>fund_etf_dividend_sina</code> → 新浪；
+                <code>fund_open_fund_info_em(...,"分红送配详情"|"拆分详情")</code>、
+                <code>fund_announcement_dividend_em</code> → 东方财富
+              </td>
+              <td>候选通常返回全历史，但公告 ID、撤回/更正与发布时间覆盖不一</td>
+              <td>聚合数据只作发现；官方公告决定事件、状态、日期和比例</td>
+              <td><span class="tag p1">P1</span> 事件追加修订；不直接保存供应商复权价为市场事实</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.tracking_relation</code><br>标的指数/比较基准</td>
+              <td>基金合同、招募说明书、产品资料概要、交易所基金档案</td>
+              <td><code>fund_overview_em</code>、<code>fund_info_index_em</code> → 东方财富，仅候选</td>
+              <td>当前快照常见；历史变更需公告重建；主动 ETF 可能只有业绩比较基准而无标的指数</td>
+              <td>名称字符串不能可靠解析指数身份；需对接 0019 指数身份方案与 0027 统一资产身份</td>
+              <td><span class="tag p1">P1</span> 有效期关系；无标的指数必须给出显式空值原因</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.iopv.tick</code><br>盘中 IOPV/实时折溢价</td>
+              <td>交易所授权行情、基金管理人公布的方法和申赎清单</td>
+              <td><code>fund_etf_spot_em</code> → 东方财富，暴露 IOPV 与“基金折价率”</td>
+              <td>快照型，缺可靠可回放历史；频率、延迟与计算责任随产品而异</td>
+              <td>实时行情授权和再分发未确认；IOPV 可由管理人、交易所或第三方计算，且不是经核算单位净值</td>
+              <td><span class="tag p2">P2</span> 首期不接；禁止从一次快照回填历史</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout warn">
+        <strong>版本形状冲突需先解决：</strong>项目固定 <code>akshare==1.18.78</code> 的 510300 探针曾看到
+        <code>amount/postVol/postAmt</code>，而 2026-07-28 的 AKShare 1.18.80 官方文档只列
+        OHLC 与 <code>volume</code>，并把 volume 标为“手”。同样，AKShare 的上交所份额文档未标输出单位，
+        上交所官网则展示“总份额（万份）”。这两项都必须以固定版本 raw fixture、真实上游字段和量纲对账作为证据，
+        不能靠列名或经验转换。
+      </aside>
+
+      <aside class="callout bad">
+        <strong>代码许可不等于数据许可：</strong>AKShare 的开源许可不能自动授予东方财富、新浪、同花顺或交易所数据的商业使用、
+        原始留存与再分发权。授权状态只限制对应 capability 的生产发布，不阻断本方案、DDL 设计或 fake 契约联调。
+      </aside>
+    </section>
+
+    <section id="architecture">
+      <h2>5. 数据边界与接入架构</h2>
+      <p class="section-intro">
+        ETF 数据继续遵守现有 provider-neutral port、raw-first、canonical revision、质量门与原子 publication。
+        供应商 SDK、URL、字段和单位修正只允许存在于 adapter。
+      </p>
+
+      <div class="flow" role="img" aria-label="ETF 数据从官方或聚合来源经适配器、原始证据、规范化质量门进入发布数据集，并由内部接口提供给 service-api">
+        <div class="flow-node">
+          <strong>真实上游</strong>
+          交易所 · 基金管理人 · 授权行情 · 聚合站点
+        </div>
+        <div class="flow-arrow" aria-hidden="true">→</div>
+        <div class="flow-node">
+          <strong>独立 Adapter</strong>
+          来源字段、单位、错误与 schema fingerprint
+        </div>
+        <div class="flow-arrow" aria-hidden="true">→</div>
+        <div class="flow-node">
+          <strong>Raw → Canonical → Quality</strong>
+          每次观测可重放；不同口径不拼接
+        </div>
+        <div class="flow-arrow" aria-hidden="true">→</div>
+        <div class="flow-node">
+          <strong>Publication → Internal API</strong>
+          service-api 只读版本化契约
+        </div>
+      </div>
+
+      <div class="grid-3" style="margin-top:16px">
+        <article class="card soft">
+          <h3>数据所有权</h3>
+          <p><code>service-data-sync</code> 独占 ETF canonical、raw、修订、质量与发布。数据库和对象存储凭据不授予其他服务。</p>
+        </article>
+        <article class="card soft">
+          <h3>消费边界</h3>
+          <p><code>service-api</code> 只通过版本化内部 HTTP 消费；<code>service-web</code> 只访问 <code>service-api</code>。</p>
+        </article>
+        <article class="card soft">
+          <h3>来源切换</h3>
+          <p>新来源形成新方法学或受控等价路由；禁止把来源 A 的价格与来源 B 的成交量拼成一行。</p>
+        </article>
+      </div>
+
+      <div class="callout warn">
+        <strong>ETF 与股票身份不得复用：</strong>现有 <code>equity_instrument</code> 是 A 股公司证券身份，
+        ETF 是基金份额，不能为了复用行情表而伪装成股票。共享资产身份与跨域外键由 0027 统一模型决定。
+      </div>
+    </section>
+
+    <section id="datasets">
+      <h2>6. 建议 canonical dataset 与消费需求</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Dataset</th>
+              <th>事实性质 / 粒度</th>
+              <th>输入</th>
+              <th>消费者必须获得</th>
+              <th>隔离要求</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>fund.etf.master</code></td>
+              <td>ETF 上市份额 × 有效/知识区间</td>
+              <td>交易所目录、产品资料、上市/终止公告</td>
+              <td>公开代码、名称、分类、生命周期、管理人、币种、日历策略、有效与可见时间</td>
+              <td>不含 LOF/REIT/联接基金；名称不作身份</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.tracking_relation</code></td>
+              <td>ETF × 关系角色 × 有效/知识区间</td>
+              <td>基金合同、招募说明书、产品资料概要</td>
+              <td>标的/基准身份、跟踪方式、目标权重、方法版本</td>
+              <td>主动 ETF 与指数 ETF 分型；未知不是“无标的”</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.bar.1d.raw</code></td>
+              <td>ETF × 交易日 × 来源方法 × 修订</td>
+              <td>未复权 EOD 行情</td>
+              <td>OHLC、成交份额、成交额、报价币种、最终性、修订、可见时间</td>
+              <td>不保存 qfq/hfq 为源事实；无交易日不补零、不前填</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.nav.1d.reported</code></td>
+              <td>ETF 份额 × 估值日 × NAV 类型 × 修订</td>
+              <td>管理人/托管人净值、官方申赎清单</td>
+              <td>单位/累计净值、币种、估值日、公开/观测/可见时间、知识依据</td>
+              <td>单位净值、累计净值、IOPV 分开；不按抓取日改写估值日</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.share.1d.reported</code></td>
+              <td>ETF 份额 × 统计日 × 份额口径 × 修订</td>
+              <td>交易所清算后总份额</td>
+              <td>原值、原单位、标准份数、统计时点、修订与覆盖状态</td>
+              <td>总份额不等于 AUM/市值；无日期快照不回填历史</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.trading_state</code></td>
+              <td>ETF × 状态维度 × 有效区间 × 修订</td>
+              <td>停复牌公告、交易所状态、申赎清单</td>
+              <td>二级交易、申购、赎回三个独立状态，原因、公告与生效时间</td>
+              <td>停牌不等于暂停申赎；缺成交不等于停牌</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.action</code></td>
+              <td>ETF × 官方事件 × 修订</td>
+              <td>分红、拆分、折算及更正/撤回公告</td>
+              <td>事件状态、公告/登记/除息/支付/折算日期、金额或比例</td>
+              <td>事后执行结果不能提前到公告前；动作不覆盖原始价格</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.premium_discount.close.derived</code></td>
+              <td>ETF × 交易日 × 方法版本 × 输入版本</td>
+              <td>同基准未复权收盘价 + 单位净值 + 行动/日历信息</td>
+              <td>折溢价、符号约定、输入数据版本、可比状态、方法版本、最晚可见时间</td>
+              <td>不可比较时不给数值；不得用累计 NAV 或 IOPV 代替单位 NAV</td>
+            </tr>
+            <tr>
+              <td><code>fund.etf.iopv.tick</code></td>
+              <td>ETF × 交易时间戳 × 计算主体/方法版本</td>
+              <td>授权行情与申赎清单</td>
+              <td>IOPV、延迟、计算主体、方法、行情时点</td>
+              <td>P2 独立高频域；不与日 NAV 合表</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="identity">
+      <h2>7. 实体身份、生命周期与候选唯一键</h2>
+      <div class="grid-2">
+        <article class="card">
+          <span class="label">身份层次</span>
+          <h3>内部锚点、基金份额、上市标识分离</h3>
+          <ol class="facts">
+            <li><strong>内部 <code>etf_id</code>：</strong>永久关联键，最终由 0027 的统一资产身份给出。</li>
+            <li><strong>法律基金/份额类别：</strong>基金合同下的法律产品与可计净值份额；基金主代码、份额类别和管理人均为证据，不单独作为永久键。</li>
+            <li><strong>上市标识：</strong><code>(exchange, symbol)</code> 带有效区间；代码可能变更或复用，名称绝不是身份。</li>
+          </ol>
+        </article>
+        <article class="card">
+          <span class="label">生命周期</span>
+          <h3>上市与基金存续是两个状态机</h3>
+          <ul class="facts">
+            <li>上市生命周期：<code>ANNOUNCED → LISTED → DELISTED</code>；只有明确官方证据才能推进。</li>
+            <li>基金存续：<code>ACTIVE → LIQUIDATING → TERMINATED</code>；退市不自动等于基金合同终止。</li>
+            <li>普通日内/全天停牌属于交易状态，不改变上市生命周期。</li>
+            <li>目录暂时缺失、行情缺行、名称变化均不得触发退市或新建身份。</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>领域对象</th>
+              <th>候选逻辑键</th>
+              <th>修订/当前约束</th>
+              <th>点时解析</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>ETF 上市标识</td>
+              <td><code>exchange + symbol + effective_range + known_range</code></td>
+              <td>同一有效与知识切片最多映射一个 <code>etf_id</code>；开放当前标识唯一</td>
+              <td>按事实日期 <code>asOf</code> 与系统知识 <code>knownAt</code> 双重解析</td>
+            </tr>
+            <tr>
+              <td>日行情</td>
+              <td><code>etf_id + trade_date + price_basis + source_methodology</code></td>
+              <td>值变化追加 <code>revision_no</code>；当前知识版本唯一</td>
+              <td>日线用 <code>trade_date</code> 解析当日上市代码</td>
+            </tr>
+            <tr>
+              <td>NAV</td>
+              <td><code>etf_id + valuation_date + nav_type + currency + valuation_basis + source_methodology</code></td>
+              <td>同逻辑事实追加修订；官方更正关闭旧知识区间</td>
+              <td>估值日不是可见日；查询必须同时约束 <code>knownAt</code></td>
+            </tr>
+            <tr>
+              <td>份额</td>
+              <td><code>etf_id + share_date + share_scope + source_methodology</code></td>
+              <td>同日更正追加修订；来源单位与标准值共同参与内容哈希</td>
+              <td>以统计日解析身份；当前快照无统计日则仅按观测时间可见</td>
+            </tr>
+            <tr>
+              <td>状态事件</td>
+              <td><code>etf_id + status_dimension + source_event_key + revision_no</code></td>
+              <td>更正、撤回、补充不覆盖原公告</td>
+              <td>公告时间决定知识边界，生效时间决定市场边界</td>
+            </tr>
+            <tr>
+              <td>分红/拆分</td>
+              <td><code>etf_id + source_event_key + action_type + revision_no</code></td>
+              <td>事件 ID 优先；无 ID 时使用受版本管理的字段指纹并进入低置信度</td>
+              <td>公告、登记、除息、支付、折算日各自保存</td>
+            </tr>
+            <tr>
+              <td>折溢价</td>
+              <td><code>etf_id + trade_date + methodology_version + price_revision_id + nav_revision_id</code></td>
+              <td>输入或方法变化生成新派生版本</td>
+              <td>可见时间为所有输入可见时间的最大值</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout bad">
+        <strong>冲突处理：</strong>同一 <code>exchange + symbol + asOf + knownAt</code> 若解析到多个 ETF，
+        必须返回身份冲突并隔离相关分区；不得按名称相似度、最新上市日或数据行顺序任意选择。
+      </aside>
+    </section>
+
+    <section id="dictionary">
+      <h2>8. 字段字典、单位与空值语义</h2>
+      <p class="section-intro">
+        以下为 canonical 输入字典，不是最终 DDL。所有金额与比率使用精确十进制；
+        API 以十进制字符串传输。公共血缘字段由 0027 定义，本节不重复创建共享表。
+      </p>
+
+      <h3>8.1 主数据与跟踪关系</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>建议类型</th>
+              <th>单位 / 枚举</th>
+              <th>含义与空值</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>etf_id</code></td><td>UUID</td><td>—</td><td>内部永久关联键；由 0027 统一身份生成，不对公开 API 暴露。</td></tr>
+            <tr><td><code>exchange</code> / <code>symbol</code></td><td>TEXT / TEXT</td><td><code>SSE | SZSE</code> / 6 位代码</td><td>上市标识；必须带有效/知识区间，不能当永久身份。</td></tr>
+            <tr><td><code>short_name</code> / <code>expanded_name</code></td><td>TEXT</td><td>中文文本</td><td>展示属性，可修订；未知保持空并给出 <code>null_reason</code>。</td></tr>
+            <tr><td><code>etf_type</code></td><td>TEXT</td><td><code>STOCK | BOND | CROSS_BORDER | COMMODITY | MONEY | OTHER</code></td><td>交易所/基金文件分类；未知不得按代码前缀推断。</td></tr>
+            <tr><td><code>management_style</code></td><td>TEXT</td><td><code>INDEX | ACTIVE | UNKNOWN</code></td><td>主动 ETF 不强制存在标的指数。</td></tr>
+            <tr><td><code>replication_method</code></td><td>TEXT</td><td><code>FULL | SAMPLING | SYNTHETIC | ACTIVE | UNKNOWN</code></td><td>仅在基金文件明确披露时写入。</td></tr>
+            <tr><td><code>fund_manager_name</code> / <code>custodian_name</code></td><td>TEXT</td><td>—</td><td>本专题保留官方名称；机构统一身份由 0027 决定。</td></tr>
+            <tr><td><code>fund_inception_date</code></td><td>DATE</td><td>自然日</td><td>基金合同生效日，不等于上市日。</td></tr>
+            <tr><td><code>listing_date</code> / <code>delisting_date</code></td><td>DATE</td><td>交易所日</td><td>仅凭官方上市/终止上市证据写入；开放结束为 <code>null</code>。</td></tr>
+            <tr><td><code>quote_currency</code> / <code>nav_currency</code></td><td>CHAR(3)</td><td>ISO 4217</td><td>分别描述交易报价和 NAV 币种；不因境内上市自动假设相同。</td></tr>
+            <tr><td><code>listing_calendar_policy</code> / <code>valuation_calendar_policy</code></td><td>TEXT</td><td>方法代码</td><td>二级市场与估值日历可不同；跨境 ETF 必须显式。</td></tr>
+            <tr><td><code>relation_role</code></td><td>TEXT</td><td><code>TRACKED_INDEX | PERFORMANCE_BENCHMARK | REFERENCE_ASSET</code></td><td>同一 ETF 可有多个角色；不得把比较基准冒充跟踪指数。</td></tr>
+            <tr><td><code>target_scheme</code> / <code>target_code</code></td><td>TEXT</td><td>指数公司/资产标识</td><td>与 0019 指数方案或 0027 统一资产映射；不能只存自由文本名称。</td></tr>
+            <tr><td><code>target_weight</code></td><td>NUMERIC(12,8)</td><td>比例 0–1</td><td>基金文件明确给出组合基准权重时写入，否则为空并说明原因。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style="margin-top:22px">8.2 日行情与交易状态</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>建议类型</th>
+              <th>单位 / 枚举</th>
+              <th>含义与空值</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>trade_date</code></td><td>DATE</td><td>交易所会话日，Asia/Shanghai</td><td>行情所属会话；不是抓取日。</td></tr>
+            <tr><td><code>price_basis</code></td><td>TEXT</td><td><code>UNADJUSTED</code></td><td>P0 唯一允许的源价格口径；qfq/hfq 只能是版本化派生。</td></tr>
+            <tr><td><code>open_price</code> / <code>high_price</code> / <code>low_price</code> / <code>close_price</code></td><td>NUMERIC(24,8)</td><td><code>quote_currency / ETF份额</code></td><td>当日无交易不制造 0 价；缺行原因由市场状态说明。</td></tr>
+            <tr><td><code>volume_shares</code></td><td>NUMERIC(30,0)</td><td>份</td><td>统一到成交份数；上游“手”必须用经验证的倍率转换并保留原单位。</td></tr>
+            <tr><td><code>amount</code></td><td>NUMERIC(30,4)</td><td><code>quote_currency</code></td><td>成交额；缺失不能用 <code>close × volume</code> 冒充。</td></tr>
+            <tr><td><code>turnover_rate</code></td><td>NUMERIC(16,10)</td><td>比例 0–1</td><td>仅来源定义和分母明确时保存；否则为空。</td></tr>
+            <tr><td><code>is_final</code></td><td>BOOLEAN</td><td>—</td><td>只有会话结束且来源标记/日终质量通过才为真。</td></tr>
+            <tr><td><code>status_dimension</code></td><td>TEXT</td><td><code>SECONDARY_TRADING | CREATION | REDEMPTION</code></td><td>三个维度严格分离。</td></tr>
+            <tr><td><code>status_value</code></td><td>TEXT</td><td><code>OPEN | SUSPENDED | CLOSED | UNKNOWN</code></td><td><code>UNKNOWN</code> 与来源故障、无市场会话分开表达。</td></tr>
+            <tr><td><code>status_reason_code</code> / <code>status_reason_text</code></td><td>TEXT</td><td>受治理代码 / 原文摘要</td><td>原因未知可空；不得从成交量推断。</td></tr>
+            <tr><td><code>effective_from</code> / <code>effective_to</code></td><td>TIMESTAMPTZ</td><td>半开区间</td><td>状态实际生效区间；全天状态也使用带时区边界。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style="margin-top:22px">8.3 NAV、份额、公司行动与折溢价</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>建议类型</th>
+              <th>单位 / 枚举</th>
+              <th>含义与空值</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>valuation_date</code></td><td>DATE</td><td>基金估值日</td><td>单位/累计净值归属日期；不必等于 ETF 二级市场交易日。</td></tr>
+            <tr><td><code>nav_type</code></td><td>TEXT</td><td><code>UNIT_NAV | ACCUMULATED_NAV</code></td><td>两类净值分行；IOPV 不允许进入该枚举。</td></tr>
+            <tr><td><code>nav_value</code></td><td>NUMERIC(24,10)</td><td><code>nav_currency / ETF份额</code></td><td>通常应大于 0；缺失需 <code>null_reason</code>，不能填 0。</td></tr>
+            <tr><td><code>valuation_basis</code></td><td>TEXT</td><td>基金合同/方法代码</td><td>跨境、商品、货币产品必须能区分估值方法版本。</td></tr>
+            <tr><td><code>share_date</code></td><td>DATE</td><td>统计日期</td><td>上交所为当日清算后，深交所以官方字段为准；无日期快照只按观测日可见。</td></tr>
+            <tr><td><code>share_scope</code></td><td>TEXT</td><td><code>TOTAL_OUTSTANDING</code></td><td>不与场内流通、市值、资产净值混算；其他口径须新增枚举和方法学。</td></tr>
+            <tr><td><code>share_value_raw</code> / <code>share_unit_raw</code></td><td>NUMERIC / TEXT</td><td>来源原值与单位</td><td>原样保留，如“万份”；单位未知则隔离，不猜倍率。</td></tr>
+            <tr><td><code>shares_outstanding</code></td><td>NUMERIC(30,6)</td><td>份</td><td>通过版本化缩放规则标准化；允许精度但不得无依据取整。</td></tr>
+            <tr><td><code>action_type</code></td><td>TEXT</td><td><code>CASH_DISTRIBUTION | SPLIT | CONSOLIDATION | OTHER</code></td><td>基金份额行动；与上市公司公司行动分域。</td></tr>
+            <tr><td><code>announcement_at</code></td><td>TIMESTAMPTZ</td><td>官方公开时间</td><td>只有来源含可信时间才写；只有日期时另存精度并保守设可见边界。</td></tr>
+            <tr><td><code>record_date</code> / <code>ex_date</code> / <code>payment_date</code> / <code>conversion_date</code></td><td>DATE</td><td>自然/交易日</td><td>各日期独立；不以公告日代替。</td></tr>
+            <tr><td><code>cash_per_share</code></td><td>NUMERIC(24,10)</td><td>币种 / 份</td><td>现金分红；若来源按 10 份披露，需保留原口径后标准化。</td></tr>
+            <tr><td><code>conversion_ratio</code></td><td>NUMERIC(24,12)</td><td>新份额 / 旧份额</td><td>拆分/合并比例；必须明确方向。</td></tr>
+            <tr><td><code>premium_discount_ratio</code></td><td>NUMERIC(18,12)</td><td>比例</td><td>正值为溢价，负值为折价；不可比较时为空并给出状态。</td></tr>
+            <tr><td><code>comparability_status</code></td><td>TEXT</td><td><code>COMPARABLE | STALE_UNDERLYING | CALENDAR_MISMATCH | BASIS_MISMATCH | MISSING_INPUT</code></td><td>只有 <code>COMPARABLE</code> 才允许公开数值。</td></tr>
+            <tr><td><code>input_price_revision_id</code> / <code>input_nav_revision_id</code></td><td>UUID</td><td>—</td><td>派生血缘；输入修订后生成新结果，不覆盖旧结果。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout">
+        <strong>公共时间与血缘信封：</strong>各领域事实还需
+        <code>observed_at</code>、<code>visible_at</code>、<code>known_from/known_to</code>、
+        <code>revision_no</code>、<code>source_batch_id</code>、<code>methodology_id/version</code>、
+        <code>quality_status</code>、<code>data_version</code> 与内容哈希。
+        这些共享字段的最终类型、外键与支撑表由 0027 统一方案定义。
+      </aside>
+    </section>
+
+    <section id="model">
+      <h2>9. ETF 领域表草案</h2>
+      <p class="section-intro">
+        本节只定义 ETF 本领域的粒度、字段簇、唯一性和关系；不是迁移文件，也不重复设计来源、批次、raw、
+        质量、隔离、checkpoint 或 publication 共享表。最终物理 DDL、分区与跨域外键以 0027 为准。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>候选表</th>
+              <th>粒度与用途</th>
+              <th>领域字段簇</th>
+              <th>候选约束 / 索引</th>
+              <th>关系</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>etf_profile_version</code></td>
+              <td>ETF 上市份额 × 有效/知识版本；分类与产品属性</td>
+              <td><code>etf_id</code>、类型、管理方式、管理人、托管人、成立/上市/退市日、报价/NAV 币种、日历策略、有效/知识区间</td>
+              <td>当前有效知识版本唯一；有效与知识区间不重叠；按类型、管理人、上市状态索引</td>
+              <td>引用 0027 的统一资产锚；不复用 <code>equity_instrument</code></td>
+            </tr>
+            <tr>
+              <td><code>etf_identifier_version</code></td>
+              <td>ETF × 交易所代码 × 双时间版本</td>
+              <td><code>etf_id</code>、<code>exchange</code>、<code>symbol</code>、短名/扩位名、日期精度、有效/知识区间</td>
+              <td>同一切片 <code>(exchange,symbol)</code> 唯一；当前开放代码唯一；GiST 排斥约束候选</td>
+              <td>行情、NAV、份额、状态均按自身事实日期解析</td>
+            </tr>
+            <tr>
+              <td><code>etf_tracking_relation_version</code></td>
+              <td>ETF × 关系角色 × 双时间版本</td>
+              <td>角色、目标 scheme/code、目标名称证据、权重、复制方式、空值原因、有效/知识区间</td>
+              <td>同角色与目标的区间不重叠；按目标标识反查 ETF</td>
+              <td>目标最终映射到 0019/0027 的指数或资产身份</td>
+            </tr>
+            <tr>
+              <td><code>etf_daily_bar_revision</code></td>
+              <td>ETF × 交易日 × 来源方法 × 修订；未复权日行情</td>
+              <td>OHLC、成交份额、成交额、换手率、报价币种、最终性、修订、可见时间</td>
+              <td>逻辑键 + <code>revision_no</code> 唯一；按 <code>trade_date</code> 月/年分区候选；<code>(etf_id,trade_date DESC)</code> 索引</td>
+              <td>状态缺失不由本表推断；公司行动不覆盖本表</td>
+            </tr>
+            <tr>
+              <td><code>etf_nav_revision</code></td>
+              <td>ETF × 估值日 × NAV 类型 × 方法 × 修订</td>
+              <td>NAV 值、币种、估值口径、公告/观测/可见时间、知识依据与置信度</td>
+              <td>逻辑键 + 修订唯一；值大于 0；按估值年分区候选；单位/累计类型检查</td>
+              <td>折溢价只引用 <code>UNIT_NAV</code> 修订</td>
+            </tr>
+            <tr>
+              <td><code>etf_share_revision</code></td>
+              <td>ETF × 统计日 × 份额口径 × 方法 × 修订</td>
+              <td>原值/原单位、标准份数、清算时点、观测/可见时间、修订</td>
+              <td>逻辑键 + 修订唯一；标准份数非负；零份额需终止/清算证据；按统计年分区候选</td>
+              <td>不保存按收盘价计算的“基金规模亿元”到本表</td>
+            </tr>
+            <tr>
+              <td><code>etf_market_state_version</code></td>
+              <td>ETF × 状态维度 × 有效区间 × 修订</td>
+              <td>二级交易/申购/赎回状态、原因、来源事件键、公告时间、生效区间、知识区间</td>
+              <td>同 ETF/维度当前有效区间不重叠；按生效时间与状态索引</td>
+              <td>上市生命周期仍在 profile/identifier；三种市场状态互不覆盖</td>
+            </tr>
+            <tr>
+              <td><code>etf_action_version</code></td>
+              <td>ETF × 官方事件 × 修订</td>
+              <td>类型、状态、公告/登记/除息/支付/折算日、现金/比例、源事件键</td>
+              <td><code>(etf_id,source_event_key,revision_no)</code>；无源 ID 事件进入低置信度指纹键</td>
+              <td>日线调整与份额跳变对账的输入，不直接修改原始事实</td>
+            </tr>
+            <tr>
+              <td><code>etf_close_premium_revision</code></td>
+              <td>ETF × 交易日 × 方法版本 × 输入版本</td>
+              <td>折溢价、可比状态、价格/NAV/行动输入引用、最晚可见时间、方法版本</td>
+              <td>输入组合唯一；仅 <code>COMPARABLE</code> 要求数值非空；按日期与绝对折溢价索引候选</td>
+              <td>纯派生表；输入 dataVersion 全量可追溯</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout warn">
+        <strong>迁移边界：</strong>本专题不创建迁移。0027 应采用 expand → 回填/对账 → dual-read 验证 →
+        publication 切换 → contract 的阶段策略；若任何新 publication 已产生，回滚只切回上一
+        <code>data_version</code> 并停止新写入，不删除修订历史。
+      </aside>
+    </section>
+
+    <section id="pit">
+      <h2>10. 时间、修订与未来函数防线</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>时间字段</th>
+              <th>语义</th>
+              <th>ETF 特殊规则</th>
+              <th>禁止行为</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>trade_date</code></td>
+              <td>ETF 上市交易所的二级市场会话日</td>
+              <td>跨境 ETF 的境外标的可能休市；二级市场仍可能开市</td>
+              <td>把境外标的日历或 NAV 日历当成上交所/深交所交易日历</td>
+            </tr>
+            <tr>
+              <td><code>valuation_date</code></td>
+              <td>NAV 所属估值日</td>
+              <td>可以与交易日不同；跨境/商品产品有独立估值规则</td>
+              <td>按抓取日期覆盖估值日期；默认与收盘价同日可比</td>
+            </tr>
+            <tr>
+              <td><code>share_date</code></td>
+              <td>官方总份额统计日期/清算日</td>
+              <td>上交所官网说明为当日清算后数据</td>
+              <td>把页面访问日或最近交易日猜成历史统计日</td>
+            </tr>
+            <tr>
+              <td><code>announcement_at</code></td>
+              <td>官方信息首次公开时间</td>
+              <td>只有日期精度时保存精度；不得假定 00:00 已可见</td>
+              <td>把文档生成日、报告期或供应商更新时间当公告时间</td>
+            </tr>
+            <tr>
+              <td><code>observed_at</code></td>
+              <td>平台成功取得本次 payload 的时间</td>
+              <td>每次拉取都是独立观测，即使 payload hash 相同</td>
+              <td>内容相同就折叠 source batch；回补时伪造过去观测</td>
+            </tr>
+            <tr>
+              <td><code>visible_at</code></td>
+              <td>市场公开可见的最早时间</td>
+              <td>有可信官方时间时可取公告时间；否则保守取 <code>observed_at</code>。系统实际获知仍由 <code>known_from</code> 约束</td>
+              <td>仅按估值日、交易日或统计日决定可见性</td>
+            </tr>
+            <tr>
+              <td><code>effective_from/to</code></td>
+              <td>市场事实有效的半开区间</td>
+              <td>适用于代码、名称、分类、跟踪关系、状态和生命周期</td>
+              <td>用系统写入时间代替官方生效时间</td>
+            </tr>
+            <tr>
+              <td><code>known_from/to</code></td>
+              <td>平台知识版本的半开区间</td>
+              <td><code>known_from</code> 永不早于本平台实际观测；更正到达时关闭旧知识版本并追加新版本</td>
+              <td>覆盖旧值并抹去策略当时看到的版本</td>
+            </tr>
+            <tr>
+              <td><code>data_version</code></td>
+              <td>消费者读取的不可变 publication 标识</td>
+              <td>不同 dataset/交易所/方法学不静默混版</td>
+              <td>分页过程中切换 publication；只返回“最后更新时间”代替版本</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style="margin-top:22px">10.1 收盘折溢价的唯一推荐公式</h3>
+      <span class="formula">premium_discount_ratio = close_price_unadjusted / unit_nav_same_share_basis - 1</span>
+      <ul class="facts">
+        <li>正值表示溢价，负值表示折价；响应必须返回该符号约定和 <code>formula_version</code>。</li>
+        <li>只使用 <code>UNIT_NAV</code>；累计净值包含分红累积语义，不是可交易份额的当日价值基准。</li>
+        <li><code>visible_at = max(price.visible_at, nav.visible_at, required_action.visible_at)</code>。若 NAV 在 T+1 才公开，T 日折溢价也只能从 T+1 起用于回测。</li>
+        <li>价格与 NAV 必须属于同一 ETF 份额、币种或经版本化汇率转换、同一拆分/折算基准和兼容估值日。</li>
+        <li>境外标的休市、估值采用陈旧价格、日历错位或输入缺失时，将 <code>comparability_status</code> 置为非可比并不输出数值。</li>
+      </ul>
+      <aside class="callout">
+        <strong>回测选择条件：</strong>必须同时满足 <code>visible_at ≤ 策略时点</code> 与
+        <code>known_from ≤ knownAt</code>。可信公告时间可以证明市场当时已公开，但不能伪造本平台在历史上已经取得该版本；
+        这一区分既保留市场可见性，也保留系统知识审计。
+      </aside>
+
+      <div class="grid-2">
+        <article class="card soft">
+          <h3>分红、拆分与无交易日</h3>
+          <ul class="facts">
+            <li>原始未复权价格永久保留；分红/拆分作为独立事件。</li>
+            <li>前复权历史随锚点和事件变化，若未来需要只能版本化即时计算。</li>
+            <li>交易日停牌：无 bar 或保留来源明确的零成交 bar，必须由状态证据说明；不得前填。</li>
+            <li>非交易日：没有 bar，不生成 0 行；NAV 是否存在按基金估值日历判断。</li>
+          </ul>
+        </article>
+        <article class="card soft">
+          <h3>修订与回补</h3>
+          <ul class="facts">
+            <li>同一逻辑事实值或口径变化时追加修订，不覆盖旧行。</li>
+            <li>迟到的官方公告时间也是新知识：追加版本，不重写过去 <code>known_from</code>。</li>
+            <li>历史回补只提高事实覆盖，不自动提高历史可见性。</li>
+            <li>事后统计、未来收益、公告后表现和当前 ETF 分类均不得回填到过去切片。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="sync">
+      <h2>11. 同步模式、增量、回补与恢复</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>任务</th>
+              <th>建议触发与分区</th>
+              <th>增量 / 回看</th>
+              <th>幂等键</th>
+              <th>失败与恢复</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>ETF 目录与生命周期</td>
+              <td>每交易日盘前/盘后；<code>exchange + snapshot_date</code></td>
+              <td>每日全量快照；公告增量；每周重拉当前目录</td>
+              <td><code>capability + exchange + source_as_of + adapter_version</code></td>
+              <td>按 SSE/SZSE 独立发布；一所失败保留该所上一稳定版；目录差集只告警</td>
+            </tr>
+            <tr>
+              <td>未复权日行情</td>
+              <td>确认会话结束后；<code>etf_id + year/window</code></td>
+              <td>T 日收盘后拉取；T+1、T+5、T+20 滚动复查；历史按年窗口回补</td>
+              <td><code>capability + methodology + etf_id + date_window</code></td>
+              <td>网络/429 指数退避；schema/单位漂移隔离；旧 publication 不前进</td>
+            </tr>
+            <tr>
+              <td>官方 NAV</td>
+              <td>管理人公开后轮询；<code>etf_id + valuation_year/window</code></td>
+              <td>最近 30 个估值日滚动重拉；历史分年；单位/累计分别调用和对齐</td>
+              <td><code>capability + nav_type + methodology + etf_id + window</code></td>
+              <td>只取得其一时发布 partial 或保持旧版；不得按日期外连接后填 0</td>
+            </tr>
+            <tr>
+              <td>总份额</td>
+              <td>交易所清算后或 T+1；<code>exchange + share_date</code></td>
+              <td>每日官方快照；深交所回补窗口不超过 6 个月；最近日接口只做发现</td>
+              <td><code>capability + exchange + share_date + methodology</code></td>
+              <td>超时可重试；解析/单位未知进入 quarantine；不切到“基金规模亿元”补洞</td>
+            </tr>
+            <tr>
+              <td>交易/申购/赎回状态</td>
+              <td>盘前公告、盘后核对；P1 才处理盘中事件；<code>etf_id + event_year</code></td>
+              <td>按公告 ID 增量；最近 20 日重复抓取更正；日级快照与事件对账</td>
+              <td><code>capability + source_event_key + observed_at</code></td>
+              <td>状态源不可用返回未知/陈旧，不从行情推断；更正/撤回追加修订</td>
+            </tr>
+            <tr>
+              <td>分红、拆分与跟踪关系</td>
+              <td>每日公告；<code>etf_id + event_year</code></td>
+              <td>公告增量 + 最近两年滚动；历史按产品回补；当前资料与事件对账</td>
+              <td><code>capability + source_event_key + adapter_version</code></td>
+              <td>无事件 ID 的记录低置信度隔离；不能从价格跳空反推事件</td>
+            </tr>
+            <tr>
+              <td>收盘折溢价派生</td>
+              <td>价格、NAV、行动 publication 就绪后；<code>trade_month</code></td>
+              <td>输入 dataVersion 或公式版本变化时定向重算</td>
+              <td><code>formula_version + price_revision + nav_revision + action_set</code></td>
+              <td>非可比输出状态不输出数值；回滚切回上一派生 publication</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid-3" style="margin-top:16px">
+        <article class="card soft">
+          <h3>写入与锁</h3>
+          <p>
+            每个 <code>capability + etf_id/exchange + window</code> 使用 advisory lock 或带 fencing token 的租约。
+            raw 先落对象存储；canonical revision、质量结果、publication 与 checkpoint 在明确事务边界内提交。
+          </p>
+        </article>
+        <article class="card soft">
+          <h3>内容幂等</h3>
+          <p>
+            同一业务内容重放不增加 revision 或 <code>data_version</code>；但每次外部获取仍创建独立
+            <code>source_batch</code>。payload hash 只去重 raw 字节，不折叠市场观测。
+          </p>
+        </article>
+        <article class="card soft">
+          <h3>恢复</h3>
+          <p>
+            从 raw evidence 重新标准化；按失败分区修复，不重跑全市场。来源故障保持上一稳定 publication，
+            暴露新鲜度与缺口，不自动用未认证来源静默补洞。
+          </p>
+        </article>
+      </div>
+
+      <aside class="callout">
+        <strong>建议任务状态：</strong><code>QUEUED → RUNNING → SUCCEEDED | PARTIAL | FAILED | CANCELLED</code>；
+        timeout、429/限流、授权、schema drift、单位未知、身份冲突和质量失败必须使用不同错误码，便于定向恢复。
+      </aside>
+    </section>
+
+    <section id="quality">
+      <h2>12. 数据质量与口径隔离规则</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>规则</th>
+              <th>级别</th>
+              <th>验证</th>
+              <th>失败动作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>ETF 身份 100% 唯一解析，且目录仅含本域产品</td>
+              <td>阻断</td>
+              <td>交易所代码/日期解析；LOF、REIT、联接基金负例；代码复用 fixture</td>
+              <td>隔离冲突分区，不发布 PENDING/歧义身份</td>
+            </tr>
+            <tr>
+              <td>Schema fingerprint 与字段投影完全匹配</td>
+              <td>阻断</td>
+              <td>固定 AKShare 版本 fixture + 真样本列名/类型/空值</td>
+              <td>schema quarantine；禁止自动丢未知列</td>
+            </tr>
+            <tr>
+              <td>OHLC 不变量</td>
+              <td>阻断</td>
+              <td><code>high ≥ max(open,close,low)</code>，<code>low ≤ min(open,close,high)</code>，价格非负</td>
+              <td>分区不发布；保留 raw 与质量样例</td>
+            </tr>
+            <tr>
+              <td>成交份额与成交额单位已取证</td>
+              <td>阻断</td>
+              <td>官网/授权源字段说明 + 至少 30 个样本的 <code>amount / volume</code> 合理区间对账</td>
+              <td>单位未知即隔离，不按经验乘 100</td>
+            </tr>
+            <tr>
+              <td>NAV 类型、估值日、币种与公开时间完整</td>
+              <td>阻断/降级</td>
+              <td>单位/累计分离；值 &gt; 0；公告时间证据或保守 <code>observed_at</code></td>
+              <td>时间缺证据时降为保守可见；类型/币种歧义则不发布</td>
+            </tr>
+            <tr>
+              <td>总份额单位与统计日期完整</td>
+              <td>阻断</td>
+              <td>原值 × 版本化缩放 = 标准份数；与交易所展示抽样核对</td>
+              <td>无日期或单位只保留 raw，不回填 canonical 历史</td>
+            </tr>
+            <tr>
+              <td>三类状态互相独立</td>
+              <td>阻断</td>
+              <td>“交易开放、申购暂停”等组合 fixture；零成交但开放交易负例</td>
+              <td>不能压成单布尔；冲突进入质量问题</td>
+            </tr>
+            <tr>
+              <td>份额大幅跳变有解释</td>
+              <td>告警</td>
+              <td>相邻日变化阈值 + 拆分/清盘/官方更正事件对账</td>
+              <td>保留事实但标记 <code>WARN</code>；无证据不自动判错或修正</td>
+            </tr>
+            <tr>
+              <td>折溢价输入完全同基准</td>
+              <td>阻断</td>
+              <td>身份、日期、币种、拆分、NAV 类型、方法、可见时间全匹配</td>
+              <td><code>NOT_COMPARABLE</code>，数值必须为空</td>
+            </tr>
+            <tr>
+              <td>交易所目录/份额批次完整性</td>
+              <td>阻断/告警</td>
+              <td>与上一成功批次计数、代码集合、来源页总数比较；阈值按交易所独立配置</td>
+              <td>异常下降不推断退市；保持上一稳定 publication</td>
+            </tr>
+            <tr>
+              <td>跨来源对账不做强行相等</td>
+              <td>告警</td>
+              <td>仅在方法、时间、单位和修订等价时做数值容差；否则只比较覆盖</td>
+              <td>不自动切源、不拼洞；记录方法差异</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout warn">
+        <strong>空值规则：</strong>未知、未披露、不适用、来源缺失、市场无会话、停牌、未上市和数据源故障是不同语义。
+        数值 0 只表示来源明确报告 0；任何空值都不能因方便计算被转成 0 或前值。
+      </aside>
+    </section>
+
+    <section id="api">
+      <h2>13. 对 service-api 的查询与权限需求</h2>
+      <p class="section-intro">
+        本节是后续 0028 跨服务契约的输入，不修改现有 OpenAPI。公开业务路由只设计 POST；
+        <code>service-api</code> 不读取同步库、不访问 Provider，也不向 <code>service-web</code> 暴露内部 UUID 或 raw URI。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>候选公开 POST 查询</th>
+              <th>筛选 / 请求</th>
+              <th>排序与分页</th>
+              <th>响应必带元数据</th>
+              <th>权限建议</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>POST /api/v1/market/etfs/search</code></td>
+              <td>exchange、类型、管理方式、管理人、跟踪目标、上市状态、query、asOf、knownAt</td>
+              <td><code>exchange,symbol</code> 稳定排序；cursor 绑定筛选与 dataVersion；最大 100</td>
+              <td>有效标识、分类、生命周期、<code>dataVersion</code>、<code>knowledgeCutoff</code>、质量摘要</td>
+              <td>有效登录；不匿名</td>
+            </tr>
+            <tr>
+              <td><code>POST /api/v1/market/etfs/{exchange}/{symbol}/profile</code></td>
+              <td>asOf、knownAt</td>
+              <td>单对象，无分页</td>
+              <td>身份/名称/跟踪关系的有效与可见时间、来源摘要、免责声明</td>
+              <td>有效登录</td>
+            </tr>
+            <tr>
+              <td><code>POST .../bars/query</code></td>
+              <td>start、end、adjust=<code>none</code>（P0）、asOf/knownAt、quality</td>
+              <td>tradeDate 升序；最大 2,000；cursor 绑定 publication</td>
+              <td>priceBasis、quoteCurrency、source/methodology、revision、visibleAt、dataVersion</td>
+              <td>有效登录；长窗口按读取预算限流</td>
+            </tr>
+            <tr>
+              <td><code>POST .../nav/query</code></td>
+              <td>navType、start、end、knownAt、quality</td>
+              <td>valuationDate + navType；最大 1,000</td>
+              <td>币种、估值口径、公告/观测/可见时间、knowledgeBasis、revision</td>
+              <td>有效登录；历史 <code>knownAt</code> 查询可单独授权</td>
+            </tr>
+            <tr>
+              <td><code>POST .../shares/query</code></td>
+              <td>start、end、shareScope、knownAt</td>
+              <td>shareDate；最大 1,000</td>
+              <td>标准份数、原单位摘要、统计/可见时间、覆盖缺口、dataVersion</td>
+              <td>有效登录；批量导出另设权限</td>
+            </tr>
+            <tr>
+              <td><code>POST .../premium-discount/query</code></td>
+              <td>start、end、comparabilityStatus、methodologyVersion、knownAt</td>
+              <td>tradeDate；最大 1,000</td>
+              <td>公式/输入版本、可比状态、最晚可见时间、质量、免责声明</td>
+              <td>有效登录；不提供 P2 实时值</td>
+            </tr>
+            <tr>
+              <td><code>POST .../status/query</code><br><code>POST .../actions/query</code></td>
+              <td>状态维度/事件类型、有效时间范围、knownAt</td>
+              <td>effectiveFrom / announcementAt；最大 500</td>
+              <td>公告与生效时间、修订、来源摘要、quality/dataVersion</td>
+              <td>有效登录</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid-3" style="margin-top:16px">
+        <article class="card soft">
+          <h3>时间参数</h3>
+          <p><code>asOf</code> 选择市场有效切片，<code>knownAt</code> 选择系统当时知识；两者不能合并成一个含糊参数。未来时间拒绝。</p>
+        </article>
+        <article class="card soft">
+          <h3>缓存与错误</h3>
+          <p>
+            ETag 由标准化请求和 <code>dataVersion</code> 生成；公开 POST 命中条件请求返回 204。
+            身份冲突 409、下游不可用 503、读取预算 429，不返回未标记陈旧值。
+          </p>
+        </article>
+        <article class="card soft">
+          <h3>公开投影</h3>
+          <p>
+            保留 source/methodology 的可理解摘要、质量与免责声明；剥离 provider 行、raw URI、
+            <code>source_batch_id</code>、内部 <code>etf_id</code> 和质量问题细节。
+          </p>
+        </article>
+      </div>
+
+      <aside class="callout">
+        <strong>权限未决但不阻断方案：</strong>P0 可沿用现有 ACTIVE <code>USER/ADMIN/SUPER_ADMIN</code> 已认证读取；
+        历史 <code>knownAt</code>、批量导出和未来 P2 实时数据建议拆为
+        <code>market.etf.point_in_time.read</code> / <code>market.etf.export</code> / <code>market.etf.realtime.read</code>。
+        最终 scope 在 0028 契约评审冻结，未冻结前保持关闭额外能力。
+      </aside>
+    </section>
+
+    <section id="gates">
+      <h2>14. 技术硬门禁</h2>
+      <p class="section-intro">
+        硬门禁只保护技术可行性、安全、合规、数据完整性与可恢复性。每个门禁只约束对应 capability 的生产发布；
+        失败时保持关闭、使用 fake 联调或只保存研究证据，不阻断其余专题和统一模型工作。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>门禁</th>
+              <th>准入条件</th>
+              <th>可验证证据</th>
+              <th>验证人</th>
+              <th>退出条件 / 失败兜底</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>G-ETF-01</strong><br>身份与产品域</td>
+              <td>发布任何 ETF 数据前，SSE/SZSE 代码能按事实日期唯一映射到 ETF 上市份额，且 LOF/REIT/联接基金不会进入本域</td>
+              <td>两期官方全量快照；上市/退市/更名/代码复用 fixture；负例集；100% resolved 且 0 conflict 的 identity 报告</td>
+              <td>数据模型负责人 + 数据质量工程师</td>
+              <td>通过后仅启用已验证交易所；失败则冲突行 quarantine、目录 publication 不推进</td>
+            </tr>
+            <tr>
+              <td><strong>G-ETF-02</strong><br>单位与价格口径</td>
+              <td>行情、份额、NAV 的来源单位、币种、缩放、复权与时间粒度全部冻结</td>
+              <td>官方字段说明；至少 30 只 × 5 日跨类型对账；VWAP 合理区间；拆分/分红样本；固定 schema fixture</td>
+              <td>行情数据工程师 + 量化研究员</td>
+              <td>所有必填字段单位可追溯且容差通过后启用；失败字段不映射 canonical，绝不猜倍率</td>
+            </tr>
+            <tr>
+              <td><strong>G-ETF-03</strong><br>点时可见性</td>
+              <td>NAV、份额、状态、行动与跟踪关系能给出可信公告时间，或明确采用保守 <code>observed_at</code></td>
+              <td>正常/迟到/更正/撤回/历史回补 fixture；<code>asOf + knownAt</code> 契约测试；未来时间拒绝测试</td>
+              <td>量化研究员 + 数据治理负责人</td>
+              <td>无未来知识测试全部通过后启用；失败时仅从首次观测时点可见或暂停该字段发布</td>
+            </tr>
+            <tr>
+              <td><strong>G-ETF-04</strong><br>来源稳定与可恢复</td>
+              <td>固定 adapter/AKShare 版本、限流、超时、重试、schema drift、raw replay 和分区回滚可工作</td>
+              <td>连续至少 5 个交易日自动探针；成功/空集/失败分类；P95 耗时；429/断连/解析失败注入；raw replay 与 publication 回滚演练</td>
+              <td>同步平台工程师 + SRE</td>
+              <td>达成 capability SLO、重放一致与回滚成功后启用；失败则保持 source policy 关闭并继续研究探针</td>
+            </tr>
+            <tr>
+              <td><strong>G-ETF-05</strong><br>数据使用与再分发</td>
+              <td>对应真实上游的采集、原始留存、内部处理和对外字段投影均有可审计的允许依据</td>
+              <td>适用条款/授权文件及版本、字段与使用范围矩阵、保留期限、访问控制测试；AKShare 代码许可不得作为数据授权证据</td>
+              <td>数据治理/合规验证人 + 安全工程师</td>
+              <td>证据覆盖目标环境和消费者后启用；失败只允许本地受控研究，不生产落库或再分发</td>
+            </tr>
+            <tr>
+              <td><strong>G-ETF-06</strong><br>折溢价可比性</td>
+              <td>价格与单位 NAV 的身份、日期、币种、拆分、日历、方法及可见时间完全对齐</td>
+              <td>公式黄金样本；跨境休市、T+1 NAV、分红/拆分、缺 NAV、错币种负例；输入 revision/dataVersion 血缘断言</td>
+              <td>量化研究员 + 数据质量工程师</td>
+              <td>所有负例均返回非可比且无数值后启用 P1；失败则仅公开价格与 NAV 原始数据集</td>
+            </tr>
+            <tr>
+              <td><strong>G-ETF-07</strong><br>日历与状态</td>
+              <td>上市交易日历、估值日历、境外标的日历以及交易/申购/赎回状态可分别表达</td>
+              <td>全天停牌、盘中停牌、外盘休市、交易开放但申购暂停、无成交但未停牌 fixture；官方公告对账</td>
+              <td>市场数据产品负责人 + QA</td>
+              <td>状态组合与缺行语义测试通过后启用；失败则状态为 UNKNOWN，禁止推断和自动前填</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="risks">
+      <h2>15. 非技术风险与跟进项</h2>
+      <p class="section-intro">
+        下列事项影响成本、覆盖或发布时间，但不是阻断方案设计的技术门禁。日期为本提案建议检查点；
+        无响应时按技术兜底收缩能力，不把审批、预算或人力等待写成系统阻塞。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>风险 / 跟进</th>
+              <th>负责人</th>
+              <th>建议时间点</th>
+              <th>影响</th>
+              <th>技术兜底</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>交易所、聚合站点与基金管理人页面的数据使用/再分发边界待确认</td>
+              <td>数据产品负责人 + 法务/合规</td>
+              <td>2026-08-14，P0 source policy 冻结前</td>
+              <td>可能限制 raw 留存、对外字段或商业使用</td>
+              <td>仅运行本地受控探针与 fake；对应生产 source policy 保持关闭；不影响模型/契约开发</td>
+            </tr>
+            <tr>
+              <td>授权 EOD/实时行情预算与采购周期未确定</td>
+              <td>数据产品负责人</td>
+              <td>2026-08-21，P0 pilot 前</td>
+              <td>决定行情覆盖、SLA 与 P2 可行性</td>
+              <td>P0 先做官方 EOD/有限样本研究；P2 IOPV 完全关闭；不以抓取聚合页替代授权实时源</td>
+            </tr>
+            <tr>
+              <td>历史 NAV/份额公告发布时间与历史快照可能不完整</td>
+              <td>数据 sourcing 负责人</td>
+              <td>2026-08-28，历史回补计划冻结前</td>
+              <td>降低 point-in-time 可用历史</td>
+              <td>保守 <code>known_from = observed_at</code>；明确 coverage，不承诺回补前可见性</td>
+            </tr>
+            <tr>
+              <td>生产调用频率、限流与异常联络渠道不明确</td>
+              <td>同步平台负责人</td>
+              <td>连续 5 日探针开始前</td>
+              <td>影响全市场耗时和恢复速度</td>
+              <td>固定 40 只样本、并发 1、指数退避与缓存 raw；不扩大 universe</td>
+            </tr>
+            <tr>
+              <td>ETF 历史 as-of、批量导出与实时数据的产品权限尚未评审</td>
+              <td>service-api 产品负责人 + 安全负责人</td>
+              <td>0028 契约评审前</td>
+              <td>影响公开范围和限额</td>
+              <td>仅已认证用户读取最新 P0；历史/导出/P2 路由不注册，使用 fake 完成契约测试</td>
+            </tr>
+            <tr>
+              <td>实施人力与运维值守窗口未排定</td>
+              <td>工程负责人</td>
+              <td>实施阶段 0 启动前</td>
+              <td>影响排期，不改变设计正确性</td>
+              <td>任务默认关闭且只允许手工 CLI/受控 task；未配置 beat 自动调度</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="rollout">
+      <h2>16. 建议实施顺序、验收与回滚</h2>
+      <div class="grid-3">
+        <article class="card">
+          <span class="tag p0">阶段 0 · 取证</span>
+          <h3>冻结身份、字段与来源</h3>
+          <ul class="facts">
+            <li>建立 40 只固定跨类型样本。</li>
+            <li>冻结真实上游、AKShare 版本、schema、单位和许可矩阵。</li>
+            <li>完成 5 个连续交易日探针与 raw replay。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="tag p0">阶段 1 · P0</span>
+          <h3>主数据、日行情、NAV、日级状态</h3>
+          <ul class="facts">
+            <li>先 fake 契约，再建 expand schema 与回填。</li>
+            <li>SSE/SZSE 分区独立发布。</li>
+            <li>通过 as-of、单位、恢复与发布回滚验收后才开外部查询。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="tag p1">阶段 2 · P1/P2 评估</span>
+          <h3>份额、行动、跟踪与派生</h3>
+          <ul class="facts">
+            <li>份额历史与拆分对账通过后再算变化。</li>
+            <li>折溢价 G-ETF-06 全部通过后发布。</li>
+            <li>P2 需新授权、容量和方法学证据，单独评审。</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>验收面</th>
+              <th>最低验收</th>
+              <th>计划测试</th>
+              <th>回滚</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>身份与生命周期</td>
+              <td>样本全解析；目录缺失不退市；代码变更/复用无误绑</td>
+              <td>双时间排斥约束、date-aware resolver、上市/终止公告 fixture</td>
+              <td>停止新主数据 publication，保留上一交易所版本</td>
+            </tr>
+            <tr>
+              <td>行情/NAV/份额</td>
+              <td>单位、日期、币种、修订与空值规则均有证据</td>
+              <td>adapter fixture、schema drift、量纲、边界日期、真实样本对账</td>
+              <td>按 capability 切回上一 dataVersion，不删 revision/raw</td>
+            </tr>
+            <tr>
+              <td>未来函数</td>
+              <td>回补、迟到修订、T+1 NAV、跨境休市均不会提前可见</td>
+              <td><code>asOf + knownAt</code> 黄金测试与 property test</td>
+              <td>关闭历史/派生查询，仅保留已验证最新 publication</td>
+            </tr>
+            <tr>
+              <td>运行恢复</td>
+              <td>超时、429、解析失败、身份冲突均可定向重试或隔离</td>
+              <td>lease/fencing、raw replay、checkpoint、partial publication、回滚演练</td>
+              <td>停止 schedule，取消租约，回到手工受控 task</td>
+            </tr>
+            <tr>
+              <td>跨服务读取</td>
+              <td>service-api 无同步库/Provider 凭据；分页同版；错误稳定映射</td>
+              <td>OpenAPI lint、consumer/provider contract、fake、超时/断路器、POST-only 架构测试</td>
+              <td>取消新路由注册或 feature flag，保留内部数据与契约证据</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside class="callout good">
+        <strong>本专题验收口径：</strong>本轮只验收“方案可评审、来源可追溯、模型和时间语义自洽、门禁可验证”。
+        上述实现测试均为后续计划执行，不得把文档检查或单次 AKShare 探针报告为实现测试已通过。
+      </aside>
+    </section>
+
+    <section id="open-items">
+      <h2>17. 未决事项</h2>
+      <div class="grid-2">
+        <article class="card soft">
+          <span class="tag bad">未决 1</span>
+          <h3>ETF 法律基金身份的稳定外部标识</h3>
+          <p>交易代码、基金主代码、份额类别和基金合同之间如何映射，需 0027 用官方样本冻结；不能仅凭六位代码相等认定同一实体。</p>
+        </article>
+        <article class="card soft">
+          <span class="tag bad">未决 2</span>
+          <h3>上交所份额接口实际单位</h3>
+          <p>AKShare 文档字段未标单位，而上交所页面展示“总份额（万份）”。adapter 必须对 raw payload 与页面/导出字段逐项取证。</p>
+        </article>
+        <article class="card soft">
+          <span class="tag bad">未决 3</span>
+          <h3>历史 NAV 的官方发布时间</h3>
+          <p>聚合历史接口常只有净值日期。能否从基金管理人、规定网站或公告元数据取得可信时间，决定历史点时覆盖；否则采用保守观测时间。</p>
+        </article>
+        <article class="card soft">
+          <span class="tag bad">未决 4</span>
+          <h3>跨境/商品/货币 ETF 的估值口径</h3>
+          <p>外盘日历、汇率、估值价格、现金申赎与收益结转不同，不能用股票 ETF 默认规则。每类需独立方法学与 fixture。</p>
+        </article>
+        <article class="card soft">
+          <span class="tag bad">未决 5</span>
+          <h3>主动 ETF 与无标的指数产品</h3>
+          <p>2026 年交易所已发布主动 ETF 指引；目录、基准、IOPV 与历史数据形状仍需探测。本模型允许无跟踪指数但要求显式管理方式。</p>
+        </article>
+        <article class="card soft">
+          <span class="tag bad">未决 6</span>
+          <h3>公开 API 的精细权限与免责声明</h3>
+          <p>由 0028 冻结最新/历史/P2 的权限 scope、限额、来源展示与免责声明；当前建议保持认证读取和额外能力关闭。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="references">
+      <h2>18. 引用与访问日期</h2>
+      <p class="section-intro">外部网页访问日期均为 2026-07-28。页面动态数据仅作当日事实证据，不代表永久历史或生产 SLA。</p>
+
+      <h3>权威与官方来源</h3>
+      <ol class="source-list">
+        <li>
+          <a href="https://www.sse.com.cn/assortment/fund/etf/list/">上交所 ETF 列表</a>：
+          股票、债券、跨境、商品等 ETF 分类与产品目录。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/market/funddata/volumn/etfvolumn/">上交所 ETF 规模</a>：
+          总份额字段，页面注明统计数据为当日清算后数据。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/disclosure/fund/etflist/">上交所 ETF 公告申购赎回清单</a>：
+          基金份额净值、申赎清单、披露时间和信息责任主体。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/disclosure/dealinstruc/suspension/fund/">上交所基金停复牌信息</a>：
+          基金代码、停牌起止、时间和原因。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/disclosure/fund/announcement/">上交所最新基金公告</a>：
+          上市、定期、临时和基金运作公告入口。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/assortment/fund/etf/rules/c/c_20150911_3985181.shtml">上交所交易型开放式指数基金业务实施细则</a>：
+          申赎清单、前一交易日 NAV、停复牌与 IOPV 规则证据。
+        </li>
+        <li>
+          <a href="https://fund.szse.cn/marketdata/etf/">深交所 ETF 列表</a>：
+          深市 ETF 官方产品入口。
+        </li>
+        <li>
+          <a href="https://fund.szse.cn/marketdata/trade/index.html">深交所基金行情</a>：
+          分时与日/周/月历史行情官方入口。
+        </li>
+        <li>
+          <a href="https://docs.static.szse.cn/www/disclosure/notice/general/W020201204583453961510.pdf">深交所证券投资基金交易和申购赎回实施细则</a>：
+          ETF/LOF 边界、交易、申赎、净值与 IOPV 发布规则。
+        </li>
+        <li>
+          <a href="https://www.szse.cn/disclosure/notice/temp/index.html">深交所停复牌公告</a>：
+          官方停复牌事件入口。
+        </li>
+        <li>
+          <a href="https://www.csrc.gov.cn/csrc/c106256/c1653978/1653978/files/1b26d5810f794a629581888ace061d08.pdf">《公开募集证券投资基金运作管理办法》</a>：
+          开放式基金份额净值的闭市后计算口径。
+        </li>
+        <li>
+          <a href="https://neris.csrc.gov.cn/falvfagui/rdqsHeader/mainbody?navbarId=2&amp;secFutrsLawId=d0e0c62179244c9a8634882f3cbc519e">《公开募集证券投资基金信息披露管理办法（2020 年修订）》</a>：
+          当前有效状态与基金披露治理依据。
+        </li>
+        <li>
+          <a href="https://fund.chinaamc.com/fund/510050/index.shtml">华夏上证 50 ETF 官方产品页</a>：
+          产品身份、管理人/托管人、单位/累计净值与交易状态样例。
+        </li>
+        <li>
+          <a href="https://www.chinaamc.com/upload/resources/file/2026/03/23/4fe319d698dc4e9da886880f8616cf97.pdf">华夏上证 50 ETF 产品资料概要</a>：
+          基金代码、交易所、上市日、币种与产品属性证据。
+        </li>
+        <li>
+          <a href="https://www.sse.com.cn/lawandrules/sselawsrules2025/fund/trading/c/c_20260617_10822565.shtml">上交所主动管理 ETF 业务指引</a>：
+          主动 ETF 申赎清单与 IOPV 方法边界。
+        </li>
+      </ol>
+
+      <h3 style="margin-top:22px">AKShare 官方文档与真实上游说明</h3>
+      <ul class="source-list">
+        <li>
+          <a href="https://akshare.akfamily.xyz/data/fund/fund_public.html">AKShare 公募基金数据文档</a>：
+          <code>fund_etf_spot_em</code>、<code>fund_etf_hist_em</code>、
+          <code>fund_etf_hist_sina</code>、<code>fund_open_fund_info_em</code>、
+          <code>fund_etf_scale_sse</code>、<code>fund_etf_scale_szse</code>、
+          <code>fund_scale_daily_szse</code> 等函数签名、字段和目标地址。
+          当前官网展示 1.18.80；项目固定 1.18.78，升级前必须重新验证。
+        </li>
+        <li>
+          <a href="https://quote.eastmoney.com/center/gridlist.html#fund_etf">东方财富 ETF 行情入口</a>：
+          AKShare 东财现货/历史函数的真实上游之一。
+        </li>
+        <li>
+          <a href="http://vip.stock.finance.sina.com.cn/fund_center/index.html#jjhqetf">新浪基金行情入口</a>：
+          AKShare 新浪 ETF 列表/历史函数的真实上游。
+        </li>
+        <li>
+          <a href="https://fund.10jqka.com.cn/datacenter/jz/kfs/etf/">同花顺 ETF 净值/行情入口</a>：
+          AKShare 同花顺 ETF 净值候选的真实上游。
+        </li>
+      </ul>
+
+      <h3 style="margin-top:22px">仓库内依据</h3>
+      <ul class="source-list">
+        <li><a href="../0019-index-constituents/index.html">0019 指数成分与权重数据接入方案</a></li>
+        <li><a href="../0002-data-catalog-and-akshare-research/index.html">0002 数据目录与 AKShare 调研总纲</a></li>
+        <li><a href="../0004-akshare-b02-initial-research/index.html">0004 核心日频行情首轮调研</a></li>
+        <li><a href="../0009-akshare-b07-initial-research/index.html">0009 基金、宏观与调研数据首轮调研</a></li>
+        <li><a href="../0010-akshare-round2-verification/index.html">0010 AKShare 第二轮独立验证</a></li>
+        <li><a href="../0011-equity-data-sync-and-api/index.html">0011 A 股个股同步、存储与 API 方案</a></li>
+        <li><a href="../0014-equity-instrument-master/index.html">0014 A 股证券身份与生命周期方案</a></li>
+        <li><a href="../0018-sqlalchemy-orm-persistence-models/index.html">0018 SQLAlchemy ORM 持久化方案</a></li>
+        <li><a href="../../decisions/0002-data-sync-ownership-and-access.md">ADR-0002 同步数据归属与跨服务访问</a></li>
+        <li><a href="../../decisions/0004-market-data-provider-adapters.md">ADR-0004 多数据源适配与路由</a></li>
+        <li><a href="../../decisions/0009-equity-data-source-and-serving-boundary.md">ADR-0009 A 股来源、复权与服务边界</a></li>
+        <li><a href="../../decisions/0015-financial-point-in-time-and-valuation.md">ADR-0015 财务点时模型与估值序列边界</a></li>
+        <li><a href="../../decisions/0018-service-api-post-only-http-method.md">ADR-0018 service-api POST-only</a></li>
+        <li><a href="../../contracts/0018-data-sync-equity-market-data-internal.openapi.yaml">既有内部行情契约 0018</a></li>
+        <li><a href="../../contracts/0019-service-api-equity-market-data.openapi.yaml">既有公开行情契约 0019</a></li>
+      </ul>
+    </section>
+
+    <section id="acceptance">
+      <h2>19. 专题文档验收清单</h2>
+      <div class="grid-2">
+        <article class="card soft">
+          <h3>内容完整性</h3>
+          <ul class="facts">
+            <li>☑ P0/P1/P2 与接入/不接入结论明确。</li>
+            <li>☑ 权威来源、AKShare 函数、真实上游、历史、稳定性、限流和授权风险分开描述。</li>
+            <li>☑ 身份、粒度、候选键、字段、单位、空值、修订与双时间语义完整。</li>
+            <li>☑ 同步、分区、回补、幂等、去重、恢复、质量与未来函数规则完整。</li>
+          </ul>
+        </article>
+        <article class="card soft">
+          <h3>边界与可实施性</h3>
+          <ul class="facts">
+            <li>☑ ETF 与股票、LOF、REIT、场外基金隔离。</li>
+            <li>☑ 价格、单位/累计 NAV、IOPV、份额和三个状态维度隔离。</li>
+            <li>☑ 领域表不自行创建跨专题共享支撑表。</li>
+            <li>☑ API 需求只使用公开 POST，并保持 service-api 不直连同步库/Provider。</li>
+          </ul>
+        </article>
+        <article class="card soft">
+          <h3>门禁与风险</h3>
+          <ul class="facts">
+            <li>☑ 每个技术硬门禁含准入条件、证据、验证人和退出条件。</li>
+            <li>☑ 授权、预算、人力、权限评审列为非技术跟进，并给出负责人、时间点与技术兜底。</li>
+            <li>☑ 单个来源失败不会阻断整套方案；只关闭对应 capability。</li>
+          </ul>
+        </article>
+        <article class="card soft">
+          <h3>后续必须计划执行</h3>
+          <ul class="facts">
+            <li>☐ 固定 1.18.78 容器的 5 日连续探针与跨类型样本对账。</li>
+            <li>☐ 0027 统一身份/物理 DDL/迁移回滚设计。</li>
+            <li>☐ 0028 内部与公开机器契约、权限、限流、缓存和契约测试。</li>
+            <li>☐ 真 PostgreSQL 迁移、集成、性能、恢复与端到端测试；本专题未执行。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      <strong>0020 · ETF 市场数据接入技术调研</strong><br>
+      状态：Proposed · 日期：2026-07-28 · 仅供技术评审，不代表来源生产准入、采购授权或 API 承诺。
+    </div>
+  </footer>
+</body>
+</html>

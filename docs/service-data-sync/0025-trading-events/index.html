@@ -1,0 +1,1514 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta
+    name="description"
+    content="龙虎榜与大宗交易的数据源、时态模型、同步恢复、领域表和 service-api 查询需求 Proposed 技术方案。"
+  >
+  <title>0025｜交易事件数据技术方案（Proposed）</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f4f7f5;
+      --surface: #ffffff;
+      --surface-soft: #eef5f1;
+      --ink: #17211b;
+      --muted: #5d6b63;
+      --line: #d7e1db;
+      --brand: #176b4d;
+      --brand-soft: #dff1e8;
+      --blue: #245f86;
+      --blue-soft: #e5f0f7;
+      --amber: #8a5b13;
+      --amber-soft: #fff1d2;
+      --red: #9d3c35;
+      --red-soft: #f9e6e3;
+      --shadow: 0 12px 34px rgb(23 54 40 / 8%);
+      --radius: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--paper);
+    }
+
+    body {
+      min-width: 1200px;
+      margin: 0;
+      background:
+        radial-gradient(circle at 92% 2%, rgb(36 95 134 / 10%), transparent 23rem),
+        var(--paper);
+      color: var(--ink);
+      font: 15px/1.68 -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    a {
+      color: var(--brand);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 0.2em;
+    }
+
+    a:hover {
+      color: #0d4b34;
+    }
+
+    a:focus-visible {
+      outline: 3px solid rgb(23 107 77 / 28%);
+      outline-offset: 3px;
+    }
+
+    code {
+      border-radius: 5px;
+      background: #edf2ef;
+      padding: 0.08em 0.34em;
+      font: 0.9em/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4 {
+      line-height: 1.25;
+      letter-spacing: -0.025em;
+    }
+
+    h1 {
+      max-width: 920px;
+      margin: 10px 0 14px;
+      font-size: 46px;
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      font-size: 30px;
+    }
+
+    h3 {
+      margin: 0 0 9px;
+      font-size: 18px;
+    }
+
+    h4 {
+      margin: 20px 0 8px;
+      font-size: 15px;
+    }
+
+    p {
+      margin: 8px 0;
+    }
+
+    ul,
+    ol {
+      padding-left: 22px;
+    }
+
+    li + li {
+      margin-top: 5px;
+    }
+
+    .shell {
+      width: 1120px;
+      margin: 0 auto;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 90%);
+      padding: 50px 0 34px;
+    }
+
+    .eyebrow {
+      margin: 0;
+      color: var(--brand);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    .lead {
+      max-width: 920px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin: 24px 0 0;
+    }
+
+    .meta-grid div {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+      padding: 10px 12px;
+    }
+
+    .meta-grid dt {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .meta-grid dd {
+      margin: 2px 0 0;
+      font-weight: 750;
+    }
+
+    .status {
+      color: var(--amber);
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 95%);
+      box-shadow: 0 4px 20px rgb(21 50 37 / 6%);
+    }
+
+    nav ol {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 0;
+      margin: 0;
+      padding: 8px 0;
+      list-style: none;
+    }
+
+    nav a {
+      display: block;
+      padding: 4px 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      text-decoration: none;
+    }
+
+    nav a:hover {
+      color: var(--brand);
+    }
+
+    main {
+      padding: 22px 0 70px;
+    }
+
+    section {
+      scroll-margin-top: 94px;
+      margin-top: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      padding: 30px;
+    }
+
+    .section-kicker {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--brand);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: #fbfdfc;
+      padding: 17px;
+    }
+
+    .card p:last-child,
+    .card ul:last-child {
+      margin-bottom: 0;
+    }
+
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .p0,
+    .good {
+      background: var(--brand-soft);
+      color: var(--brand);
+    }
+
+    .p1,
+    .info {
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+
+    .p2,
+    .warn {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .bad {
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    .callout {
+      margin: 16px 0;
+      border-left: 4px solid var(--brand);
+      border-radius: 0 11px 11px 0;
+      background: var(--brand-soft);
+      padding: 14px 17px;
+    }
+
+    .callout.warning {
+      border-left-color: var(--amber);
+      background: var(--amber-soft);
+    }
+
+    .callout.danger {
+      border-left-color: var(--red);
+      background: var(--red-soft);
+    }
+
+    .fact {
+      border-left: 4px solid var(--blue);
+      background: var(--blue-soft);
+    }
+
+    .flow {
+      overflow-x: auto;
+      margin: 14px 0;
+      border-radius: 13px;
+      background: #10251b;
+      color: #e4f3ea;
+      padding: 17px 19px;
+      font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      margin: 13px 0;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+    }
+
+    table {
+      width: 100%;
+      min-width: 920px;
+      border-collapse: collapse;
+      background: var(--surface);
+      font-size: 12.5px;
+    }
+
+    .wide table {
+      min-width: 1320px;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 11px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--surface-soft);
+      color: #405149;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .small {
+      font-size: 12px;
+    }
+
+    .checklist {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 20px;
+      padding-left: 20px;
+    }
+
+    footer {
+      border-top: 1px solid var(--line);
+      background: #fff;
+      padding: 25px 0 38px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media print {
+      @page {
+        size: A4 landscape;
+        margin: 10mm;
+      }
+
+      body {
+        min-width: 0;
+        background: #fff;
+        font-size: 9.5pt;
+      }
+
+      .shell {
+        width: 100%;
+      }
+
+      header {
+        padding: 0 0 14px;
+      }
+
+      h1 {
+        font-size: 26pt;
+      }
+
+      h2 {
+        font-size: 18pt;
+      }
+
+      nav {
+        display: none;
+      }
+
+      main {
+        padding: 0;
+      }
+
+      section {
+        break-before: page;
+        margin: 0;
+        border: 0;
+        box-shadow: none;
+        padding: 8mm 0 0;
+      }
+
+      section:first-child {
+        break-before: auto;
+      }
+
+      .card,
+      .callout,
+      .flow,
+      tr {
+        break-inside: avoid;
+      }
+
+      .table-wrap {
+        overflow: visible;
+        border-color: #aaa;
+      }
+
+      table,
+      .wide table {
+        min-width: 0;
+        font-size: 7.2pt;
+      }
+
+      th,
+      td {
+        padding: 4px 5px;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Service Data Sync · Research Proposal 0025</p>
+      <h1>龙虎榜与大宗交易：保留当时披露事实，不保存事后赢家叙事</h1>
+      <p class="lead">
+        本方案把龙虎榜“上榜事实、原因、买卖席位”和大宗交易“逐笔成交”建成两个隔离的数据集。
+        推荐先接交易所权威披露，再以固定 AKShare / 东方财富接口做候选补充与对账；所有未来收益、
+        事后成功率、滚动排行和最新价字段在 Adapter 白名单之外硬拒绝。
+      </p>
+      <dl class="meta-grid">
+        <div><dt>编号</dt><dd>0025</dd></div>
+        <div><dt>状态</dt><dd class="status">Proposed</dd></div>
+        <div><dt>调研日期</dt><dd>2026-07-28</dd></div>
+        <div><dt>范围</dt><dd>龙虎榜 / A 股大宗交易</dd></div>
+        <div><dt>实施状态</dt><dd>已实现龙虎榜/大宗交易 P0 模型、发布、受控 CLI 与内部读取；Adapter 准入保持关闭。</dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="方案目录">
+    <div class="shell">
+      <ol>
+        <li><a href="#summary">1. 结论</a></li>
+        <li><a href="#value">2. 价值与边界</a></li>
+        <li><a href="#sources">3. 来源证据</a></li>
+        <li><a href="#grain">4. 粒度与字段</a></li>
+        <li><a href="#temporal">5. 时态修订</a></li>
+        <li><a href="#sync">6. 同步恢复</a></li>
+        <li><a href="#quality">7. 质量与未来函数</a></li>
+        <li><a href="#canonical">8. Canonical 输入</a></li>
+        <li><a href="#tables">9. 领域表草案</a></li>
+        <li><a href="#api">10. POST 查询需求</a></li>
+        <li><a href="#gates">11. 门禁与风险</a></li>
+        <li><a href="#acceptance">12. 引用与验收</a></li>
+      </ol>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <span class="section-kicker">01 · Recommendation</span>
+      <h2>结论：两个 P0 明细集，一个 P1 派生层，P2 明确不接</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="tag p0">P0 · 条件接入</span>
+          <h3>龙虎榜披露与席位明细</h3>
+          <p>
+            建议接入沪、深、北交易所公开信息，按“证券 × 交易日 × 上榜原因”建事件头，
+            买入榜和卖出榜分别保存席位与名次。东方财富 raw 的 <code>TRADE_ID</code>
+            可作候选来源关联键，但不能替代内部身份。
+          </p>
+        </article>
+        <article class="card">
+          <span class="tag p0">P0 · 条件接入</span>
+          <h3>A 股大宗交易逐笔</h3>
+          <p>
+            建议接入成交日期、证券、成交价、数量、金额、买卖营业部及同日参考价。
+            逐笔与日汇总分离；完全相同的多笔成交可能真实存在，禁止按经济字段哈希直接去重。
+          </p>
+        </article>
+        <article class="card">
+          <span class="tag p1">P1 · 仅从 P0 派生</span>
+          <h3>机构净额与日度汇总</h3>
+          <p>
+            机构席位聚合、大宗成交均价、折溢价分布由已发布明细在固定
+            <code>data_version</code> 上计算；不直接保存供应商滚动榜单，避免口径和历史漂移。
+          </p>
+        </article>
+      </div>
+      <div class="callout danger">
+        <strong>P2 · 不建议接入：</strong>
+        <code>上榜后1/2/5/10/20/30日涨跌幅</code>、营业部“成功率”、后续上涨概率、
+        活跃股/营业部滚动排行、最新价和事后解读。它们不是事件发生时可见的披露事实，
+        不进入 raw→canonical 映射白名单，也不进入实时或回测 API。
+      </div>
+      <div class="callout">
+        <strong>事实：</strong>当前仓库没有龙虎榜或大宗交易任务、领域模型、Adapter 或 API。
+        可复用能力是现有 <code>DataSourcePort</code>、不可变 raw evidence、来源批次、
+        发布版本、质量隔离、checkpoint 以及 service-api 防腐客户端。
+        <strong>建议：</strong>本专题只输出领域输入，跨专题共享表和最终契约由后续统一方案定义。
+      </div>
+      <table>
+        <thead>
+          <tr><th>维度</th><th>龙虎榜</th><th>大宗交易</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>业务事实</td><td>交易所为何公开一只证券，以及公开的前五买卖席位</td><td>交易所确认并公开的一笔大宗成交</td></tr>
+          <tr><td>不可混入</td><td>大宗成交、普通日行情、供应商事后表现</td><td>竞价龙虎榜、盘后固定价格汇总、减持公告</td></tr>
+          <tr><td>主时点</td><td>交易日 + 市场可见时间 + 平台观测时间</td><td>成交日 + 交易所披露时间 + 平台观测时间</td></tr>
+          <tr><td>查询主键</td><td>证券、交易日、原因、来源事件键</td><td>成交日、证券、来源逐笔键/重复序号</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="value">
+      <span class="section-kicker">02 · Value & Scope</span>
+      <h2>业务价值、目标用户与不可越界语义</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>量化研究员</h3>
+          <ul>
+            <li>研究异常交易公开原因、席位集中度和机构专用席位出现。</li>
+            <li>构建大宗交易折溢价、成交规模和后续事件研究的“事件起点”。</li>
+            <li>按当时可见信息复现信号，不让结果期数据倒灌。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>投研与风控用户</h3>
+          <ul>
+            <li>查看证券为何上榜、哪些营业部进入买卖前五。</li>
+            <li>识别大额协议成交与竞价价格的差异。</li>
+            <li>关联公司公告时只通过事件 ID，不推断买卖双方最终投资者。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>数据运营与 API 消费者</h3>
+          <ul>
+            <li>按交易所、交易日、证券、原因和质量状态检索。</li>
+            <li>复验来源批次、方法学、版本和修订。</li>
+            <li>监控缺日、空集、分页截断和 schema 漂移。</li>
+          </ul>
+        </article>
+      </div>
+      <h3>范围决定</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>对象</th><th>本方案处理</th><th>理由</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>沪深北 A 股竞价交易公开信息</td><td><span class="tag good">纳入</span></td><td>权威披露，具有清晰原因和席位场景</td></tr>
+            <tr><td>沪深北 A 股大宗交易逐笔</td><td><span class="tag good">纳入</span></td><td>事件研究需要逐笔价格、数量、金额和买卖席位</td></tr>
+            <tr><td>B 股、基金、债券、REITs</td><td><span class="tag warn">首期排除</span></td><td>币种、数量单位、交易机制和披露栏目不同，不与 A 股静默共表</td></tr>
+            <tr><td>盘后固定价格交易</td><td><span class="tag warn">独立评估</span></td><td>规则与公开字段不同，不等同协议大宗交易</td></tr>
+            <tr><td>龙虎榜供应商解读/胜率</td><td><span class="tag bad">排除</span></td><td>非官方事实，可能包含事后或不透明模型输入</td></tr>
+            <tr><td>公司股东通过大宗交易减持公告</td><td><span class="tag info">关联但不混表</span></td><td>属于<a href="../0024-corporate-events/index.html">0024 公司事件</a>，披露主体与时态不同</td></tr>
+            <tr><td>个股/市场资金流</td><td><span class="tag info">独立数据域</span></td><td>属于<a href="../0017-daily-money-flow/index.html">0017 日资金流</a>，不能用席位金额代替</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <aside class="callout warning">
+        <strong>席位不等于投资者：</strong>“机构专用”或营业部名称是交易公开信息中的交易单元标识，
+        不能推断最终账户、股东身份、交易动机或关联关系。API 必须携带这一免责声明。
+      </aside>
+    </section>
+
+    <section id="sources">
+      <span class="section-kicker">03 · Evidence & Providers</span>
+      <h2>权威来源、AKShare 候选、真实上游与实测边界</h2>
+      <div class="callout fact">
+        <strong>来源顺序：</strong>交易所公开页面/规则是事实权威；AKShare 是调用聚合层，
+        <code>stock_lhb_*</code> 和 <code>stock_dzjy_*</code> 的本批主候选真实上游是东方财富，
+        不是 AKShare 自有数据，也不是交易所直连。两类来源需独立 Adapter、独立来源标识和独立质量评分。
+      </div>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr>
+              <th>能力</th><th>权威/候选来源</th><th>AKShare 1.18.78 函数</th>
+              <th>真实上游或报表</th><th>历史与稳定性</th><th>限流/授权</th><th>建议</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>龙虎榜事件头</td>
+              <td>沪、深、北交易所交易公开信息</td>
+              <td><code>stock_lhb_detail_em(start_date,end_date)</code></td>
+              <td>东方财富 <code>RPT_DAILYBILLBOARD_DETAILSNEW</code></td>
+              <td>上交所查询页注明自 2017-01-01 统计；东财文档称历史可取，但需逐日盘点</td>
+              <td>公开页面不等于再分发授权；接口无公开 SLA/额度</td>
+              <td><span class="tag p0">官方主源</span> 东财候选补充</td>
+            </tr>
+            <tr>
+              <td>买卖席位</td>
+              <td>交易所公开的前五营业部/交易单元</td>
+              <td><code>stock_lhb_stock_detail_em(symbol,date,flag)</code></td>
+              <td>东方财富 <code>RPT_BILLBOARD_DAILYDETAILSBUY/SELL</code></td>
+              <td>按证券日发起两次请求，存在 N+1、字段顺序与原因关联风险</td>
+              <td>低并发、缓存、退避；条款需生产前确认</td>
+              <td><span class="tag p0">保留 raw TRADE_ID</span></td>
+            </tr>
+            <tr>
+              <td>机构日统计</td>
+              <td>由席位明细可重算</td>
+              <td><code>stock_lhb_jgmmtj_em(start_date,end_date)</code></td>
+              <td>东方财富 <code>RPT_ORGANIZATION_TRADE_DETAILS</code></td>
+              <td>供应商聚合口径；不含完整席位链</td>
+              <td>无 SLA；不可替代官方明细</td>
+              <td><span class="tag p1">仅 QA 对账</span></td>
+            </tr>
+            <tr>
+              <td>新浪龙虎榜</td>
+              <td>非权威聚合</td>
+              <td><code>stock_lhb_detail_daily_sina(date)</code> 等</td>
+              <td>新浪财经</td>
+              <td>既有探针仅返回简表，字段不足</td>
+              <td>未确认许可与稳定性</td>
+              <td><span class="tag p2">不接入</span></td>
+            </tr>
+            <tr>
+              <td>A 股大宗逐笔</td>
+              <td>沪、深、北交易所大宗交易公开信息</td>
+              <td><code>stock_dzjy_mrmx("A股",start_date,end_date)</code></td>
+              <td>东方财富 <code>RPT_DATA_BLOCKTRADE</code></td>
+              <td>文档称历史可取；函数固定 5000 行且没有翻页循环</td>
+              <td>必须按单交易日抓取并检查页数；授权同上</td>
+              <td><span class="tag p0">官方主源</span> 东财补洞/对账</td>
+            </tr>
+            <tr>
+              <td>大宗日统计</td>
+              <td>由逐笔在固定版本重算</td>
+              <td><code>stock_dzjy_mrtj(start_date,end_date)</code></td>
+              <td>东方财富 <code>RPT_BLOCKTRADE_STA</code></td>
+              <td>含供应商折溢率与聚合；raw 仍请求未来表现字段</td>
+              <td>无 SLA</td>
+              <td><span class="tag p1">仅 QA 对账</span></td>
+            </tr>
+            <tr>
+              <td>活跃股/营业部排行</td>
+              <td>供应商派生</td>
+              <td><code>stock_dzjy_hygtj</code>、<code>stock_dzjy_yybph</code></td>
+              <td>东方财富滚动排行</td>
+              <td>近月/季/年滚动窗口，明确包含后续涨幅和概率</td>
+              <td>语义不适合 PIT</td>
+              <td><span class="tag bad">禁止接入</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>固定环境源码与短探针证据</h3>
+      <p class="muted">
+        项目锁定 <code>akshare==1.18.78</code>；2026-07-28 使用现有
+        <code>quant-v2/service-data-sync:test</code> 只读容器核验签名、源码与少量历史样本。
+        下列结果只证明一次调用的返回结构，不代表生产稳定性、完整历史或授权已满足。
+      </p>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>探针</th><th>事实</th><th>设计含义</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>龙虎榜 2024-04-17</td>
+              <td>139 行；按代码+上榜日有 22 个重复，加入原始上榜原因后无重复</td>
+              <td>同股同日多原因是合法事实，唯一键必须包含原因或来源事件 ID</td>
+            </tr>
+            <tr>
+              <td>龙虎榜 raw</td>
+              <td>含 <code>TRADE_ID</code>、<code>CHANGE_TYPE</code>；AKShare DataFrame 丢弃两字段</td>
+              <td>Adapter 必须保存 raw 并显式提取稳定关联键，不能只消费规范化 DataFrame</td>
+            </tr>
+            <tr>
+              <td>龙虎榜未来字段</td>
+              <td><code>D1/D2/D5/D10_CLOSE_ADJCHRATE</code> 已有值；<code>EXPLAIN</code> 含“成功率”</td>
+              <td>全量列映射会制造未来函数；采用允许字段清单</td>
+            </tr>
+            <tr>
+              <td>000007 席位样本</td>
+              <td>买入榜 5 行、卖出榜 5 行，raw 共用 <code>TRADE_ID=4944812</code>；金额为元</td>
+              <td>事件头→原因→买卖榜可关联；榜单方向和名次必须进入键</td>
+            </tr>
+            <tr>
+              <td>大宗交易 2022-01-04</td>
+              <td>135 行、1 页；成交量为股、成交额为元，价格×数量与金额近似一致</td>
+              <td>统一成股/人民币元；允许来源舍入容差并保存原始值</td>
+            </tr>
+            <tr>
+              <td>大宗完全相同行</td>
+              <td>同一经济字段可出现 3 次，仅 raw <code>DAILY_RANK</code> 不同</td>
+              <td>合法多笔不能折叠；保留来源顺序并生成重复序号</td>
+            </tr>
+            <tr>
+              <td>大宗未来字段</td>
+              <td>raw 含 <code>CHANGE_RATE_1DAYS/5DAYS/10DAYS/20DAYS</code></td>
+              <td>即使 AKShare 最终 DataFrame 丢弃，raw→canonical 解码器仍须显式拒绝</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <aside class="callout warning">
+        <strong>版本差异：</strong>AKShare 在线文档访问时显示 1.18.80；本文函数签名和字段以项目固定
+        1.18.78 源码为证，在线文档仅辅助解释单位。升级版本必须重新冻结 schema fingerprint，
+        不能把在线文档当前状态默认为仓库运行状态。
+      </aside>
+    </section>
+
+    <section id="grain">
+      <span class="section-kicker">04 · Grain, Identity & Units</span>
+      <h2>粒度、候选唯一键、字段字典与量纲</h2>
+      <h3>实体与唯一性</h3>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>实体</th><th>业务粒度</th><th>首选来源键</th><th>候选自然键</th><th>重复语义</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>龙虎榜事件头</td>
+              <td>一只证券在一个披露日因一个标准被公开</td>
+              <td><code>venue + provider + TRADE_ID</code></td>
+              <td><code>security_id + trade_date + reason_code/text</code></td>
+              <td>同股同日多原因全部保留</td>
+            </tr>
+            <tr>
+              <td>龙虎榜席位</td>
+              <td>一个事件的一侧榜单中的一个名次</td>
+              <td><code>event_id + list_side + rank</code></td>
+              <td><code>TRADE_ID + side + seat_code + rank</code></td>
+              <td>同一席位可同时出现在买卖榜，不合并</td>
+            </tr>
+            <tr>
+              <td>大宗交易逐笔</td>
+              <td>交易所披露的一笔成交</td>
+              <td>交易所逐笔 ID；若无则来源日序号</td>
+              <td>经济字段元组 + <code>occurrence_no</code></td>
+              <td>完全相同的多笔按重数保留</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        <strong>证券身份：</strong>以
+        <a href="../0014-equity-instrument-master/index.html">0014 证券主数据</a>和
+        <a href="../../decisions/0013-equity-instrument-identity-lifecycle.md">ADR-0013</a>
+        的 <code>security_id</code> 为内部身份；必须按 <code>trade_date</code> 与
+        <code>known_at</code> 解析当时的交易所代码，禁止使用当前简称或当前代码反向锚定历史记录。
+      </p>
+      <h3>龙虎榜字段白名单</h3>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>字段</th><th>类型/单位</th><th>上游字段</th><th>空值与约束</th><th>用途</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>trade_date</code></td><td>date / Asia/Shanghai 交易日</td><td><code>TRADE_DATE</code></td><td>非空，必须为对应交易所开市日</td><td>分区与业务时间</td></tr>
+            <tr><td><code>source_trade_id</code></td><td>text</td><td><code>TRADE_ID</code></td><td>官方源无 ID 时可空，但需替代证据键</td><td>来源内关联</td></tr>
+            <tr><td><code>reason_code</code></td><td>text</td><td><code>CHANGE_TYPE</code>/交易所代码</td><td>未知码不可静默映射</td><td>稳定筛选</td></tr>
+            <tr><td><code>reason_text_raw</code></td><td>text</td><td><code>EXPLANATION</code></td><td>非空，原文保留</td><td>规则审计</td></tr>
+            <tr><td><code>window_start/end</code></td><td>date，可空</td><td>交易所明确窗口</td><td>不得仅凭“连续三日”字符串猜测</td><td>异常波动窗口</td></tr>
+            <tr><td><code>close_price</code></td><td>numeric / CNY·股⁻¹</td><td><code>CLOSE_PRICE</code></td><td>发布后才可见；正数</td><td>同日上下文</td></tr>
+            <tr><td><code>buy/sell/net_amount</code></td><td>numeric / CNY</td><td><code>BILLBOARD_*_AMT</code></td><td>买卖非负；净额≈买入−卖出</td><td>榜单规模</td></tr>
+            <tr><td><code>market_turnover_amount</code></td><td>numeric / CNY</td><td><code>ACCUM_AMOUNT</code></td><td>可空；不得与大宗成交额混算</td><td>占比基数</td></tr>
+            <tr><td><code>deal/net_ratio</code></td><td>numeric / 小数</td><td><code>DEAL_*_RATIO</code></td><td>东财 summary 为百分点，除以 100</td><td>标准化比率</td></tr>
+            <tr><td><code>turnover_ratio</code></td><td>numeric / 小数</td><td><code>TURNOVERRATE</code></td><td>百分点除以 100；可超过常见阈值</td><td>上榜语境</td></tr>
+            <tr><td><code>list_side</code></td><td>enum BUY/SELL</td><td>函数 <code>flag</code>/报表名</td><td>非空</td><td>榜单隔离</td></tr>
+            <tr><td><code>rank</code></td><td>smallint</td><td>来源顺序</td><td>通常 1–5；不足 5 记录告警</td><td>确定性排序</td></tr>
+            <tr><td><code>seat_code/name</code></td><td>text</td><td><code>OPERATEDEPT_CODE/NAME</code></td><td>代码可空，名称原文非空</td><td>席位身份</td></tr>
+            <tr><td><code>seat_buy/sell/net</code></td><td>numeric / CNY</td><td><code>BUY/SELL/NET</code></td><td>净额允许负；分位到分</td><td>席位金额</td></tr>
+            <tr><td><code>seat_*_ratio</code></td><td>numeric / 小数</td><td><code>TOTAL_BUYRIO/SELLRIO</code></td><td>raw 已为小数，不再次除以 100</td><td>席位占比</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>大宗交易字段白名单</h3>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>字段</th><th>类型/单位</th><th>上游字段</th><th>空值与约束</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>trade_date</code></td><td>date / 交易所日历</td><td><code>TRADE_DATE</code></td><td>非空，开市日</td></tr>
+            <tr><td><code>execution_price</code></td><td>numeric / CNY·股⁻¹</td><td><code>DEAL_PRICE</code></td><td>正数</td></tr>
+            <tr><td><code>quantity_shares</code></td><td>bigint / 股</td><td><code>DEAL_VOLUME</code></td><td>正整数；A 股首期限定</td></tr>
+            <tr><td><code>notional_cny</code></td><td>numeric / CNY</td><td><code>DEAL_AMT</code></td><td>正数；与价×量按来源舍入容差核验</td></tr>
+            <tr><td><code>buyer/seller_seat_code</code></td><td>text，可空</td><td><code>BUYER_CODE/SELLER_CODE</code></td><td>同名不等于同代码</td></tr>
+            <tr><td><code>buyer/seller_seat_name</code></td><td>text</td><td><code>BUYER_NAME/SELLER_NAME</code></td><td>“机构专用”原样保留，不推断账户</td></tr>
+            <tr><td><code>reference_close_price</code></td><td>numeric / CNY·股⁻¹</td><td><code>CLOSE_PRICE</code></td><td>仅同源字段；跨源派生须另带方法学</td></tr>
+            <tr><td><code>premium_discount_ratio</code></td><td>numeric / 小数</td><td><code>PREMIUM_RATIO</code></td><td>负数折价、正数溢价；raw 已为小数</td></tr>
+            <tr><td><code>source_daily_rank</code></td><td>integer</td><td><code>DAILY_RANK</code></td><td>仅来源定位，不对外作为业务排名</td></tr>
+            <tr><td><code>occurrence_no</code></td><td>smallint</td><td>同经济元组按来源序号生成</td><td>从 1 开始，保存合法重数</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <aside class="callout warning">
+        <strong>折溢价口径：</strong>只有成交价与“同日竞价收盘价”同源且同版本时，才保存来源报告的折溢价。
+        若改用 canonical 日线重算，必须输出独立派生字段和 <code>methodology_version</code>，
+        不能用新行情版本静默改写历史事件。
+      </aside>
+    </section>
+
+    <section id="temporal">
+      <span class="section-kicker">05 · Temporal Semantics</span>
+      <h2>交易日不是可见时间：双时态与修订必须同时存在</h2>
+      <div class="flow" aria-label="交易事件时态流程">交易发生 / 异常窗口结束（trade_date / window_end）
+        │ 收盘后交易所形成公开信息
+        ▼
+来源公开（source_published_at，可空） ──▶ 市场安全可见（visible_at）
+        │                                  日期级历史披露：保守取下一交易时段开盘
+        ▼
+平台首次抓到（observed_at / known_from） ──▶ 质量通过并发布（published_at / data_version）
+        │
+        └── T+1/T+5 内容变化：追加 revision，旧 knownAt 仍返回旧版本</div>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>时间字段</th><th>含义</th><th>取值规则</th><th>不得替代</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>trade_date</code></td><td>竞价公开信息结束日或大宗成交日</td><td>交易所本地日期</td><td>不是公告时刻、不是抓取时刻</td></tr>
+            <tr><td><code>window_start/end_date</code></td><td>多日异常波动评价窗口</td><td>只有来源明确给出才保存</td><td>不得由文本机械减两天</td></tr>
+            <tr><td><code>source_published_at</code></td><td>来源明确发布时刻</td><td>带时区；来源只给日期时为空</td><td>不得用 HTTP 响应时间伪造</td></tr>
+            <tr><td><code>visible_at</code></td><td>允许实时/回测消费的最早安全时刻</td><td>精确发布时刻；否则保守到下一交易时段</td><td>不得等于当日 00:00</td></tr>
+            <tr><td><code>observed_at</code></td><td>Adapter 完成该次来源观测的 UTC 时刻</td><td>每次抓取独立保存</td><td>不是市场公开时刻</td></tr>
+            <tr><td><code>known_from/to</code></td><td>平台对某修订版本的知识有效区间</td><td>半开区间；追加修订关闭旧版本</td><td>不得覆盖旧知识视图</td></tr>
+            <tr><td><code>published_at</code></td><td>质量通过并原子发布到消费者的时刻</td><td>与 <code>data_version</code> 绑定</td><td>不是来源发布时间</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>查询语义</h3>
+      <ul>
+        <li><code>tradeDateFrom/To</code> 选择事件业务日期，不改变知识版本。</li>
+        <li><code>asOf</code> 选择业务有效视图；本域默认等于请求的事件日期上界。</li>
+        <li><code>knownAt</code> 同时限制 <code>visible_at</code> 和平台已知 revision，禁止未来时刻。</li>
+        <li>不传 <code>knownAt</code> 返回当前已发布版本；传值则返回当时已知且当时可见的版本。</li>
+        <li>历史回填只有交易日而无发布时间时，使用下一交易时段开盘这一保守界限，并标记
+          <code>visibility_basis=DATE_ONLY_CONSERVATIVE</code>。</li>
+      </ul>
+      <h3>修订、撤回与缺失</h3>
+      <div class="grid">
+        <article class="card">
+          <h3>内容变化</h3>
+          <p>同一交易所日重新抓取后先比较排序无关的多重集哈希；字段变化形成新 revision，不原地更新。</p>
+        </article>
+        <article class="card">
+          <h3>记录消失</h3>
+          <p>只有完整日快照通过后才追加 tombstone；单页失败、限流或空响应不能解释为官方撤回。</p>
+        </article>
+        <article class="card">
+          <h3>原因规则变化</h3>
+          <p>原始原因字符串永远保留；canonical 原因码按方法学版本解释，不能批量改写历史原文。</p>
+        </article>
+      </div>
+      <aside class="callout danger">
+        <strong>同日收盘字段并非盘中可见：</strong>收盘价、当日涨跌幅、龙虎榜金额和大宗折溢价只有在
+        交易所收盘后公开信息形成并达到 <code>visible_at</code> 后才可消费。把
+        <code>trade_date 00:00</code> 当成可见时刻会产生确定的未来函数。
+      </aside>
+    </section>
+
+    <section id="sync">
+      <span class="section-kicker">06 · Sync, Backfill & Recovery</span>
+      <h2>按交易所日发布完整快照，明细抓取可恢复但不可半发布</h2>
+      <div class="flow" aria-label="同步数据流">scheduler / backfill command
+  → venue calendar partition (dataset, venue, trade_date)
+  → provider-neutral request
+  → official Adapter ── or ── Eastmoney-AKShare Adapter
+  → immutable raw payload + request/response metadata
+  → whitelist decoder → identity resolution → multiset dedup
+  → quality gate / quarantine
+  → one transaction publishes event head + seats/executions + data_version
+  → checkpoint advances only after full partition publication</div>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>环节</th><th>龙虎榜</th><th>大宗交易</th><th>共同约束</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>调度</td>
+              <td>收盘后轮询事件头；再按事件取买/卖席位</td>
+              <td>收盘后按交易所、单日取逐笔</td>
+              <td>不预设官方精确发布时间；记录首次非空观测</td>
+            </tr>
+            <tr>
+              <td>逻辑分区</td>
+              <td><code>dataset/venue/trade_date</code></td>
+              <td><code>dataset/venue/trade_date</code></td>
+              <td>物理表候选按 <code>trade_date</code> 年度 RANGE 分区，待统一模型定稿</td>
+            </tr>
+            <tr>
+              <td>增量</td>
+              <td>T 日抓取，T+1/T+5 复核；席位任务可断点续跑</td>
+              <td>T 日抓取，T+1/T+5 复核</td>
+              <td>空集、未发布、网络错误三种状态分离</td>
+            </tr>
+            <tr>
+              <td>分页</td>
+              <td>summary 全页；seat 按事件两侧抓取</td>
+              <td>AKShare 1.18.78 函数不翻页，强制单日且检查 raw pages</td>
+              <td>页数、总数、每页行数、稳定排序键进入批次元数据</td>
+            </tr>
+            <tr>
+              <td>回补</td>
+              <td>按日倒序，优先官方可验证区间；旧历史单独质量等级</td>
+              <td>按日倒序，不允许跨长窗口触发 5000 行截断</td>
+              <td>回补不改写当时可见时间；历史发布日期缺失采用保守值</td>
+            </tr>
+            <tr>
+              <td>幂等</td>
+              <td>事件多重集哈希 + TRADE_ID；seat 按 side/rank</td>
+              <td>经济元组的重数 + occurrence_no，不折叠完全相同行</td>
+              <td>相同内容复跑不产生新 revision；不同内容追加版本</td>
+            </tr>
+            <tr>
+              <td>恢复</td>
+              <td>头完成但席位未完成时保持 staged，不对外发布</td>
+              <td>所有页归档、数量核对后才发布</td>
+              <td>指数退避、抖动、熔断、限速；失败分区入重试队列</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>写入顺序与事务边界</h3>
+      <ol>
+        <li>创建独立来源观测并写不可变 raw；相同 payload 也不折叠观测。</li>
+        <li>解码允许字段，拒绝未知 schema、未来日期和禁用字段进入 DTO。</li>
+        <li>按交易日解析证券身份；无法唯一解析的记录进入隔离区，不丢弃整日其他证券。</li>
+        <li>构造日分区多重集；保留大宗完全相同成交的重数与来源日序。</li>
+        <li>运行字段、对账、完整性、PIT 和跨来源抽样质量规则。</li>
+        <li>单事务发布日 release、事件头与全部子项，生成不可变 <code>data_version</code>。</li>
+        <li>提交成功后推进 checkpoint；失败回滚 canonical 发布，不删除 raw 证据。</li>
+      </ol>
+      <h3>容量与查询假设</h3>
+      <p>
+        2024-04-17 探针有 139 个龙虎榜原因事件；若每个事件最多 10 个席位行，
+        单日约千级子项。2022-01-04 大宗交易有 135 笔。按 250 交易日和十年估算，
+        领域明细为百万到低千万级，年度分区和
+        <code>(security_id, trade_date desc)</code>、<code>(venue, trade_date desc)</code>
+        索引可覆盖主查询；该估算不是容量承诺，连续样本统计后再定物理分区。
+      </p>
+    </section>
+
+    <section id="quality">
+      <span class="section-kicker">07 · Quality & No-look-ahead</span>
+      <h2>允许清单先于映射；未来字段即使在 raw 中存在也永不发布</h2>
+      <h3>质量规则</h3>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>规则</th><th>级别</th><th>验证</th><th>失败动作</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>交易日合法</td><td>ERROR</td><td>日期属于对应交易所开市日且不晚于来源观测本地日</td><td>隔离行；未来日期整批拒绝</td></tr>
+            <tr><td>身份唯一</td><td>ERROR</td><td>按 trade_date/known_at 解析唯一 security_id</td><td>隔离行并记录候选身份</td></tr>
+            <tr><td>龙虎榜键完整</td><td>ERROR</td><td>TRADE_ID 或可审计替代键、原因、证券、日期非空</td><td>不发布事件与席位</td></tr>
+            <tr><td>席位榜一致</td><td>ERROR/WARN</td><td>side+rank 唯一；rank 1–5；同 TRADE_ID 原因一致</td><td>重复 rank 拒绝；不足五名告警</td></tr>
+            <tr><td>龙虎榜金额恒等</td><td>ERROR</td><td>net≈buy−sell；deal≈buy+sell，按分级容差</td><td>隔离事件头</td></tr>
+            <tr><td>占比不过度约束</td><td>INFO</td><td>榜单买卖双边可能使成交额占比超过 100%</td><td>不错误截断到 [0,1]</td></tr>
+            <tr><td>大宗金额对账</td><td>ERROR/WARN</td><td>price×quantity≈notional；容差由同源样本冻结</td><td>超容差隔离，舍入差告警</td></tr>
+            <tr><td>大宗重数保持</td><td>ERROR</td><td>输入/输出完全相同经济元组的 Counter 相等</td><td>整日不发布</td></tr>
+            <tr><td>折溢价对账</td><td>ERROR</td><td>ratio≈price/reference−1，且参考价方法学明确</td><td>移除派生字段或隔离</td></tr>
+            <tr><td>完整分页</td><td>ERROR</td><td>抓取行数=来源 count，所有 page 唯一且连续</td><td>整日不发布，checkpoint 不推进</td></tr>
+            <tr><td>日级异常</td><td>WARN</td><td>行数、空集率、席位覆盖与近 20 日分布比较</td><td>自动复核，不用历史均值填充</td></tr>
+            <tr><td>跨源抽样</td><td>WARN/ERROR</td><td>官方与东财在证券、原因、金额、席位、逐笔重数上对账</td><td>官方优先；冲突不静默合并</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>禁用字段登记</h3>
+      <div class="grid two">
+        <article class="card">
+          <span class="tag bad">龙虎榜硬拒绝</span>
+          <ul>
+            <li><code>D1/D2/D5/D10/D20/D30_CLOSE_ADJCHRATE</code></li>
+            <li><code>EXPLAIN</code> 中供应商“成功率”与交易叙事</li>
+            <li><code>RISE_PROBABILITY_3DAY</code></li>
+            <li><code>TOTAL_BUYER_SALESTIMES_3DAY</code> 等不透明统计</li>
+            <li>当前活跃营业部、近月排行和事后席位表现</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="tag bad">大宗交易硬拒绝</span>
+          <ul>
+            <li><code>CHANGE_RATE_1DAYS/5DAYS/10DAYS/20DAYS</code></li>
+            <li><code>D1/D5/D10/D20_AVG_ADJCHRATE</code></li>
+            <li>“上榜日后平均涨跌幅”“上涨概率”</li>
+            <li>随查询日变化的最新价、近月/季/年活跃排名</li>
+            <li>未来公告中确认的交易对手身份或减持结果</li>
+          </ul>
+        </article>
+      </div>
+      <div class="callout danger">
+        <strong>结构性防线：</strong>禁用字段不仅“不返回”，还不得进入 provider-neutral DTO、
+        canonical mapper、领域表、API schema、测试 fixture 或派生视图。raw 可为审计原样保存，
+        但 raw 下载权限与业务查询权限隔离；列名新增默认拒绝，不能默认透传。
+      </div>
+      <h3>PIT 回归场景</h3>
+      <ul>
+        <li>在 <code>visible_at - 1ms</code> 查询，当日事件必须不可见；到达可见时刻后才出现。</li>
+        <li>T+5 来源修订不能改变 <code>knownAt=T+1</code> 的结果。</li>
+        <li>历史回补不能把回补日观测到的未来收益写入历史版本。</li>
+        <li>同股同日两个原因必须返回两个事件；席位通过 <code>TRADE_ID</code> 分别挂接。</li>
+        <li>三笔经济字段相同的大宗交易重放后仍为三笔，且幂等复跑不变成六笔。</li>
+      </ul>
+    </section>
+
+    <section id="canonical">
+      <span class="section-kicker">08 · Canonical Dataset Inputs</span>
+      <h2>向统一模型交付三个版本化输入，不自行定义共享基础表</h2>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>dataset_id</th><th>粒度</th><th>输入字段组</th><th>消费者</th><th>隔离边界</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>equity.dragon_tiger.event.reported</code></td>
+              <td>证券 × 交易日 × 原因 × revision</td>
+              <td>身份、原因、窗口、同日行情上下文、榜单金额、时态、来源和质量</td>
+              <td>异常交易检索、事件研究、席位聚合</td>
+              <td>不含席位明细、不含未来表现</td>
+            </tr>
+            <tr>
+              <td><code>equity.dragon_tiger.seat.reported</code></td>
+              <td>事件 × 买卖榜方向 × 名次 × revision</td>
+              <td>席位代码/名称、买卖净额、占比、来源事件关联</td>
+              <td>席位集中度、机构专用统计</td>
+              <td>不推断投资者，不保存供应商胜率</td>
+            </tr>
+            <tr>
+              <td><code>equity.block_trade.execution.reported</code></td>
+              <td>交易所公开逐笔 × revision</td>
+              <td>证券、成交价/量/额、买卖席位、参考价、折溢价、重数序号</td>
+              <td>折溢价研究、大额成交检索、日汇总派生</td>
+              <td>不混入盘后固定价、B 股/基金/债券</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>对共享模型的依赖输入</h3>
+      <ul>
+        <li>证券身份与生命周期：复用 0014 / ADR-0013，不创建第二套证券表。</li>
+        <li>交易所日历、来源、批次、raw payload、质量、隔离、checkpoint、publication：
+          由统一 canonical 方案定义，本专题仅提交所需关系。</li>
+        <li><code>data_version</code>、方法学版本、<code>known_from/to</code> 和审计字段：
+          复用<a href="../0018-sqlalchemy-orm-persistence-models/index.html">0018 ORM 持久化约束</a>的发布模式。</li>
+      </ul>
+      <h3>P1 派生需求</h3>
+      <div class="grid">
+        <article class="card">
+          <h3>龙虎榜机构聚合</h3>
+          <p>从 seat 数据中对官方“机构专用”标签按事件和版本聚合；不以名称模糊匹配扩张机构范围。</p>
+        </article>
+        <article class="card">
+          <h3>大宗日汇总</h3>
+          <p>从逐笔计算笔数、总量、总额、成交均价和折溢价分布，结果绑定输入 data_version。</p>
+        </article>
+        <article class="card">
+          <h3>事件研究输出</h3>
+          <p>未来收益只能由独立研究任务在查询时计算，清楚标注观察窗，永不回写事件事实集。</p>
+        </article>
+      </div>
+      <aside class="callout">
+        <strong>来源冲突：</strong>官方与东财同一日的数据不拼字段生成“更完整的一行”。
+        官方版本为首选 release；东财作为独立观测做缺口告警或经批准的降级 release，
+        响应必须显示来源与质量等级。
+      </aside>
+    </section>
+
+    <section id="tables">
+      <span class="section-kicker">09 · Domain Table Draft</span>
+      <h2>仅描述交易事件领域表；共享支撑表留给统一模型</h2>
+      <p class="muted">
+        下列是 DDL 级输入草案，不是迁移。最终字段类型、共享外键、分区和 publication 关系由
+        canonical_data_model_research 合并。所有 version 表为追加式，不覆盖旧行。
+      </p>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>表</th><th>用途与粒度</th><th>领域字段</th><th>唯一性/关系</th><th>索引建议</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>dragon_tiger_event_version</code></td>
+              <td>一个上榜原因事件的知识版本</td>
+              <td>
+                <code>event_id</code>、<code>security_id</code>、<code>venue</code>、
+                <code>trade_date</code>、<code>window_start/end_date</code>、
+                <code>reason_code</code>、<code>reason_text_raw</code>、
+                <code>source_trade_id</code>、收盘价、买卖净额、市场成交额、占比、
+                visible/known/revision/content_hash/data_version/quality
+              </td>
+              <td>
+                PK 内部 version_id；同来源 <code>(provider,source_trade_id,known_from)</code> 唯一；
+                无来源 ID 时用可审计替代键；一对多 seat
+              </td>
+              <td>
+                <code>(security_id,trade_date desc)</code>；
+                <code>(venue,trade_date desc,reason_code)</code>
+              </td>
+            </tr>
+            <tr>
+              <td><code>dragon_tiger_seat_version</code></td>
+              <td>事件一侧榜单的一个名次版本</td>
+              <td>
+                <code>event_version_id</code>、<code>list_side</code>、<code>rank</code>、
+                <code>seat_code</code>、<code>seat_name_raw</code>、
+                <code>seat_type</code>、buy/sell/net amount、buy/sell ratio、
+                revision/content_hash/data_version/quality
+              </td>
+              <td>
+                <code>(event_version_id,list_side,rank)</code> 唯一；
+                seat_code 为空时不以名称做全局唯一
+              </td>
+              <td>
+                <code>(seat_code,trade_date desc)</code> 需通过事件关联；
+                <code>(event_version_id,list_side,rank)</code>
+              </td>
+            </tr>
+            <tr>
+              <td><code>block_trade_execution_version</code></td>
+              <td>一笔大宗成交的知识版本</td>
+              <td>
+                <code>execution_id</code>、<code>security_id</code>、<code>venue</code>、
+                <code>trade_date</code>、price/quantity/notional、buyer/seller seat、
+                reference price/type、premium_discount_ratio、
+                <code>source_event_key</code>、<code>source_daily_rank</code>、
+                <code>economic_fingerprint</code>、<code>occurrence_no</code>、
+                visible/known/revision/content_hash/data_version/quality
+              </td>
+              <td>
+                有官方 ID 时按来源 ID；无 ID 时
+                <code>(release,economic_fingerprint,occurrence_no)</code> 唯一；
+                重复重数不可丢
+              </td>
+              <td>
+                <code>(security_id,trade_date desc)</code>；
+                <code>(venue,trade_date desc)</code>；
+                可选 notional/premium 部分索引
+              </td>
+            </tr>
+            <tr>
+              <td><code>trading_disclosure_reason_map_version</code></td>
+              <td>交易所原始原因到 canonical 原因族的版本化映射</td>
+              <td>
+                venue、board、source_reason_code/text、canonical_reason_family、
+                rule_reference、effective_from/to、methodology_version
+              </td>
+              <td>
+                同 venue/board/source code 的有效期不可重叠；
+                未知原因原文仍可发布为 UNKNOWN
+              </td>
+              <td><code>(venue,source_reason_code,effective_from)</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>约束草案</h3>
+      <ul>
+        <li>金额、价格、数量均大于或等于零；大宗成交三者必须严格大于零。</li>
+        <li><code>known_to &gt; known_from</code> 或为空；同一逻辑事件知识区间不重叠。</li>
+        <li><code>list_side IN ('BUY','SELL')</code>，<code>rank BETWEEN 1 AND 5</code>。</li>
+        <li><code>occurrence_no &gt;= 1</code>；不允许通过唯一约束抹掉相同经济字段的多笔。</li>
+        <li>年度 RANGE 分区是容量候选，不在本专题固化；空分区不自动创建“零事件”事实。</li>
+      </ul>
+    </section>
+
+    <section id="api">
+      <span class="section-kicker">10 · Service API Needs</span>
+      <h2>service-api 只经内部客户端读取；外部业务路由一律 POST</h2>
+      <div class="callout danger">
+        <strong>禁止直连：</strong>service-api 不读取 data-sync 数据库，不访问交易所、东方财富、
+        新浪或 AKShare；service-web 只访问 service-api。跨服务实际通信方式和机器可读契约由第五批统一设计。
+      </div>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>拟议 POST 路由</th><th>用途</th><th>筛选</th><th>默认权限</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>POST /v1/market-data/dragon-tiger/query</code></td>
+              <td>按证券或全市场查事件及可选席位</td>
+              <td>venue、exchange+symbol、日期、原因族、seatCode/type、side、金额、quality</td>
+              <td><code>market-data:trading-events:read</code></td>
+            </tr>
+            <tr>
+              <td><code>POST /v1/market-data/block-trades/query</code></td>
+              <td>按证券、营业部、折溢价和规模查逐笔</td>
+              <td>venue、symbol、日期、buyer/seller seat、notional、premium range、quality</td>
+              <td><code>market-data:trading-events:read</code></td>
+            </tr>
+            <tr>
+              <td><code>POST /v1/market-data/trading-events/aggregate</code></td>
+              <td>P1 固定版本聚合，不返回未来收益</td>
+              <td>dataset、groupBy、metric 白名单、日期、knownAt、dataVersion</td>
+              <td><code>market-data:analytics:read</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>请求约束</h3>
+      <ul>
+        <li>请求体支持 <code>tradeDateFrom</code>、<code>tradeDateTo</code>、
+          <code>asOf</code>、<code>knownAt</code>、<code>dataVersion</code>、字段投影、
+          server-side 排序白名单、<code>cursor</code> 和 <code>limit</code>。</li>
+        <li>普通用户默认只读 <code>VERIFIED</code>；<code>QUARANTINED</code>、
+          raw URI、来源请求参数只对数据运维权限开放。</li>
+        <li>日期范围、证券数量、席位模糊搜索、字段投影和聚合基数设置配额；
+          超限返回 429，不把无限查询透传给 data-sync。</li>
+        <li>cursor 必须绑定 dataset、全部筛选、排序、knownAt、dataVersion 和最后唯一位置；
+          发布版本改变返回 409 snapshot-expired，不静默翻到新版本。</li>
+        <li>排序至少支持 <code>tradeDate desc + eventId</code>、notional、premium；
+          任意排序字段不得由用户原样拼入 SQL。</li>
+      </ul>
+      <h3>响应与错误</h3>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>类别</th><th>必须返回</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>事件数据</td>
+              <td>canonical 字段、交易所、证券身份、时态、revision；绝不返回禁用字段</td>
+            </tr>
+            <tr>
+              <td>审计元数据</td>
+              <td><code>datasetId</code>、<code>dataVersion</code>、<code>methodologyVersion</code>、
+                <code>qualityStatus</code>、source、<code>visibleAt</code>、<code>observedAt</code></td>
+            </tr>
+            <tr>
+              <td>免责声明</td>
+              <td>席位不等于最终投资者；折溢价参考价口径；非投资建议；来源与再分发限制</td>
+            </tr>
+            <tr>
+              <td>错误</td>
+              <td>400 参数/PIT、401/403 鉴权、404 身份/数据、409 版本或身份冲突、
+                429 限流、503 下游/合同漂移；采用稳定 Problem Details code</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        service-api 需新增独立防腐 client 和严格 schema 校验，复用现有 Bearer 服务身份、
+        超时、请求关联 ID、错误降级和 ETag 模式。内部出站方法由最终跨服务契约决定；
+        本文不把尚未评审的 HTTP/事件选择写成已接受决策。
+      </p>
+    </section>
+
+    <section id="gates">
+      <span class="section-kicker">11 · Gates & Risks</span>
+      <h2>技术硬门禁只阻止不安全发布，不阻止方案和其他数据集推进</h2>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>技术硬门禁</th><th>准入条件</th><th>可验证证据</th><th>验证人</th><th>退出条件/技术兜底</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>G1 来源合规</td>
+              <td>所选官方/聚合来源允许既定抓取、存储和响应范围</td>
+              <td>条款快照、许可矩阵、公开字段清单、API 响应分级</td>
+              <td>数据治理/合规 + 技术负责人</td>
+              <td>许可满足即退出；否则仅内部验证、返回官方链接或切换获准来源，不阻塞模型实现</td>
+            </tr>
+            <tr>
+              <td>G2 事件身份与席位关联</td>
+              <td>龙虎榜稳定保留 TRADE_ID/官方 ID；同股同日多原因不串席位</td>
+              <td>多原因 fixture、双侧榜单关联、重复/重放测试</td>
+              <td>data-sync 负责人 + 数据 QA</td>
+              <td>连续样本关联全通过；未通过则只发布事件头，不开放席位数据集</td>
+            </tr>
+            <tr>
+              <td>G3 大宗逐笔重数</td>
+              <td>无稳定 ID 时仍能确定性保留完全相同多笔</td>
+              <td>Counter 属性测试、DAILY_RANK 重复样本、跨重抓顺序稳定性</td>
+              <td>数据建模负责人</td>
+              <td>重数和幂等均通过；否则只发布官方日汇总并标记功能降级</td>
+            </tr>
+            <tr>
+              <td>G4 分页完整</td>
+              <td>每个日分区抓取行数等于来源 count，页序连续且无截断</td>
+              <td>页元数据、5000 行边界 fixture、故障注入与 checkpoint 测试</td>
+              <td>Adapter 维护者 + SRE</td>
+              <td>完整性测试通过；否则失败关闭分区，不返回部分日</td>
+            </tr>
+            <tr>
+              <td>G5 单位和金额</td>
+              <td>价、股、元、百分点/小数映射与官方样本对账</td>
+              <td>至少三所各 5 日样本、price×quantity≈amount、ratio 公式和容差报告</td>
+              <td>数据 QA</td>
+              <td>量纲与容差冻结；未通过字段置空/隔离，绝不猜单位</td>
+            </tr>
+            <tr>
+              <td>G6 PIT 与未来字段</td>
+              <td>允许清单、visible_at 和 revision 回放无未来信息</td>
+              <td>禁用列静态测试、边界时刻测试、T+修订回放、schema 漂移拒绝测试</td>
+              <td>量化研究负责人 + 安全评审人</td>
+              <td>全部回归通过；否则只允许数据运维查看 raw，不开放业务 API</td>
+            </tr>
+            <tr>
+              <td>G7 三所覆盖与原因方法学</td>
+              <td>板块/交易所差异有版本化原因映射，未知原因不误分类</td>
+              <td>现行规则样本、reason code map、UNKNOWN 回退测试</td>
+              <td>领域负责人</td>
+              <td>每个启用 venue 独立过门；未通过的 venue 保持关闭，不阻塞其他 venue</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>非技术风险与跟进项</h3>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>风险/跟进</th><th>负责人</th><th>时间点</th><th>技术兜底</th><th>是否阻断整案</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>外部数据预算或商业授权未定</td>
+              <td>数据产品负责人</td>
+              <td>P0 Provider 选型前</td>
+              <td>官方低频来源 + 内部用途权限；接口保留 provider-neutral</td>
+              <td>否；仅影响具体来源启用</td>
+            </tr>
+            <tr>
+              <td>优先覆盖板块和历史年限未确认</td>
+              <td>量化产品负责人</td>
+              <td>实施设计评审前</td>
+              <td>默认沪深北 A 股、近 3 年倒序回补，按日可扩展</td>
+              <td>否</td>
+            </tr>
+            <tr>
+              <td>交易所页面格式或访问策略变化</td>
+              <td>数据平台负责人</td>
+              <td>上线前及持续监控</td>
+              <td>schema fingerprint、熔断、冻结最后 verified 版本、候选来源对账</td>
+              <td>否；故障域按 venue 隔离</td>
+            </tr>
+            <tr>
+              <td>席位免责声明和 UI 文案未定</td>
+              <td>service-api / 产品负责人</td>
+              <td>对外 API 评审前</td>
+              <td>默认只开放原始席位名称并附固定免责声明，不提供投资者推断</td>
+              <td>否</td>
+            </tr>
+            <tr>
+              <td>连续观察所需人力/排期未排</td>
+              <td>工程经理</td>
+              <td>R3 准入窗口前</td>
+              <td>自动只读探针与日报；未过的 capability 保持关闭</td>
+              <td>否</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <aside class="callout">
+        Provider 短时不可用、限流、历史深度未知、预算或排期都不是整套方案的技术阻塞。
+        只有继续发布会造成合规风险、记录错配、分页截断、量纲错误或未来函数时，才由对应硬门禁关闭具体数据集/venue。
+      </aside>
+    </section>
+
+    <section id="acceptance">
+      <span class="section-kicker">12 · References, Open Questions & Acceptance</span>
+      <h2>引用、未决事项与可执行验收清单</h2>
+      <h3>权威与项目引用</h3>
+      <div class="table-wrap wide">
+        <table>
+          <thead>
+            <tr><th>来源</th><th>用途</th><th>访问日期</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><a href="https://www.sse.com.cn/lawandrules/sselawsrules2025/trade/universal/c/c_20260424_10816492.shtml">上海证券交易所交易规则（2026 年修订）</a></td>
+              <td>现行交易、大宗和交易公开信息规则基线；2026-07-06 生效</td>
+              <td>2026-07-28</td>
+            </tr>
+            <tr>
+              <td><a href="https://www.sse.com.cn/disclosure/diclosure/public/inquirydata/">上交所交易公开信息查询</a></td>
+              <td>注明自 2017-01-01 统计，且成交数据仅含竞价、不含大宗和盘后固定价</td>
+              <td>2026-07-28</td>
+            </tr>
+            <tr>
+              <td><a href="https://star.sse.com.cn/services/tradingservice/blocktrading/home/">上交所大宗交易专区</a></td>
+              <td>成交价、金额、数量、买卖营业部及官方展示单位</td>
+              <td>2026-07-28</td>
+            </tr>
+            <tr>
+              <td><a href="https://edu.sse.com.cn/service/hotline/qa/c/5717490.shtml">上交所投教：关于大宗交易</a></td>
+              <td>申报门槛、价格范围和申报要素说明</td>
+              <td>2026-07-28</td>
+            </tr>
+            <tr>
+              <td><a href="https://www.szse.cn/lawrules/rule/trade/current/t20260424_620190.html">深圳证券交易所交易规则（2026 年修订）</a></td>
+              <td>深市现行交易规则；2026-07-06 生效</td>
+              <td>2026-07-28</td>
+            </tr>
+            <tr>
+              <td><a href="https://www.szse.cn/disclosure/index/index.html">深交所交易信息披露</a></td>
+              <td>竞价交易公开信息与权益类证券大宗交易栏目</td>
+              <td>2026-07-28</td>
+            </tr>
+            <tr>
+              <td><a href="https://www.szse.cn/www/investor/knowledge/stock/deal/t20230406_599703.html">深交所：主板竞价交易公开信息披露规则</a></td>
+              <td>上榜条件、前五营业部和并列选择规则</td>
+              <td>2026-07-28</td>
+            </tr>
+            <tr>
+              <td><a href="https://www.bse.cn/jygl_list/200028217.html">北京证券交易所交易规则</a></td>
+              <td>北交所交易公开信息和大宗交易规则</td>
+              <td>2026-07-28</td>
+            </tr>
+            <tr>
+              <td><a href="https://www.bse.cn/products/neeq_listed_companies/public_information.html">北交所交易公开/大宗交易信息</a></td>
+              <td>北交所官方查询入口</td>
+              <td>2026-07-28</td>
+            </tr>
+            <tr>
+              <td><a href="https://akshare.akfamily.xyz/data/stock/stock.html">AKShare 股票数据文档</a></td>
+              <td>龙虎榜与大宗交易函数、参数、字段和文档单位；项目版本另以 1.18.78 源码核验</td>
+              <td>2026-07-28</td>
+            </tr>
+            <tr>
+              <td><a href="../0008-akshare-b06-initial-research/index.html">0008 AKShare B06 首轮调研</a>、
+                <a href="../0010-akshare-round2-verification/index.html">0010 第二轮验证</a></td>
+              <td>既有短探针、准入状态和“单次成功不等于生产接入”结论</td>
+              <td>2026-07-28</td>
+            </tr>
+            <tr>
+              <td><a href="../../decisions/0004-market-data-provider-adapters.md">ADR-0004 Provider Adapter</a>、
+                <a href="../../decisions/0013-equity-instrument-identity-lifecycle.md">ADR-0013 证券身份</a></td>
+              <td>供应商隔离、证券双时态身份和来源边界</td>
+              <td>2026-07-28</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>未决事项</h3>
+      <ol>
+        <li>三所官方页面/API 的可自动化接口、完整历史起点、精确发布时间和再分发范围分别是什么？</li>
+        <li>官方数据是否提供稳定逐笔/披露 ID；如何与东财 <code>TRADE_ID</code>、<code>DAILY_RANK</code> 对账？</li>
+        <li>同股同日多原因时，三所原因代码、板块规则和评价窗口如何版本化映射？</li>
+        <li>大宗完全相同多笔在连续重抓中的来源顺序是否稳定；官方日汇总能否验证重数？</li>
+        <li>席位代码在交易所与东方财富之间是否同构；代码缺失时名称变更如何保留历史？</li>
+        <li>北交所与 2026 年规则切换前后的历史原因语义是否需要独立 methodology version？</li>
+        <li>第五批统一契约最终采用内部 HTTP、事件或组合；本域只提交查询和发布需求。</li>
+      </ol>
+      <h3>验收清单</h3>
+      <ul class="checklist">
+        <li>三个 dataset 的字段、粒度、单位、空值和唯一性冻结。</li>
+        <li>沪深北每个启用 venue 连续 5 个交易日只读探针完成。</li>
+        <li>官方与候选来源完成同日原因、席位、逐笔和金额对账。</li>
+        <li>分页 5000 边界、网络中断、空集和恢复测试通过。</li>
+        <li>龙虎榜 TRADE_ID 与多原因席位关联 fixture 通过。</li>
+        <li>大宗相同行重数、幂等和 revision 属性测试通过。</li>
+        <li>未来字段静态 denylist 与新增列默认拒绝测试通过。</li>
+        <li>visible_at 前后、knownAt 修订和历史回补 PIT 测试通过。</li>
+        <li>source、dataVersion、methodology、quality、免责声明进入响应。</li>
+        <li>service-api 仅 POST；跨服务和 Provider 无数据库/来源直连。</li>
+        <li>HTML 在 1280×720、1440×900 与 A4 横向打印可读。</li>
+        <li>所有本地链接、锚点、引用和访问日期通过检查。</li>
+      </ul>
+      <aside class="callout warning">
+        <strong>本轮未执行：</strong>未创建 Adapter、任务、表、迁移、配置、依赖、OpenAPI 或测试代码；
+        未运行实现测试。连续交易日稳定性、外部条款确认、容量压测和端到端契约测试均是计划执行项，
+        不得把本次源码核验与单日探针描述为生产准入完成。
+      </aside>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      0025 · 龙虎榜与大宗交易数据技术方案 · Proposed · 仅用于评审，不代表架构决策已接受或生产能力已上线。
+    </div>
+  </footer>
+</body>
+</html>

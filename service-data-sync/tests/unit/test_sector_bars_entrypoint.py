@@ -68,6 +68,10 @@ def test_cli_requires_bounded_window_and_closes_composition_root(monkeypatch, ca
         sector_bars, "SqlAlchemySectorMarketDataRepository", lambda _database: object()
     )
     monkeypatch.setattr(sector_bars, "S3RawPayloadStore", lambda _storage: object())
+    # 入口组合测试不触及对象存储；留证语义由原始载荷存储的专用单元测试覆盖。
+    monkeypatch.setattr(
+        sector_bars, "retain_failure_evidence", lambda _store, operation: operation()
+    )
     monkeypatch.setattr(sector_bars, "SectorBarSyncService", FakeSyncService)
 
     assert (

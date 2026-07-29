@@ -14,7 +14,11 @@ from service_data_sync.bootstrap.container import build_container
 from service_data_sync.bootstrap.logging import configure_logging
 from service_data_sync.bootstrap.settings import load_settings
 from service_data_sync.domain.equity import EquityBarPeriod, EquityIdentifier
-from service_data_sync.infrastructure.object_storage.raw_payload_store import S3RawPayloadStore
+from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    FailureEvidenceDataSource,
+    S3RawPayloadStore,
+    retain_failure_evidence,
+)
 from service_data_sync.infrastructure.persistence.equity_market_data_repository import (
     SqlAlchemyEquityMarketDataRepository,
 )
@@ -50,20 +54,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         repository = SqlAlchemyEquityMarketDataRepository(container.database)
         raw_payload_store = S3RawPayloadStore(container.object_storage)
         if period is EquityBarPeriod.DAY_1:
-            result = asyncio.run(
-                EquityDailyBarSyncService(
-                    source=sources[0],
-                    repository=repository,
-                    raw_payload_store=raw_payload_store,
-                ).sync(identifier=identifier, start=start, end=end)
+            result = retain_failure_evidence(
+                raw_payload_store,
+                # 同一执行边界仅在同步异常时将暂存来源字节固化为排障证据。
+                lambda: asyncio.run(
+                    EquityDailyBarSyncService(
+                        source=FailureEvidenceDataSource(sources[0], raw_payload_store),
+                        repository=repository,
+                        raw_payload_store=raw_payload_store,
+                    ).sync(identifier=identifier, start=start, end=end)
+                ),
             )
         else:
-            result = asyncio.run(
-                EquityPeriodBarSyncService(
-                    source=sources[0],
-                    repository=repository,
-                    raw_payload_store=raw_payload_store,
-                ).sync(identifier=identifier, period=period, start=start, end=end)
+            result = retain_failure_evidence(
+                raw_payload_store,
+                # 同一执行边界仅在同步异常时将暂存来源字节固化为排障证据。
+                lambda: asyncio.run(
+                    EquityPeriodBarSyncService(
+                        source=FailureEvidenceDataSource(sources[0], raw_payload_store),
+                        repository=repository,
+                        raw_payload_store=raw_payload_store,
+                    ).sync(identifier=identifier, period=period, start=start, end=end)
+                ),
             )
     finally:
         container.close()
@@ -72,9 +84,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             {
                 "instrument": result.instrument.qualified_symbol,
                 "period": period.value,
-                "data_version": str(result.data_version),
+                "data_version": None if result.data_version is None else str(result.data_version),
                 "inserted_count": result.inserted_count,
                 "unchanged_count": result.unchanged_count,
+                "availability": result.availability,
             },
             separators=(",", ":"),
         )

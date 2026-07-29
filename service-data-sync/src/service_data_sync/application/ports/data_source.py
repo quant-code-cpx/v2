@@ -43,7 +43,7 @@ class SourceRequest:
 
 @dataclass(frozen=True, slots=True)
 class ProviderBatch:
-    """同时承载标准化载荷与不可变原始证据的数据源无关批次。"""
+    """承载标准化与仅失败留存来源载荷的数据源无关批次。"""
 
     provider_id: str
     capability: str
@@ -88,7 +88,10 @@ class ProviderBatch:
 class DataSourcePort(Protocol):
     """应用层访问外部数据源时唯一允许使用的抽象。"""
 
-    provider_id: str
+    @property
+    def provider_id(self) -> str:
+        """返回只读来源身份，包装器不得改变已获准 adapter 的归属。"""
+        ...
 
     def capabilities(self) -> frozenset[str]:
         """不发起网络请求，返回数据源声明的能力集合。"""

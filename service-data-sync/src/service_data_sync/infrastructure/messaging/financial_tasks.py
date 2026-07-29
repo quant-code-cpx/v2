@@ -14,7 +14,11 @@ from service_data_sync.bootstrap.settings import Settings
 from service_data_sync.domain.equity import Exchange
 from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.object_storage.client import ObjectStorageClient
-from service_data_sync.infrastructure.object_storage.raw_payload_store import S3RawPayloadStore
+from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    FailureEvidenceDataSource,
+    S3RawPayloadStore,
+    retain_failure_evidence,
+)
 from service_data_sync.infrastructure.persistence.financial_sync_repository import (
     SqlAlchemyFinancialSyncRepository,
 )
@@ -75,12 +79,17 @@ def register_financial_tasks(app: Celery, *, settings: Settings) -> None:
         database = DatabaseClient.from_settings(settings)
         object_storage = ObjectStorageClient.from_settings(settings)
         try:
-            result = asyncio.run(
-                FinancialSyncService(
-                    source=providers[0],
-                    repository=SqlAlchemyFinancialSyncRepository(database),
-                    raw_payload_store=S3RawPayloadStore(object_storage),
-                ).sync_security(exchange=Exchange(exchange), symbol=symbol)
+            raw_payload_store = S3RawPayloadStore(object_storage)
+            result = retain_failure_evidence(
+                raw_payload_store,
+                # 任务失败时才把来源响应写入 S3，成功时释放暂存字节。
+                lambda: asyncio.run(
+                    FinancialSyncService(
+                        source=FailureEvidenceDataSource(providers[0], raw_payload_store),
+                        repository=SqlAlchemyFinancialSyncRepository(database),
+                        raw_payload_store=raw_payload_store,
+                    ).sync_security(exchange=Exchange(exchange), symbol=symbol)
+                ),
             )
         finally:
             object_storage.close()

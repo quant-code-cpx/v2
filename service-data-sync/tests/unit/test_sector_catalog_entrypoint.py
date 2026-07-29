@@ -59,6 +59,10 @@ def test_cli_syncs_one_explicit_scheme_and_closes_composition_root(monkeypatch, 
         sector_catalog, "SqlAlchemySectorMarketDataRepository", lambda _database: object()
     )
     monkeypatch.setattr(sector_catalog, "S3RawPayloadStore", lambda _storage: object())
+    # 入口组合测试不触及对象存储；留证语义由原始载荷存储的专用单元测试覆盖。
+    monkeypatch.setattr(
+        sector_catalog, "retain_failure_evidence", lambda _store, operation: operation()
+    )
     monkeypatch.setattr(sector_catalog, "SectorCatalogSyncService", FakeSyncService)
 
     assert sector_catalog.main(["--scheme", "eastmoney.industry"]) == 0

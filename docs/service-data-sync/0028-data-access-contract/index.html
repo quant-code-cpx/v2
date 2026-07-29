@@ -1,0 +1,780 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="quant-v2 高价值市场数据由 service-data-sync 向 service-api 提供的 POST-only 内部查询契约、时点、质量、安全与恢复方案。">
+  <title>0028｜高价值市场数据访问契约（Proposed）</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink:#172033; --muted:#667085; --line:#dce3ec; --surface:#f6f8fb;
+      --accent:#3157d5; --accent-soft:#eef2ff; --ok:#176b4d; --ok-soft:#eaf7f1;
+      --warn:#8a4b08; --warn-soft:#fff5df; --bad:#a1392f; --bad-soft:#fff0ee;
+      --radius:13px; --shadow:0 10px 28px rgb(23 32 51 / 7%);
+    }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body {
+      margin:0; min-width:1200px; color:var(--ink); background:#fff;
+      font:15px/1.68 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
+        "Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    }
+    a { color:var(--accent); text-underline-offset:.2em; }
+    a:focus-visible { outline:3px solid rgb(49 87 213 / 28%); outline-offset:3px; }
+    code {
+      padding:.08em .32em; border-radius:4px; background:#eef1f6; color:#293d78;
+      font:.89em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      overflow-wrap:anywhere;
+    }
+    .shell { width:1120px; margin:0 auto; }
+    header {
+      padding:46px 0 32px; border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg,var(--surface),#fff);
+    }
+    .eyebrow,.label {
+      color:var(--accent); font-size:.76rem; font-weight:800;
+      letter-spacing:.1em; text-transform:uppercase;
+    }
+    h1,h2,h3,h4 { line-height:1.28; letter-spacing:-.02em; }
+    h1 { max-width:960px; margin:8px 0 12px; font-size:3rem; }
+    h2 { margin:0 0 18px; font-size:1.92rem; }
+    h3 { margin:24px 0 8px; font-size:1.12rem; }
+    h4 { margin:18px 0 6px; font-size:.98rem; }
+    p { max-width:92ch; }
+    .lede { max-width:940px; color:var(--muted); font-size:1.08rem; }
+    .meta,.grid { display:grid; gap:13px; }
+    .meta { grid-template-columns:repeat(5,minmax(0,1fr)); margin-top:24px; }
+    .grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+    .grid.two { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .meta div,.card {
+      min-width:0; padding:16px; border:1px solid var(--line); border-radius:var(--radius);
+      background:#fff;
+    }
+    .meta div { padding:11px 13px; }
+    .meta dt { color:var(--muted); font-size:.76rem; }
+    .meta dd { margin:3px 0 0; font-weight:730; }
+    .status { color:var(--warn); }
+    .card { box-shadow:var(--shadow); }
+    .card h3 { margin-top:0; }
+    nav {
+      position:sticky; top:0; z-index:10; overflow-x:auto;
+      border-bottom:1px solid var(--line); background:rgb(255 255 255 / 95%);
+      backdrop-filter:blur(10px);
+    }
+    nav ul {
+      display:flex; gap:17px; width:max-content; margin:0; padding:11px 0;
+      list-style:none;
+    }
+    nav a { color:var(--muted); font-size:.8rem; font-weight:750; text-decoration:none; }
+    main { padding:16px 0 66px; }
+    section { padding:42px 0; border-bottom:1px solid var(--line); scroll-margin-top:52px; }
+    .callout {
+      margin:17px 0; padding:16px 19px; border-left:4px solid var(--accent);
+      border-radius:0 var(--radius) var(--radius) 0; background:var(--accent-soft);
+    }
+    .callout.ok { border-left-color:var(--ok); background:var(--ok-soft); }
+    .callout.warn { border-left-color:var(--warn); background:var(--warn-soft); }
+    .callout.bad { border-left-color:var(--bad); background:var(--bad-soft); }
+    .callout strong { display:block; margin-bottom:4px; }
+    .table-wrap {
+      max-width:100%; margin:13px 0 19px; overflow-x:auto;
+      border:1px solid var(--line); border-radius:var(--radius);
+    }
+    table { width:100%; min-width:920px; border-collapse:collapse; font-size:.84rem; }
+    table.wide { min-width:1320px; }
+    th,td {
+      padding:10px 11px; border-bottom:1px solid var(--line);
+      text-align:left; vertical-align:top;
+    }
+    th { background:var(--surface); font-size:.78rem; white-space:nowrap; }
+    tr:last-child td { border-bottom:0; }
+    pre {
+      overflow-x:auto; padding:18px; border:1px solid #263247; border-radius:var(--radius);
+      color:#e5e7eb; background:#111827;
+      font:.82rem/1.62 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    }
+    pre code { padding:0; color:inherit; background:transparent; }
+    .tag {
+      display:inline-block; margin-right:5px; padding:2px 7px; border-radius:99px;
+      font-size:.71rem; font-weight:800; white-space:nowrap;
+    }
+    .fact { color:#245e8d; background:#e9f2fa; }
+    .decision { color:var(--ok); background:var(--ok-soft); }
+    .assumption { color:var(--warn); background:var(--warn-soft); }
+    .open { color:var(--bad); background:var(--bad-soft); }
+    .small,.muted { color:var(--muted); font-size:.88rem; }
+    .checklist { padding-left:1.15rem; list-style:"✓  "; }
+    ul,ol { padding-left:1.25rem; }
+    li + li { margin-top:5px; }
+    footer { padding:26px 0 42px; color:var(--muted); font-size:.82rem; }
+    @media print {
+      @page { size:A4 landscape; margin:10mm; }
+      body { min-width:0; font-size:9pt; }
+      nav { display:none; }
+      header,main,section { padding-top:14px; }
+      .shell { width:100%; }
+      .card { box-shadow:none; break-inside:avoid; }
+      .table-wrap { overflow:visible; }
+      table,table.wide { min-width:0; font-size:6.8pt; }
+      th,td { padding:4px 5px; }
+      pre { white-space:pre-wrap; color:#111; background:#fff; }
+      a { color:inherit; text-decoration:none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Technical solution · service-data-sync · 0028</p>
+      <h1>高价值市场数据访问契约</h1>
+      <p class="lede">
+        由 <code>service-data-sync</code> 统一发布八类 canonical dataset，并通过两个版本化、
+        POST-only 内部 HTTP 端点供 <code>service-api</code> 发现与查询。方案固定
+        <code>dataVersion</code>、PIT 可见性、质量与来源边界；不共享数据库、不访问 Provider、
+        不引入事件平台或 API 自有完整读模型。
+      </p>
+      <dl class="meta">
+        <div><dt>状态</dt><dd class="status">Proposed</dd></div>
+        <div><dt>优先级</dt><dd>P0 基础契约</dd></div>
+        <div><dt>所有者</dt><dd>service-data-sync</dd></div>
+        <div><dt>最后修改</dt><dd>2026-07-28</dd></div>
+        <div><dt>架构决策</dt><dd><a href="../../decisions/0020-data-sync-market-data-access.md">ADR-0020</a></dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <nav aria-label="页面目录">
+    <div class="shell">
+      <ul>
+        <li><a href="#summary">结论</a></li>
+        <li><a href="#scope">边界</a></li>
+        <li><a href="#choice">通信裁决</a></li>
+        <li><a href="#datasets">数据集映射</a></li>
+        <li><a href="#contract">POST 契约</a></li>
+        <li><a href="#pit">时点与质量</a></li>
+        <li><a href="#security">安全</a></li>
+        <li><a href="#reliability">运行与恢复</a></li>
+        <li><a href="#governance">演进与灰度</a></li>
+        <li><a href="#gates">门禁</a></li>
+        <li><a href="#validation">验收</a></li>
+        <li><a href="#references">引用</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="summary">
+      <h2>1. 结论与评审摘要</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="tag decision">建议</span>
+          <h3>v1 只采用内部 HTTP</h3>
+          <p>新增 dataset catalog 与 query 两个 POST 端点。事实由 data-sync 发布，API 只消费显式合同。</p>
+        </article>
+        <article class="card">
+          <span class="tag decision">关键不变量</span>
+          <h3>一页一个发布版本</h3>
+          <p>dataset schema、<code>dataVersion</code>、方法学、来源集合、质量与排序都绑定游标，禁止混页。</p>
+        </article>
+        <article class="card">
+          <span class="tag decision">不采用</span>
+          <h3>不做事件与完整读模型</h3>
+          <p>当前没有 durable broker、outbox、registry、DLQ、replay 或 inbox；事件需新 ADR。</p>
+        </article>
+      </div>
+
+      <div class="callout ok">
+        <strong>可评审结论</strong>
+        建议批准“合同方向与边界”，但保持全部产物为 Proposed。只有机器合同、认证隔离、PIT golden
+        fixture、过载恢复与无直连门禁全部通过，某个 dataset 才能进入实现与灰度。
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>标记</th><th>内容</th><th>对方案的影响</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="tag fact">事实</span></td>
+              <td>现有数据访问遵循 data-sync owning + 版本化内部 HTTP；API 客户端已有 Bearer、超时和运行时 DTO 校验模式。</td>
+              <td>复用边界与模块模式，不修改既有 GET 合同。</td>
+            </tr>
+            <tr>
+              <td><span class="tag fact">事实</span></td>
+              <td>当前跨服务环境没有可承担事实流的 durable broker、transactional outbox、schema registry、DLQ/replay/inbox。</td>
+              <td>事件不能作为本期生产路径；Celery/Redis 不冒充事件总线。</td>
+            </tr>
+            <tr>
+              <td><span class="tag assumption">拟议初值</span></td>
+              <td>总 deadline 5s、请求 64KiB、响应 2MiB、身份 100、字段 64、最大页 500、日频窗口 366 天。</td>
+              <td>压测后可收紧或按 dataset 分级；不表示已满足生产 SLO。</td>
+            </tr>
+            <tr>
+              <td><span class="tag open">未决</span></td>
+              <td>工作负载身份采用短期 JWT、mTLS 绑定 token 或服务网格身份。</td>
+              <td>不阻断文档评审；进入预发前必须满足安全门禁。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="scope">
+      <h2>2. 范围、所有权与禁止路径</h2>
+      <pre><code>允许：
+service-web ──POST──▶ service-api ──POST /internal/v1/market-data/*──▶ service-data-sync
+                                                       │
+                                                       └──▶ canonical publication/read repository
+
+禁止：
+service-api ──X──▶ data-sync PostgreSQL / object storage
+service-api ──X──▶ AKShare / exchange URL / Provider SDK
+service-web ──X──▶ service-data-sync / database / Provider
+非 Adapter 代码 ──X──▶ Provider SDK / URL / Provider 字段</code></pre>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>责任</th><th>service-data-sync</th><th>service-api</th></tr></thead>
+          <tbody>
+            <tr><td>事实与存储</td><td>canonical、raw lineage、发布、修订、质量、隔离、归档</td><td>不保存权威事实；只可做有界非权威缓存</td></tr>
+            <tr><td>查询语义</td><td>dataset、字段/筛选/排序白名单、PIT、版本选择、游标</td><td>把用户 DTO 映射为受限内部请求，不传任意表达式</td></tr>
+            <tr><td>身份</td><td>校验独立 service identity 与 dataset/字段/PIT scope</td><td>校验用户 JWT/状态/业务权限；绝不转发用户 token</td></tr>
+            <tr><td>错误</td><td>稳定内部 Problem code、无局部页、可重试标志</td><td>脱敏并映射为公开 Problem，不泄漏拓扑与内部字段</td></tr>
+            <tr><td>Provider</td><td>仅 Adapter 可调用，记录真实上游而非只记 AKShare</td><td>无 Provider 依赖、凭据、URL 与字段</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">实施更新：data-sync 已实现运行时目录、受限内部读取路由、publication 选择、ETF/两融/港通/公司业绩/交易公开信息/衍生品 typed reader 与测试。service-api 已实现个人认证部署的最小 <code>MarketDataAccessClient</code> 与 <code>POST /api/v1/market-data/query</code>；领域化 DTO、细粒度权限、缓存与再分发策略仍按后续门禁推进。</p>
+    </section>
+
+    <section id="choice">
+      <h2>3. 通信方式裁决</h2>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>候选</th><th>优势</th><th>主要代价/风险</th><th>契合现状</th><th>裁决</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>内部 POST HTTP 查询</td>
+              <td>按需筛选；可固定版本；合同与客户端可独立测试；无需复制事实</td>
+              <td>多一次网络跳转；需要分页、限流、熔断和 data-sync 查询容量</td>
+              <td>已有内部 HTTP、Bearer、DTO 校验和 Problem 映射模式</td>
+              <td><span class="tag decision">v1 采用</span></td>
+            </tr>
+            <tr>
+              <td>完整事实事件 + API 读模型</td>
+              <td>读性能高；消费者运行时解耦；可推送</td>
+              <td>顺序、修订、撤回、重放、双存储、灾备复杂；PIT 投影很难证明</td>
+              <td>缺 broker/outbox/registry/DLQ/inbox/read model</td>
+              <td><span class="tag open">不采用</span></td>
+            </tr>
+            <tr>
+              <td>发布通知事件 + HTTP 拉取</td>
+              <td>减少轮询；事实仍由 data-sync 查询</td>
+              <td>仍需完整可靠事件基础设施，收益要由多个消费者或低延迟需求证明</td>
+              <td>可作为平滑演进方向</td>
+              <td><span class="tag assumption">另 ADR</span></td>
+            </tr>
+            <tr>
+              <td>共享 DB / 只读账号</td>
+              <td>少一次网络跳转；SQL 灵活</td>
+              <td>绕过 publication/质量；schema、权限、迁移、恢复强耦合</td>
+              <td>违反仓库边界和 ADR-0002</td>
+              <td><span class="tag open">永久排除</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>3.1 service-api 的实际消费路径</h3>
+      <ol>
+        <li>公开领域 Controller 完成用户认证、权限、参数与成本校验。</li>
+        <li>领域 Service 把公开 DTO 映射为 dataset code、canonical UUID、业务时间、PIT 和字段白名单。</li>
+        <li><code>DataSyncModule</code> 中的 <code>MarketDataAccessClient</code> 调用内部 POST；用户 JWT 不出站。</li>
+        <li>客户端严格校验响应，拒绝未知 record type、质量未知、版本变化、超限或 schema drift。</li>
+        <li>领域 Service 只投影公开字段、来源摘要、版本、质量、可见时间与免责声明。</li>
+      </ol>
+      <p>API 影响详见 <a href="../../service-api/0005-market-data-access-impact/index.html">0005 市场数据访问影响方案</a>。</p>
+    </section>
+
+    <section id="datasets">
+      <h2>4. 八域 dataset 与查询形状</h2>
+      <p>下面代码遵循 <a href="../0027-canonical-data-model/index.html">0027</a> 的
+        <code>canonical_dataset(code, schema_version)</code> 分离模型：稳定 code 不嵌版本后缀，
+        schema major 单独传递。各专题的输入载荷 schema 可独立版本化，但 canonical dataset code
+        必须由 catalog 单一登记，客户端不得猜测别名或静默混算。</p>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>域</th><th>canonical dataset</th><th>身份与时间</th><th>关键筛选/排序</th><th>PIT 与隔离重点</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>指数</td>
+              <td><code>index.catalog</code>、<code>index.constituent.membership.reported</code>、<code>index.constituent.snapshot.observed</code>、<code>index.weight.close.reported</code></td>
+              <td>index UUID / constituent UUID；effective、observation、weight date</td>
+              <td>管理员、指数、成分、生效区间；有效日 + 成分稳定序</td>
+              <td>正式生效不等于当前观察；收盘权重不等于目标权重</td>
+            </tr>
+            <tr>
+              <td>ETF</td>
+              <td><code>fund.etf.profile</code>、<code>fund.etf.bar.1d.reported</code>、<code>fund.etf.nav.1d.reported</code>、<code>fund.etf.share.1d.reported</code>、<code>fund.etf.market_state</code>、<code>fund.etf.premium_discount.close.derived</code></td>
+              <td>fund / share-class UUID；trade date、NAV date、effective</td>
+              <td>交易所、代码、状态、日期；日期 + 身份</td>
+              <td>价格/NAV/IOPV 分离；折溢价显式方法学；拆分/分红不静默复权</td>
+            </tr>
+            <tr>
+              <td>融资融券</td>
+              <td><code>market.margin.market.1d.reported</code>、<code>market.margin.instrument.1d.reported</code>、<code>market.margin.eligibility</code>、<code>market.margin.system_risk.1d.reported</code></td>
+              <td>venue / equity UUID；trade date、effective</td>
+              <td>MARKET 与 SECURITY scope 分开；交易日 + venue + security</td>
+              <td>官方汇总不从证券明细求和；直报偿还不与差分值混用</td>
+            </tr>
+            <tr>
+              <td>沪深港通</td>
+              <td><code>market.stock_connect.market_stat.reported</code>、<code>market.stock_connect.active_security.snapshot</code>、<code>market.stock_connect.holding.snapshot</code></td>
+              <td>channel / A-H security UUID；trade、position、effective date</td>
+              <td>方向、通道、场所、披露制度；日期 + 通道 + 证券</td>
+              <td>流量与存量分离；2024 披露制度断点；null 不当作 0</td>
+            </tr>
+            <tr>
+              <td>主营构成</td>
+              <td><code>equity.business_composition.reported</code></td>
+              <td>equity UUID；report period、announcement、public usable</td>
+              <td>合并口径、行业/产品/地区、修订；报告期 + 维度 + 行序</td>
+              <td>公告前不可见；reported 不与 CAS 35 分部或 derived 混用</td>
+            </tr>
+            <tr>
+              <td>公司事件</td>
+              <td><code>disclosure.document</code> 与具体 <code>equity.corporate_event.&lt;family&gt;.reported</code></td>
+              <td>equity / document / event UUID；event、announcement、effective</td>
+              <td>事件类型、状态、修订；公告时间 + eventRef</td>
+              <td>更正/撤回保留版本；后续收益与事后结果字段完全排除</td>
+            </tr>
+            <tr>
+              <td>交易事件</td>
+              <td><code>equity.dragon_tiger.event.reported</code>、<code>equity.dragon_tiger.seat.reported</code>、<code>equity.block_trade.execution.reported</code></td>
+              <td>equity / event UUID；trade date、public usable</td>
+              <td>原因、席位角色、逐笔；交易日 + eventRef + item sequence</td>
+              <td>多次上榜/逐笔不误去重；席位不等于投资者；无未来表现</td>
+            </tr>
+            <tr>
+              <td>衍生品</td>
+              <td><code>derivative.contract</code>、<code>derivative.bar.1d.reported</code>、<code>derivative.option_risk.1d.reported</code>、<code>derivative.continuous.1d.derived</code>；option chain 仅为查询投影</td>
+              <td>product / real contract UUID；trade、expiry、effective</td>
+              <td>场所、品种、合约、期权权利；日期 + 合约</td>
+              <td>真实合约与连续序列隔离；close/settlement/delivery settlement 分离</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout warn">
+        <strong>Catalog 是运行时白名单，不是自由查询入口</strong>
+        dataset descriptor 明确字段类型、单位、空值、可筛选运算符、稳定排序、时间维度、最大窗口、PIT
+        覆盖、方法学和所需 scope。请求不接受 SQL、JSONPath、Provider code、表名或任意字段。
+      </div>
+    </section>
+
+    <section id="contract">
+      <h2>5. 拟议内部 POST 契约</h2>
+      <p>
+        机器可读定义：<a href="../../contracts/data-sync-market-data-v1.yaml">data-sync-market-data-v1.yaml</a>
+        （OpenAPI 3.1.1，<code>info.version: 1.0.0</code>，<code>Proposed</code>，命名按用户指定，
+        因而不沿用既有编号 + <code>.openapi.yaml</code> 文件名）。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>POST endpoint</th><th>用途</th><th>成功</th><th>重要约束</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>/internal/v1/market-data/datasets/search</code></td>
+              <td>按域、优先级、可用状态、PIT 能力发现授权 dataset</td>
+              <td><code>200</code> descriptor page</td>
+              <td>只返回调用身份可发现项；字段/筛选/排序/上限为权威 allowlist</td>
+            </tr>
+            <tr>
+              <td><code>/internal/v1/market-data/query</code></td>
+              <td>从一个不可变 publication 查询 typed canonical records</td>
+              <td><code>200</code> page；<code>knownDataVersion</code> 相同可返回私有语义 <code>204</code></td>
+              <td>一请求一 dataset；无副作用；不使用 If-None-Match，不声明共享 POST 缓存语义</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>5.1 请求 DTO</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>字段</th><th>类型 / 上限</th><th>语义</th><th>拒绝条件</th></tr></thead>
+          <tbody>
+            <tr><td><code>dataset</code></td><td>code + schemaVersion；恰好 1 个</td><td>canonical dataset discriminator</td><td>未知、未发布、版本不支持 → 404/503</td></tr>
+            <tr><td><code>businessScope</code></td><td>MARKET / SECURITY / INDEX / FUND / CHANNEL / REPORT / EVENT / CONTRACT</td><td>防止汇总与明细静默混用</td><td>与 dataset 不匹配 → 422</td></tr>
+            <tr><td><code>identity</code></td><td>canonical UUID 或稳定标识；最多 100</td><td>指数、证券、基金、真实合约等身份</td><td>歧义/冲突/越权 → 400/403/409</td></tr>
+            <tr><td><code>time</code></td><td>明确 dimension + from/to</td><td>交易日、报告期、持仓日、事件日、生效时间等</td><td>倒置、超窗口、dataset 不支持 → 400/422</td></tr>
+            <tr><td><code>visibility</code></td><td>CURRENT / PUBLIC_PIT / OPERATIONAL_REPLAY</td><td>PIT/replay 必须同时给 UTC <code>asOf</code>、<code>knownAt</code></td><td>覆盖不足/权限不足 → 422/403</td></tr>
+            <tr><td><code>selection</code></td><td>dataVersion、knownDataVersion、方法学、PASSED/WARNED</td><td>可固定发布；未固定时选唯一当前合格发布并在响应显式返回</td><td>版本或方法冲突 → 409；质量不可服务 → 422</td></tr>
+            <tr><td><code>filters</code></td><td>最多 20；EQ/IN/GTE/LTE/RANGE</td><td>只能使用 descriptor 白名单和有界 scalar</td><td>任意表达式、Provider 字段、超值数 → 400/422</td></tr>
+            <tr><td><code>fields</code></td><td>1–64</td><td>只投影 dataset typed schema 的业务字段；元数据不可移除</td><td>未知/受限字段 → 403/422</td></tr>
+            <tr><td><code>sort</code></td><td>1–3 stable keys</td><td>descriptor 规定方向与最终唯一 tie-breaker</td><td>不稳定或非白名单排序 → 422</td></tr>
+            <tr><td><code>page</code></td><td>limit 默认 100、最大 500；cursor ≤ 2048B</td><td>opaque HMAC cursor，绑定 caller/request/schema/dataVersion/sort，有界 TTL</td><td>篡改、过期、跨请求复用 → 409</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>5.2 响应 DTO 与 typed record</h3>
+      <div class="grid two">
+        <article class="card">
+          <h3>发布级 <code>meta.release</code></h3>
+          <ul>
+            <li>UUID <code>dataVersion</code>、dataset schema、<code>publishedAt</code>；</li>
+            <li><code>knowledgeCutoff</code>、<code>publicUsableAt</code>、有效区间；</li>
+            <li>真实发布者/源数据集摘要，不含 Provider Adapter；</li>
+            <li>方法学 code/version/kind、质量、完整度、PIT coverage/gap；</li>
+            <li>warnings、disclaimers、page 与下一游标。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>记录级 <code>records[]</code></h3>
+          <ul>
+            <li><code>recordType</code> discriminator + 八域 typed <code>oneOf</code>；</li>
+            <li>canonical entity、业务时间、修订链、来源引用；</li>
+            <li><code>publicUsableAt</code> + EXACT / DATE_ONLY_CONSERVATIVE / OBSERVED_ONLY；</li>
+            <li>每条显式 dataVersion、methodologyVersion、qualityStatus；</li>
+            <li>decimal 统一十进制字符串，单位/scale 由 catalog 固定。</li>
+          </ul>
+        </article>
+      </div>
+
+      <pre><code>{
+  "dataset": {"code": "index.constituent.membership.reported", "schemaVersion": 1},
+  "businessScope": "INDEX",
+  "identity": {"entityRefs": ["0198f0e6-34ef-74cb-83cd-33cc70459201"]},
+  "time": {
+    "dimension": "EFFECTIVE_AT",
+    "from": "2025-06-01T00:00:00+08:00",
+    "to": "2025-06-30T23:59:59+08:00"
+  },
+  "visibility": {
+    "mode": "PUBLIC_PIT",
+    "asOf": "2025-06-30T07:00:00Z",
+    "knownAt": "2025-06-30T07:00:00Z"
+  },
+  "selection": {
+    "methodology": {"code": "official-effective-membership", "version": "1"},
+    "qualityStatuses": ["PASSED"]
+  },
+  "fields": ["constituentEntityRef", "effectiveFrom", "effectiveTo"],
+  "sort": [{"field": "constituentEntityRef", "direction": "ASC"}],
+  "page": {"limit": 200}
+}</code></pre>
+
+      <h3>5.3 稳定 Problem code</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>HTTP</th><th>稳定 code</th><th>语义</th><th>客户端动作</th></tr></thead>
+          <tbody>
+            <tr><td>400</td><td><code>MARKET_DATA_VALIDATION_FAILED</code></td><td>格式、范围、字段语法无效</td><td>不重试；映射公开校验错误</td></tr>
+            <tr><td>401 / 403</td><td><code>..._UNAUTHORIZED</code> / <code>..._FORBIDDEN</code></td><td>内部服务身份或 scope 问题</td><td>不向用户泄漏；对外 503 并告警</td></tr>
+            <tr><td>404</td><td><code>MARKET_DATA_NOT_FOUND</code></td><td>dataset / identity / publication 不存在；合法空集合不是 404</td><td>按公开资源语义映射</td></tr>
+            <tr><td>409</td><td><code>..._CURSOR_MISMATCH</code> / <code>..._DATA_VERSION_CONFLICT</code></td><td>游标、版本、方法学冲突</td><td>不重试；要求重新起页或固定版本</td></tr>
+            <tr><td>413 / 422</td><td><code>..._PAYLOAD_TOO_LARGE</code> / <code>..._PIT_COVERAGE_UNAVAILABLE</code> / <code>..._QUALITY_NOT_SERVABLE</code></td><td>成本边界或语义不可满足</td><td>缩小请求或降为 latest；不得伪造结果</td></tr>
+            <tr><td>429</td><td><code>MARKET_DATA_RATE_LIMITED</code></td><td>服务/dataset 成本预算耗尽</td><td>不自动重试；尊重有界 Retry-After</td></tr>
+            <tr><td>503</td><td><code>..._DEPENDENCY_UNAVAILABLE</code> / <code>..._SCHEMA_DRIFT</code> / <code>..._CONTRACT_VERSION_UNSUPPORTED</code></td><td>发布/依赖/合同不可安全服务</td><td>可熔断；禁止绕过边界</td></tr>
+            <tr><td>504</td><td><code>MARKET_DATA_QUERY_TIMEOUT</code></td><td>截止时间内未完成，无部分页</td><td>在总预算内至多一次重试</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="pit">
+      <h2>6. 时点、修订、质量与未来函数</h2>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>概念</th><th>字段 / 规则</th><th>允许行为</th><th>禁止行为</th></tr></thead>
+          <tbody>
+            <tr><td>业务时间</td><td>tradeDate、reportPeriodEnd、positionDate、eventDate、effectiveAt、expiryDate</td><td>按 dataset descriptor 选择唯一 time dimension</td><td>把公告日当报告期或把持仓日当交易日</td></tr>
+            <tr><td>知识时间</td><td>sourcePublishedAt、observedAt、knowledgeCutoff</td><td>保留原始披露与抓取证据；UTC 输出</td><td>用后采集时间回填成更早公开时间</td></tr>
+            <tr><td>可用时间</td><td>publicUsableAt + availabilityBasis</td><td>精确时刻用 EXACT；日期-only 用保守收市规则；未知只 OBSERVED_ONLY</td><td>把日期 00:00 当全天开盘前已知</td></tr>
+            <tr><td>有效时间</td><td>effectiveFrom/effectiveTo 或 valid range</td><td>与 publicUsableAt 同时约束 PIT</td><td>使用未来生效成分、权重或事件状态</td></tr>
+            <tr><td>修订</td><td>revision number、supersedes、dataVersion</td><td>CURRENT 取当前发布；PIT 取 knownAt 时可见修订</td><td>用最终重述覆盖历史回测快照</td></tr>
+            <tr><td>质量</td><td>PASSED / WARNED；隔离不出服务</td><td>WARNED 需请求与权限同时允许，响应携带 issue code</td><td>unknown、failed、quarantined 被当作空值或 0</td></tr>
+            <tr><td>方法学</td><td>methodology code/version/kind</td><td>reported 与 derived 分离发布</td><td>不同复权、连续合约、折溢价口径静默拼接</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout bad">
+        <strong>明确不进入任何可回测 / 实时响应的字段</strong>
+        公告后收益、未来收益、后续表现标签、事后修订但在当时不可见的值、未来已知成分/权重、事件后才出现的
+        完成状态，以及供应商“资金流”估算冒充交易所事实。若无法证明当时可见性，dataset 只能标记覆盖缺口、
+        latest-only 或关闭，不能填补。
+      </div>
+
+      <h3>6.1 publication 选择伪代码</h3>
+      <pre><code>assert request.dataset in authorized_catalog
+assert request.fields, filters, sort ⊆ dataset_descriptor.allowlist
+assert requested_quality ⊆ {PASSED, WARNED}
+
+publication =
+  explicit dataVersion
+  OR exactly_one_publication(
+       dataset_schema = request.dataset,
+       methodology = requested_or_active_methodology,
+       published_at <= knownAt when PIT,
+       public_usable_at <= knownAt when PIT,
+       effective_range contains asOf when PIT,
+       quality_status is servable
+     )
+
+page = query(publication_id, normalized_filters, stable_sort, cursor_tuple)
+assert every row.publication_id == publication.id
+return full_page_or_problem  // 永不返回部分页</code></pre>
+    </section>
+
+    <section id="security">
+      <h2>7. 服务身份、授权与审计</h2>
+      <div class="callout warn">
+        <strong>现状差距（事实）</strong>
+        当前内部认证是单一静态 bearer，尚不是可轮换的细粒度工作负载身份；游标签名也不能继续复用同一字节。
+        这不是调研阻断，但属于进入预发前的安全硬门禁。
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>层</th><th>拟议控制</th><th>失败行为</th></tr></thead>
+          <tbody>
+            <tr><td>传输与网络</td><td>TLS；仅 service-api workload/网络 allowlist 可达；生产不暴露公网</td><td>握手或来源不可信直接拒绝并告警</td></tr>
+            <tr><td>身份</td><td>专用 service identity，audience=data-sync，scope=<code>market-data:read</code>；不转发用户 JWT</td><td>内部 401；API 对外 503，不泄漏身份细节</td></tr>
+            <tr><td>dataset 权限</td><td>身份 → dataset/domain/PIT/replay/字段/批量成本策略；默认拒绝</td><td>403；不做旧路径回退</td></tr>
+            <tr><td>游标签名</td><td>独立 HMAC keyring：current/previous + keyId + TTL；轮换演练</td><td>篡改/过期/未知 key 返回 409，不降级 offset</td></tr>
+            <tr><td>日志脱敏</td><td>记录 requestId、caller、dataset、范围摘要、dataVersion、耗时、结果码、成本；不记 token、完整标识列表、raw payload</td><td>检测到秘密/PII 即阻断发布并清理日志</td></tr>
+            <tr><td>来源许可</td><td>字段级 redistribution 状态与 scope；响应只给真实发布者摘要</td><td>许可未知时字段不可公开，不以 AKShare 可调通代替授权</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>审计日志只证明“谁在何时以何参数摘要读取了哪个发布版本”，不作为业务事实或幂等存储；读取本身无副作用、可安全重试。</p>
+    </section>
+
+    <section id="reliability">
+      <h2>8. 超时、重试、限流、熔断、缓存与恢复</h2>
+      <h3>8.1 Proposed 起始预算</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>控制</th><th>初始值</th><th>设计理由</th><th>校准/兜底</th></tr></thead>
+          <tbody>
+            <tr><td>总 deadline</td><td>客户端 5s；首尝试最多 2s</td><td>给一次短抖动重试留预算，避免每次 attempt 重新计时</td><td>按 dataset 压测；超时返回 504，无部分页</td></tr>
+            <tr><td>重试</td><td>最多 1 次，50–150ms full jitter</td><td>仅读取且版本稳定；network/timeout/502/503/504</td><td>429、4xx 不重试；总预算耗尽即停止</td></tr>
+            <tr><td>请求/响应</td><td>64KiB / 2MiB</td><td>保护 JSON 解析、网络和内存</td><td>超限 413；缩字段/身份/时间，不做局部结果</td></tr>
+            <tr><td>查询上限</td><td>1 dataset、100 identities、64 fields、3 sort、500 rows</td><td>保持单发布语义和有界成本</td><td>批量/导出另行合同，不扩大交互 API</td></tr>
+            <tr><td>默认日频窗口</td><td>366 天</td><td>覆盖常见一年分析且限制扫描</td><td>catalog 可按域收紧；长回补走离线流程</td></tr>
+            <tr><td>熔断</td><td>按 dataset 成本桶；阈值压测后定</td><td>衍生品/批量 PIT 不拖垮 P0 latest</td><td>高成本桶熔断，低成本桶继续；无陈旧伪数据</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>8.2 限流与成本</h3>
+      <p>
+        采用“caller + dataset + visibility mode + 时间跨度 + 身份数 + 字段数”的加权令牌桶，而不是只看 QPS。
+        PIT、OPERATIONAL_REPLAY、衍生品期权链与大窗口成本更高。data-sync 返回 <code>429</code> 和有界
+        <code>Retry-After</code>；API 不在同一用户请求中自动重试 429，防止放大。
+      </p>
+
+      <h3>8.3 缓存与幂等</h3>
+      <ul>
+        <li>data-sync 查询不产生业务副作用；规范化 body、选定 UUID dataVersion 与版本绑定 cursor 使重试稳定。</li>
+        <li><code>knownDataVersion</code> 命中可返回 204，是私有应用协议；没有 If-None-Match/ETag 共享缓存承诺。</li>
+        <li>API 仅可使用非权威有界私有缓存，key 必须包含权限投影 hash、规范化请求、dataset schema、方法学和 dataVersion。</li>
+        <li>CURRENT 缓存短 TTL 并重查版本；固定 dataVersion/PIT 可延长，但 publication 归档后要安全 miss。</li>
+        <li>Redis 当前只承载安全状态，不能未经独立设计变为权威市场数据缓存；缓存故障必须退回 HTTP 或 503。</li>
+      </ul>
+
+      <h3>8.4 故障与恢复矩阵</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>故障</th><th>检测</th><th>运行行为</th><th>恢复</th><th>数据完整性保证</th></tr></thead>
+          <tbody>
+            <tr><td>无合格 publication</td><td>catalog DEGRADED/DISABLED；query 503</td><td>熔断该 dataset；不返回隔离版本</td><td>质量重跑/重新发布后半开探测</td><td>旧不可变发布不被覆盖</td></tr>
+            <tr><td>查询超时/连接断开</td><td>deadline + requestId 指标</td><td>预算内至多一次重试；之后 504/503</td><td>半开探测；缩窗或页限</td><td>只交付完整页，不拼接两次结果</td></tr>
+            <tr><td>schema drift / 未知枚举</td><td>严格 OpenAPI/Zod/JSON Schema 校验</td><td>fail-closed 503 并告警</td><td>consumer-first 兼容发布或升级 major</td><td>未知质量/时间语义不进入公开 DTO</td></tr>
+            <tr><td>游标 key 轮换</td><td>keyId、验签失败率</td><td>current 签发、current+previous 验证</td><td>TTL 后移除 previous；异常时回滚 keyring</td><td>不复用 bearer、不回退 offset</td></tr>
+            <tr><td>新 POST 未部署</td><td>仅 404/405/501 capability signal</td><td>灰度期可有界回退对应旧 GET</td><td>部署完成后关闭 fallback</td><td>游标不跨协议；其他 4xx/5xx 不回退</td></tr>
+            <tr><td>data-sync 全面不可用</td><td>health + client circuit</td><td>固定版本的合格私有缓存可服务；否则 503</td><td>服务恢复、半开、版本复核</td><td>禁止 DB/Provider 旁路或未知陈旧数据</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="governance">
+      <h2>9. 版本、兼容、事件演进与灰度</h2>
+      <h3>9.1 五个版本轴</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>轴</th><th>载体</th><th>破坏性变化</th></tr></thead>
+          <tbody>
+            <tr><td>HTTP major</td><td><code>/internal/v1</code></td><td>传输/资源/认证语义 breaking → <code>/v2</code></td></tr>
+            <tr><td>合同 SemVer</td><td><code>info.version: 1.0.0</code></td><td>合同发布记录；不覆盖 URI major</td></tr>
+            <tr><td>dataset schema</td><td>dataset code + schemaVersion</td><td>类型、单位、空值、时间、粒度变化 → dataset major</td></tr>
+            <tr><td>publication</td><td>UUID <code>dataVersion</code></td><td>每次不可变发布不同；不是 schema 版本</td></tr>
+            <tr><td>方法学</td><td>methodology code/version</td><td>复权、连续、折溢价、派生算法变化独立升级</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        添加 optional 字段也采用 consumer-first：先让严格消费者接受，再由 provider 发送。字段删除、必填增加、
+        类型/单位/空值/时区/可见性变化、枚举收窄、排序/游标、权限和错误语义变化都需 major。Proposed
+        弃用基线为并行 ≥90 天、≥2 个稳定发布周期且旧版连续 30 天调用量为 0。
+      </p>
+
+      <h3>9.2 事件何时重新评估</h3>
+      <p>以下任一信号只触发新 ADR：生产消费者 ≥3 且持续 30 天；批准的发布可见 P95 &lt;60s 而轮询无法满足；
+        去除无效轮询后探测仍连续 5 个交易日占读取容量 &gt;20%；或 HTTP 优化后连续 5 日违反已批准 SLO。</p>
+      <p>
+        候选只能是 publication notification（dataset、partition、dataVersion、publishedAt）+ HTTP 拉取。
+        新 ADR 必须先补齐 broker、transactional outbox、AsyncAPI/registry、每键顺序、至少一次投递、
+        retention/replay、DLQ、inbox/消费幂等、读模型和灾备测试；本方案不接受 topic 或 schema。
+      </p>
+
+      <h3>9.3 灰度与回滚序列</h3>
+      <ol>
+        <li>冻结 YAML 与八域 fixture；执行 provider/consumer 合同校验。</li>
+        <li>data-sync 只部署 catalog/query，dataset 默认 DISABLED；不注册公开路由。</li>
+        <li>service-api shadow 双读旧 GET 与新 POST，对比 rows、业务时间、来源、质量、dataVersion；不向用户返回新结果。</li>
+        <li>按 dataset allowlist 开启内部读取，再按公开路由 <code>1% → 10% → 50% → 100%</code> 放量。</li>
+        <li>观察错误率、P95、429、熔断、schema drift、PIT 差异和缓存命中；逐域独立推进。</li>
+        <li>回滚 feature route 到旧 client 或 fail-closed 503；保留不可变历史，不删除 publication、不改写 raw。</li>
+      </ol>
+    </section>
+
+    <section id="gates">
+      <h2>10. 技术硬门禁与非技术风险</h2>
+      <h3>10.1 技术硬门禁</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>ID</th><th>准入条件</th><th>可验证证据</th><th>验证人</th><th>退出条件</th><th>技术兜底</th></tr></thead>
+          <tbody>
+            <tr><td>G1 合同</td><td>进入联调前</td><td>OpenAPI 3.1.1 解析/ref/opId/仅 POST；八域 typed oneOf；strict request/Problem 示例</td><td>两服务负责人 + QA</td><td>全部自动检查与合同 fixture 通过</td><td>不启用新 client，旧 GET 继续</td></tr>
+            <tr><td>G2 安全</td><td>进入预发前</td><td>TLS/allowlist、service token 轮换、负向 scope、日志脱敏；独立 cursor keyring 轮换测试</td><td>安全验证人 + 两服务负责人</td><td>无共享密钥/用户 token/日志泄漏</td><td>新接口 fail-closed；撤销身份</td></tr>
+            <tr><td>G3 PIT/质量</td><td>开放某 dataset 的 PIT 前</td><td>asOf/knownAt/publicUsableAt/revision/dataVersion golden SQL/fixture；未来字段黑名单</td><td>数据 QA + 量化验证人</td><td>零未来泄漏、零跨版本混页、覆盖声明准确</td><td>该域只 latest 或 DISABLED</td></tr>
+            <tr><td>G4 运行恢复</td><td>生产放量前</td><td>timeout/retry/429/circuit/2MiB/中途故障/key rotation 注入与恢复证据</td><td>SRE + 两服务负责人</td><td>无部分页/重试风暴；恢复符合基线</td><td>缩窗/限页/关闭高成本桶</td></tr>
+            <tr><td>G5 无直连</td><td>每次发布前</td><td>依赖、部署凭据与网络检查：API 无 data-sync DB/S3/Provider；web 只 API</td><td>架构 + 安全验证人</td><td>零绕过路径</td><td>阻断并撤销凭据</td></tr>
+            <tr><td>G6 再分发</td><td>字段对外开放前</td><td>字段来源、真实上游、单位、口径、授权/公开披露与投影清单</td><td>数据负责人 + 合规验证人</td><td>证据覆盖全部公开字段</td><td>隐藏字段或整域内部-only</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>10.2 非技术风险与跟进（不阻断技术方案）</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>风险/跟进</th><th>负责人</th><th>时间点</th><th>技术兜底</th></tr></thead>
+          <tbody>
+            <tr><td>用户套餐、PIT/bulk/derivatives 权限策略未定</td><td>产品负责人</td><td>实施规划前</td><td>仅低成本 latest；其他 scope 默认拒绝</td></tr>
+            <tr><td>第三方限流、授权、历史窗口仍需外部确认</td><td>数据采购/合规</td><td>dataset 上线前</td><td>官方公开来源优先；限制投影、降频、保留覆盖缺口</td></tr>
+            <tr><td>容量与 SLO 没有生产基线</td><td>SRE</td><td>首个 P0 灰度前</td><td>保守上限 + allowlist；按压测收紧</td></tr>
+            <tr><td>新旧客户端迁移排期未定</td><td>两服务负责人</td><td>实施计划评审</td><td>旧 GET 保持；只在 capability 缺失时有界 fallback</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="validation">
+      <h2>11. 合同、测试计划与验收</h2>
+      <div class="grid two">
+        <article class="card">
+          <h3>文档级检查（本方案应执行）</h3>
+          <ul class="checklist">
+            <li>YAML 可解析、OpenAPI 3.1.1、所有本地 ref 可解；</li>
+            <li>paths 下除扩展字段外只有 POST；operationId 全局唯一；</li>
+            <li>Problem required 字段、错误枚举、响应上限与八域 discriminator 完整；</li>
+            <li>HTML 离线资源、锚点、相对链接、1440×900 / 1280×720 与打印样式；</li>
+            <li>只新增授权文档，不触碰代码、配置、迁移、Docker、现有 OpenAPI。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>实现后计划执行（本次未运行）</h3>
+          <ul>
+            <li>strict request、未知字段、auth/token rotation、scope 与 Problem 无泄漏；</li>
+            <li>cursor 篡改/TTL/key rotation/跨版本，空页、稳定排序、decimal string；</li>
+            <li>八域 fake Provider → canonical publish → internal POST → API DTO E2E；</li>
+            <li>PIT/修订/质量隔离/未来字段 golden fixture；</li>
+            <li>timeout、一次重试、429、熔断、response cap 与恢复；</li>
+            <li>consumer-driven contract、compat diff、缓存权限 key、无 DB/Provider 依赖测试。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3>11.1 验收清单</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>验收项</th><th>成功标准</th><th>证据</th></tr></thead>
+          <tbody>
+            <tr><td>边界</td><td>唯一生产路径为 web → API → data-sync POST；零 DB/Provider 直连</td><td>依赖图、部署凭据与网络策略检查</td></tr>
+            <tr><td>语义</td><td>八域查询均显式 dataset/schema/dataVersion/methodology/source/quality/publicUsableAt</td><td>合同 fixture 与响应 schema</td></tr>
+            <tr><td>PIT</td><td>golden 样本只返回 knownAt 当时公开且有效修订；覆盖不足明确失败</td><td>固定时钟测试与验收 SQL</td></tr>
+            <tr><td>分页</td><td>同游标链 UUID dataVersion 恒定，篡改/过期/跨请求 409</td><td>cursor property/negative tests</td></tr>
+            <tr><td>可靠性</td><td>失败无部分页、总 deadline 有界、无重试风暴、熔断按成本桶隔离</td><td>故障注入与负载报告</td></tr>
+            <tr><td>兼容</td><td>旧 GET 无回归；新 POST 可独立回滚；breaking 被 compatibility diff 拒绝</td><td>双读报告、合同差异报告、回滚演练</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">声明：本文只列实现测试计划，不声称任何尚不存在的接口、重试、熔断、身份轮换或 E2E 已运行。</p>
+    </section>
+
+    <section id="references">
+      <h2>12. 假设、未决事项与引用</h2>
+      <h3>12.1 显式假设</h3>
+      <ul>
+        <li><span class="tag assumption">A1</span> API 消费是交互式有界查询，首期不需要批量导出或秒级推送。</li>
+        <li><span class="tag assumption">A2</span> 0027 的 UUID publication、dataset catalog 和质量发布模型先于本合同实现。</li>
+        <li><span class="tag assumption">A3</span> 每个公开字段都能映射到 typed domain value；不能映射的字段不进入 v1。</li>
+        <li><span class="tag assumption">A4</span> Proposed 上限与 90 天弃用基线可由压测和实施评审调整，但不得弱化不变量。</li>
+      </ul>
+      <h3>12.2 未决事项</h3>
+      <ul>
+        <li>短期 JWT、mTLS 绑定 token 或服务网格身份的最终选择；</li>
+        <li>各 dataset 的 P95/SLO、成本权重、cursor TTL 和私有缓存 TTL；</li>
+        <li>具体公司事件子 dataset 与衍生品辅助 dataset 的最终 code；</li>
+        <li>授权受限字段的用户 entitlement 与免责声明文本。</li>
+      </ul>
+      <h3>12.3 仓库依据</h3>
+      <ul>
+        <li><a href="../0027-canonical-data-model/index.html">0027 高价值市场数据 Canonical Model 与 PostgreSQL 设计</a></li>
+        <li><a href="../0019-index-constituents/index.html">0019 指数成分</a>；
+          <a href="../0020-etf-market-data/index.html">0020 ETF</a>；
+          <a href="../0021-margin-trading/index.html">0021 融资融券</a>；
+          <a href="../0022-stock-connect/index.html">0022 沪深港通</a></li>
+        <li><a href="../0023-business-composition/index.html">0023 主营构成</a>；
+          <a href="../0024-corporate-events/index.html">0024 公司事件</a>；
+          <a href="../0025-trading-events/index.html">0025 交易事件</a>；
+          <a href="../0026-derivatives/index.html">0026 衍生品</a></li>
+        <li><a href="../../decisions/0002-data-sync-ownership-and-access.md">ADR-0002 数据归属与跨服务访问</a>；
+          <a href="../../decisions/0018-service-api-post-only-http-method.md">ADR-0018 service-api POST-only</a>；
+          <a href="../../decisions/0020-data-sync-market-data-access.md">ADR-0020 本次通信裁决（Proposed）</a></li>
+        <li><a href="../../contracts/data-sync-market-data-v1.yaml">拟议机器合同</a>；
+          <a href="../../service-api/0005-market-data-access-impact/index.html">service-api 影响方案</a></li>
+      </ul>
+      <p class="small">资料访问/仓库审计日期：2026-07-28。数据源事实与历史覆盖引用由 0019–0026 各专题维护，本合同不把一次 AKShare 调通提升为生产可用结论。</p>
+    </section>
+    <section id="empty-results">
+      <h2>空观测与消费者连续性（实施决策）</h2>
+      <div class="callout ok">
+        <strong>空数据不是故障</strong>
+        依 ADR-0022，已注册 capability 的首个同步可以没有事实：data-sync 记录 <code>EMPTY</code>
+        或 <code>SOURCE_UNAVAILABLE</code> observation，读取仍返回 <code>200</code> 与空记录集。
+        事实表不写全空行，业务主键、金额、日期和单位约束保持不变。
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>状态</th><th>持久化</th><th>读取结果</th><th>失败留证</th></tr></thead>
+          <tbody>
+            <tr><td><code>AVAILABLE</code></td><td>canonical revision + publication</td><td>200，带 dataVersion 与事实记录</td><td>无</td></tr>
+            <tr><td><code>EMPTY</code></td><td>空 observation / 空 publication；不造事实行</td><td>200，空 records/items</td><td>无</td></tr>
+            <tr><td><code>SOURCE_UNAVAILABLE</code></td><td>诊断 observation；保留已有可用 publication</td><td>无历史时 200 空记录；有历史时返回历史数据及状态</td><td>无来源字节时无</td></tr>
+            <tr><td><code>FAILED</code></td><td>不推进 publication</td><td>真实服务故障才映射为 503</td><td>按 ADR-0021</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>该语义先由个股日线端到端验收，再复制到其余 capability；AKShare 字段覆盖不再是数据库、内部读取或 API 开发的前置门禁。</p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">quant-v2 · service-data-sync proposal 0028 · Proposed · PC desktop only</div>
+  </footer>
+</body>
+</html>

@@ -23,7 +23,11 @@ from service_data_sync.bootstrap.settings import Settings
 from service_data_sync.domain.equity import EquityBarPeriod, EquityIdentifier
 from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.object_storage.client import ObjectStorageClient
-from service_data_sync.infrastructure.object_storage.raw_payload_store import S3RawPayloadStore
+from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    FailureEvidenceDataSource,
+    S3RawPayloadStore,
+    retain_failure_evidence,
+)
 from service_data_sync.infrastructure.persistence.equity_market_data_repository import (
     SqlAlchemyEquityMarketDataRepository,
 )
@@ -177,25 +181,33 @@ def _sync_bar_once(
         repository = SqlAlchemyEquityMarketDataRepository(database)
         raw_store = S3RawPayloadStore(object_storage)
         if selected_period is EquityBarPeriod.DAY_1:
-            result = asyncio.run(
-                EquityDailyBarSyncService(
-                    source=providers[0],
-                    repository=repository,
-                    raw_payload_store=raw_store,
-                ).sync(identifier=identifier, start=start_date, end=end_date)
+            result = retain_failure_evidence(
+                raw_store,
+                # 任务失败时才把来源响应写入 S3，成功时释放暂存字节。
+                lambda: asyncio.run(
+                    EquityDailyBarSyncService(
+                        source=FailureEvidenceDataSource(providers[0], raw_store),
+                        repository=repository,
+                        raw_payload_store=raw_store,
+                    ).sync(identifier=identifier, start=start_date, end=end_date)
+                ),
             )
         else:
-            result = asyncio.run(
-                EquityPeriodBarSyncService(
-                    source=providers[0],
-                    repository=repository,
-                    raw_payload_store=raw_store,
-                ).sync(
-                    identifier=identifier,
-                    period=selected_period,
-                    start=start_date,
-                    end=end_date,
-                )
+            result = retain_failure_evidence(
+                raw_store,
+                # 任务失败时才把来源响应写入 S3，成功时释放暂存字节。
+                lambda: asyncio.run(
+                    EquityPeriodBarSyncService(
+                        source=FailureEvidenceDataSource(providers[0], raw_store),
+                        repository=repository,
+                        raw_payload_store=raw_store,
+                    ).sync(
+                        identifier=identifier,
+                        period=selected_period,
+                        start=start_date,
+                        end=end_date,
+                    )
+                ),
             )
     finally:
         object_storage.close()
@@ -204,6 +216,7 @@ def _sync_bar_once(
         "capability": selected_period.capability,
         "inserted": result.inserted_count,
         "unchanged": result.unchanged_count,
+        "availability": result.availability,
     }
 
 
@@ -231,36 +244,48 @@ def _sync_reference_once(
         repository = SqlAlchemyEquityMarketDataRepository(database)
         raw_store = S3RawPayloadStore(object_storage)
         if capability == "equity.adjustment_factor":
-            result = asyncio.run(
-                EquityAdjustmentFactorSyncService(
-                    source=providers[0],
-                    repository=repository,
-                    raw_payload_store=raw_store,
-                ).sync(
-                    identifier=identifier,
-                    start=_required_date(start),
-                    end=_required_date(end),
-                )
+            result = retain_failure_evidence(
+                raw_store,
+                # 任务失败时才把来源响应写入 S3，成功时释放暂存字节。
+                lambda: asyncio.run(
+                    EquityAdjustmentFactorSyncService(
+                        source=FailureEvidenceDataSource(providers[0], raw_store),
+                        repository=repository,
+                        raw_payload_store=raw_store,
+                    ).sync(
+                        identifier=identifier,
+                        start=_required_date(start),
+                        end=_required_date(end),
+                    )
+                ),
             )
         elif capability == "equity.corporate_action":
-            result = asyncio.run(
-                EquityCorporateActionSyncService(
-                    source=providers[0],
-                    repository=repository,
-                    raw_payload_store=raw_store,
-                ).sync(
-                    identifier=identifier,
-                    start=_required_date(start),
-                    end=_required_date(end),
-                )
+            result = retain_failure_evidence(
+                raw_store,
+                # 任务失败时才把来源响应写入 S3，成功时释放暂存字节。
+                lambda: asyncio.run(
+                    EquityCorporateActionSyncService(
+                        source=FailureEvidenceDataSource(providers[0], raw_store),
+                        repository=repository,
+                        raw_payload_store=raw_store,
+                    ).sync(
+                        identifier=identifier,
+                        start=_required_date(start),
+                        end=_required_date(end),
+                    )
+                ),
             )
         else:
-            result = asyncio.run(
-                EquityCompanyProfileSyncService(
-                    source=providers[0],
-                    repository=repository,
-                    raw_payload_store=raw_store,
-                ).sync(identifier=identifier)
+            result = retain_failure_evidence(
+                raw_store,
+                # 任务失败时才把来源响应写入 S3，成功时释放暂存字节。
+                lambda: asyncio.run(
+                    EquityCompanyProfileSyncService(
+                        source=FailureEvidenceDataSource(providers[0], raw_store),
+                        repository=repository,
+                        raw_payload_store=raw_store,
+                    ).sync(identifier=identifier)
+                ),
             )
     finally:
         object_storage.close()

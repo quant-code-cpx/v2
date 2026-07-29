@@ -5,6 +5,7 @@ import { EquityInstrumentClient } from './clients/equity-instrument.client.js';
 import { EquityMarketDataClient } from './clients/equity-market-data.client.js';
 import { FinancialDataClient } from './clients/financial-data.client.js';
 import { MoneyFlowClient } from './clients/money-flow.client.js';
+import { MarketDataAccessClient } from './clients/market-data-access.client.js';
 import { SectorMarketDataClient } from './clients/sector-market-data.client.js';
 import { SwSectorClient } from './clients/sw-sector.client.js';
 
@@ -26,6 +27,11 @@ function createFinancialDataClient(config: AppConfigService): FinancialDataClien
 /** 使用集中配置构造资金流数据 Client。 */
 function createMoneyFlowClient(config: AppConfigService): MoneyFlowClient {
   return new MoneyFlowClient(config);
+}
+
+/** 使用集中配置构造通用市场数据 POST Client。 */
+function createMarketDataAccessClient(config: AppConfigService): MarketDataAccessClient {
+  return new MarketDataAccessClient(config);
 }
 
 /** 使用集中配置构造板块数据 Client，并保留测试显式传入 `fetch` 替身的能力。 */
@@ -67,6 +73,11 @@ function createSwSectorClient(config: AppConfigService): SwSectorClient {
       useFactory: createMoneyFlowClient,
     },
     {
+      provide: MarketDataAccessClient,
+      inject: [AppConfigService],
+      useFactory: createMarketDataAccessClient,
+    },
+    {
       provide: SwSectorClient,
       inject: [AppConfigService],
       useFactory: createSwSectorClient,
@@ -77,6 +88,7 @@ function createSwSectorClient(config: AppConfigService): SwSectorClient {
     EquityMarketDataClient,
     FinancialDataClient,
     MoneyFlowClient,
+    MarketDataAccessClient,
     SectorMarketDataClient,
     SwSectorClient,
   ],

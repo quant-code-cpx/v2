@@ -15,7 +15,11 @@ from service_data_sync.bootstrap.container import build_container
 from service_data_sync.bootstrap.logging import configure_logging
 from service_data_sync.bootstrap.settings import load_settings
 from service_data_sync.domain.sector import SectorScheme
-from service_data_sync.infrastructure.object_storage.raw_payload_store import S3RawPayloadStore
+from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    FailureEvidenceDataSource,
+    S3RawPayloadStore,
+    retain_failure_evidence,
+)
 from service_data_sync.infrastructure.persistence.sector_eod_repository import (
     SqlAlchemySectorEodRepository,
 )
@@ -39,23 +43,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         providers = container.source_registry.for_capability(_CAPABILITY)
         if len(providers) != 1:
             raise SystemExit("exactly one approved sector-eod provider must be enabled")
+        raw_payload_store = S3RawPayloadStore(container.object_storage)
         service = SectorEodSnapshotSyncService(
-            source=providers[0],
+            source=FailureEvidenceDataSource(providers[0], raw_payload_store),
             repository=SqlAlchemySectorEodRepository(container.database),
-            raw_payload_store=S3RawPayloadStore(container.object_storage),
+            raw_payload_store=raw_payload_store,
             trading_calendar=container.trading_calendar,
         )
         operation = service.replay if arguments.replay_raw else service.sync
         execution_mode = (
             SectorEodExecutionMode.PUBLISH if arguments.publish else SectorEodExecutionMode.SHADOW
         )
-        result = asyncio.run(
-            operation(
-                scheme=scheme,
-                trade_date=target_date,
-                source_cutoff_at=sector_eod_source_cutoff_at(target_date),
-                execution_mode=execution_mode,
-            )
+        result = retain_failure_evidence(
+            raw_payload_store,
+            # 同一执行边界仅在同步异常时将暂存来源字节固化为排障证据。
+            lambda: asyncio.run(
+                operation(
+                    scheme=scheme,
+                    trade_date=target_date,
+                    source_cutoff_at=sector_eod_source_cutoff_at(target_date),
+                    execution_mode=execution_mode,
+                )
+            ),
         )
     finally:
         container.close()
