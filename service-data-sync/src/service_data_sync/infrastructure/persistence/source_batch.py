@@ -1,4 +1,9 @@
-"""共享来源观测账本的 ORM-enabled 写入器。"""
+"""共享来源观察账本的 `ORM` 写入器。
+
+每次外部抓取都登记为独立 `SourceBatch`，即使字节摘要相同也不折叠，因为观测时间、
+执行分区和来源版本本身是审计证据。已有运行分区时按序号追加；独立调用则创建最小
+手工运行账本，确保后续标准化和发布始终能追溯到一次明确执行。
+"""
 
 from __future__ import annotations
 
@@ -34,17 +39,22 @@ def record_source_observation(
     run_id: UUID | None = None,
     partition_key: str | None = None,
 ) -> UUID:
-    """登记不可折叠来源观测；既有 run 分区复用，否则创建手工账本。"""
+    """登记不可折叠来源观察；既有运行分区复用，否则创建手工账本。
+
+    `raw_uri` 指向受控证据定位；它不是公开读取接口，也不能由调用方替换为任意对象地址。
+    """
     if observed_at.tzinfo is None or created_at.tzinfo is None:
         raise ValueError("source observation timestamps must include a timezone")
     if (run_id is None) != (partition_key is None):
         raise ValueError("run_id and partition_key must be supplied together")
 
     source_batch_id = uuid4()
+    # 缺省指纹仍绑定能力与适配器版本，避免未显式提供时所有上游表结构共享同一摘要。
     resolved_schema_fingerprint = (
         schema_fingerprint or hashlib.sha256(f"{capability}:{adapter_version}".encode()).hexdigest()
     )
     if run_id is not None and partition_key is not None:
+        # 重试在同一分区增加观察序号，不覆盖前一次响应，便于定位来源随时间变化。
         return _record_in_existing_partition(
             session,
             source_batch_id=source_batch_id,
@@ -154,7 +164,10 @@ def _record_in_existing_partition(
     run_id: UUID,
     partition_key: str,
 ) -> UUID:
-    """在已有 lease 分区中追加来源观测序号，避免重跑覆盖原始证据。"""
+    """在已有租约分区中追加来源观察序号，避免重跑覆盖原始证据。
+
+    序号只在同一运行和分区内递增，不能被误作跨分区的全局来源版本。
+    """
     next_observation_sequence = (
         select(func.coalesce(func.max(SourceBatch.observation_seq) + 1, 1))
         .where(

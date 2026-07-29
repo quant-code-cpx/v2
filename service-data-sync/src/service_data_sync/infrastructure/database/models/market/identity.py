@@ -1,4 +1,8 @@
-"""跨资产根身份、双时间标识、交易场所与新资产扩展模型。"""
+"""跨资产根身份、双时态代码/生命周期、交易场所、日历与基金/衍生品扩展模型。
+
+表间先回答“法律或经济实体是什么、能否在哪个场所交易、何时可交易”，再处理来源代码和版本；
+这使代码复用、跨场所同名、夜盘归属和基金上市关系不会被简化成一个字符串字段。
+"""
 
 from __future__ import annotations
 
@@ -47,7 +51,12 @@ _ENTITY_KINDS = (
 
 
 class TradingVenue(Base):
-    """保存交易所或指数管理人等场所字典，避免业务事实直接复制场所名称。"""
+    """保存交易所、指数管理人等场所字典，避免业务事实直接复制易变名称。
+
+    场所代码是统一身份锚，时区、国家/地区和场所类别决定交易日、货币、披露和监管口径的解释边界。
+    它不代表某个工具一定可交易，也不代表来源网站；具体上市关系由 `MarketInstrument` 等模型表达，
+    名称更新应维护本字典而非批量改写已归档的事实来源原文。
+    """
 
     __tablename__ = "trading_venue"
     __table_args__ = (
@@ -83,7 +92,12 @@ class TradingVenue(Base):
 
 
 class MarketEntity(Base):
-    """提供跨资产不可变引用根；实体存在不代表它可在场所交易。"""
+    """提供跨资产不可变引用根；实体存在不代表它可在场所交易。
+
+    公司、法律基金、指数、衍生品品种和真实合约可共享这一层的永久 `entity_id`，但都需要各自子类
+    说明可交易性与业务规则。这样跨资产关系可稳定引用经济对象，而不把交易代码、交易所或当前名称
+    误作根身份；实体创建也不会自动创建价格、上市状态或消费者可见数据。
+    """
 
     __tablename__ = "market_entity"
     __table_args__ = (
@@ -113,7 +127,12 @@ class MarketEntity(Base):
 
 
 class MarketInstrument(Base):
-    """表达可在明确场所交易的实体子集，禁止把指数或法律基金放入交易工具层。"""
+    """表达可在明确场所交易的实体子集，禁止把指数或法律基金放入交易工具层。
+
+    工具层连接永久实体与交易场所，承担代码版本、日行情、成分和交易状态的外键；它与法律基金、
+    指数方法学或衍生品品种分开，避免把“可交易份额”当作“基金本身”。同一实体可在多个场所形成
+    不同工具，不能以名称或六位代码自动合并。
+    """
 
     __tablename__ = "market_instrument"
     __table_args__ = (
@@ -158,7 +177,12 @@ class MarketInstrument(Base):
 
 
 class InstrumentIdentifierVersion(Base):
-    """保存新资产代码的有效时间和知识时间版本，阻止代码复用产生静默误绑。"""
+    """保存新资产代码的业务有效时间和平台知识时间版本，阻止代码复用静默误绑。
+
+    代码与场所共同组成业务标识；`effective_range` 说明市场上何时可用，`knowledge_range` 说明平台
+    何时得知。双范围排斥约束让同一场所代码在重叠时间内只能指向一个工具，官方更正以追加版本而
+    非覆盖实现；不能拿当前代码或当前 `MarketInstrument` 字段回填历史身份。
+    """
 
     __tablename__ = "instrument_identifier_version"
     __table_args__ = (
@@ -269,7 +293,12 @@ class InstrumentIdentifierVersion(Base):
 
 
 class InstrumentLifecycleVersion(Base):
-    """保存上市、停编、到期和摘牌等新资产生命周期事实版本。"""
+    """保存上市、停编、到期和摘牌等新资产生命周期事实的双时态版本。
+
+    生命周期必须来自明确官方或批准来源；目录/行情缺席、成交量为零或代码无法解析都不是自动退市
+    证据。业务与知识范围分开保留，使迟到公告、临时暂停和官方更正可重放；状态只描述工具可交易性，
+    不能替代法律实体存续、基金申赎或衍生品交割状态。
+    """
 
     __tablename__ = "instrument_lifecycle_version"
     __table_args__ = (
@@ -358,7 +387,12 @@ class InstrumentLifecycleVersion(Base):
 
 
 class MarketEntityRelationVersion(Base):
-    """保存跟踪、underlying、基金份额和产品合约等类型化双时间关系。"""
+    """保存跟踪、`underlying`、基金份额和产品合约等类型化双时态关系。
+
+    关系类型决定两端的解释，例如 `ETF` 跟踪对象、期货标的和基金份额不能用同一名称字段表示；
+    有效/知识范围及排斥约束防止相同关系在同一时点出现相互矛盾版本。不能因相同代码、名称或行业
+    标签擅自建关系，目标无法精确解析时应留在来源观察或隔离流程。
+    """
 
     __tablename__ = "market_entity_relation_version"
     __table_args__ = (
@@ -453,7 +487,12 @@ class MarketEntityRelationVersion(Base):
 
 
 class MarketCalendarDay(Base):
-    """保存版本化交易、结算或披露日历日，未知日历不会被自动推断为开市。"""
+    """保存版本化交易、结算或披露日历日；未知日历不会被自动推断为开市。
+
+    日历由场所、日历类型和业务日期共同定位，可表达开市、休市、半日和临时调整的来源版本；它决定
+    同步任务和行情事实如何归属交易日。缺少被批准日历时服务应停在安全边界，不可用工作日、上次
+    开市日或外部来源返回行数猜测本日状态；新版本也不重写旧日历证据。
+    """
 
     __tablename__ = "market_calendar_day"
     __table_args__ = (
@@ -507,7 +546,12 @@ class MarketCalendarDay(Base):
 
 
 class MarketSessionVersion(Base):
-    """表达夜盘、日盘和临时调整的版本化会话，跨自然日归属由 trade_date 明确指定。"""
+    """表达夜盘、日盘和临时调整的版本化会话，跨自然日归属由 `trade_date` 明确指定。
+
+    会话开始/结束的时区时间不能单独推断业务日期，特别是夜盘跨越自然日时；`trade_date` 由场所
+    规则和版本决定。临时停市、调时和节假日变更以新版本记录，防止历史行情或任务调度按今天的
+    会话规则重新解释过去；会话也不替代 `MarketCalendarDay` 的开闭市事实。
+    """
 
     __tablename__ = "market_session_version"
     __table_args__ = (
@@ -574,7 +618,12 @@ class MarketSessionVersion(Base):
 
 
 class FundLegalEntity(Base):
-    """保存法律基金根实体，交易代码必须归属于份额类别或 ETF 上市工具。"""
+    """保存法律基金根实体；交易代码必须归属于份额类别或 `ETF` 上市工具。
+
+    基金合同、管理人和注册地属于法律实体层，不应与某一可交易代码、份额类别或上市地混为一张表。
+    这使同一基金可有多个份额类别及上市工具，也使产品名称变化不破坏法律身份；行情、`NAV` 和
+    申赎状态必须引用更具体的下层对象，不能直接挂在这里。
+    """
 
     __tablename__ = "fund_legal_entity"
     __table_args__ = (
@@ -609,7 +658,12 @@ class FundLegalEntity(Base):
 
 
 class FundShareClass(Base):
-    """保存法律基金下的份额类别，避免把份额、基金和上市工具合并为同一身份。"""
+    """保存法律基金下的份额类别，避免把份额、基金和上市工具合并为同一身份。
+
+    不同类别可能有不同币种、费用、分红权利或交易安排，即使产品名称相同也不一定可互换；因此它
+    连接法律基金与后续 `ETF` 上市工具，而不直接承担交易代码。任何类别合并、拆分或终止需要来源
+    证据和版本化关系，不能用当前基金名称或行情代码作隐式映射。
+    """
 
     __tablename__ = "fund_share_class"
     __table_args__ = (
@@ -642,7 +696,12 @@ class FundShareClass(Base):
 
 
 class EtfListing(Base):
-    """保存份额类别在单一场所的 ETF 上市工具，不将它等同于法律基金。"""
+    """保存份额类别在单一场所的 `ETF` 上市工具，不将它等同于法律基金。
+
+    `EtfListing` 是可交易层的具体对象，承接报价、日线、资料和交易状态；同一份额类别可在不同场所
+    上市并拥有不同代码、币种或交易时间。基金成立与上市、申购赎回、二级市场交易均是不同语义，
+    后续模型必须引用对应层级，不能把其中任一日期倒灌给其他层。
+    """
 
     __tablename__ = "etf_listing"
     __table_args__ = (
@@ -677,7 +736,12 @@ class EtfListing(Base):
 
 
 class DerivativeProduct(Base):
-    """保存场所内期货或期权品种实体，真实合约另由 derivative_contract 表表达。"""
+    """保存场所内期货或期权品种实体；真实合约另由 `derivative_contract` 表表达。
+
+    品种定义基础资产类别和场所规则范围，不等同于某个月份、行权价或到期日的可交易合约；连续主力
+    代码同样不属于本层。将品种与合约分离后，规格变更、交割规则和真实日行情可准确指向具体合约，
+    不必靠字符串解析或按当前主力合约回写历史。
+    """
 
     __tablename__ = "derivative_product"
     __table_args__ = (
@@ -719,7 +783,12 @@ class DerivativeProduct(Base):
 
 
 class DerivativeContract(Base):
-    """保存一个真实可交易衍生品合约，连续序列必须在独立派生表中表达。"""
+    """保存一个真实可交易衍生品合约；连续序列必须在独立派生表中表达。
+
+    真实合约绑定具体品种、场所和合约标识，后续规格/行情 `revision` 通过它保持永久外键。它不能
+    代表“主力”“近月”或其他会随时间换月的策略序列；这类派生对象必须明确换月规则、输入版本和
+    可用时间，避免将今天的连续定义应用到历史交易日。
+    """
 
     __tablename__ = "derivative_contract"
     __table_args__ = (

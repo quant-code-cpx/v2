@@ -1,4 +1,4 @@
-"""供应商资金流排行位置与 canonical scope 模型。"""
+"""供应商资金流排行位置与已精确解析 `canonical scope` 的绑定模型。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,12 @@ from ..base import Base
 
 
 class MoneyFlowRankingItem(Base):
-    """把 supplier position 绑定到目标日唯一解析的证券或板块身份。"""
+    """把 `supplier position` 绑定到目标日唯一解析的证券或板块身份。
+
+    排名位置来自供应商页面，平台不按金额自行重排；同一快照中证券或板块只能二选一，约束防止两种
+    身份同时或都为空。身份解析必须基于目标交易日，代码复用或板块变更不能用当前投影代替；无法
+    解析时应阻断或隔离快照，而不是把名称相同的对象合并。
+    """
 
     __tablename__ = "money_flow_ranking_item"
     __table_args__ = (

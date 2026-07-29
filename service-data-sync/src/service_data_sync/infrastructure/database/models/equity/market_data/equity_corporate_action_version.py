@@ -1,4 +1,4 @@
-"""个股分红送转事件 revision 模型。"""
+"""个股分红、送转、拆并股等公司行动的可修订事件证据模型。"""
 
 from __future__ import annotations
 
@@ -27,7 +27,12 @@ from ...base import Base
 
 
 class EquityCorporateActionVersion(Base):
-    """保存公司行动的可修订事件状态与关键实施日期。"""
+    """保存公司行动的可修订事件状态、关键实施日期和来源证据。
+
+    同一经济事件会经历预案、实施、取消或更正，不能把后来状态原地覆盖早期观察；事件键和
+    `revision` 使复权、份额对账和历史展示可按当时知识重放。未宣布、未知金额或缺失日期应保持
+    受控空值，不能从行情变动反推分红、送转或除权日期。
+    """
 
     __tablename__ = "equity_corporate_action_version"
     __table_args__ = (

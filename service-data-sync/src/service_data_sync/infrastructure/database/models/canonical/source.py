@@ -1,4 +1,4 @@
-"""真实上游与其数据产品目录模型。"""
+"""真实上游权利主体及其数据产品目录模型。"""
 
 from __future__ import annotations
 
@@ -24,7 +24,12 @@ from ..base import Base
 
 
 class DataSource(Base):
-    """登记真实数据所有者，避免把技术 adapter 误当作来源权利主体。"""
+    """登记真实数据所有者及其权利状态，避免把技术 adapter 误当作来源主体。
+
+    adapter 是本服务如何取得数据的技术实现，而 `DataSource` 表示数据实际来自谁、时区如何
+    解释、能否保存或再分发。来源身份稳定后，变更抓取库或 HTTP 实现不会改写已有事实的权利
+    归属；无法证明的权利信息必须保留证据引用，而不能默认允许消费。
+    """
 
     __tablename__ = "data_source"
     __table_args__ = (
@@ -59,7 +64,12 @@ class DataSource(Base):
 
 
 class SourceDataset(Base):
-    """登记某真实来源下可由一个或多个 adapter 取得的具体数据产品。"""
+    """登记真实来源下的具体数据产品，而不是单个 adapter 请求。
+
+    `capability` 描述 provider-neutral 业务能力，`native_grain`、单位、历史范围和许可范围保留
+    上游原始口径；多个 adapter 可以服务同一数据产品，但不应把不同产品或不同许可混为一项。
+    `active` 仅控制新观察能否采用，不会抹去已有来源血缘。
+    """
 
     __tablename__ = "source_dataset"
     __table_args__ = (

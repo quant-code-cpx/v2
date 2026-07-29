@@ -1,4 +1,4 @@
-"""同步运行总账模型。"""
+"""可重跑同步请求的运行总账模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ..base import Base
 
 
 class SyncRun(Base):
-    """记录一个可重跑同步请求的整体状态，不能替代各分区 checkpoint。"""
+    """记录一个可重跑同步请求的整体状态，不能替代各分区 checkpoint 或发布版本。
+
+    `request_key` 将相同意图的投递关联起来，`mode` 区分正常抓取、回放或受控回填，时间字段则
+    记录请求、实际开始和结束。总状态只汇总分区结果：它不能证明某条事实已发布，也不能在失败
+    时覆盖租约、来源证据或已成功分区的精确位置。
+    """
 
     __tablename__ = "sync_run"
     __table_args__ = (

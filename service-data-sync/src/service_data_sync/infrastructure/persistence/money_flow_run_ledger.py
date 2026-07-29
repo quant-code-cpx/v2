@@ -1,4 +1,9 @@
-"""资金流同步对共享 run/partition 账本的 checkpoint 与恢复操作。"""
+"""资金流同步对共享运行、分区账本的检查点与恢复操作。
+
+一个 `capability` 与排序后的完整参数构成稳定请求分区；相同语义的重试复用运行并接管
+过期租约。账本记录已存原始证据、已发布数据版本和低基数失败码，使调度层能恢复而不
+重复猜测任务进度。
+"""
 
 from __future__ import annotations
 
@@ -25,7 +30,10 @@ _LEASE_DURATION = timedelta(minutes=5)
 
 @dataclass(frozen=True, slots=True)
 class MoneyFlowRun:
-    """携带一次可恢复资金流分区的 run 身份和 fencing owner。"""
+    """携带一次可恢复资金流分区的运行身份和 `fencing` 所有者。
+
+    `lease_owner` 是本次尝试的写入凭据；只有持有它的 worker 能结束或失败该分区。
+    """
 
     run_id: UUID
     partition_key: str
@@ -34,7 +42,10 @@ class MoneyFlowRun:
 
 
 class SqlAlchemyMoneyFlowRunLedger:
-    """使用共享执行账本维护幂等请求、租约、checkpoint 和稳定错误码。"""
+    """使用共享执行账本维护幂等请求、租约、检查点和稳定错误码。
+
+    仓储不发布资金流业务事实，只协调谁可执行、何时接管及可恢复状态由何种结果组成。
+    """
 
     def __init__(self, database: DatabaseClient) -> None:
         """保存短生命周期数据库会话工厂。"""
@@ -47,10 +58,14 @@ class SqlAlchemyMoneyFlowRunLedger:
         parameters: tuple[tuple[str, str], ...],
         mode: str,
     ) -> MoneyFlowRun:
-        """创建或接管一个稳定请求分区，保留旧 checkpoint 供幂等恢复。"""
+        """创建或接管一个稳定请求分区，保留旧检查点供幂等恢复。
+
+        参数会再次排序和哈希，确保字典顺序不同的同一请求不会竞争两个独立租约。
+        """
         if mode not in {"manual", "scheduled", "backfill"}:
             raise ValueError("money-flow run mode is invalid")
         canonical_parameters = tuple(sorted(parameters))
+        # 摘要不含运行时间；同一业务请求才能稳定命中先前的恢复状态。
         request_digest = hashlib.sha256(
             json.dumps(
                 [capability, canonical_parameters],
@@ -155,7 +170,10 @@ class SqlAlchemyMoneyFlowRunLedger:
         )
 
     def finish(self, *, run: MoneyFlowRun, result: MoneyFlowSyncResult) -> None:
-        """原子写入 raw 和 publication checkpoint，并释放当前 fencing 租约。"""
+        """原子写入原始证据和 `publication` 检查点，并释放当前 `fencing` 租约。
+
+        仅当前租约所有者可结束运行，防止已超时 worker 覆盖接管者已经发布的新版本。
+        """
         now = datetime.now(UTC)
         status = "succeeded" if result.publication.quality_status == "passed" else "partial"
         checkpoint = {
@@ -209,7 +227,10 @@ class SqlAlchemyMoneyFlowRunLedger:
         error_code: str,
         retryable: bool,
     ) -> None:
-        """保存稳定失败码；可重试失败进入 partial，后续同请求可安全接管。"""
+        """保存稳定失败码；可重试失败进入部分完成，后续同请求可安全接管。
+
+        异常文本不写入账本，避免来源细节成为高基数日志或长期敏感数据。
+        """
         if not error_code or len(error_code) > 64:
             raise ValueError("money-flow error code is invalid")
         now = datetime.now(UTC)

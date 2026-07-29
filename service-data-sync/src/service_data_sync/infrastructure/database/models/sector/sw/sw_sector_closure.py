@@ -1,4 +1,4 @@
-"""申万行业发布级父级闭包模型。"""
+"""申万三级行业某个 `data_version` 内祖先到后代的完整父级闭包模型。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,12 @@ from ...base import Base
 
 
 class SwSectorClosure(Base):
-    """冻结一个 taxonomy dataVersion 中祖先到后代的完整闭包。"""
+    """冻结一个 `taxonomy data_version` 中祖先到后代的完整闭包。
+
+    闭包让一级、二级、三级行业的导航和聚合不必运行时递归，且能明确祖先、后代和层级距离。它只
+    适用于与其绑定的发布版本，不能拿当前节点关系解释旧估值或旧 `taxonomy`；任何孤儿、环或层级
+    跳跃必须在质量门阻断，不能通过查询时补父节点修复。
+    """
 
     __tablename__ = "sw_sector_closure"
     __table_args__ = (

@@ -1,4 +1,4 @@
-"""财务报表逻辑身份模型。"""
+"""财务报表逻辑身份、报告期口径、币种空值原因与受控替代关系模型。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,12 @@ from ..base import Base
 
 
 class FinancialReport(Base):
-    """保存一份报表的逻辑身份，业务值和双时态修订只存在于 revision 表。"""
+    """保存一份报表的逻辑身份；业务值和双时态 `revision` 只存在于版本表。
+
+    唯一键把证券、方法学、三表类型、报告期、时点/累计/单季/TTM、合并范围、币种和报告类别共同
+    定义为一个不可混用的报表身份。币种未知必须说明受控原因，不能伪造默认币种；若确有逻辑身份
+    替代，也以 `superseded_by` 留下链路而不覆盖历史主键或把不同会计口径合并。
+    """
 
     __tablename__ = "financial_report"
     __table_args__ = (

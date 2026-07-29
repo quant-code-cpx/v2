@@ -1,4 +1,4 @@
-"""板块月频直接行情 revision 模型。"""
+"""板块上游直取月频未复权行情 `revision` 与来源血缘模型。"""
 
 from __future__ import annotations
 
@@ -26,7 +26,12 @@ from ...base import Base
 
 
 class SectorMonthlyBar(Base):
-    """保存上游直接提供的板块月线；不由日线或周线聚合。"""
+    """保存上游直接提供的板块月线；不由日线或周线聚合。
+
+    `period_end` 是上游定义的月周期结束日，未必等于自然月最后一天；价格、成交量、金额和换手率都
+    继承该周期接口口径。内容变化追加 `revision`，而不是在日线发布后本地重算；年度分区按
+    `period_end` 准备，读取时不得把不同 `scheme`、周期或未发布版本混合。
+    """
 
     __tablename__ = "sector_monthly_bar"
     __table_args__ = (

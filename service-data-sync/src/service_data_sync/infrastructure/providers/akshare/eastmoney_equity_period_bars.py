@@ -1,4 +1,9 @@
-"""经由 AKShare SDK 直取东方财富个股周线与月线。"""
+"""经由 `AKShare SDK` 直取东方财富个股周线与月线的适配器。
+
+周线和月线是供应商原生周期，不从平台日线重新聚合。东财成交量原始单位为手，输出
+前固定换算为股；换手率原始为百分数，输出前固定除以 100 成为小数比例。两种换算都
+用成交额、`OHLC` 的 `VWAP` 对账，异常单位不能进入 `canonical` 数据。
+"""
 
 from __future__ import annotations
 
@@ -28,7 +33,10 @@ _UPSTREAM_PERIOD = {
 
 
 class AkshareEastmoneyEquityPeriodBarsAdapter:
-    """分别调用 AKShare 周线、月线接口，不读取或聚合平台日线。"""
+    """分别调用 AKShare 周线、月线接口，不读取或聚合平台日线。
+
+    它不声明日线能力，避免任务误把东财周月口径与腾讯日线来源混为同一数据集。
+    """
 
     provider_id = "akshare-eastmoney-equity-period"
 
@@ -138,7 +146,12 @@ def _request_values(
 
 
 def _normalize_record(record: dict[str, Any]) -> dict[str, str | None]:
-    """将东财周期行情转换为股、元和小数换手率口径。"""
+    """将东财周期行情转换为股、元和小数换手率口径。
+
+    ``volumeShares`` 是股、``amountCny`` 是人民币元、``turnoverRate`` 是 0 到 1 的比率；
+    这些字段不能保留为供应商展示单位。
+    """
+    # 东财周期接口把成交量按手展示；先显式换算，再由 VWAP 守住单位一致性。
     volume_lots = int(_decimal(record["成交量"]))
     volume_shares = volume_lots * 100
     amount_cny = _decimal(record["成交额"])

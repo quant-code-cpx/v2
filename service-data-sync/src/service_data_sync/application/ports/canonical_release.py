@@ -1,4 +1,8 @@
-"""跨域 canonical release 的发布端口与传输无关值对象。"""
+"""跨域 `canonical` 发布的端口与传输无关值对象。
+
+它定义消费者可见版本所需的来源血缘、质量结论和内容摘要。
+它不规定这些信息存进哪个数据库或由哪个 `API` 暴露。
+"""
 
 from __future__ import annotations
 

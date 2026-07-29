@@ -1,4 +1,8 @@
-"""申万行业 taxonomy、闭包、估值、发布和恢复模型包。"""
+"""申万三级行业 `taxonomy`、父级闭包、估值观察、质量、发布和恢复模型包。
+
+行业结构与估值均绑定同一观测日和方法学版本；它们不是通用板块目录的替代品，也不能与其他
+分类体系、当前名称或未验证来源页面混合为消费者视图。
+"""
 
 from .sw_sector_closure import SwSectorClosure
 from .sw_sector_methodology import SwSectorMethodology

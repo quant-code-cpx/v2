@@ -1,4 +1,9 @@
-"""申万行业来源探针、当天同步、replay 任务与显式启用的发布 cadence。"""
+"""申万行业快照的探针、当天同步、重放任务与显式调度。
+
+任务层只决定何时执行和如何报告低基数结果，不解析供应商字段或直接写数据库。当天
+同步通过失败证据包装器保护排障信息；重放则只读取已成功检查点，不能借由历史日期
+再次请求会变化的上游快照。
+"""
 
 from __future__ import annotations
 
@@ -27,7 +32,10 @@ _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def register_sw_sector_tasks(app: Celery, *, settings: Settings) -> None:
-    """幂等注册探针、当天同步和指定日期 replay，不修改其他任务配置。"""
+    """幂等注册探针、当天同步和指定日期重放，不修改其他任务配置。
+
+    多个 worker 进程可重复调用本函数；已有同名任务时不替换其实现或调度设置。
+    """
     if _PROBE_TASK not in app.tasks:
 
         @app.task(name=_PROBE_TASK, shared=False)
@@ -53,6 +61,7 @@ def register_sw_sector_tasks(app: Celery, *, settings: Settings) -> None:
             except ProviderError as error:
                 if not error.retryable:
                     raise
+                # 数据结构和请求错误不能因重复调用变好；只有来源暂不可用才允许重试。
                 raise task.retry(exc=error, countdown=2 ** (task.request.retries + 1)) from error
 
     if _REPLAY_TASK in app.tasks:
@@ -88,7 +97,10 @@ def register_sw_sector_tasks(app: Celery, *, settings: Settings) -> None:
 
 
 def sw_sector_beat_schedule(*, settings: Settings) -> dict[str, dict[str, object]]:
-    """在显式开关开启时返回上海时间 18:30 的单一发布调度项。"""
+    """在显式开关开启时返回上海时间 18:30 的单一发布调度项。
+
+    函数只生成配置，不投递消息；因此部署时可先审阅调度表再启用实际同步。
+    """
     if not settings.sw_sector_enabled:
         return {}
     return {

@@ -1,4 +1,4 @@
-"""个股累计后复权因子 revision 模型。"""
+"""个股累计后复权因子 `revision`、来源血缘与窗口发布模型。"""
 
 from __future__ import annotations
 
@@ -24,7 +24,12 @@ from ...base import Base
 
 
 class EquityAdjustmentFactor(Base):
-    """保存稀疏累计因子及其来源修订，查询时才计算前后复权价格。"""
+    """保存稀疏累计后复权因子及其来源 `revision`，查询时才计算前后复权价格。
+
+    因子不是日线价格，也不能拿来原地更新未复权 OHLC；它只描述在指定业务日将原始价格转换到
+    约定基准的乘数。来源可在公司行动后更正历史因子，因此同一证券日期追加 `revision` 并保留
+    观察时间和内容摘要；缺失日期由查询口径处理，不能用相邻因子臆造来源事实。
+    """
 
     __tablename__ = "equity_adjustment_factor"
     __table_args__ = (

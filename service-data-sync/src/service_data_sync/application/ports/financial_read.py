@@ -1,4 +1,8 @@
-"""已发布财务数据的 `provider-neutral` 内部读取端口。"""
+"""已发布财务数据的 `provider-neutral` 内部读取端口。
+
+只要精确生产 `publication` 不可读、被替代或不存在，读取端就应失败关闭。
+它不回退研究数据、半成品 `revision` 或供应商原始字段。
+"""
 
 from __future__ import annotations
 

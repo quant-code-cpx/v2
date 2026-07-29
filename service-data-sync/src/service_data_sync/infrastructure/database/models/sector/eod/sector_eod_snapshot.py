@@ -1,4 +1,4 @@
-"""板块 EOD 完整横截面 revision 模型。"""
+"""一个分类体系一个交易日完整板块 `EOD` 横截面的候选/发布 `revision` 模型。"""
 
 from __future__ import annotations
 
@@ -26,7 +26,12 @@ from ...base import Base
 
 
 class SectorEodSnapshot(Base):
-    """保存一个分类体系和交易日的完整横截面 revision，发布切换在同一事务中完成。"""
+    """保存一个分类体系和交易日的完整横截面 `revision`，发布切换在同一事务中完成。
+
+    快照头记录来源、目录覆盖、质量状态、候选/隔离/已发布阶段和内容摘要；只有行数与预期全集
+    相符并通过发布门的完整候选，才能与 `dataset_publication` 在一个事务中切换。相同内容重跑保持
+    幂等，新版本或受控回滚只改变可见指针，绝不删除历史报价、质量证据或更晚候选。
+    """
 
     __tablename__ = "sector_eod_snapshot"
     __table_args__ = (

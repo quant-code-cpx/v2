@@ -1,4 +1,4 @@
-"""个股公司概况 revision 模型。"""
+"""个股公司概况内容哈希 `revision` 与来源血缘模型。"""
 
 from __future__ import annotations
 
@@ -23,7 +23,12 @@ from ...base import Base
 
 
 class EquityProfileVersion(Base):
-    """保存巨潮公司概况的内容修订，空字段不用于覆盖既有非空值。"""
+    """保存公司概况的内容 `revision`，空字段不用于覆盖既有已证实非空值。
+
+    概况是“当前资料”的来源观察，不是按交易日回填的财务事实；内容摘要相同的重跑保持幂等，
+    上游实质变更才追加 `revision`。可空字段表示来源确实未提供，不能因为一次缺失清空此前资料；
+    消费者读取必须通过发布或当前版本规则，而非把所有历史字段随意拼接。
+    """
 
     __tablename__ = "equity_profile_version"
     __table_args__ = (

@@ -1,4 +1,9 @@
-"""经由 AKShare SDK 获取巨潮个股公司概况。"""
+"""经由 `AKShare SDK` 获取巨潮个股当前公司概况的适配器。
+
+公司概况是当前披露状态，不承诺历史回溯；适配器把巨潮中文展示字段裁剪为平台许可的
+稳定字段，空白和 `pandas` 空值统一为真实空值。名称缺失被视为 `schema` 问题，其他可选
+字段不能被临时缺失误解为“应清空既有公司资料”。
+"""
 
 from __future__ import annotations
 
@@ -23,7 +28,10 @@ _SCHEMA = "quant-v2.equity-profile.v1"
 
 
 class AkshareCninfoCompanyProfileAdapter:
-    """读取巨潮公司概况并裁剪为平台允许的标准字段。"""
+    """读取巨潮当前公司概况并裁剪为平台允许的标准字段。
+
+    它不以代码相似性推断市场；请求中的平台证券身份是唯一归属依据。
+    """
 
     provider_id = "akshare-cninfo-company-profile"
 
@@ -58,6 +66,7 @@ class AkshareCninfoCompanyProfileAdapter:
             )
         try:
             raw_records = frame.to_dict(orient="records")
+            # 当前接口应只给出一份概况；首行作为本次观测，其余行仍保留在失败证据中。
             profile = _normalize_record(raw_records[0])
         except (KeyError, TypeError, ValueError) as error:
             raise ProviderError(
@@ -110,7 +119,10 @@ def _request_identifier(request: SourceRequest) -> EquityIdentifier:
 
 
 def _normalize_record(record: dict[str, Any]) -> dict[str, str | None]:
-    """将巨潮中文字段映射为稳定公司概况结构。"""
+    """将巨潮中文字段映射为稳定公司概况结构。
+
+    地址、经营范围等文本不做语义改写；仅清理空值，避免适配器擅自解释公司披露。
+    """
     return {
         "companyName": _required_text(record.get("公司名称")),
         "englishName": _optional_text(record.get("英文名称")),

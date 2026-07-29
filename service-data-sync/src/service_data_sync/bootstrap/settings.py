@@ -1,4 +1,8 @@
-"""数据同步服务的环境变量配置模型与输入校验。"""
+"""数据同步服务的环境变量配置模型与输入校验。
+
+它把部署注入的字符串转换为有类型、可审计的运行策略，并在基础设施客户端或 provider
+adapter 创建前验证开关依赖、授权策略和资源上限，避免配置错误在同步中途才暴露。
+"""
 
 from __future__ import annotations
 
@@ -27,7 +31,12 @@ class LogFormat(StrEnum):
 
 
 class Settings(BaseSettings):
-    """从环境变量加载并校验的服务配置，不在日志中暴露密钥。"""
+    """从环境变量加载服务运行契约，并在创建基础设施客户端前拒绝危险组合。
+
+    此模型是进程启动时唯一的配置入口。`SecretStr` 让密码、令牌和连接串在
+    常规日志或异常展示中自动隐藏；各项功能开关必须与对应来源策略同时满足，
+    因而不会因单独打开某个布尔值而意外访问尚未验证的数据源。
+    """
 
     model_config = SettingsConfigDict(
         env_file=("../.env", ".env"),
@@ -36,6 +45,7 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
+    # 基础运行参数同时决定日志标签和诊断输出，不能由业务任务在运行中改写。
     environment: Environment = Field(validation_alias="DATA_SYNC_ENV")
     log_level: str = Field(default="INFO", validation_alias="DATA_SYNC_LOG_LEVEL")
     log_format: LogFormat = Field(
@@ -54,6 +64,7 @@ class Settings(BaseSettings):
         le=60,
         validation_alias="DATA_SYNC_DIAGNOSTICS_TIMEOUT_SECONDS",
     )
+    # 下列开关采用“默认拒绝”：来源或下游能力未经过验证时，组合根不会注册 adapter。
     akshare_enabled: bool = Field(default=False, validation_alias="DATA_SYNC_AKSHARE_ENABLED")
     equity_market_enabled: bool = Field(
         default=False,
@@ -93,6 +104,7 @@ class Settings(BaseSettings):
         validation_alias="DATA_SYNC_MONEY_FLOW_ENABLED",
     )
     index_enabled: bool = Field(default=False, validation_alias="DATA_SYNC_INDEX_ENABLED")
+    # 财务、指数使用具名来源策略而非单纯开关，便于在账本和事故排查中追溯批准依据。
     financial_source_policy: str = Field(
         default="disabled",
         validation_alias="DATA_SYNC_FINANCIAL_SOURCE_POLICY",
@@ -101,6 +113,7 @@ class Settings(BaseSettings):
         default="disabled",
         validation_alias="DATA_SYNC_INDEX_SOURCE_POLICY",
     )
+    # dark launch 必须显式给出并发、速率和超时，防止默认值无意间压垮上游来源。
     financial_max_concurrency: int | None = Field(
         default=None,
         ge=1,
@@ -120,6 +133,7 @@ class Settings(BaseSettings):
         default=False,
         validation_alias="DATA_SYNC_TRADING_CALENDAR_ENABLED",
     )
+    # 内部 HTTP 仍需凭据；Compose 内网不是绕过服务间身份校验的理由。
     internal_api_bearer_token: SecretStr = Field(
         validation_alias="DATA_SYNC_INTERNAL_API_BEARER_TOKEN"
     )
@@ -129,6 +143,7 @@ class Settings(BaseSettings):
     internal_api_port: int = Field(
         default=8000, ge=1, le=65535, validation_alias="DATA_SYNC_INTERNAL_API_PORT"
     )
+    # 所有 AKShare adapter 共用有界请求超时，避免 worker 被单次网络阻塞长期占用。
     akshare_request_timeout_seconds: int = Field(
         default=30,
         ge=1,
@@ -190,7 +205,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_source_policy_settings(self) -> Settings:
-        """启用受控来源能力前强制声明策略和依赖，避免隐式访问未验证上游。"""
+        """验证能力开关、来源策略和资源上限之间的依赖关系。
+
+        校验在任何网络连接、数据库连接或任务注册之前执行。这样配置错误会以启动
+        失败暴露，而不是在同步过程中静默降级到错误来源或不受控的默认并发。
+        """
         if self.equity_scheduler_enabled and not self.equity_market_enabled:
             raise ValueError(
                 "DATA_SYNC_EQUITY_SCHEDULER_ENABLED requires DATA_SYNC_EQUITY_MARKET_ENABLED"

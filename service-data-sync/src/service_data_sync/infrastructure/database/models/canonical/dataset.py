@@ -1,4 +1,4 @@
-"""稳定 canonical dataset 身份模型。"""
+"""定义跨运行稳定的 canonical 数据集身份与不可混用的 schema 边界。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ..base import Base
 
 
 class CanonicalDataset(Base):
-    """定义跨运行保持稳定的数据集及其不可混用的 schema 版本。"""
+    """定义跨运行保持稳定的数据集身份，而不是某次同步结果或消费者版本。
+
+    `code`、`domain` 与 `grain` 说明事实的业务归属和一行代表什么；`schema_version` 是该解释
+    可兼容的结构版本。任一项变化都应创建或显式升级数据集，不能把不同粒度、币种口径或字段
+    语义的记录塞入同一身份。后续的来源、质量、release 和 checkpoint 都以此表为共同锚点。
+    """
 
     __tablename__ = "canonical_dataset"
     __table_args__ = (

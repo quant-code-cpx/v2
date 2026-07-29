@@ -1,4 +1,4 @@
-"""板块周频直接行情 revision 模型。"""
+"""板块上游直取周频未复权行情 `revision` 与来源血缘模型。"""
 
 from __future__ import annotations
 
@@ -26,7 +26,12 @@ from ...base import Base
 
 
 class SectorWeeklyBar(Base):
-    """保存上游直接提供的板块周线；不由日线聚合。"""
+    """保存上游直接提供的板块周线；不由日线聚合。
+
+    `period_end`、完整周期标记和数值单位均由周线能力定义，不能按本地自然周或日线缺口猜测；相同
+    板块周期的来源更正形成新 `revision` 并关闭旧知识版本。物理年分区只改善查询，绝不允许以它为
+    由把同月不同周、不同板块或不同来源内容拼成一个月线。
+    """
 
     __tablename__ = "sector_weekly_bar"
     __table_args__ = (

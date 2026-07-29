@@ -1,4 +1,9 @@
-"""基于证券标识双时间历史的日期感知身份解析器。"""
+"""基于证券标识双时间历史的日期感知身份解析器。
+
+同一交易所代码可能因退市或复用在不同事实日代表不同证券；解析必须同时使用市场有效
+日期和系统知识时刻，不能读取“当前代码”列后回填历史。写入批次跨越身份边界时必须
+整体拒绝，防止一个 `publication` 混入两只证券的行情或事件。
+"""
 
 from __future__ import annotations
 
@@ -23,11 +28,17 @@ from ..database.models.equity.identity.equity_identifier_version import (
 
 
 class EquityIdentityWriteConflictError(ValueError):
-    """表示事实日期集合无法唯一绑定到同一已确认证券，调用方必须隔离整批写入。"""
+    """表示事实日期集合无法唯一绑定到同一已确认证券，调用方必须隔离整批写入。
+
+    这是数据正确性错误而非可重试数据库故障；需要主数据新证据或按日期拆分请求。
+    """
 
 
 class SqlAlchemyEquityIdentityResolver(EquityIdentityResolver):
-    """在服务自有 PostgreSQL 上执行只读的双时间证券标识查询。"""
+    """在服务自有 `PostgreSQL` 上执行只读的双时间证券标识查询。
+
+    解析器不创建 `PENDING` 身份，也不在冲突时任选一行；它只向调用者报告可证明的结果。
+    """
 
     def __init__(self, database: DatabaseClient) -> None:
         """保存 Session 工厂，不向应用层暴露连接或事务管理细节。"""
@@ -102,7 +113,10 @@ def require_single_confirmed_identity_on_connection(
     fact_dates: Sequence[date],
     known_at: datetime,
 ) -> int:
-    """逐事实日解析身份，并拒绝未确认、缺失、冲突或跨越代码复用边界的批次。"""
+    """逐事实日解析身份，并拒绝未确认、缺失、冲突或跨越代码复用边界的批次。
+
+    使用调用方现有事务可保证身份选择与事实写入看到同一知识切片，避免并发修订间隙。
+    """
     dates = tuple(sorted(set(fact_dates)))
     if not dates:
         raise ValueError("fact_dates must not be empty")

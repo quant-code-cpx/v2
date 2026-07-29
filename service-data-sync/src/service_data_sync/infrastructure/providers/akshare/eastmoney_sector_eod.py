@@ -1,4 +1,9 @@
-"""经由 AKShare SDK 获取东财行业与概念板块收盘后批量横截面。"""
+"""经由 `AKShare SDK` 获取东财行业与概念板块收盘后批量横截面的适配器。
+
+每次请求只对应一个分类体系和目标交易日，来源接口本身不支持历史日期过滤，因此
+目标日仅作为本次观测分区而非伪造的上游筛选条件。价格、涨跌幅、总市值等字段保留
+来源声明值；未确认单位的数值不会被适配器擅自换算。
+"""
 
 from __future__ import annotations
 
@@ -50,7 +55,11 @@ _APPROVED_SCHEMA_FINGERPRINTS = frozenset(
 
 
 class AkshareEastmoneySectorEodAdapter:
-    """将东财 name 批量接口隔离为 provider-neutral EOD 横截面能力。"""
+    """将东财名称批量接口隔离为来源中立 `EOD` 横截面能力。
+
+        完整且获批的列集合是发布前提，未知新增列也会阻断同步，防止供应商语义变更悄悄
+    混入既有质量规则。
+    """
 
     provider_id = "akshare-eastmoney-sector-eod"
 
@@ -94,6 +103,7 @@ class AkshareEastmoneySectorEodAdapter:
             schema_fingerprint = _schema_fingerprint(columns)
             if schema_fingerprint not in _APPROVED_SCHEMA_FINGERPRINTS:
                 raise ValueError("provider eod schema fingerprint is not approved")
+            # 保留完整原始行用于失败证据，标准载荷只暴露经过允许的中立字段。
             raw_records = frame.to_dict(orient="records")
             quotes = [_normalize_record(record) for record in raw_records]
         except (KeyError, TypeError, ValueError, InvalidOperation) as error:
@@ -171,7 +181,11 @@ def _fetch_snapshot(*, scheme: SectorScheme) -> Any:
 
 
 def _normalize_record(record: dict[str, Any]) -> dict[str, str | int | None]:
-    """将供应商中文字段映射为中立名称，并保留未确认单位的原生数值。"""
+    """将供应商中文字段映射为中立名称，并保留未确认单位的原生数值。
+
+    ``changePercent``、``turnoverPercent`` 等名称明确其来源为百分数展示值；消费者不可
+    将其误当成已转换为小数比例的字段。
+    """
     return {
         "code": _required_text(record, "板块代码"),
         "name": _required_text(record, "板块名称"),

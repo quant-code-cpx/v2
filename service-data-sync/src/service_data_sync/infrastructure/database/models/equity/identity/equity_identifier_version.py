@@ -1,4 +1,4 @@
-"""证券代码双时间版本模型。"""
+"""证券交易所代码的业务有效时间与平台知识时间双时态版本模型。"""
 
 from __future__ import annotations
 
@@ -32,7 +32,12 @@ from ...base import Base
 
 
 class EquityIdentifierVersion(Base):
-    """表达证券代码在业务时间与知识时间上的唯一身份，防止代码复用被静默混淆。"""
+    """表达证券代码在两条时间轴上的唯一身份，防止代码复用被静默混淆。
+
+    `effective_range` 回答某代码在市场事实层何时属于该证券，`knowledge_range` 回答平台何时按此
+    理解它；两者都可能因官方更正而改变。排斥约束禁止同一交易所代码在两条范围重叠时绑定两个
+    永久 `security_id`，从而让历史行情、财务和成分记录能够按当时身份重新解析。
+    """
 
     __tablename__ = "equity_identifier_version"
     __table_args__ = (

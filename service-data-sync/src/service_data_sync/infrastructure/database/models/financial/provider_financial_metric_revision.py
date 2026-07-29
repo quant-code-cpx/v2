@@ -1,4 +1,4 @@
-"""供应商财务指标双时态修订模型。"""
+"""按报告期年度分区的供应商直接财务指标双时态 `revision` 模型。"""
 
 from __future__ import annotations
 
@@ -28,7 +28,12 @@ from ..base import Base
 
 
 class ProviderFinancialMetricRevision(Base):
-    """保存供应商直接给出的指标 revision，不与披露事实或平台派生指标共表。"""
+    """保存供应商直接给出的指标 `revision`，不与披露事实或平台派生指标共表。
+
+    供应商可能使用自有 TTM、滚动窗口或修订规则，即使指标名称与报表字段相同也不能视为同一事实。
+    记录通过方法学、报告期口径、合并范围、单位币种和双时态范围固定其含义；内容或知识变化时
+    追加 `revision`。质量或来源不足的行只能审计或隔离，不能与已发布披露值相互补齐。
+    """
 
     __tablename__ = "provider_financial_metric_revision"
     __table_args__ = (

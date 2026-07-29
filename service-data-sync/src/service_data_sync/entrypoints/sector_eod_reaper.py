@@ -1,4 +1,8 @@
-"""回收板块 EOD 过期租约的受控运维入口。"""
+"""回收板块 EOD 过期租约的受控运维入口。
+
+reaper 仅把因 worker 异常遗留的 checkpoint 从租约状态退回可调度状态，不访问 provider、
+不判断交易日，也不发布数据；把恢复控制面与实际同步面分开可避免误触发外部副作用。
+"""
 
 from __future__ import annotations
 

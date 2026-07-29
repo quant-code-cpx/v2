@@ -1,4 +1,10 @@
-"""经由 AKShare 东财接口提供 A 股报表、指标与历史估值的隔离适配器。"""
+"""经由 `AKShare` 东财接口提供 A 股报表、指标与历史估值的隔离适配器。
+
+三大报表、供应商指标和日频估值是三个独立 `capability`：它们的报告期、单位和修订
+语义不同，不能在适配器中拼成同一张“财务表”。宽表中的来源列会被投影为带原始
+单位和空值原因的事实，未知币种、审计状态或数值域保持未知，不根据列名之外的经验
+猜测 `canonical` 口径。
+"""
 
 from __future__ import annotations
 
@@ -59,7 +65,10 @@ _RECORD_METADATA = frozenset(
 
 
 class AkshareEastmoneyFinancialAdapter:
-    """将东财宽表隔离成三类 provider-neutral 财务能力，保留原始表头与行记录。"""
+    """将东财宽表隔离成三类来源中立财务能力，保留原始表头与行记录。
+
+    标准载荷供应用层严格解码，完整原始行仅随批次携带供失败证据与 `schema` 漂移审计。
+    """
 
     provider_id = "akshare-eastmoney-financial"
 
@@ -72,7 +81,10 @@ class AkshareEastmoneyFinancialAdapter:
         return _CAPABILITIES
 
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
-        """按 capability 调用唯一东财接口组合，返回标准载荷与完整原始证据。"""
+        """按 `capability` 调用唯一东财接口组合，返回标准载荷与完整原始证据。
+
+        网络故障属于可重试的来源不可用；不支持的请求和宽表形状变化则必须阻止自动重试。
+        """
         exchange, symbol = _request_identity(request)
         provider_symbol = _provider_symbol(exchange, symbol)
         try:
@@ -171,7 +183,11 @@ def _fetch_payload(
 def _statement_payload(
     *, exchange: Exchange, symbol: str, provider_symbol: str
 ) -> tuple[dict[str, object], dict[str, object]]:
-    """获取东财三张按报告期宽表；不使用年度或单季接口二次拼接，避免混合口径。"""
+    """获取东财三张按报告期宽表；不使用年度或单季接口二次拼接，避免混合口径。
+
+    三张表必须来自本次相同的证券请求；任一表为空即停止整个报表能力，不能以局部成功
+    伪装成完整财务披露。
+    """
     calls: tuple[tuple[str, Callable[..., Any]], ...] = (
         ("BALANCE_SHEET", ak.stock_balance_sheet_by_report_em),
         ("INCOME_STATEMENT", ak.stock_profit_sheet_by_report_em),
@@ -330,7 +346,10 @@ def _normalize_metric_records(records: list[dict[str, object | None]]) -> list[d
 def _normalize_valuation_records(
     records: list[dict[str, object | None]],
 ) -> list[dict[str, object]]:
-    """映射东财历史估值固定五项；不把未定义的 PEG、PS 等额外字段混入当前合同。"""
+    """映射东财历史估值固定五项；不把未定义的 `PEG`、`PS` 等额外字段混入当前合同。
+
+    市值以 `CNY` 计量；`PE`、`PB` 和市现率是无币种比例，不能当作可相加的货币金额。
+    """
     fields = (
         ("总市值", "market_cap", "总市值", "monetary", "CNY", None),
         ("PE(TTM)", "pe_ttm", "市盈率（TTM）", "ratio", None, "NOT_APPLICABLE"),
@@ -363,12 +382,16 @@ def _normalize_valuation_records(
 def _normalize_facts(
     record: dict[str, object | None], *, namespace: str
 ) -> list[dict[str, object | None]]:
-    """把宽表中的数值列投影为中立事实；空数值保留 `UPSTREAM_NULL`，文本列不伪造成数值。"""
+    """把宽表中的数值列投影为中立事实；空数值保留 `UPSTREAM_NULL`，文本列不伪造成数值。
+
+    每个事实带来源字段标签和保守的数值域，便于后续词典审核后再赋予精确单位或会计语义。
+    """
     facts: list[dict[str, object | None]] = []
     for source_field, raw_value in record.items():
         if source_field in _RECORD_METADATA:
             continue
         value = _decimal_text(raw_value)
+        # 非空但无法转换的展示文本不是零也不是空披露，不能静默进入数值事实。
         if value is None and raw_value is not None:
             continue
         code_suffix = _field_code(source_field, max_length=80 - len(namespace) - 1)

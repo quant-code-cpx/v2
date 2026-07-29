@@ -1,4 +1,4 @@
-"""同步分区、租约和 checkpoint 模型。"""
+"""同步请求内可独立重试的数据分区、租约和恢复 checkpoint 模型。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,13 @@ from ..base import Base
 
 
 class SyncPartition(Base):
-    """保存一个 run 内可独立重试分区的租约、状态、错误码与恢复 checkpoint。"""
+    """保存一个 run 内可独立重试分区的租约、状态、错误码与恢复 checkpoint。
+
+    一次 `SyncRun` 可拆成多个业务日期、证券或分类体系分区；任一分区失败不应重做已成功同伴。
+    `lease_owner`、到期时间和心跳防止两个 worker 同时发布同一分区，`attempt` 与 `next_retry_at`
+    记录可恢复重试节奏。这里的 `checkpoint_json` 是任务内部进度，不能误作已发布的 canonical
+    水位；只有后续 publication 成功才能推进跨运行 checkpoint。
+    """
 
     __tablename__ = "sync_partition"
     __table_args__ = (

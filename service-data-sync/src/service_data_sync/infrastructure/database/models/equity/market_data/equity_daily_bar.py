@@ -1,4 +1,4 @@
-"""按年物理分区的个股未复权日线模型。"""
+"""按上海交易日年度物理分区的个股来源直取未复权日线 `revision` 模型。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,12 @@ from ...base import Base
 
 
 class EquityDailyBar(Base):
-    """保存个股未复权日线 revision；物理年度子分区由 partition manager 管理。"""
+    """保存来源直取的未复权日线 `revision`；年度子分区只优化存储，不改变业务表语义。
+
+    OHLC、成交量和成交额均按来源原始交易口径保存：价格不因后续分红拆并回写，成交量单位为股、
+    成交额单位为人民币元。相同证券/交易日内容变化时追加 `revision` 并以 `valid_from`/`valid_to`
+    记录平台何时采用该版本；`is_final` 仅说明来源对收盘完整性的判断，不等同于交易所最终更正。
+    """
 
     __tablename__ = "equity_daily_bar"
     __table_args__ = (

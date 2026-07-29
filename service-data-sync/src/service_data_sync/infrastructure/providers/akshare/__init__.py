@@ -1,4 +1,8 @@
-"""AKShare 适配器；上游 API 与字段必须封装在本包内。"""
+"""固定版本 `AKShare` 适配器的公开组合边界。
+
+此包仅导出各能力的具体 adapter，便于组合根按来源策略注册；任何东财、同花顺、交易所
+或其他上游函数名、字段名和单位换算仍必须留在各自模块，不能被应用层直接导入。
+"""
 
 from service_data_sync.infrastructure.providers.akshare.cnindex_index_snapshot import (
     AkshareCnindexIndexSnapshotAdapter,

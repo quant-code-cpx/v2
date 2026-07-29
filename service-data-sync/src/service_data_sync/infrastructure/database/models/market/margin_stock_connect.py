@@ -1,4 +1,8 @@
-"""融资融券和沪深港通的强类型事实、快照与制度版本模型。"""
+"""融资融券与沪深港通的强类型日频事实、快照、制度版本和独立发布模型。
+
+两融市场、证券资格、港通通道统计、活跃榜和持股快照有不同来源粒度与制度断点；不能从其中
+一张表反推另一张，也不能跨通道、方向、币种或披露制度混合统计。
+"""
 
 from __future__ import annotations
 
@@ -31,7 +35,12 @@ from .revision_mixin import CanonicalRevisionMixin
 
 
 class MarginMarketDailyRevision(CanonicalRevisionMixin, Base):
-    """保存场所日频两融市场汇总，绝不由当期证券明细反向累加替代。"""
+    """保存场所日频两融市场汇总；绝不由当期证券明细反向累加替代。
+
+    来源公布的融资、融券余额及交易汇总可能包含未下发证券、口径调整或截止时间差异，因此是独立
+    事实。业务交易日、场所、币种、单位和方法学共同决定可比性；内容更正追加 `revision`，不为
+    与明细相等而改写原始汇总或将缺失明细解释为零。
+    """
 
     __tablename__ = "margin_market_daily_revision"
     __table_args__ = (
@@ -108,7 +117,12 @@ class MarginMarketDailyRevision(CanonicalRevisionMixin, Base):
 
 
 class MarginSecurityDailyRevision(CanonicalRevisionMixin, Base):
-    """保存证券日频两融明细，直报偿还与派生偿还不能在同一行混用。"""
+    """保存证券日频两融明细；直报偿还与派生偿还不能在同一行混用。
+
+    融资买入、偿还、余额和融券相关字段按来源属性保存，派生值必须有单独受控标记和输入血缘，不能
+    伪装为直报事实。证券身份、场所、交易日、单位和币种不一致时不可比较；负数或缺失也不能靠
+    相邻日期、市场汇总或价格序列自动修正。
+    """
 
     __tablename__ = "margin_security_daily_revision"
     __table_args__ = (
@@ -185,7 +199,12 @@ class MarginSecurityDailyRevision(CanonicalRevisionMixin, Base):
 
 
 class MarginEligibilityRevision(CanonicalRevisionMixin, Base):
-    """保存证券两融资格双时间版本，当前名单不能倒推历史资格。"""
+    """保存证券两融资格双时态版本；当前名单不能倒推历史资格。
+
+    资格由场所、融资/融券维度、业务有效范围和来源证据决定，可能先后纳入、暂停或移除。`known_*`
+    区间保留平台何时得知名单变化，历史研究必须同时过滤业务和知识时间；目录缺席或明细交易量为零
+    不构成资格取消证据，必须等待批准来源的显式事实。
+    """
 
     __tablename__ = "margin_eligibility_revision"
     __table_args__ = (
@@ -249,7 +268,12 @@ class MarginEligibilityRevision(CanonicalRevisionMixin, Base):
 
 
 class MarginSystemRiskDailyRevision(CanonicalRevisionMixin, Base):
-    """保存 P2 两融系统风险指标，独立于市场与证券明细发布。"""
+    """保存 `P2` 两融系统风险指标，独立于市场汇总与证券明细发布。
+
+    风险指标的定义、窗口、阈值和来源可与两融余额不同，不能从余额相除或临时汇总生成并混入同一
+    数据集。每行以方法学、场所、交易日和 `revision` 固定口径，质量失败或来源策略未批准时保持
+    不可发布，而不是返回伪零值或复用上一次指标。
+    """
 
     __tablename__ = "margin_system_risk_daily_revision"
     __table_args__ = (
@@ -298,7 +322,12 @@ class MarginSystemRiskDailyRevision(CanonicalRevisionMixin, Base):
 
 
 class StockConnectDisclosureRegime(Base):
-    """保存沪深港通通道与方向的制度版本，2024 披露断点必须显式建模。"""
+    """保存沪深港通通道与方向的披露制度版本；2024 断点必须显式建模。
+
+    不同制度可能改变字段定义、额度、披露时点或统计方式，因而相同列名跨断点未必可比。每条通道/方向
+    日频事实都要解析到适用制度，不能以当前规则解释历史数值；制度未知或冲突时应阻断发布，而不是
+    选择“最近”版本补齐。
+    """
 
     __tablename__ = "stock_connect_disclosure_regime"
     __table_args__ = (
@@ -354,7 +383,12 @@ class StockConnectDisclosureRegime(Base):
 
 
 class StockConnectChannelDailyRevision(CanonicalRevisionMixin, Base):
-    """保存通道日频统计，买卖、成交、净买与额度余额均按制度字段独立保留。"""
+    """保存通道日频统计；买卖、成交、净买与额度余额均按制度字段独立保留。
+
+    一条记录绑定通道、方向、交易日和已解析披露制度；买卖额、成交额、净买额及额度余额不能在
+    不同规则下重算或相互替代。来源修订关闭旧知识版本并追加新行，消费者读取须锁定同一方法学和
+    `release`，防止跨制度/跨时间点组合出看似完整但不可比的序列。
+    """
 
     __tablename__ = "stock_connect_channel_daily_revision"
     __table_args__ = (
@@ -425,7 +459,12 @@ class StockConnectChannelDailyRevision(CanonicalRevisionMixin, Base):
 
 
 class StockConnectActiveSecurityRevision(CanonicalRevisionMixin, Base):
-    """保存通道日活跃证券排行，A/H 或跨市场身份无法解析时应隔离而非按代码合并。"""
+    """保存通道日活跃证券排行；`A/H` 或跨市场身份无法解析时应隔离而非按代码合并。
+
+    排行位置依赖同日通道统计的 `release`，缺少该依赖时不能单独发布；证券、场所和币种必须精确
+    解析，六位代码或名称相同不能证明是同一 `A/H` 工具。每个名次是独立来源事实，排行重排或金额
+    更正形成新 `revision`，不会覆盖历史榜单。
+    """
 
     __tablename__ = "stock_connect_active_security_revision"
     __table_args__ = (
@@ -487,7 +526,12 @@ class StockConnectActiveSecurityRevision(CanonicalRevisionMixin, Base):
 
 
 class StockConnectHoldingSnapshot(CanonicalRevisionMixin, Base):
-    """保存完整持股快照头，日频和季频不因共享证券字段而混合发布。"""
+    """保存完整持股快照头；日频和季频不因共享证券字段而混合发布。
+
+    快照头界定通道、方向、观察日期、来源频率、完整性和内容摘要，所有持股项必须属于同一完整集合。
+    日频与季频的披露时点、覆盖范围和可用性不同，不能按证券字段拼成一个“最新持股”；只有通过
+    完整性和身份质量门的快照才可进入相应 `publication`。
+    """
 
     __tablename__ = "stock_connect_holding_snapshot"
     __table_args__ = (
@@ -544,7 +588,12 @@ class StockConnectHoldingSnapshot(CanonicalRevisionMixin, Base):
 
 
 class StockConnectHoldingItem(Base):
-    """保存持股快照内证券项，不按后续公司行动回写原始来源持股事实。"""
+    """保存持股快照内证券项，不按后续公司行动回写原始来源持股事实。
+
+    数量、市值、占比、币种与单位表达来源在快照时刻看到的持股，不是经过分红、拆并股或当前价格
+    回算后的持仓。证券身份解析必须精确；无法解析的项目应隔离或保留来源标识，不可用代码猜测
+    并入其他市场。后续更正通过新快照与来源批次表达，旧快照保持不可变。
+    """
 
     __tablename__ = "stock_connect_holding_item"
     __table_args__ = (

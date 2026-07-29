@@ -1,4 +1,4 @@
-"""供应商资金流排行快照修订模型。"""
+"""已验证完整的供应商资金流排行快照 `revision` 与可见状态模型。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,12 @@ from ..base import Base
 
 
 class MoneyFlowRankingSnapshot(Base):
-    """保存已验证完整的 supplier ranking 不可变 revision header。"""
+    """保存已验证完整的 `supplier ranking` 不可变 `revision` 头。
+
+    快照固定目标交易日、方法学、`scope`、样本池、供应商窗口、排序分桶、行数和内容摘要；它不能由
+    逐日序列重建，因为供应商位置与滚动计算可能无法反推。只有完整性和质量通过的快照才能处于
+    `published`，新内容以版本替代旧快照，历史版本通过 `superseded_at` 保留。
+    """
 
     __tablename__ = "money_flow_ranking_snapshot"
     __table_args__ = (

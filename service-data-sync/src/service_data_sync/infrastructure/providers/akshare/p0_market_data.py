@@ -1,4 +1,10 @@
-"""通过 AKShare 提供 ETF、两融、港通、公告、公开交易与衍生品 P0 adapter。"""
+"""通过 `AKShare` 提供 `ETF`、两融、港通、公告、公开交易与衍生品 `P0` 适配器。
+
+本模块集中隔离多个已审核的上游接口，但每个 `capability` 仍有独立 `schema`、来源、参数
+和单位规则。它绝不因为一个来源缺字段而用另一能力补值：例如 `ETF` 净值不补日线，
+期货结算价不以收盘价替代，港通不同通道和方向不合并。标准 JSON 与原始响应一并交给
+失败留证包装器，成功路径不在对象存储长期保留供应商字节。
+"""
 
 from __future__ import annotations
 
@@ -72,7 +78,10 @@ _ADAPTER_VERSION = "akshare-1.18.78-p0-market-data-v1"
 
 
 class AkshareP0MarketDataAdapter:
-    """将 AKShare P0 可验证字段隔离成一个默认 `akshare` provider。"""
+    """将 `AKShare` `P0` 可验证字段隔离成一个默认 `akshare` 数据源。
+
+    适配器只声明已完成字段映射或可安全返回空集的能力，未知请求不会成为任意 SDK 调用。
+    """
 
     provider_id = "akshare"
 
@@ -85,7 +94,11 @@ class AkshareP0MarketDataAdapter:
         return _CAPABILITIES
 
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
-        """调用唯一 AKShare 映射并返回标准 JSON 与仅失败留证所需的内存载荷。"""
+        """调用唯一 `AKShare` 映射并返回标准 `JSON` 与仅失败留证所需的内存载荷。
+
+        可重试错误只代表上游暂不可用；参数、单位、字段和来源语义问题会以不可重试错误
+        停止发布，避免重试把同一错误响应写成多次观察。
+        """
         _validate_capability(request.capability)
         parameters = dict(request.parameters)
         try:
@@ -128,7 +141,11 @@ class AkshareP0MarketDataAdapter:
 def _fetch_payload(
     *, capability: str, parameters: dict[str, str]
 ) -> tuple[dict[str, Any], dict[str, Any], str]:
-    """在 adapter 边界内分派供应商函数，绝不将 AKShare 名称泄漏给应用层。"""
+    """在适配器边界内分派供应商函数，绝不将 `AKShare` 名称泄漏给应用层。
+
+    返回的 `upstream_source` 是血缘字段，而非可自由选择的路由参数；每个分支固定对应
+    一个经过审核的上游数据集。
+    """
     if capability == _ETF_MASTER:
         return (*_etf_master(parameters), "ths.etf-category")
     if capability == _ETF_STATUS:
@@ -157,7 +174,10 @@ def _fetch_payload(
 
 
 def _etf_master(parameters: dict[str, str]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """读取当前 ETF 行情目录；无历史快照接口时拒绝把当前名单写到过去。"""
+    """读取当前 `ETF` 行情目录；无历史快照接口时拒绝把当前名单写到过去。
+
+    不支持的历史日期返回带原因的安全空集，由应用层记录可用性而不是伪造历史产品资料。
+    """
     venue = _venue(parameters)
     observation_date = _date_parameter(parameters, "observationDate")
     if observation_date != datetime.now(_SHANGHAI).date():
@@ -167,7 +187,7 @@ def _etf_master(parameters: dict[str, str]) -> tuple[dict[str, Any], dict[str, A
                 _ETF_MASTER, parameters, "AKShare ETF category only exposes current snapshot"
             ),
         )
-    # `fund_etf_spot_em` 需逐页请求；同花顺 ETF 分类接口一次返回已筛选的 ETF 目录。
+    # 当前接口一次返回已筛选目录；不能把分页现货接口的瞬时结果混入同一主数据观察。
     frame = _akshare_frame_or_empty(lambda: ak.fund_etf_category_ths(symbol="ETF"))
     raw_records = _frame_records(frame)
     profiles = []
@@ -1231,7 +1251,10 @@ def _conservative_visible_at(day: date) -> str:
 
 
 def _raw_empty(capability: str, parameters: dict[str, str], reason: str) -> dict[str, object]:
-    """记录语义不兼容的安全空结果原因；字节仍只会在失败路径落盘。"""
+    """记录语义不兼容的安全空结果原因；字节仍只会在失败路径落盘。
+
+    这不是来源成功却无记录的同义词，而是 adapter 明确无法诚实满足该请求形状的证据。
+    """
     return {"capability": capability, "parameters": parameters, "records": [], "reason": reason}
 
 

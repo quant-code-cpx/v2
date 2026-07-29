@@ -1,4 +1,8 @@
-"""个股行情持久化与仅失败留证端口，均不依赖具体数据源。"""
+"""个股行情、参考数据与仅失败留证的应用端口。
+
+端口描述证券身份、原生日线/周期线、因子、公司行动和资料的版本化读写，同时隔离具体数据源与对象存储实现。
+成功发布不要求保存供应商大字段；失败排障字节由独立存储端口按私有证据策略处理。
+"""
 
 from __future__ import annotations
 
@@ -21,7 +25,11 @@ from service_data_sync.domain.equity import (
 
 @dataclass(frozen=True, slots=True)
 class StoredEquityInstrument:
-    """行情仓储返回的稳定标准证券身份。"""
+    """行情仓储返回的稳定标准证券身份。
+
+    `security_id` 是跨代码复用的内部永久身份，`instrument_id` 是当前交易所代码版本。
+    调用方不应把名称或六位代码单独当作主键。
+    """
 
     security_id: int
     instrument_id: UUID
@@ -32,7 +40,11 @@ class StoredEquityInstrument:
 
 @dataclass(frozen=True, slots=True)
 class PublishedDailyBars:
-    """描述一次已提交日线发布及其写入结果。"""
+    """描述一次已提交日线发布及其写入结果。
+
+    `data_version` 是读取端应固定使用的不可变版本。
+    两个计数分别说明新增事实和与既有内容相同的幂等记录。
+    """
 
     data_version: UUID
     inserted_count: int
@@ -42,7 +54,11 @@ class PublishedDailyBars:
 
 @dataclass(frozen=True, slots=True)
 class EquitySourceObservation:
-    """描述来源摘要及成功不留存或失败归档标记的标准观察。"""
+    """描述来源摘要及成功不留存或失败归档标记的标准观察。
+
+    `source_payload_sha256` 用于验证输入内容，`raw_uri` 指向失败证据或成功路径的不可回放标记。
+    `observed_at` 是服务观察来源的带时区时间。
+    """
 
     provider_id: str
     capability: str
@@ -53,7 +69,10 @@ class EquitySourceObservation:
 
 @dataclass(frozen=True, slots=True)
 class PublishedEquityDataset:
-    """描述一个证券分区的行情或参考数据发布结果。"""
+    """描述一个证券分区的行情或参考数据发布结果。
+
+    `published_at` 表示消费者何时可见该 `data_version`；写入计数用于区分内容变更和安全的重复同步。
+    """
 
     data_version: UUID
     published_at: datetime
@@ -72,7 +91,10 @@ class EquityDatasetPublication:
 
 @dataclass(frozen=True, slots=True)
 class EquityAvailabilityObservation:
-    """表示不会产生 canonical 事实的同步结果，供读取方安全显示为空。"""
+    """表示不会产生 `canonical` 事实的同步结果，供读取方安全显示为空。
+
+    这表示精确窗口的合法空集或来源不可用，不等于没有执行过同步，也不能作为行情数值或生命周期变化写入数据库。
+    """
 
     availability: str
     reason_code: str
@@ -124,7 +146,10 @@ class EquityIdentityReadConflictError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class RawPayload:
-    """表示仅在同步失败时才会持久化的来源或标准化字节。"""
+    """表示仅在同步失败时才会持久化的来源或标准化字节。
+
+    对象键、摘要和内容类型共同让排障过程能验证证据；成功同步不应借此保存可回放的大型供应商响应。
+    """
 
     object_key: str
     content_sha256: str
@@ -133,19 +158,25 @@ class RawPayload:
 
 
 class RawPayloadStore(Protocol):
-    """独立于适配器和标准表管理失败排障所需的来源字节。"""
+    """独立于 `adapter` 和标准表管理失败排障所需来源字节的 `Protocol`。
+
+    此端口与业务事实写入分离，保证失败证据可受控保存，同时不把对象存储细节泄漏给同步编排代码。
+    """
 
     def put(self, payload: RawPayload) -> str:
-        """暂存来源字节并返回成功路径不可回放的摘要标记。"""
+        """暂存失败证据字节，并返回可记录在来源观察中的受控引用。"""
         ...
 
     def get(self, uri: str) -> bytes:
-        """只读取失败时归档的服务私有证据，成功标记必须明确拒绝。"""
+        """只读取失败时归档的服务私有证据；成功路径标记必须明确拒绝。"""
         ...
 
 
 class EquityDailyBarRepository(Protocol):
-    """负责标准日线写入的最小应用端口。"""
+    """负责标准日线写入和可用性观察的最小应用 `Protocol`。
+
+    实现负责版本化、幂等和事实/非事实结果的互斥；应用服务只提交已解码、已校验的领域对象与来源摘要。
+    """
 
     def publish_daily_bars(
         self,
@@ -187,7 +218,11 @@ class EquityDailyBarRepository(Protocol):
 
 
 class EquityMarketDataRepository(EquityDailyBarRepository, Protocol):
-    """负责标准行情、因子、公司事件与概况的版本化写入和发布读取。"""
+    """负责标准行情、因子、公司事件与概况的版本化写入和发布读取。
+
+    所有读取都应受当前 `publication` 约束，所有写入都以永久证券身份分区。
+    这阻止代码复用或未发布修订污染消费者视图。
+    """
 
     def get_instrument(self, instrument_id: UUID) -> StoredEquityInstrument | None:
         """返回一个可供内部查询的标准证券。"""

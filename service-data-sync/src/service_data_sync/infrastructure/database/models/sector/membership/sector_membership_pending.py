@@ -1,4 +1,4 @@
-"""待确认板块成分模型。"""
+"""无法安全解析为永久证券的板块成分待确认行与后续处置模型。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,12 @@ from ...base import Base
 
 
 class SectorMembershipPending(Base):
-    """保存无法安全解析为永久证券的成分行，禁止其推进成分区间。"""
+    """保存无法安全解析为永久证券的成分行，禁止其推进成分区间。
+
+    来源代码、交易所或证券生命周期不充分时，保留原文、快照和原因以便后续治理，而不是强制关联
+    同名或当前代码证券。`pending` 不等于成员不存在，也不等于隔离错误；只要快照含未确认项，就
+    不能宣布该板块完整、更新观察区间或纳入面向消费者的成分 `release`。
+    """
 
     __tablename__ = "sector_membership_pending"
     __table_args__ = (

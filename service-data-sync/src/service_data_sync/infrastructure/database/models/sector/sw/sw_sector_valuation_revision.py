@@ -1,4 +1,4 @@
-"""申万行业估值观察双时间修订模型。"""
+"""申万行业观测日估值字段的来源观察与知识时间 `revision` 模型。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,12 @@ from ...base import Base
 
 
 class SwSectorValuationRevision(Base):
-    """保存乐咕页面对一个申万行业的日期估值观察及知识修订。"""
+    """保存来源页面对一个申万行业的日期估值观察及知识 `revision`。
+
+    静态/滚动市盈率、市净率和股息率是指定行业、观测日期与方法学下的页面观察，不代表官方终态或
+    可与其他行业体系直接比较。来源可能更正历史页面或平台晚些才观察到，故以知识版本保留；缺失、
+    负值或不适用需按受控含义保存，不能用股价或其他估值表自行回算。
+    """
 
     __tablename__ = "sw_sector_valuation_revision"
     __table_args__ = (

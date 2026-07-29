@@ -1,4 +1,4 @@
-"""显式上市生命周期恢复检查点模型。"""
+"""交易所显式上市生命周期同步的成功发布与可重放检查点模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ...base import Base
 
 
 class EquityLifecycleCheckpoint(Base):
-    """保存每所最后成功发布及其 raw/标准证据位置，供无上游请求的确定性 replay。"""
+    """保存每所最后成功发布及其证据位置，供不访问上游的确定性重放。
+
+    检查点只在对应交易所的生命周期 `release` 与 `publication` 成功后推进，因此不会把半截目录、
+    解析失败或质量阻断误作已完成。它保存摘要和私有证据引用以校验历史重放；新成功批次采用
+    失败留证策略时可没有完整正文，仍不能通过“当前目录缺席”伪造退市或暂停事实。
+    """
 
     __tablename__ = "equity_lifecycle_checkpoint"
     __table_args__ = (

@@ -1,4 +1,9 @@
-"""经由 AKShare 东财全市场快照实现 A 股证券目录适配器。"""
+"""经由 `AKShare` 东财全市场快照获取 A 股证券目录的适配器。
+
+东财接口给出的是当前市场截面，不是任意历史时点的正式目录；模块仅按请求交易所
+筛出允许的六位 A 股代码，并将上游表头作 `schema` 指纹。历史目录请求会被明确拒绝，
+不能把今天的名单回填到过去并掩盖代码复用或退市事实。
+"""
 
 from __future__ import annotations
 
@@ -26,7 +31,10 @@ _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 class AkshareEastmoneyEquityCatalogAdapter:
-    """获取东财 A 股完整快照，并按交易所输出标准证券目录。"""
+    """获取东财 A 股完整快照，并按交易所输出标准证券目录。
+
+    该适配器只提供来源观察；上市状态和双时间身份仍由主数据发布层根据独立证据决定。
+    """
 
     provider_id = "akshare-eastmoney-equity-catalog"
 
@@ -39,7 +47,10 @@ class AkshareEastmoneyEquityCatalogAdapter:
         return frozenset({_CAPABILITY})
 
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
-        """请求一次全市场现货快照，并隔离为指定交易所目录。"""
+        """请求一次全市场现货快照，并隔离为指定交易所目录。
+
+        请求日期按上海时区验证，避免北京时间零点附近把同一响应误归入两个业务日。
+        """
         if request.capability != _CAPABILITY:
             raise ProviderError(
                 ProviderErrorCode.INVALID_REQUEST, "unsupported capability", retryable=False
@@ -72,6 +83,7 @@ class AkshareEastmoneyEquityCatalogAdapter:
             )
         try:
             raw_records = frame.to_dict(orient="records")
+            # 交易所由代码段显式识别；名称不能作为证券身份或跨市归属的依据。
             entries = _normalize_entries(raw_records, exchange=exchange)
         except (KeyError, TypeError, ValueError) as error:
             raise ProviderError(
@@ -122,10 +134,14 @@ def _request_values(request: SourceRequest) -> tuple[Exchange, date]:
 def _normalize_entries(
     records: list[dict[str, Any]], *, exchange: Exchange
 ) -> list[dict[str, str | None]]:
-    """将东财中文字段归一化，并只保留目标交易所允许的六位股票代码。"""
+    """将东财中文字段归一化，并只保留目标交易所允许的六位股票代码。
+
+    ``listedOn`` 保持为空：当前现货目录不提供可审计的上市日，不能用抓取日伪造。
+    """
     entries: list[dict[str, str | None]] = []
     for record in records:
         symbol = str(record["代码"]).zfill(6)
+        # 仅恢复数值化丢失的前导零；非法代码会由 `_exchange_for_symbol` 拒绝。
         if _exchange_for_symbol(symbol) is not exchange:
             continue
         name = str(record["名称"]).strip()

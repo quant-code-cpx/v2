@@ -1,4 +1,9 @@
-"""经由 AKShare SDK 获取新浪累计后复权因子。"""
+"""经由 `AKShare SDK` 获取新浪稀疏累计后复权因子的适配器。
+
+输出的是按生效日变化的累计因子，不是已经复权后的价格，也不表示前复权或后复权
+收益率。因子必须为正且有限；上游返回窗口外的行会被过滤，日期窗口按两端包含处理，
+以便应用层能够稳定选择历史锚点。
+"""
 
 from __future__ import annotations
 
@@ -24,7 +29,10 @@ _SCHEMA = "quant-v2.equity-adjustment-factor.v1"
 
 
 class AkshareSinaAdjustmentFactorsAdapter:
-    """读取新浪稀疏累计后复权因子，不保存供应商的复权价格序列。"""
+    """读取新浪稀疏累计后复权因子，不保存供应商的复权价格序列。
+
+    新浪代码前缀只用于 SDK 请求；发布后的证券身份始终是平台的交易所限定代码。
+    """
 
     provider_id = "akshare-sina-adjustment-factor"
 
@@ -62,6 +70,7 @@ class AkshareSinaAdjustmentFactorsAdapter:
             )
         try:
             raw_records = frame.to_dict(orient="records")
+            # SDK 可能返回更宽日期范围；只允许请求窗口内因子影响本次发布。
             factors = [
                 _normalize_record(record)
                 for record in raw_records
@@ -142,7 +151,11 @@ def _sina_symbol(identifier: EquityIdentifier) -> str:
 
 
 def _normalize_record(record: dict[str, Any]) -> dict[str, str]:
-    """把新浪日期与累计因子映射为标准字段。"""
+    """把新浪日期与累计因子映射为标准字段。
+
+    ``cumulativeFactor`` 直接保留来源的累计数，不额外归一化为某个基准日，避免不同批次
+    因基准选择不同而产生伪修订。
+    """
     factor = Decimal(str(record["hfq_factor"]))
     if not factor.is_finite() or factor <= 0:
         raise ValueError("adjustment factor must be finite and positive")

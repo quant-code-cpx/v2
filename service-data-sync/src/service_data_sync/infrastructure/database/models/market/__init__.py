@@ -1,4 +1,8 @@
-"""跨资产市场身份、场所和日历模型。"""
+"""跨资产根身份、交易场所、日历、基金/衍生品与 `P0` 市场事实模型。
+
+本域先区分法律实体、可交易工具、交易场所和来源观察，再保存双时态 `revision`；股票、`ETF`、
+指数、期货、期权、两融和港通不能因为代码或名称相似而绕过这些身份边界。
+"""
 
 from .derivative_revisions import DerivativeContractRevision, DerivativeDailyBarRevision
 from .equity_expansion import (

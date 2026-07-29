@@ -1,4 +1,4 @@
-"""财务能力消费者发布明细模型。"""
+"""财务能力按证券和方法学对消费者可见的冻结 `data_version` 明细模型。"""
 
 from __future__ import annotations
 
@@ -23,7 +23,12 @@ from ..base import Base
 
 
 class FinancialPublication(Base):
-    """将财务 capability、证券和方法学绑定到一个不可变消费者 data_version。"""
+    """将财务 `capability`、证券和方法学绑定到一个不可变消费者 `data_version`。
+
+    每一行说明某只证券在某种报表/指标/估值口径下，消费者应该读哪一个完整、已验收的版本；研究、
+    隔离和半成品 `revision` 绝不进入这里。`effective_as_of` 与 `knowledge_cutoff` 分别冻结业务
+    截点和可用信息截点，读取层据此实现可重现的 PIT 视图、ETag 与受控回滚。
+    """
 
     __tablename__ = "financial_publication"
     __table_args__ = (

@@ -1,4 +1,9 @@
-"""基于 PostgreSQL 的通用空集与来源不可用观测仓储。"""
+"""基于 `PostgreSQL` 的空集与来源不可用观测仓储。
+
+“没有事实”和“本次无法从来源取得事实”都不是零行 `canonical release`，而是独立的
+可用性观察。它们按数据集和精确分区版本化，真实事实成功发布后必须终结旧观察，避免
+消费者把历史空集误读为当前状态。
+"""
 
 from __future__ import annotations
 
@@ -19,7 +24,10 @@ from service_data_sync.infrastructure.database.models.publication.dataset_availa
 
 
 class SqlAlchemyDatasetAvailabilityRepository(DatasetAvailabilityRepository):
-    """将空同步结果保存为独立元数据，不干扰既有 canonical release。"""
+    """将空同步结果保存为独立元数据，不干扰既有 `canonical release`。
+
+    该仓储不创建虚构事实、不会替代当前 `publication`，只提供可审计的执行结论。
+    """
 
     def __init__(self, database: DatabaseClient) -> None:
         """保存服务私有数据库事务工厂，不向应用层暴露 SQLAlchemy 细节。"""
@@ -35,7 +43,10 @@ class SqlAlchemyDatasetAvailabilityRepository(DatasetAvailabilityRepository):
         provider_id: str | None,
         observed_at: datetime,
     ) -> DatasetAvailability:
-        """原子替换同分区当前观测；相同来源时刻重试保持幂等。"""
+        """原子替换同分区当前观测；相同来源时刻重试保持幂等。
+
+        `empty` 与 `source_unavailable` 必须由调用方显式区分，后者不能被消费端当成数据零值。
+        """
         if availability not in {"empty", "source_unavailable"}:
             raise ValueError("dataset availability is invalid")
         if not dataset.strip() or not partition_key.strip() or not reason_code.strip():
@@ -43,6 +54,7 @@ class SqlAlchemyDatasetAvailabilityRepository(DatasetAvailabilityRepository):
         if observed_at.tzinfo is None:
             raise ValueError("observed_at must include a timezone")
         with self._database.transaction() as connection:
+            # 先结束旧观察，再写新观察，使任意时刻最多只有一条当前可用性结论。
             connection.execute(
                 update(DatasetAvailabilityObservation)
                 .where(

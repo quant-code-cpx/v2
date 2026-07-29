@@ -1,4 +1,9 @@
-"""财务来源探针和受控单证券同步任务；本模块不直接调用 provider 或数据库。"""
+"""财务来源探针和受控单证券同步 `Celery` 任务。
+
+本模块负责从配置组装一个来源中立数据源和仓储，并把一次证券同步的失败证据
+留存到服务自有桶。它不解释报表字段、不跨供应商拼接报表，也不把原始响应写入任务
+结果；这些数据口径与发布事务分别由应用层和持久化层负责。
+"""
 
 from __future__ import annotations
 
@@ -36,7 +41,10 @@ _LOGGER = structlog.get_logger(__name__)
 
 
 def register_financial_tasks(app: Celery, *, settings: Settings) -> None:
-    """注册无 beat schedule 的探针和单证券同步任务；重复初始化保持幂等。"""
+    """注册无自动调度的探针和单证券同步任务；重复初始化保持幂等。
+
+    财务同步没有隐式全市场调度，调用方必须明确选择证券，便于控制供应商许可和负载。
+    """
     if _PROBE_TASK not in app.tasks:
 
         @app.task(name=_PROBE_TASK, shared=False)
@@ -73,6 +81,7 @@ def register_financial_tasks(app: Celery, *, settings: Settings) -> None:
         if not settings.financial_enabled:
             raise RuntimeError("financial sync is disabled")
         registry = build_source_registry(settings)
+        # 三种财务能力须属于同一获准来源；任务层不以“有任意一个”降级混合来源。
         providers = registry.for_capability("financial.statement.raw")
         if len(providers) != 1:
             raise RuntimeError("exactly one financial provider must be enabled")
@@ -102,7 +111,10 @@ def register_financial_tasks(app: Celery, *, settings: Settings) -> None:
 
 
 def _financial_adapter_summary(registry: SourceRegistry) -> tuple[int, int]:
-    """统计已声明的财务能力与 adapter 数；不在 probe 中决定来源组合或数据合并。"""
+    """统计已声明的财务能力与适配器数；不在探针中决定来源组合或数据合并。
+
+    返回数量而非 provider 细节，避免健康检查输出配置、凭据或未获批来源信息。
+    """
     provider_ids: set[str] = set()
     available_capability_count = 0
     for capability in _REQUIRED_CAPABILITIES:

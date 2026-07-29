@@ -1,4 +1,4 @@
-"""跨数据域质量评估、规则结果和隔离索引模型。"""
+"""跨数据域质量评估、逐规则证据与私有隔离索引模型。"""
 
 from __future__ import annotations
 
@@ -30,7 +30,12 @@ from ..base import Base
 
 
 class QualityEvaluation(Base):
-    """记录一套版本化质量策略对一个规范化分区运行的完整判定。"""
+    """记录一套版本化质量策略对一个规范化候选分区运行的完整判定。
+
+    评估同时绑定数据集、稳定分区、规范化运行和策略版本，避免把不同输入或规则的分数混作
+    同一次验收。`passed`、`warned` 与 `blocked` 是发布门语义：阻断状态不能被 publication
+    绕过；分数只作辅助指标，不能取代逐规则结果或人工处置。
+    """
 
     __tablename__ = "quality_evaluation"
     __table_args__ = (
@@ -93,7 +98,12 @@ class QualityEvaluation(Base):
 
 
 class QualityResult(Base):
-    """保存质量评估中每条规则的可审计通过结果和有限样本。"""
+    """保存单次质量评估中每条规则的可审计结论、阈值和有限样本。
+
+    复合主键保证同一策略版本内每条规则只有一个结果；`actual_value` 和 `threshold_value` 让
+    运营能复核判定，`sample_json` 只存脱敏、有界样本，不应承担全量问题数据存储。阻断规则
+    即使只影响少量记录也必须阻止对应 release，不能因总分较高而自动放行。
+    """
 
     __tablename__ = "quality_result"
     __table_args__ = (
@@ -135,7 +145,12 @@ class QualityResult(Base):
 
 
 class QuarantineRecord(Base):
-    """建立统一隔离索引，保留问题记录的私有证据引用但不向业务 API 暴露。"""
+    """建立统一隔离索引，保留问题记录的私有证据引用而不向业务 API 暴露。
+
+    隔离是“拒绝进入可见 canonical”的显式业务状态，不是删除或静默修补。记录可定位到来源批次
+    和业务键摘要，但批次级错误允许没有唯一记录键；解决时只关闭处置单，不会篡改原始证据或
+    已发布 release。部分索引只关注 `open` 记录，支撑待处理问题队列。
+    """
 
     __tablename__ = "quarantine_record"
     __table_args__ = (

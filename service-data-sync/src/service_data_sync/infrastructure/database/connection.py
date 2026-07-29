@@ -1,4 +1,9 @@
-"""PostgreSQL 连接池的创建、连通性探测与释放。"""
+"""管理服务进程拥有的 PostgreSQL 连接池、短生命周期会话与事务边界。
+
+仓储只通过本模块取得 `Session`，不自行创建 `Engine`、跨任务复用会话或猜测提交时机。
+`transaction` 正常退出才提交，任意异常都会回滚本次数据库写入并关闭会话，因此一次
+发布、检查点推进和相关审计记录可以由调用方放在同一原子边界内。
+"""
 
 from __future__ import annotations
 
@@ -16,20 +21,37 @@ from service_data_sync.bootstrap.settings import Settings
 
 @dataclass
 class DatabaseClient:
-    """封装服务拥有的 Engine 与短生命周期 `Session`，避免上层管理连接池或事务。"""
+    """封装进程级 `Engine` 与每次仓储操作独享的短生命周期 `Session`。
 
+    `Engine` 只负责连接池，不能承载业务事务状态；实际查询和写入必须发生在新建的
+    `Session` 中。这样 Celery worker、CLI 命令和并发同步分区不会意外共享未提交数据、
+    身份映射缓存或连接生命周期。上层使用 `transaction` 时不应再手工提交或回滚同一会话。
+    """
+
+    # `Engine` 由服务进程共享，关闭进程或容器时统一释放其空闲和在借连接。
     engine: Engine
+    # 工厂不暴露给仓储，避免绕过本类约定的短生命周期会话策略。
     _session_factory: sessionmaker[Session] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        """以关闭 autoflush、保留已提交字段的策略创建仓储专用 Session 工厂。"""
+        """创建仓储专用会话工厂，明确写入何时送库、何时失效。
+
+        `autoflush=False` 让仓储能在预期位置执行 SQL，而不是在中途查询时意外写入；
+        `expire_on_commit=False` 保留刚发布对象的字段，避免提交后为了读取摘要再访问数据库。
+        这不改变事务语义，提交仍只由 `transaction` 的正常退出触发。
+        """
         self._session_factory = sessionmaker(
             bind=self.engine, autoflush=False, expire_on_commit=False
         )
 
     @classmethod
     def from_settings(cls, settings: Settings) -> DatabaseClient:
-        """根据已校验的私密连接 URL 创建具备探活能力的 PostgreSQL 引擎。"""
+        """由已校验的私密连接 URL 创建 PostgreSQL 引擎及连接池策略。
+
+        五秒连接超时让启动和诊断快速暴露不可用依赖；`pool_pre_ping` 会在借出连接前
+        淘汰失效连接，`pool_recycle` 则避免长期空闲连接被基础设施回收后仍被复用。
+        本方法只创建本地对象，不会在此时建立连接或执行迁移。
+        """
         return cls(
             engine=create_engine(
                 settings.database_url.get_secret_value(),
@@ -40,7 +62,11 @@ class DatabaseClient:
         )
 
     def ping(self) -> None:
-        """执行最小查询，并将 SQL 驱动故障转换为领域错误。"""
+        """执行无业务副作用的最小查询，将驱动故障转换为统一依赖错误。
+
+        连接失败、认证失败和数据库暂不可用都会保留原始异常链，但对启动诊断暴露稳定的
+        `DependencyUnavailable` 语义；本方法不创建表、不读取业务数据，也不打开事务。
+        """
         try:
             with self.engine.connect() as connection:
                 connection.execute(select(1))
@@ -48,16 +74,26 @@ class DatabaseClient:
             raise DependencyUnavailable("postgres", "ping") from error
 
     def session(self) -> Session:
-        """创建一个调用方负责关闭的短生命周期 Session，不跨任务或线程共享。"""
+        """创建调用方负责关闭的独立 `Session`，不得跨任务、线程或请求共享。
+
+        此接口适合只读查询或调用方已有更大事务边界的场景；调用方必须使用上下文管理器
+        或显式关闭它，否则连接池中的连接可能长期被占用。
+        """
         return self._session_factory()
 
     @contextmanager
     def transaction(self) -> Iterator[Session]:
-        """提供提交或异常自动回滚的最小事务边界，并在结束后释放 Session。"""
+        """提供一次仓储操作的原子提交/回滚边界，并在结束后归还连接。
+
+        `yield` 之前开始事务；调用方代码无异常返回时 `session.begin()` 提交全部变更，
+        包括事实、来源血缘、质量结果和 publication。任何异常则由 SQLAlchemy 回滚，避免
+        半完成发布或已推进但未落库的 checkpoint；随后外层上下文关闭会话。该方法不吞掉异常，
+        以便任务层决定重试、隔离或终止。
+        """
         with self.session() as session:
             with session.begin():
                 yield session
 
     def close(self) -> None:
-        """在关闭时释放全部数据库引擎连接池。"""
+        """在进程退出时释放连接池；已借出的会话应先由其调用方结束。"""
         self.engine.dispose()

@@ -1,4 +1,4 @@
-"""外部来源批次与可审计观测身份模型。"""
+"""外部来源批次与可审计观察身份模型。"""
 
 from __future__ import annotations
 
@@ -23,7 +23,13 @@ from ..base import Base
 
 
 class SourceBatch(Base):
-    """记录一次不可变外部观察，并关联执行 run、分区、raw 证据和 adapter 版本。"""
+    """记录一次不可变外部观察，并关联执行分区、证据摘要和 adapter 版本。
+
+    同样的 `payload_sha256` 在不同请求、时间或分区出现时仍是不同观察，因而唯一性使用 run、
+    分区和递增序号而不是内容摘要。`provider_id` 标识技术 adapter，`upstream_source` 和可选
+    `source_dataset_id` 保留真实来源；这三者不能互相替代。`raw_uri` 是私有证据位置或兼容历史
+    引用，不表示正文被复制进 PostgreSQL，也绝不能暴露给业务 API。
+    """
 
     __tablename__ = "source_batch"
     __table_args__ = (

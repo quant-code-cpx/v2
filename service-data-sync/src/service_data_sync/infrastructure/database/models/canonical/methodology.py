@@ -1,4 +1,4 @@
-"""跨新数据域使用的方法学版本模型。"""
+"""跨数据域复用的来源、计算与解释方法学版本模型。"""
 
 from __future__ import annotations
 
@@ -21,7 +21,12 @@ from ..base import Base
 
 
 class MethodologyVersion(Base):
-    """冻结 reported 或 derived 数据解释规则，供 release 绑定而不是运行时覆盖。"""
+    """冻结 reported 或 derived 数据的解释规则，供 release 绑定而非运行时覆盖。
+
+    方法学不仅是公式：它还界定来源、单位、会计口径、适用日期和文档证据。`formula_hash` 和
+    `semantic_family` 使同名指标的规则改变可追溯；release 绑定具体版本后，历史查询可复现当时
+    的含义。停用版本只阻止新发布，不会删除或重解释已经发布的数据。
+    """
 
     __tablename__ = "methodology_version"
     __table_args__ = (

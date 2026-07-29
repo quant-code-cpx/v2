@@ -1,4 +1,4 @@
-"""隔离板块成分模型。"""
+"""因结构、来源或身份冲突被隔离的板块成分私有证据模型。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,12 @@ from ...base import Base
 
 
 class SectorMembershipQuarantine(Base):
-    """保存因结构或身份冲突被隔离的成分行，绝不作为 canonical 成员发布。"""
+    """保存因结构或身份冲突被隔离的成分行，绝不作为 `canonical` 成员发布。
+
+    隔离项保留所属快照、来源原文、原因和有限证据，供修复映射或上游异常排查；它不是对证券退市、
+    板块删除或成员退出的业务结论。任何隔离存在都应影响快照完整性与质量门，不能为凑齐覆盖率
+    把它临时写入已确认成员表或关闭已有观察区间。
+    """
 
     __tablename__ = "sector_membership_quarantine"
     __table_args__ = (

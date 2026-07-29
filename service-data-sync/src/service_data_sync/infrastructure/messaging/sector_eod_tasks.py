@@ -1,4 +1,10 @@
-"""板块 EOD shadow 调度、受控重试与 raw 优先恢复任务。"""
+"""板块 `EOD` 快照的 `shadow` 调度、受控重试与原始证据优先恢复任务。
+
+调度器先以权威交易日历判断目标自然日，再为行业和概念两个独立分类体系投递任务。
+每个任务只处理一个明确分区：已有归档观测时重放，不再请求上游；首次执行则在
+`shadow` 或 `publish` 模式下通过应用服务校验和发布。失败重试不会改变分区、来源截止
+时间或数据口径。
+"""
 
 from __future__ import annotations
 
@@ -41,13 +47,21 @@ _LOGGER = structlog.get_logger(__name__)
 
 
 def register_sector_eod_tasks(app: Celery, *, settings: Settings) -> None:
-    """向 worker 注册固定 EOD dispatch/run 任务；任务本身仍受全部运行开关与日历约束。"""
+    """向工作进程注册固定 `EOD` 调度和运行任务；任务仍受运行开关与日历约束。
+
+    三个任务必须作为一个集合注册，避免部分旧任务混入新调度语义；已有任一任务时
+    保持现有 worker 定义不变。
+    """
     if _DISPATCH_TASK in app.tasks or _RUN_TASK in app.tasks or _REAP_TASK in app.tasks:
         return
 
     @app.task(name=_DISPATCH_TASK, shared=False)
     def dispatch_shadow() -> dict[str, int | str]:
-        """在 16:20 调度点读取权威日历，并为两个 scheme 投递同一明确交易日任务。"""
+        """在 16:20 调度点读取权威日历，并为两个分类体系投递同一交易日任务。
+
+        日历返回 ``None`` 代表没有权威结论，和明确休市一样不投递消息，避免调度器
+        用本机日期或周末规则替代交易所事实。
+        """
         if not settings.sector_eod_scheduler_enabled:
             return {"status": "disabled", "queued": 0}
         # 调度开关不能绕过来源准入；未获许可时不应产生后续无效消息。
@@ -79,7 +93,11 @@ def register_sector_eod_tasks(app: Celery, *, settings: Settings) -> None:
 
     @app.task(name=_REAP_TASK, shared=False)
     def reap_expired_leases() -> dict[str, int | str]:
-        """回收崩溃 worker 的 lease，并重投仍 queued 的明确分区；不直接访问 provider。"""
+        """回收崩溃 worker 的租约，并重投仍排队的明确分区；不访问数据源。
+
+        租约是数据库中的执行所有权，回收后仍由运行任务决定重放还是抓取，因此
+        回收任务自身不会绕过来源准入、日期校验或幂等发布。
+        """
         if not settings.sector_eod_scheduler_enabled:
             return {"status": "disabled", "requeued": 0}
         # 暂停来源准入时保留历史运行记录，但不重投会触发来源访问的任务。
@@ -115,7 +133,11 @@ def register_sector_eod_tasks(app: Celery, *, settings: Settings) -> None:
     def run_sector_eod(
         task: Any, scheme_value: str, trade_date_value: str
     ) -> dict[str, str | bool]:
-        """执行或恢复一个明确分区；临时来源与基础设施失败按 5/15/30 分钟退避。"""
+        """执行或恢复一个明确分区；临时来源与基础设施失败按 5/15/30 分钟退避。
+
+        晚确认和工作进程丢失拒绝会导致消息重复投递；仓储租约、来源摘要和发布版本
+        共同保证重复执行不会生成第二份相同的 EOD 事实。
+        """
         if not settings.sector_eod_enabled:
             return {"status": "source-policy-disabled", "replayed": False}
         scheme = SectorScheme(scheme_value)
@@ -139,6 +161,7 @@ def register_sector_eod_tasks(app: Celery, *, settings: Settings) -> None:
                 scheme=scheme,
                 trade_date=trade_date,
             )
+            # `shadow` 只产生质量观察；`publish` 才能改变消费者可见的 `canonical` 版本。
             execution_mode = (
                 SectorEodExecutionMode.PUBLISH
                 if settings.sector_eod_publish_enabled
@@ -153,6 +176,7 @@ def register_sector_eod_tasks(app: Celery, *, settings: Settings) -> None:
                 execution_mode=execution_mode.value,
                 replayed=replayed,
             )
+            # 同一分区已存在来源观测时必须重放，防止重试把更晚响应冒充原执行证据。
             operation = service.replay if replayed else service.sync
             result = retain_failure_evidence(
                 raw_payload_store,
@@ -207,6 +231,7 @@ def register_sector_eod_tasks(app: Celery, *, settings: Settings) -> None:
             )
             raise
         except (BotoCoreError, ClientError, OSError, SQLAlchemyError) as error:
+            # 对象存储、网络和数据库短故障与上游暂不可用一样可恢复，保留同一分区重试。
             countdown = _retry_countdown(task)
             _log_retry(
                 error=error,
@@ -231,7 +256,10 @@ def register_sector_eod_tasks(app: Celery, *, settings: Settings) -> None:
 
 
 def _retry_countdown(task: Any) -> int:
-    """按当前重试次数选择冻结退避档位并加入小抖动，避免两个 scheme 同时重压来源。"""
+    """按当前重试次数选择冻结退避档位并加入小抖动，避免两个分类体系同时重压来源。
+
+    退避档位固定而非无限增长，便于值班人员预估最后一次自动恢复尝试的时间。
+    """
     retries = int(task.request.retries)
     delay = _RETRY_DELAYS_SECONDS[min(retries, len(_RETRY_DELAYS_SECONDS) - 1)]
     return delay + random.randint(0, 30)
@@ -290,7 +318,10 @@ def _log_failure(
 
 
 def _error_code(error: Exception) -> str:
-    """将异常归类为低基数错误码，避免异常文本进入日志索引或 metrics 维度。"""
+    """将异常归类为低基数错误码，避免异常文本进入日志索引或 `metrics` 维度。
+
+    保留错误类别足以统计故障域；具体来源字节和异常细节只可经失败证据受控查看。
+    """
     if isinstance(error, ProviderError):
         return error.code.value
     if isinstance(error, (BotoCoreError, ClientError)):

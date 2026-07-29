@@ -1,4 +1,4 @@
-"""板块成分固定发布版本模型。"""
+"""板块成分消费者读取使用的完整快照集合固定 `release` 模型。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,12 @@ from ...base import Base
 
 
 class SectorMembershipRelease(Base):
-    """固定一个分类体系成分读取所使用的完整快照集合，允许受控 carry forward。"""
+    """固定一个分类体系成分读取所使用的完整快照集合，允许受控 `carry forward`。
+
+    一个 `release` 声明消费者在某次读取中应使用哪些板块的已验收快照，防止逐板块“当前最新”造成
+    混用时间点。受控延用只可引用先前完整、质量通过的快照并留存原因，不能把失败/空响应当作空集；
+    新 `release` 或回滚均是指针切换，不修改历史快照、成员或观察区间。
+    """
 
     __tablename__ = "sector_membership_release"
     __table_args__ = (

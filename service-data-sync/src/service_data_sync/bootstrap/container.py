@@ -39,7 +39,12 @@ from service_data_sync.infrastructure.providers.akshare import (
 
 @dataclass
 class ServiceContainer:
-    """承载单进程依赖，并负责在退出时按反向使用顺序关闭资源。"""
+    """承载一个进程共享的基础设施依赖与获准来源注册表。
+
+    容器只负责组装，不承载业务状态；CLI、HTTP 进程和 worker 在入口处创建一个
+    容器，并在退出时统一关闭网络客户端。来源注册表保留的是 provider-neutral
+    port，因此应用层不会直接依赖某个供应商 SDK。
+    """
 
     settings: Settings
     database: DatabaseClient
@@ -49,7 +54,11 @@ class ServiceContainer:
     trading_calendar: TradingCalendarPort
 
     def close(self) -> None:
-        """在进程退出时按反向使用顺序尽力关闭依赖。"""
+        """在进程退出时按反向使用顺序尽力关闭依赖。
+
+        关闭操作是资源回收，不应遮蔽已经产生的业务异常；因此即使某个驱动已断连，
+        其余连接仍会获得释放机会。
+        """
         # 单个驱动关闭失败不能阻止其余连接释放，避免进程退出时遗留资源。
         for dependency in (self.object_storage, self.broker, self.database):
             with suppress(Exception):
@@ -57,7 +66,11 @@ class ServiceContainer:
 
 
 def build_container(settings: Settings) -> ServiceContainer:
-    """根据策略配置组合基础设施客户端和获准适配器。"""
+    """根据已校验策略创建进程所需客户端和获准 adapter。
+
+    此处不探测外部数据源、不建表，也不启动后台任务；延迟这些副作用能让诊断、CLI
+    和测试复用同一组装规则，同时在真正执行前保留清晰的失败边界。
+    """
     registry = build_source_registry(settings)
     return ServiceContainer(
         settings=settings,
@@ -70,7 +83,11 @@ def build_container(settings: Settings) -> ServiceContainer:
 
 
 def build_source_registry(settings: Settings) -> SourceRegistry:
-    """只按开关组合来源适配器，不创建数据库、消息或对象存储客户端。"""
+    """只按批准的能力开关组合来源 adapter，不创建其他基础设施客户端。
+
+    注册与使用分离：这里仅声明某来源可被选择，具体任务仍须按 capability 精确挑选
+    adapter。这样关闭某个实验性能力时，不会影响已批准的独立数据集。
+    """
     registry = SourceRegistry()
     if settings.akshare_enabled:
         # P0 CLI 默认精确选择 `provider_id=akshare`；统一 adapter 避免同名 provider 注册歧义。
@@ -171,7 +188,11 @@ def build_source_registry(settings: Settings) -> SourceRegistry:
 
 
 def _trading_calendar_for_settings(settings: Settings) -> TradingCalendarPort:
-    """仅在显式开关开启时提供已发布的年度日历，其余场景保持未知并阻止 EOD。"""
+    """按开关返回已发布交易日历或显式未知日历。
+
+    EOD 横截面只能在已验证年份判断交易日；未启用时返回拒绝型实现，而不是猜测
+    周末或节假日，从而防止在错误日期发布不完整快照。
+    """
     if settings.trading_calendar_enabled:
         return SseSzseAshare2026TradingCalendar()
     return UnavailableTradingCalendar()

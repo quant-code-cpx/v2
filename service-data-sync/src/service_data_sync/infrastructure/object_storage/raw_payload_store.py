@@ -1,4 +1,9 @@
-"""供同步失败排障使用的兼容 S3 原始证据存储。"""
+"""仅在同步失败时归档原始来源证据的兼容 `S3` 存储。
+
+正常同步只在进程内暂存原始和标准化载荷，成功后立即丢弃；这是为了控制留存范围，
+避免把供应商数据无条件复制到对象存储。若抓取、`schema` 校验或发布失败，则把同次
+调用的证据和私有 `manifest` 一并写入服务自有桶，供有权限的排障人员复核。
+"""
 
 from __future__ import annotations
 
@@ -22,7 +27,11 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class S3RawPayloadStore(RawPayloadStore):
-    """仅在同步失败时向服务自有 S3 桶写入不可变来源证据。"""
+    """仅在同步失败时向服务自有 `S3` 桶写入不可变来源证据。
+
+    暂存区按内容摘要和 `MIME` 类型去重，生命周期严格限于一次同步操作；它不是可查询的
+    历史档案，也不能为成功批次提供回放字节。
+    """
 
     def __init__(self, object_storage: ObjectStorageClient) -> None:
         """接收组合根已配置好的对象存储客户端。"""
@@ -35,7 +44,11 @@ class S3RawPayloadStore(RawPayloadStore):
         return f"unretained://sha256/{payload.content_sha256}"
 
     def stage_batch(self, batch: ProviderBatch) -> None:
-        """在解码前暂存上游批次，保证 schema 失败也保留可排障来源字节。"""
+        """在解码前暂存上游批次，保证 `schema` 失败也保留可排障来源字节。
+
+        原始字节与适配器标准化字节都要暂存：前者用于复现供应商响应，后者用于判断
+        映射或解码环节是否造成差异。
+        """
         raw_payload = batch.raw_payload if batch.raw_payload is not None else batch.payload
         raw_content_type = batch.raw_content_type or batch.content_type
         self._stage_bytes(raw_payload, raw_content_type)
@@ -51,6 +64,7 @@ class S3RawPayloadStore(RawPayloadStore):
         prefix = f"failures/{captured_at:%Y/%m/%d}/{failure_id}"
         objects: list[dict[str, object]] = []
         for sequence, payload in enumerate(self._pending.values(), start=1):
+            # 失败编号使每次异常独立可审计，摘要使同次对象可校验而无需暴露内容到日志。
             object_key = f"{prefix}/{sequence:03d}-{payload.content_sha256}.bin"
             self._object_storage.client.put_object(
                 Bucket=self._object_storage.bucket,
@@ -68,6 +82,7 @@ class S3RawPayloadStore(RawPayloadStore):
                 }
             )
 
+        # `manifest` 只记录定位和完整性元数据；异常文本可能含供应商细节，故仅留错误类别。
         manifest_key = f"{prefix}/manifest.json"
         manifest = json.dumps(
             {
@@ -108,10 +123,14 @@ class S3RawPayloadStore(RawPayloadStore):
         self._pending.setdefault((payload.content_sha256, payload.content_type), payload)
 
     def get(self, uri: str) -> bytes:
-        """读取失败证据；成功同步的不可回放标记会明确拒绝读取。"""
+        """读取失败证据；成功同步的不可回放标记会明确拒绝读取。
+
+        请求必须指向当前服务配置的桶，不能把调用方提供的 `URI` 当作任意 `S3` 读取能力。
+        """
         if uri.startswith("unretained://sha256/"):
             raise ValueError("successful source payload was not retained")
         parsed = urlparse(uri)
+        # 限定桶名避免内部诊断接口被利用为跨桶对象读取代理。
         if parsed.scheme != "s3" or parsed.netloc != self._object_storage.bucket:
             raise ValueError("raw URI must target the configured S3 bucket")
         key = parsed.path.lstrip("/")
@@ -128,7 +147,11 @@ class S3RawPayloadStore(RawPayloadStore):
 
 
 class FailureEvidenceDataSource:
-    """在来源批次返回后立即暂存证据，避免解码失败早于应用层归档步骤。"""
+    """在来源批次返回后立即暂存证据，避免解码失败早于应用层归档步骤。
+
+    它保持 `DataSourcePort` 的身份和能力语义不变，只为失败路径增加一次短生命周期
+    的原始字节暂存，因此应用服务无需依赖 `S3` 或知道留存策略。
+    """
 
     def __init__(self, source: DataSourcePort, store: S3RawPayloadStore) -> None:
         """保存唯一来源和本次同步私有的失败证据暂存区。"""
@@ -155,7 +178,11 @@ def retain_failure_evidence[RESULT](
     store: S3RawPayloadStore,
     operation: Callable[[], RESULT],
 ) -> RESULT:
-    """执行同步；仅操作失败时固化已暂存的来源证据，且不掩盖原始异常。"""
+    """执行同步；仅操作失败时固化已暂存的来源证据，且不掩盖原始异常。
+
+    成功和失败后都会清空内存暂存；归档本身失败时仍重新抛出原始同步异常，以保留
+    正确的重试分类和根因。
+    """
     try:
         return operation()
     except Exception as error:
@@ -178,7 +205,10 @@ async def retain_failure_evidence_async[RESULT](
     store: S3RawPayloadStore,
     operation: Callable[[], Awaitable[RESULT]],
 ) -> RESULT:
-    """异步执行同步；仅协程失败时固化已暂存来源证据。"""
+    """异步执行同步；仅协程失败时固化已暂存来源证据。
+
+    语义与同步包装器相同，区别仅是等待被包装操作；它不会吞掉取消或供应商异常。
+    """
     try:
         return await operation()
     except Exception as error:

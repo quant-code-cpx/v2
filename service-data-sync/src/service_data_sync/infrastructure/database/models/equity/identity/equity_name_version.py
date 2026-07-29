@@ -1,4 +1,4 @@
-"""证券名称双时间版本模型。"""
+"""证券显示名称的业务有效时间与平台知识时间双时态版本模型。"""
 
 from __future__ import annotations
 
@@ -31,7 +31,12 @@ from ...base import Base
 
 
 class EquityNameVersion(Base):
-    """保存证券显示名称在业务时间和知识时间上的可复验历史。"""
+    """保存证券显示名称在业务时间和知识时间上的可复验历史。
+
+    名称变更不改变永久证券身份，也不能覆盖旧快照中的原文。`effective_range` 让历史界面可显示
+    当时名称，`knowledge_range` 让“截至某日平台知道什么”查询可复现；重名并不表示同一证券，
+    所以该表始终通过 `security_id` 而非名称本身关联其他事实。
+    """
 
     __tablename__ = "equity_name_version"
     __table_args__ = (

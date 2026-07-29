@@ -1,4 +1,4 @@
-"""板块 EOD 分区恢复账本模型。"""
+"""按 `scheme`/交易日拆分的板块 `EOD` 租约、阶段和可恢复检查点账本模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ...base import Base
 
 
 class SectorEodSyncPartition(Base):
-    """保存一个 scheme/交易日 EOD 同步的租约、阶段、来源 checkpoint 与稳定错误码。"""
+    """保存一个 `scheme`/交易日 `EOD` 同步的租约、阶段、来源 `checkpoint` 与稳定错误码。
+
+    租约、心跳、尝试次数和重试时间防止多个 worker 同时处理同一横截面；阶段记录抓取、归档、质量、
+    发布等可恢复位置。过期租约 reaper 只能把未完成分区重新入队，不能访问来源或推断交易日；失败
+    不推进已发布 checkpoint，避免后续任务跳过尚未形成完整快照的日期。
+    """
 
     __tablename__ = "sector_eod_sync_partition"
     __table_args__ = (

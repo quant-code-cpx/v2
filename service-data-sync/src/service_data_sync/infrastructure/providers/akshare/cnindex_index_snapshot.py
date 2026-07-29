@@ -1,4 +1,9 @@
-"""经由 AKShare 国证接口提供目录与带日期的样本、权重影子快照。"""
+"""经由 `AKShare` 国证接口提供目录与带日期样本、权重的影子快照。
+
+国证返回的样本日期和权重日期会原样成为来源观察日期；它们不是平台确认的历史生效
+区间。目录、样本和权重仍是独立能力，适配器严格校验管理人、指数代码和表头，避免把
+其他指数公司或未知列混进国证数据集。
+"""
 
 from __future__ import annotations
 
@@ -38,7 +43,10 @@ _WEIGHT_SCHEMA = "quant-v2.index-weight-close-observed-snapshot.v1"
 
 
 class AkshareCnindexIndexSnapshotAdapter:
-    """调用国证目录与样本详情接口，不猜测交易所、有效区间或历史覆盖范围。"""
+    """调用国证目录与样本详情接口，不猜测交易所、有效区间或历史覆盖范围。
+
+    同一批次的日期必须可复核；缺失日期不能用抓取时间替代，否则会错误放大数据时效性。
+    """
 
     provider_id = "akshare-cnindex-index-snapshot"
 
@@ -57,7 +65,10 @@ class AkshareCnindexIndexSnapshotAdapter:
         )
 
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
-        """获取一批国证来源观察，保留 raw evidence 并将未知交易所显式保留为空。"""
+        """获取一批国证来源观察，保留原始证据并将未知交易所显式保留为空。
+
+        来源短暂不可用可重试；列、日期或权重形状异常被标为不可重试的 `schema` 漂移。
+        """
         capability, identifier = _request_values(request)
         try:
             async with asyncio.timeout(self._request_timeout_seconds):
@@ -180,7 +191,10 @@ def _normalize_payload(
     identifier: IndexIdentifier | None,
     records: list[dict[str, Any]],
 ) -> dict[str, object]:
-    """将国证来源列归一化为中立 JSON，同时保留无法解析的交易所空值。"""
+    """将国证来源列归一化为中立 JSON，同时保留无法解析的交易所空值。
+
+    当前详情中的成分与权重共用同一来源日期，但仍按不同能力分别发布，不能互相补全。
+    """
     if capability is IndexCapability.CATALOG_SNAPSHOT:
         return {
             "schema": _CATALOG_SCHEMA,

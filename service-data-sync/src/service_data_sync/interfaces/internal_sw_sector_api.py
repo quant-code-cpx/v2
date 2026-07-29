@@ -1,4 +1,8 @@
-"""申万 taxonomy、父级闭包与估值的版本化内部只读 API。"""
+"""申万 taxonomy、父级闭包与估值的版本化内部只读 API。
+
+接口将一至三级行业、父级路径、方法学血缘和指定日期估值绑定到一个生产 release；游标
+和 ETag 随版本变化，因而调用方不会把不同 taxonomy 版本或研究态观察混入同一页面。
+"""
 
 from __future__ import annotations
 

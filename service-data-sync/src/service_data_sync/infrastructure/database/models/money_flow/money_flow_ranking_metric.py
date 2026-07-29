@@ -1,4 +1,4 @@
-"""供应商资金流排行固定度量模型。"""
+"""供应商资金流排行位置与分桶下固定四类度量的强类型模型。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,12 @@ from ..base import Base
 
 
 class MoneyFlowRankingMetric(Base):
-    """保存一个排行位置和 bucket 的固定四度量，不使用 EAV。"""
+    """保存一个排行位置和 `bucket` 的固定四度量，不使用 `EAV`。
+
+    流入、流出、净额和净占比是受控字段；供应商未提供的值保持空，不把任意新增列塞进键值表逃避
+    单位/语义治理。至少一项度量必须存在，比例统一为一比一小数；对同一排行位置和分桶的读取必须
+    通过所属快照解释方法学、窗口、样本池、币种和完整性。
+    """
 
     __tablename__ = "money_flow_ranking_metric"
     __table_args__ = (

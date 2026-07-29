@@ -1,4 +1,4 @@
-"""申万行业快照恢复 checkpoint 模型。"""
+"""申万行业指定观测日成功发布后的证据摘要与可重放 `checkpoint` 模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ...base import Base
 
 
 class SwSectorSyncCheckpoint(Base):
-    """保存精确观测日最近成功发布后的 raw 与中立重放位置。"""
+    """保存精确观测日最近成功发布后的证据摘要与中立载荷重放位置。
+
+    检查点只在完整 `taxonomy`/估值质量通过并发布后更新，记录来源、哈希、私有对象引用和适用方法学；
+    重放先校验摘要再解码，避免遭篡改对象形成新版本。新成功批次采用失败留证策略时可能没有完整
+    正文，历史 checkpoint 仍可回放；失败、隔离或未发布候选绝不推进它。
+    """
 
     __tablename__ = "sw_sector_sync_checkpoint"
     __table_args__ = (

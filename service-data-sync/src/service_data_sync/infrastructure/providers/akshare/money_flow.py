@@ -1,4 +1,10 @@
-"""通过 AKShare 1.18.78 隔离东财与同花顺资金流接口及供应商字段。"""
+"""通过固定版本 `AKShare` 隔离东财与同花顺资金流接口及供应商字段。
+
+东财订单规模日序列、东财排行和同花顺交易方向排行采用不同方法学，必须作为独立
+`capability` 发布。东财比例从百分数换为小数比率；同花顺金额的“万”“亿”后缀换为
+`CNY`。供应商排行的完整性没有得到验证，因此明确标注为来源返回页，不能当作完整
+市场截面或日频时间序列。
+"""
 
 from __future__ import annotations
 
@@ -50,7 +56,10 @@ FrameFetcher = Callable[..., Any]
 
 
 class AkshareEastmoneyMoneyFlowAdapter:
-    """把东财订单规模日序列与 supplier ranking 归一为中立 batch。"""
+    """把东财订单规模日序列与供应商排行归一为中立批次。
+
+    排行的滚动窗口仍保持供应商定义，不能由调用方把“三日排行”拆成三条单日资金流。
+    """
 
     provider_id = "akshare-eastmoney-money-flow"
 
@@ -77,7 +86,10 @@ class AkshareEastmoneyMoneyFlowAdapter:
         return _EASTMONEY_CAPABILITIES
 
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
-        """执行唯一匹配的 SDK 调用并同时返回标准 JSON 与完整 DataFrame raw。"""
+        """执行唯一匹配的 `SDK` 调用并同时返回标准 `JSON` 与完整 `DataFrame` 原始行。
+
+        适配器只映射已声明能力；任意 SDK 函数不能透过参数名被调用方间接访问。
+        """
         if request.capability not in _EASTMONEY_CAPABILITIES:
             raise _invalid_request("unsupported money-flow capability")
         parameters = dict(request.parameters)
@@ -161,7 +173,11 @@ class AkshareEastmoneyMoneyFlowAdapter:
 
 
 class AkshareThsMoneyFlowAdapter:
-    """把同花顺交易方向即时或滚动排行隔离成独立方法学 batch。"""
+    """把同花顺交易方向即时或滚动排行隔离成独立方法学批次。
+
+    同花顺的“即时”行可含流入、流出、净额，滚动排行通常只给净额；缺失字段保持空值，
+    不从另一来源或另一窗口补齐。
+    """
 
     provider_id = "akshare-ths-money-flow"
 
@@ -186,7 +202,10 @@ class AkshareThsMoneyFlowAdapter:
         return _THS_CAPABILITIES
 
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
-        """执行同花顺 SDK 调用，保留带万/亿后缀 raw 并按版本化规则换算。"""
+        """执行同花顺 `SDK` 调用，保留带万/亿后缀原始行并按版本化规则换算。
+
+        未知金额后缀会触发 `schema` 错误，避免错误倍率把资金规模放大或缩小一万倍。
+        """
         if request.capability not in _THS_CAPABILITIES:
             raise _invalid_request("unsupported money-flow capability")
         parameters = dict(request.parameters)
@@ -243,7 +262,10 @@ def _normalize_order_size_daily(
     parameters: dict[str, str],
     records: list[dict[str, object]],
 ) -> dict[str, object]:
-    """把东财五个 bucket 的日历史转换为固定四度量列。"""
+    """把东财五个订单规模桶的日历史转换为固定四度量列。
+
+    每个交易日都生成五个来源定义桶；桶间不是互斥的模型推断，不能按名称重新汇总。
+    """
     observations: list[dict[str, object]] = []
     for record in records:
         trade_date = _date_text(record["日期"])
@@ -275,7 +297,10 @@ def _normalize_order_size_ranking(
     parameters: dict[str, str],
     records: list[dict[str, object]],
 ) -> dict[str, object]:
-    """把东财合并 DataFrame 排行保留为未验证完整性的供应商快照。"""
+    """把东财合并 `DataFrame` 排行保留为未验证完整性的供应商快照。
+
+    `isComplete=False` 是业务事实：SDK 可能只返回一页或筛选结果，不能用行数推断全市场。
+    """
     indicator = parameters["indicator"]
     prefix = indicator
     window_size = {"今日": 1, "3日": 3, "5日": 5, "10日": 10}[indicator]
@@ -335,7 +360,10 @@ def _normalize_ths_ranking(
     parameters: dict[str, str],
     records: list[dict[str, object]],
 ) -> dict[str, object]:
-    """解析同花顺带中文倍率金额，滚动排行仍不伪装为日历史。"""
+    """解析同花顺带中文倍率金额，滚动排行仍不伪装为日历史。
+
+    `supplierPosition` 是上游展示顺序；缺失序号才以当前页顺序回退，且回退不声称全局排名。
+    """
     indicator = parameters["indicator"]
     window_size = 1 if indicator == "即时" else int(indicator.removesuffix("日排行"))
     items: list[dict[str, object]] = []
@@ -408,7 +436,10 @@ def _provider_batch(
     upstream_source: str,
     adapter_version: str,
 ) -> ProviderBatch:
-    """序列化标准载荷与 raw 记录，并冻结完整表头 fingerprint。"""
+    """序列化标准载荷与原始记录，并冻结完整表头 `fingerprint`。
+
+    指纹覆盖所有列（含未知新增列），使供应商悄悄改表头时可在发布前隔离而非漏记变化。
+    """
     raw_object = {
         "columns": [str(column) for column in frame.columns],
         "records": [
@@ -508,13 +539,13 @@ def _decimal_text(value: object) -> str | None:
 
 
 def _ratio_text(value: object) -> str | None:
-    """把来源百分数转换为 canonical 十进制比率。"""
+    """把来源百分数转换为 `canonical` 十进制比率。"""
     decimal_text = _decimal_text(value)
     return None if decimal_text is None else format(Decimal(decimal_text) / Decimal(100), "f")
 
 
 def _scaled_cny_text(value: object) -> str | None:
-    """按同花顺原始万/亿后缀换算为 CNY，并拒绝未知倍率。"""
+    """按同花顺原始万/亿后缀换算为 `CNY`，并拒绝未知倍率。"""
     text = _text(value).replace(",", "").replace(" ", "")
     if text in {"", "-", "--", "nan", "None", "<NA>"}:
         return None

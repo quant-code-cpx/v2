@@ -1,4 +1,4 @@
-"""资金流方法学适用范围与 universe 模型。"""
+"""资金流方法学版本可支持的 `scope` 类型、样本池与来源范围模型。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,12 @@ from ..base import Base
 
 
 class MoneyFlowMethodologyScope(Base):
-    """逐行声明方法学版本支持的 scope 类型和 universe。"""
+    """逐行声明方法学版本支持的 `scope` 类型和 `universe`。
+
+    个股、板块和市场的净流入不因字段相同而可互换；每个 `scope` 还需明确哪些证券、板块或市场
+    样本属于该统计范围。来源页面、指数成分或分类目录变更时，必须通过受控样本池版本表达，不能
+    让应用层按当前名单随意过滤历史序列。
+    """
 
     __tablename__ = "money_flow_methodology_scope"
     __table_args__ = (

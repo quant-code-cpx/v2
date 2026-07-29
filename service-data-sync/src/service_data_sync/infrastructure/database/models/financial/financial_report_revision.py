@@ -1,4 +1,4 @@
-"""财务报表双时态修订模型。"""
+"""按报告期年度分区的财务报表双时态 `revision` 事实模型。"""
 
 from __future__ import annotations
 
@@ -26,7 +26,13 @@ from ..base import Base
 
 
 class FinancialReportRevision(Base):
-    """追加报表 revision 并保存有效时间和平台知识时间，物理分区按报告年度创建。"""
+    """追加报表 `revision` 并保存业务有效和平台知识时间，物理分区按报告年度创建。
+
+    `effective_*` 表示该披露内容在业务世界应适用的半开日期范围，`known_*` 表示平台可使用它的
+    半开时间范围；两者不可互换，且 `known_from` 不早于实际观察时间。公告、供应商更新和实际观察
+    的可信度显式记录，历史更正通过新 `revision` 关闭旧知识范围；年度分区只是查询优化，不会
+    改变跨年报告期的双时态语义。
+    """
 
     __tablename__ = "financial_report_revision"
     __table_args__ = (

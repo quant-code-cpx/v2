@@ -1,4 +1,8 @@
-"""板块 EOD 快照与确定性排行的内部 HTTP 路由。"""
+"""板块 EOD 快照与确定性排行的内部 HTTP 路由。
+
+读取只面向已经发布的完整横截面，并将快照版本、交易日和稳定排序一并固定；candidate、
+quarantine 和影子观测不会被意外返回，确保消费者不会在同一请求范围看到半批数据。
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""资金流 universe 的版本化身份模型。"""
+"""资金流 `universe` 的业务有效范围、成员血缘和版本化身份模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ..base import Base
 
 
 class MoneyFlowUniverseVersion(Base):
-    """保存来源样本池的版本及其与身份或成分发布的血缘。"""
+    """保存来源样本池的版本及其与身份目录或成分发布的血缘。
+
+    样本池决定一条资金流值覆盖哪些证券、板块或市场对象，必须按业务有效区间版本化；它可关联已发布
+    身份目录或成分 `release`，来源未说明成员时也允许明确标记未知。未知 `universe` 不能被伪造成
+    当前全市场名单，成员数量和内容摘要只是可验证证据，不能替代精确成员记录。
+    """
 
     __tablename__ = "money_flow_universe_version"
     __table_args__ = (

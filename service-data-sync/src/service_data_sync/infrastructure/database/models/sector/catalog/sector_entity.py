@@ -1,4 +1,4 @@
-"""板块稳定身份模型。"""
+"""分类体系内板块永久键、当前展示投影和来源激活状态模型。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,12 @@ from ...base import Base
 
 
 class SectorEntity(Base):
-    """保存分类体系内的板块永久 UUID 与当前展示状态。"""
+    """保存分类体系内的板块永久键与当前展示状态。
+
+    `sector_key` 是所有行情、成分和 `EOD` 事实使用的稳定内部身份，来源代码/名称只是该体系内的
+    当前投影。目录同步可以把早先由行情创建的 `PENDING` 身份升级为 `ACTIVE`，但不能因当前目录
+    缺席删除历史身份或把同名板块跨 `scheme` 合并。
+    """
 
     __tablename__ = "sector_entity"
     __table_args__ = (

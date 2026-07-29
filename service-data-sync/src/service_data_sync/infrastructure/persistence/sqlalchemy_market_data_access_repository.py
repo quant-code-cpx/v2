@@ -1,4 +1,9 @@
-"""0028 已发布市场数据的 SQLAlchemy typed reader，只读取 immutable canonical publication。"""
+"""已发布市场数据的 `SQLAlchemy` 强类型读取器，只读取不可变 `canonical publication`。
+
+每次查询先从运行时目录取得精确数据集、字段白名单和分区约束，再选择唯一当前或指定
+数据版本。读取器拒绝全市场范围、模糊来源字段、未验证游标及跨分区拼接；输出不包含
+内部主键、来源批次、原始对象地址或供应商凭据，只返回合同允许的业务字段与版本血缘。
+"""
 
 from __future__ import annotations
 

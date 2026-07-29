@@ -1,4 +1,4 @@
-"""平台派生指标的逐项报表输入血缘模型。"""
+"""平台派生指标到逐项报表输入、来源批次与冻结发布版本的血缘模型。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,12 @@ from ..base import Base
 
 
 class FinancialDerivationInput(Base):
-    """逐项关联派生 revision、来源报表 revision、raw batch 和输入 publication。"""
+    """逐项关联派生 `revision`、来源报表 `revision`、来源批次和输入 `publication`。
+
+    同一公式可能使用当前累计、上期累计、上年全年或同期值；`input_sequence` 和 `input_role` 让
+    每个输入在公式中的位置可重演。它冻结计算当时读取的报表 `data_version`，因此后来报表更正
+    不会悄悄改写既有派生结果；币种或单位不可比时应在质量门阻断，而不是在此表隐式换算。
+    """
 
     __tablename__ = "financial_derivation_input"
     __table_args__ = (

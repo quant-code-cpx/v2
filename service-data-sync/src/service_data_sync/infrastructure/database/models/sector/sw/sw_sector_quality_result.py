@@ -1,4 +1,4 @@
-"""申万行业完整快照质量证据模型。"""
+"""申万三级行业完整快照的结构、闭包、覆盖和估值有限性质量证据模型。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,12 @@ from ...base import Base
 
 
 class SwSectorQualityResult(Base):
-    """记录 schema、三级闭包、覆盖和估值有限数检查结果。"""
+    """记录 `schema`、三级闭包、覆盖和估值有限数检查结果。
+
+    结构错误、缺级、循环父子关系、重复代码、覆盖不足或非有限估值都会阻断该观测日的发布；每条规则
+    保存实际值、阈值和有限样本，便于重放时复核。质量通过不代表来源成为官方最终值，只说明在冻结
+    方法学下足以形成可读 `taxonomy`/估值 `data_version`。
+    """
 
     __tablename__ = "sw_sector_quality_result"
     __table_args__ = (

@@ -1,4 +1,4 @@
-"""上游直取的个股未复权周线模型。"""
+"""按周期结束日年度物理分区的个股上游直取未复权周线 `revision` 模型。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,12 @@ from ...base import Base
 
 
 class EquityWeeklyBar(Base):
-    """保存上游周线接口直接返回的 revision，不允许由日线聚合写入。"""
+    """保存周线接口直接返回的未复权 `revision`，不允许由日线聚合写入。
+
+    `period_end` 和是否完整由上游周线能力定义，不能以本地自然周或日线缺口推导；价格保留原始
+    未复权值、成交量统一为股、成交额统一为人民币元，换手率按一比一小数保存。内容变化追加
+    `revision`，`valid_from`/`valid_to` 只表示平台知识版本，年度分区不会生成额外业务模型。
+    """
 
     __tablename__ = "equity_weekly_bar"
     __table_args__ = (

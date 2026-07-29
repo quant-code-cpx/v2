@@ -1,4 +1,4 @@
-"""板块日频直接行情 revision 模型。"""
+"""板块上游直取日频未复权行情 `revision` 与来源血缘模型。"""
 
 from __future__ import annotations
 
@@ -26,7 +26,12 @@ from ...base import Base
 
 
 class SectorDailyBar(Base):
-    """保存上游直接提供的板块日线；不从其他周期推导。"""
+    """保存上游直接提供的板块日线；不从其他周期推导。
+
+    价格、成交量、成交额和换手率以来源日线口径保存，交易日由板块来源/市场日历解释；同一板块和
+    交易日内容变化追加 `revision` 并保留知识时间和来源批次。年分区仅用于裁剪查询，不产生新业务
+    表；缺失行不能以 `EOD` 横截面、周线或当前板块资料补造。
+    """
 
     __tablename__ = "sector_daily_bar"
     __table_args__ = (

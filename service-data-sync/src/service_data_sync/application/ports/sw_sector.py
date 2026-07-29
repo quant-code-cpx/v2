@@ -1,4 +1,8 @@
-"""申万行业同步、发布、恢复与内部读取的 provider-neutral 端口。"""
+"""申万行业同步、发布、恢复与内部读取的中立端口。
+
+完整三级 `taxonomy`、估值、方法学和摘要共同构成一个观测日版本。
+`checkpoint` 用于无需访问上游的可验证重放，读取只暴露已发布视图。
+"""
 
 from __future__ import annotations
 

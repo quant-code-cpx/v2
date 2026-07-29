@@ -1,4 +1,4 @@
-"""资金流强身份序列模型。"""
+"""按方法学、对象、样本池、分桶和窗口组成的资金流强身份序列模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ..base import Base
 
 
 class MoneyFlowSeries(Base):
-    """绑定方法学、scope、universe、bucket 和窗口形成不可混用的序列。"""
+    """绑定方法学、`scope`、`universe`、`bucket` 和窗口形成不可混用的序列。
+
+    一条序列必须恰好指向证券、板块或市场之一，且唯一性索引在未退役状态下阻止相同定义重复创建。
+    来源、样本池、订单分桶或窗口任何一项改变都意味着另一序列；这使时间序列查询不会把个股与
+    板块、当日值与滚动排行、不同供应商单位或历史/当前身份投影混到一起。
+    """
 
     __tablename__ = "money_flow_series"
     __table_args__ = (

@@ -1,4 +1,9 @@
-"""经由 AKShare SDK 实现的腾讯日线适配器。"""
+"""经由 `AKShare SDK` 获取腾讯 A 股未复权日线的适配器。
+
+上游字段只在本模块出现：标准载荷使用交易日、元计价 `OHLC`、`CNY` 成交额和股数成交量。
+腾讯偶发把成交量按“手”返回，适配器仅在成交额反推的 `VWAP` 能与当日高低价对账时才
+换算为股；不能对账的响应以 `schema` 错误隔离，绝不靠猜测写入 `canonical` 日线。
+"""
 
 from __future__ import annotations
 
@@ -23,7 +28,10 @@ _SCHEMA = "quant-v2.equity-daily-bar.v1"
 
 
 class AkshareTencentDailyBarsAdapter:
-    """获取腾讯 A 股日线，并产出标准化的数据源无关批次。"""
+    """获取腾讯 A 股未复权日线，并产出标准化的数据源无关批次。
+
+    该适配器不提供复权、周线或月线能力，防止不同供应商及聚合口径被错误混用。
+    """
 
     provider_id = "akshare-tencent"
 
@@ -36,7 +44,11 @@ class AkshareTencentDailyBarsAdapter:
         return frozenset({_CAPABILITY})
 
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
-        """获取一个包含端日线窗口，并将上游失败隔离为中立错误。"""
+        """获取一个包含端日线窗口，并将上游失败隔离为中立错误。
+
+        原始行仅附在批次中，后续失败留存策略决定是否归档；成功路径不会把原始响应
+        作为长期数据集保存。
+        """
         if request.capability != _CAPABILITY:
             raise ProviderError(
                 ProviderErrorCode.INVALID_REQUEST, "unsupported capability", retryable=False
@@ -124,13 +136,17 @@ def _tencent_symbol(identifier: EquityIdentifier) -> str:
 
 
 def _normalize_record(record: dict[str, Any]) -> dict[str, str | None]:
-    """将腾讯/AKShare 字段转换为标准值，并修复已识别的“手”单位。"""
+    """将腾讯/AKShare 字段转换为标准值，并修复已识别的“手”单位。
+
+    价格和金额均以精确十进制文本传给应用层，不能使用二进制浮点改变哈希或发布判断。
+    """
     open_price = _decimal(record["open"])
     high_price = _decimal(record["high"])
     low_price = _decimal(record["low"])
     close_price = _decimal(record["close"])
     volume_shares = int(_decimal(record["volume"]))
     amount_cny = _decimal(record["amount"])
+    # 先保留来源整数，再以可审计的价格—金额恒等式判断其究竟是股还是手。
     normalized_volume = _normalize_volume_shares(
         volume_shares=volume_shares,
         amount_cny=amount_cny,

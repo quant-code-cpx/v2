@@ -1,4 +1,9 @@
-"""补齐公司事件与交易公开信息 P0 的强类型字段。
+"""补齐公司事件与交易公开信息 `P0` 的强类型字段。
+
+新增列均可空，并以 `IF NOT EXISTS` 兼容由最新 `ORM` 直接建表的环境；已有行不做回填，
+新增字段为空表示本迁移未补录相应信息。新增外键只表达新增字段的追溯关系，不重写既有
+发布、原始证据或其他专题事实。回退会删除这些新列及其保存的值，仅可在未填充或已导出且
+允许弃置时执行。
 
 Revision ID: 202607290008
 Revises: 202607290007
@@ -17,7 +22,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    """以加法方式补足 P0 字段；使用幂等 DDL 兼容由最新 ORM 直接建表的新环境。"""
+    """以加法方式补足 `P0` 字段；新增列可空且使用幂等 `DDL` 兼容最新 `ORM` 建表。"""
     _add("disclosure_document", "announced_on DATE")
     _add("disclosure_document", "source_batch_id UUID")
     _add("etf_profile_version", "methodology_version_id UUID")
@@ -80,7 +85,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """回退仅移除本迁移添加的列；不触碰既有 release、raw 或其他专题事实。"""
+    """移除本迁移新增的约束和列。
+
+    列中已保存的新增业务值会被永久删除，因此仅可在未填充、已导出或明确允许弃置时回退；
+    既有发布、原始证据和其他专题事实不在操作范围。
+    """
     op.execute(
         "ALTER TABLE stock_connect_active_security_revision "
         "DROP CONSTRAINT IF EXISTS fk_stock_connect_active_market_stat_release"

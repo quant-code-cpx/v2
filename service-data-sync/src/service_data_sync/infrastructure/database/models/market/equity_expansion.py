@@ -1,4 +1,8 @@
-"""主营构成、公司公告事件、龙虎榜与大宗交易的强类型模型。"""
+"""主营构成、官方公告事件、公开交易信息与大宗交易的强类型 `revision` 模型。
+
+每种来源事实保留自己的业务键、单位、日期、身份解析和知识版本；公告标题、证券名称、金额或
+同一交易日的相似记录都不足以自动合并，更不能把后续收益、当前市值等未来信息写回历史事实。
+"""
 
 from __future__ import annotations
 
@@ -31,7 +35,12 @@ from .revision_mixin import CanonicalRevisionMixin
 
 
 class BusinessCompositionReportRevision(CanonicalRevisionMixin, Base):
-    """保存证券报告期主营构成版本，合并范围、章节和币种不能静默合并。"""
+    """保存证券报告期主营构成版本；合并范围、章节和币种不能静默合并。
+
+    一份报告的主营构成可能按行业、产品或地区披露，且合并/母公司范围、报告章节和币种决定其可比性。
+    内容更正或来源新观察追加 `revision`，不会覆盖旧披露；下级行只能在同一报告版本和维度内比较，
+    不能与另一章节、另一币种或另一报告期自动求和。
+    """
 
     __tablename__ = "business_composition_report_revision"
     __table_args__ = (
@@ -119,7 +128,12 @@ class BusinessCompositionReportRevision(CanonicalRevisionMixin, Base):
 
 
 class BusinessCompositionLine(Base):
-    """保存报告 revision 内的行业、产品或地区行，跨维度不允许自动求和。"""
+    """保存报告 `revision` 内的行业、产品或地区行，跨维度不允许自动求和。
+
+    每行保留来源标签、可选受控映射、金额/比例/单位及其缺失原因；相同行名在不同维度可能含义不同。
+    父子层级和汇总关系由来源结构表达，服务不为凑齐总额而修补或转化；任何跨行加总必须在明确的
+    方法学、币种和范围条件下由派生层完成。
+    """
 
     __tablename__ = "business_composition_line"
     __table_args__ = (
@@ -178,7 +192,12 @@ class BusinessCompositionLine(Base):
 
 
 class BusinessCompositionLabelVersion(Base):
-    """保存公司自定义主营标签的历史原文与可选精确映射，不做模糊 taxonomy 归并。"""
+    """保存公司自定义主营标签原文与可选精确映射，不做模糊 `taxonomy` 归并。
+
+    来源标签随报告和公司表述变化，保留版本化原文才能解释历史分项；只有治理确认的精确映射才能
+    连接受控分类体系。名称相近、翻译相似或当前公司业务相近都不足以自动归并，未知标签必须可见
+    地保持未映射，避免把不同产品或行业的历史金额合在一起。
+    """
 
     __tablename__ = "business_composition_label_version"
     __table_args__ = (
@@ -261,7 +280,12 @@ class BusinessCompositionLabelVersion(Base):
 
 
 class DisclosureDocument(Base):
-    """保存官方公开文档永久身份；URL 是定位线索而不是业务主键。"""
+    """保存官方公开文档永久身份；`URL` 是定位线索而不是业务主键。
+
+    同一文档可能镜像、换域、补充附件或更正下载地址，因此永久键、发布机构和来源文档标识优先于
+    链接文本。文档记录是事件、业绩、股本和持股事实的证据锚，不表示文档内容已经被完整解析或可
+    公开再分发；受限正文仍只保留私有证据引用和摘要。
+    """
 
     __tablename__ = "disclosure_document"
     __table_args__ = (
@@ -331,7 +355,12 @@ class DisclosureDocument(Base):
 
 
 class DisclosureDocumentRelation(Base):
-    """记录文档的更正、补充、结果或撤回关系，关系图不能形成自环。"""
+    """记录文档的更正、补充、结果或撤回关系；关系图不能形成自环。
+
+    关系让读取层理解后一份公告是补充、否定还是执行前一份，而不是按发布时间覆盖旧文档。两端都
+    保留永久文档身份和关系类型，避免仅凭标题、证券或日期猜测关联；关系本身不是对业务事件是否
+    完成的结论，仍需由相应事实 `revision` 和来源状态说明。
+    """
 
     __tablename__ = "disclosure_document_relation"
     __table_args__ = (
@@ -367,7 +396,12 @@ class DisclosureDocumentRelation(Base):
 
 
 class CorporateEvent(Base):
-    """保存跨文档公司业务事件身份，禁止按标题或人员姓名模糊合并。"""
+    """保存跨文档公司业务事件身份，禁止按标题或人员姓名模糊合并。
+
+    一个事件可有计划、进展、结果、更正和撤回等多份文件，事件锚让这些证据可聚合而不丢失文档
+    原文。事件创建需要受控来源键或明确关系；同名主体、相似公告标题和同日披露都不能自动合并，
+    以免将不同融资、并购或治理事项错误串联。
+    """
 
     __tablename__ = "corporate_event"
     __table_args__ = (
@@ -402,7 +436,12 @@ class CorporateEvent(Base):
 
 
 class CorporateEventRevision(CanonicalRevisionMixin, Base):
-    """保存公司事件知识版本，计划、进展、结果、更正和撤回不能原地覆盖。"""
+    """保存公司事件知识版本；计划、进展、结果、更正和撤回不能原地覆盖。
+
+    事件阶段、公告时间、业务日期和状态必须随每次可验证观察冻结，后续文件可改变平台理解但不改写
+    历史。`revision` 与知识时间让用户能区分“当时只是计划”与“后来已经撤回”；它不应根据股价、
+    新闻转载或人员同名推断事实，也不能作为未来收益或因果关系的输入。
+    """
 
     __tablename__ = "corporate_event_revision"
     __table_args__ = (
@@ -447,7 +486,12 @@ class CorporateEventRevision(CanonicalRevisionMixin, Base):
 
 
 class CorporateEarningsValue(Base):
-    """保存业绩预告或快报 revision 的指标数值，区间与单值均保留来源表达。"""
+    """保存业绩预告或快报 `revision` 的指标数值，区间与单值均保留来源表达。
+
+    预告可能只给增长区间、盈亏区间或单点快报，来源表达和单位不能被强行压成一个精确值；上/下界、
+    单值、币种和口径各自保存。它不是经审计报表，也不应被财务读取层当作最终披露数值；后续公告
+    形成新版本或关联文档，而非原地覆盖。
+    """
 
     __tablename__ = "corporate_earnings_value"
     __table_args__ = (
@@ -514,7 +558,12 @@ class CorporateEarningsValue(Base):
 
 
 class RestrictedUnlockLot(Base):
-    """保存限售解禁事件的批次行，不能加入公告后收益或最新市值等未来字段。"""
+    """保存限售解禁事件的批次行，不能加入公告后收益或最新市值等未来字段。
+
+    每个批次按来源事件、可流通日期、数量、股份类别和可选主体记录，允许同一公告存在多个解禁安排。
+    历史事件只使用当时已披露信息；不能把后来股价表现、当前市值、实际减持或最终持股结果回填成
+    事件字段，以免污染事件日可用的研究和审计边界。
+    """
 
     __tablename__ = "restricted_unlock_lot"
     __table_args__ = ({"comment": "限售解禁批次；计划和实际数量保留为独立来源字段。"},)
@@ -550,7 +599,12 @@ class RestrictedUnlockLot(Base):
 
 
 class ShareCapitalComponent(Base):
-    """保存股本事件 revision 的股份类别项，分项与总额平衡由质量门验证而不静默修复。"""
+    """保存股本事件 `revision` 的股份类别项；分项与总额平衡由质量门验证而不静默修复。
+
+    流通股、限售股、总股本等类别必须以来源定义和单位保存，不能默认所有类别可加总或可跨报告期
+    比较。若分项与来源总额不平衡，应记录质量问题或隔离，而不是调整某行使之相等；后续更正通过
+    新的事件版本和来源文档表达。
+    """
 
     __tablename__ = "share_capital_component"
     __table_args__ = ({"comment": "股本变动组件；前后数量及变动量均保留来源事实。"},)
@@ -583,7 +637,12 @@ class ShareCapitalComponent(Base):
 
 
 class ShareholderHoldingAction(Base):
-    """保存股东持股计划或实际变动，主体原文不因同名而在数据库中合并。"""
+    """保存股东持股计划或实际变动；主体原文不因同名而在数据库中合并。
+
+    计划与实际执行、增持与减持、权益变动日与公告日都需分别记录；名称相同不代表法律主体相同，
+    因此精确身份缺失时保留来源原文。它不根据后续持仓、新闻或交易数据推断执行结果，也不会把
+    不同公告的数值合并成“当前持股”。
+    """
 
     __tablename__ = "shareholder_holding_action"
     __table_args__ = (
@@ -634,7 +693,12 @@ class ShareholderHoldingAction(Base):
 
 
 class DragonTigerEventRevision(CanonicalRevisionMixin, Base):
-    """保存证券日公开交易信息事件 revision，同股同日多原因保持多事件。"""
+    """保存证券日公开交易信息事件 `revision`；同股同日多原因保持多事件。
+
+    上榜原因、市场、交易日和来源事件键共同定位一条公开交易信息，不能只按证券/日期去重。金额、
+    换手和席位明细使用来源口径，后续更正追加版本；它不是全部成交明细、投资者身份或收益归因，
+    更不能由席位名称猜测最终受益人。
+    """
 
     __tablename__ = "dragon_tiger_event_revision"
     __table_args__ = (
@@ -715,7 +779,12 @@ class DragonTigerEventRevision(CanonicalRevisionMixin, Base):
 
 
 class DragonTigerSeatItem(Base):
-    """保存龙虎榜事件内买卖侧前五席位，席位名称不等同于投资者身份。"""
+    """保存龙虎榜事件内买卖侧前五席位；席位名称不等同于投资者身份。
+
+    买入、卖出、净额和排名属于一条具体公开事件，席位原文可能是营业部、机构或来源展示标签，不能
+    映射为个人/机构投资者主数据。席位数量不足、匿名或来源变更要保留事实状态，不能用其他榜单
+    补齐；读取时须通过所属事件版本保持同一交易日和来源口径。
+    """
 
     __tablename__ = "dragon_tiger_seat_item"
     __table_args__ = (
@@ -784,7 +853,12 @@ class DragonTigerSeatItem(Base):
 
 
 class BlockTradeExecutionRevision(CanonicalRevisionMixin, Base):
-    """保存一笔大宗交易知识版本，完全相同的经济行通过 occurrence_no 保留重数。"""
+    """保存一笔大宗交易知识版本；完全相同的经济行通过 `occurrence_no` 保留重数。
+
+    来源可能出现经济字段完全一致的多笔成交，不能用内容哈希或价格/数量键错误去重；发生序号与来源
+    事件键共同保留每笔事实。价格、数量、金额、币种、场所和交易日按原始披露保存，更新时新增
+    `revision`；它不应由盘后汇总、龙虎榜或行情条目补造。
+    """
 
     __tablename__ = "block_trade_execution_revision"
     __table_args__ = (
@@ -875,7 +949,12 @@ class BlockTradeExecutionRevision(CanonicalRevisionMixin, Base):
 
 
 class TradingDisclosureReasonMapVersion(Base):
-    """保存交易所原因文本到受控原因家族的版本化映射，未知映射显式标为 UNKNOWN。"""
+    """保存交易所原因文本到受控原因家族的版本化映射，未知映射显式标为 `UNKNOWN`。
+
+    映射规则本身会随交易所文本和治理口径变化，必须按版本和来源原文保存，不能用应用代码中的
+    模糊关键字替代。未知原因保持可见是为了防止错误分类影响榜单统计；新映射只适用于明确选择的
+    方法学/版本，不能悄悄重写历史公开事件的解释。
+    """
 
     __tablename__ = "trading_disclosure_reason_map_version"
     __table_args__ = (

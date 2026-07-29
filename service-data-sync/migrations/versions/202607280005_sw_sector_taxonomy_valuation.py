@@ -1,4 +1,8 @@
-"""创建申万三级 taxonomy、估值、发布与恢复表。
+"""创建申万三级 `taxonomy`、估值、发布与恢复表。
+
+该独立数据域保存方法学版本、行业层级与估值的双时间修订、面向消费者的不可变发布、
+闭包关系、质量证据及可重放 `checkpoint`；不改变既有板块消费者。每个发布以
+`data_version` 关联通用发布指针，使读取方使用稳定完整快照而非半成品同步结果。
 
 Revision ID: 202607280005
 Revises: 202607280004
@@ -20,7 +24,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """以 expand 方式创建申万专属表与索引，不改变既有板块消费者。"""
+    """以 `expand` 方式创建申万专属表与索引，不改变既有板块消费者或其历史数据。"""
     op.create_table(
         "sw_sector_methodology",
         sa.Column(
@@ -666,7 +670,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """按依赖逆序删除申万专属对象，不触碰既有板块与发布历史。"""
+    """按依赖逆序删除本迁移创建的申万对象。
+
+    这会永久删除申万方法学、层级、估值、发布、质量与恢复数据；只可在尚未写入业务状态，
+    或已完成备份且明确允许销毁时执行。既有板块对象及其发布历史不在本操作范围。
+    """
     op.drop_table("sw_sector_quality_result")
     op.drop_table("sw_sector_sync_checkpoint")
     op.drop_index("ix_sw_sector_closure_descendant", table_name="sw_sector_closure")

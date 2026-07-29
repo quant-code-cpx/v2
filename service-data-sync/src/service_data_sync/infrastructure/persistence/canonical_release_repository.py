@@ -1,4 +1,10 @@
-"""SQLAlchemy canonical release 发布仓储，统一实现不可变内容、可追溯血缘与 fencing。"""
+"""基于 `SQLAlchemy` 的 `canonical release` 通用发布仓储。
+
+一个候选分区只有在数据集、方法学、标准化运行和质量决策均通过后，才会在同一数据库
+事务中写入不可变 `release`、强类型事实血缘、消费者可见 `publication` 与检查点。
+内容相同的重试复用既有版本；并发 worker 则受 `fencing token` 约束，不能以晚到结果
+覆盖较新的发布。
+"""
 
 from __future__ import annotations
 
@@ -34,7 +40,11 @@ from service_data_sync.infrastructure.database.models.publication.dataset_public
 
 
 class SqlAlchemyCanonicalReleaseRepository(CanonicalReleaseRepository):
-    """在一个数据库事务内发布一个已质量合格的 canonical dataset 分区。"""
+    """在一个数据库事务内发布一个已质量合格的 `canonical dataset` 分区。
+
+    调用方提供业务候选和可选事实写入回调；仓储控制最终可见性，调用方不能单独推进
+    `publication` 或检查点。
+    """
 
     def __init__(self, database: DatabaseClient) -> None:
         """保留服务拥有的事务工厂，避免应用层接触 SQLAlchemy session。"""
@@ -50,7 +60,10 @@ class SqlAlchemyCanonicalReleaseRepository(CanonicalReleaseRepository):
         candidate: CanonicalReleaseCandidate,
         write_facts: Callable[[Session, UUID], None] | None,
     ) -> PublishedCanonicalRelease:
-        """在 release 创建与 publication 切换之间写入强类型事实，消除非空 release 外键循环。"""
+        """在 `release` 创建与 `publication` 切换之间写入强类型事实，消除非空外键循环。
+
+        回调失败会使整个事务回滚，避免消费者看到没有事实行的已发布版本。
+        """
         with self._database.transaction() as session:
             return _publish_in_session(session, candidate=candidate, write_facts=write_facts)
 
@@ -78,15 +91,19 @@ def _publish_in_session(
     candidate: CanonicalReleaseCandidate,
     write_facts: Callable[[Session, UUID], None] | None,
 ) -> PublishedCanonicalRelease:
-    """执行已准备候选的统一发布步骤；调用方必须已开启同一数据库事务。"""
+    """执行已准备候选的统一发布步骤；调用方必须已开启同一数据库事务。
+
+    顺序固定为验证、质量、`release`、事实、血缘、`publication`、检查点，任何步骤失败
+    都不能留下半可见数据。
+    """
     content_hash = canonical_release_content_hash(candidate)
     _validate_candidate_references(session, candidate)
     _record_quality_decision(session, candidate=candidate)
     release, reused_release = _find_or_create_release(
         session, candidate=candidate, content_hash=content_hash
     )
-    # 新 release 必须先拥有稳定 UUID，随后才能让强类型 revision 以非空外键引用它。
-    # 回调仍处在同一事务中：任一步失败都会回滚 release、事实、血缘和 publication。
+    # 新 `release` 必须先有稳定 UUID，强类型 `revision` 才能以非空外键引用它。
+    # 回调仍在同一事务中：任一步失败都会回滚 `release`、事实、血缘和 `publication`。
     if not reused_release and write_facts is not None:
         write_facts(session, release.release_id)
     _record_lineage(session, release_id=release.release_id, candidate=candidate)
@@ -100,6 +117,7 @@ def _publish_in_session(
         .with_for_update()
     ).scalar_one_or_none()
     if current is not None and current.release_id == release.release_id:
+        # 重试命中当前内容时不创建新数据版本，只推进受同一栅栏保护的处理水位。
         _advance_checkpoint(session, candidate=candidate, release_id=release.release_id)
         return PublishedCanonicalRelease(
             release_id=release.release_id,
@@ -319,7 +337,10 @@ def _record_lineage(
 def _advance_checkpoint(
     session: Session, *, candidate: CanonicalReleaseCandidate, release_id: UUID
 ) -> None:
-    """在 publication 成功路径内按 CAS 推进水位，拒绝过期 worker 的晚提交。"""
+    """在 `publication` 成功路径内按 `CAS` 推进水位，拒绝过期 worker 的晚提交。
+
+    检查点版本是分区的写入所有权，不是来源时间；只有与预期栅栏一致的 worker 才可更新。
+    """
     checkpoint = session.execute(
         select(CanonicalCheckpoint)
         .where(

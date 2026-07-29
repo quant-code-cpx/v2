@@ -1,4 +1,4 @@
-"""板块 EOD 快照质量证据模型。"""
+"""板块 `EOD` 横截面逐规则质量实际值、阈值和阻断结论模型。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,12 @@ from ...base import Base
 
 
 class SectorEodQualityResult(Base):
-    """记录 EOD 快照每条质量规则的结构化实际值、阈值与是否通过。"""
+    """记录 `EOD` 快照每条质量规则的结构化实际值、阈值与是否通过。
+
+    覆盖率、名称/身份闭包、数值范围、单位、连续性和市场稳定性等规则必须逐项留证，不能以单个
+    总分掩盖局部阻断。阻断失败会保留候选和隔离证据但不更新 `publication`；警告与通过同样保留
+    版本和样本，方便后续回放、规则升级或受控回滚时解释为何当时可见。
+    """
 
     __tablename__ = "sector_eod_quality_result"
     __table_args__ = (

@@ -1,4 +1,4 @@
-"""资金流方法学不可变版本模型。"""
+"""资金流来源、算法、方向、单位和终态的不可变方法学版本模型。"""
 
 from __future__ import annotations
 
@@ -21,7 +21,12 @@ from ..base import Base
 
 
 class MoneyFlowMethodologyVersion(Base):
-    """冻结供应商来源、算法、方向、单位、最终态与支持度量。"""
+    """冻结供应商来源、算法、方向、单位、最终态和支持度量。
+
+    该表是所有资金流值可比较性的前提：它明确上游数据集、供应商算法、金额原始/标准单位、比率分母、
+    方向含义、可用窗口及是否允许生产发布。来源只可研究或连续探针未通过时，`production_enabled`
+    必须保持关闭；不能因为数值看似合理就提升为正式 `publication`。
+    """
 
     __tablename__ = "money_flow_methodology_version"
     __table_args__ = (

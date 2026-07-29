@@ -1,4 +1,4 @@
-"""证券永久身份锚模型。"""
+"""A 股证券永久身份锚与当前兼容投影模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ...base import Base
 
 
 class EquityInstrument(Base):
-    """保存证券永久 UUID 与当前兼容投影；历史解析必须使用版本表。"""
+    """保存证券永久 `security_id` 与当前兼容投影；历史解析必须使用版本表。
+
+    这张表只提供不会随代码变化的内部锚点和便于当前读取的展示字段，不承诺“当前代码”适用于
+    任意历史日期。行情、报表、成分等事实都引用 `security_id`；需要把旧代码映射回证券时必须
+    查询 `EquityIdentifierVersion` 的双时态范围，不能以本表的当前字段倒推。
+    """
 
     __tablename__ = "equity_instrument"
     __table_args__ = (

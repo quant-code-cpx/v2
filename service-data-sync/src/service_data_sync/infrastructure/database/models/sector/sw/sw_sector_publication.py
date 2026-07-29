@@ -1,4 +1,4 @@
-"""申万 taxonomy 与估值消费者发布明细模型。"""
+"""申万 `taxonomy` 和估值按观测日/方法学对消费者可见的冻结 `data_version` 明细模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ...base import Base
 
 
 class SwSectorPublication(Base):
-    """把 capability、观测日和方法学绑定到不可变 dataVersion。"""
+    """把 `capability`、观测日和方法学绑定到不可变 `data_version`。
+
+    行业结构和估值能力可分别发布，但每一版本都精确指向同一类完整、质量通过的候选；消费者读取
+    必须按该明细锁定观测日、方法学、业务/知识截点，不能临时取“最新节点”与“最新估值”。回滚
+    通过受控切换版本实现，已发布数据、质量和来源血缘均保留。
+    """
 
     __tablename__ = "sw_sector_publication"
     __table_args__ = (

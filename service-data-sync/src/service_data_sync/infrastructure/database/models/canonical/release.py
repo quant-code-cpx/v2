@@ -25,7 +25,12 @@ from ..base import Base
 
 
 class CanonicalCheckpoint(Base):
-    """仅在 publication 提交成功后推进跨运行水位，并用 fencing token 防止旧 worker 覆盖。"""
+    """仅在 publication 成功提交后推进跨运行水位，并用 fencing token 拒绝旧 worker 覆盖。
+
+    这是跨运行的已发布进度，不是单次任务的分页游标或租约；位置变化必须与对应 release/
+    publication 在一个事务内完成。比较交换使用单调 `fencing_token`，因此租约过期后恢复的旧
+    worker 即使晚到，也不能把更新后的水位回退。失败、隔离或未发布候选绝不推进这里。
+    """
 
     __tablename__ = "canonical_checkpoint"
     __table_args__ = (
@@ -67,7 +72,13 @@ class CanonicalCheckpoint(Base):
 
 
 class DatasetRelease(Base):
-    """固定一个数据集分区的不可变候选内容集合，作为 publication 的实际发布目标。"""
+    """冻结一个数据集分区的不可变候选内容集合，作为 publication 可切换的实际目标。
+
+    内容摘要、方法学、规范化运行、数量和业务日期范围共同定义一个可复验快照；同内容重跑由
+    唯一约束复用，不会制造无意义的新 release。release 自身不等于“当前可见”：publication
+    才选择消费者版本。受控回滚只需把 publication 指向已验收的旧 release，不删除新证据或
+    修改任一历史 release。
+    """
 
     __tablename__ = "dataset_release"
     __table_args__ = (
@@ -145,7 +156,12 @@ class DatasetRelease(Base):
 
 
 class CanonicalRecordLineage(Base):
-    """记录 release 内每条 canonical 事实与一个或多个来源观察及 raw 对象的多对多血缘。"""
+    """记录 release 内每条 canonical 事实到来源观察和证据对象的多对多血缘。
+
+    同一事实可同时有主要、佐证或派生输入来源，因而不能把来源字段直接覆盖在事实行上。
+    `transform_hash` 指向从证据到事实所用规则，`raw_payload_id` 在可精确定位时才填写；成功
+    路径没有保留对象正文时，仍可通过批次和摘要证明观察身份。
+    """
 
     __tablename__ = "canonical_record_lineage"
     __table_args__ = (

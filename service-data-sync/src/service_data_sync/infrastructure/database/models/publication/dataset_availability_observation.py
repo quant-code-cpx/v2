@@ -1,4 +1,4 @@
-"""记录不产生 canonical 事实的同步可用性观测。"""
+"""记录不产生 canonical 事实的同步可用性、空集与原因观测。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ..base import Base
 
 
 class DatasetAvailabilityObservation(Base):
-    """保存空集或来源不可用状态，避免向强约束事实表写入伪空行。"""
+    """保存空集或来源不可用状态，避免向强约束事实表写入伪空行。
+
+    合法空结果、未注册来源和暂时不可用都属于观察结果，但它们不等同于业务事实为零，更不能
+    用一条虚构记录污染金额、价格或成分表。新的观察通过 `superseded_at` 替代旧可用性判断；
+    消费者可据此决定展示空列表、暂不可用或保留既有发布，而不是误读为数据已被删除。
+    """
 
     __tablename__ = "dataset_availability_observation"
     __table_args__ = (

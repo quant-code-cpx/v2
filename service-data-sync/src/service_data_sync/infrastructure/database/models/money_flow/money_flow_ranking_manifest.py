@@ -1,4 +1,4 @@
-"""供应商资金流排行来源完整性证据模型。"""
+"""供应商资金流排行分页、行数和可证明完整性的来源证据模型。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,12 @@ from ..base import Base
 
 
 class MoneyFlowRankingManifest(Base):
-    """记录 SDK 返回行数、上游 total 与可证明完整性。"""
+    """记录 `SDK` 返回行数、上游总数与可证明完整性。
+
+    合并后的 `DataFrame` 或单页响应不能证明供应商排行榜已经取完；只有可验证上游总数与实际行数
+    相等时才允许标记完整。manifest 绑定来源批次和目标日期，防止不同分页或不同抓取时刻拼接成
+    一张快照；不完整排行只能保留研究/排障证据，不能生成消费者发布。
+    """
 
     __tablename__ = "money_flow_ranking_manifest"
     __table_args__ = (

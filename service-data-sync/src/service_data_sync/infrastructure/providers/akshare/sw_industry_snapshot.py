@@ -1,4 +1,9 @@
-"""经由 AKShare 固定版本获取乐咕申万三级分类与估值快照。"""
+"""经由固定版本 `AKShare` 获取乐咕申万三级分类与估值快照。
+
+三个无参数接口必须在同次调用中完整返回一级、二级、三级分类，才构成可发布的原子
+快照。静态市盈率、滚动市盈率、市净率和股息率均保留供应商数值；股息率的来源单位是
+百分数，`methodology` 中的语义摘要用于阻止后续版本无声改变该口径。
+"""
 
 from __future__ import annotations
 
@@ -59,7 +64,11 @@ _SEMANTIC_SPEC_SHA256 = hashlib.sha256(
 
 
 class AkshareSwIndustrySnapshotAdapter:
-    """把三个无参数申万接口合并为一个原子的 provider-neutral 快照。"""
+    """把三个无参数申万接口合并为一个原子的来源中立快照。
+
+    上游不支持历史查询，只接受上海当前日；历史修复必须重放已归档的标准批次，而不能
+    重新抓取会随时间变化的分类和估值。
+    """
 
     provider_id = "akshare-legulegu-sw-industry"
 
@@ -74,7 +83,10 @@ class AkshareSwIndustrySnapshotAdapter:
         return frozenset({_CAPABILITY})
 
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
-        """按当天观测日调用三个真实 AKShare 函数并冻结字段 fingerprint。"""
+        """按当天观测日调用三个真实 `AKShare` 函数并冻结字段 `fingerprint`。
+
+        任一层级为空或列集合不匹配即整体失败，防止不完整分类树与完整估值被错误发布。
+        """
         snapshot_date = _request_snapshot_date(request)
         try:
             async with asyncio.timeout(self._request_timeout_seconds):
@@ -101,6 +113,7 @@ class AkshareSwIndustrySnapshotAdapter:
                 columns = tuple(str(column) for column in frame.columns)
                 if frozenset(columns) != _LEVEL_COLUMNS[level]:
                     raise ValueError("SW provider columns changed")
+                # 层级与列名共同参与指纹，避免相同表头被错误地交换到另一分类层级。
                 fingerprint_parts.extend(f"{level}:{column}" for column in sorted(columns))
                 records = frame.to_dict(orient="records")
                 levels.append(
@@ -201,7 +214,10 @@ def _fetch_frames() -> tuple[Any, Any, Any]:
 
 
 def _normalize_record(record: dict[str, Any], *, level: int) -> dict[str, object]:
-    """将中文供应商字段映射为中立快照字段并保留来源百分比单位。"""
+    """将中文供应商字段映射为中立快照字段并保留来源百分比单位。
+
+    `dividendYieldPercent` 明确是百分数展示值；它不能与已换算为小数比例的收益率相加。
+    """
     return {
         "code": _required_text(record, "行业代码"),
         "name": _required_text(record, "行业名称"),

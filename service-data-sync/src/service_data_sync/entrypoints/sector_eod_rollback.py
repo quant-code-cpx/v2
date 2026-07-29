@@ -1,4 +1,8 @@
-"""将板块 EOD consumer publication 回滚到已通过历史 revision 的受控运维入口。"""
+"""将板块 EOD consumer publication 回滚到已通过历史 revision 的受控运维入口。
+
+回滚只移动消费者指针到既有 `passed` 或 `warned` revision；它不会删除候选、隔离证据
+或较新版本，因此审计、复现与后续恢复都仍保留完整上下文。
+"""
 
 from __future__ import annotations
 

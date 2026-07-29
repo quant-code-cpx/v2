@@ -1,4 +1,9 @@
-"""Celery worker 的受限 broker 配置。"""
+"""创建同步服务唯一的 `Celery` 工作进程与显式调度表。
+
+工作进程只负责把已声明的同步单元投递到队列；任务本身仍通过应用服务、来源中立
+端口和仓储发布数据。所有自动调度默认由配置关闭，且时区固定为上海时间，避免把
+日线或 EOD 任务误投到错误的自然日。
+"""
 
 from __future__ import annotations
 
@@ -28,7 +33,11 @@ _SECTOR_EOD_REAP_TASK = "service_data_sync.sector_eod.reap"
 
 
 def create_worker_app(settings: Settings) -> Celery:
-    """创建受限 broker worker，并注册默认关闭的同步任务和调度表。"""
+    """创建受限消息代理工作进程，并注册默认关闭的同步任务和调度表。
+
+    返回的应用不配置结果后端：同步结果由数据库发布版本和结构化日志追溯，避免把
+    原始载荷或大结果写入消息系统。
+    """
     app = Celery("service_data_sync", broker=settings.broker_url.get_secret_value())
     app.conf.update(
         broker_connection_timeout=5,
@@ -41,6 +50,7 @@ def create_worker_app(settings: Settings) -> Celery:
         task_ignore_result=True,
         task_send_sent_event=False,
         worker_send_task_events=False,
+        # 任务完成后才确认；工作进程崩溃时消息代理可重新投递，发布层再负责幂等。
         task_acks_late=True,
         task_reject_on_worker_lost=True,
         timezone="Asia/Shanghai",

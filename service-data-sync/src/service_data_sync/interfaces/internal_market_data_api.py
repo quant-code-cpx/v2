@@ -1,4 +1,8 @@
-"""0028 市场数据内部 POST catalog/query 路由及 HMAC 游标边界。"""
+"""0028 市场数据内部 POST catalog/query 路由及 HMAC 游标边界。
+
+该模块统一将查询投影绑定到数据版本、过滤范围和分页位置，保证同一游标不能跨数据集、
+时间窗或调用语义重用；HTTP 层只负责契约映射，不直接接触上游来源或持久化细节。
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""财务摘要变更检测 checkpoint 模型。"""
+"""用于减少无变化全量抓取的财务摘要变更检测 `checkpoint` 模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ..base import Base
 
 
 class FinancialChangeCheckpoint(Base):
-    """记录已成功发布的摘要版本，防止无变化时重复抓取完整财务报表。"""
+    """记录已成功发布的摘要版本，防止无变化时重复抓取完整财务报表。
+
+    该表只是抓取优化的提示，不能当作报表内容、质量结论或消费者版本。只有摘要对应的完整数据已
+    通过发布事务时才能更新；来源不可用、摘要解析失败或发布被阻断都必须保持旧值，宁可重复检查
+    也不能跳过可能尚未落库的财务更正。
+    """
 
     __tablename__ = "financial_change_checkpoint"
     __table_args__ = (

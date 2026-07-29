@@ -1,4 +1,4 @@
-"""申万行业来源与估值方法学版本模型。"""
+"""申万行业结构、估值字段、来源页面和语义摘要的固定方法学版本模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ...base import Base
 
 
 class SwSectorMethodology(Base):
-    """固化乐咕申万展示口径，避免 taxonomy 与估值失去来源版本。"""
+    """固化申万展示口径，避免 `taxonomy` 与估值失去来源/版本关系。
+
+    行业代码层级、父级名称解析、成分数、静态/滚动市盈率、市净率和股息率的含义均取决于来源页面与
+    方法学版本。语义摘要和来源引用让结构与估值能在历史回放中一起解释；口径变化必须新增版本，
+    不能把新页面字段映射覆盖到旧观测日。
+    """
 
     __tablename__ = "sw_sector_methodology"
     __table_args__ = (

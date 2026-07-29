@@ -1,4 +1,4 @@
-"""新市场数据域共享的 revision 血缘与时间列 mixin。"""
+"""新市场数据域共享的 `revision` 血缘、可用时间和质量列 `mixin`。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 
 class CanonicalRevisionMixin:
-    """为强类型事实提供不可变 release、方法学、来源、知识时间和质量字段。"""
+    """为强类型事实提供不可变 `release`、方法学、来源、知识时间和质量字段。
+
+    继承类仍需定义自己的业务键、数值、单位、日期和约束；本 `mixin` 只统一回答“哪个冻结版本、
+    按什么口径、来自哪个观察、何时可公开使用、平台何时知道、质量是否可发布”。它不能替代双时态
+    业务有效范围，也不能让任意一行绕过数据集 `publication` 直接对消费者可见。
+    """
 
     methodology_version_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),

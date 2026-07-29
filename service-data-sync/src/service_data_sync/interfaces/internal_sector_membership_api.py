@@ -1,4 +1,8 @@
-"""板块成分观测历史的 internal v1 路由，只读取固定 release manifest。"""
+"""板块成分观测历史的 internal v1 路由，只读取固定 release manifest。
+
+成分关系以已发布 release 为准，`observedFrom` 与 `observedTo` 表示来源快照观察区间而非
+官方调仓日；双向查询和分页都绑定该 release，避免目录更新时历史关系发生漂移。
+"""
 
 from __future__ import annotations
 

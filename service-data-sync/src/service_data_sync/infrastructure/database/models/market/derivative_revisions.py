@@ -1,4 +1,8 @@
-"""衍生品真实合约规格与交易所日行情的不可变 revision 模型。"""
+"""真实衍生品合约规格与交易所日行情的不可变 `revision` 模型。
+
+本域只记录真实可交易合约，连续主力、换月规则和平台派生序列必须在独立数据集实现；合约规格、
+夜盘交易日、结算价、单位和可用时间都有来源口径，不能由普通证券日线规则替代。
+"""
 
 from __future__ import annotations
 
@@ -27,7 +31,12 @@ from .revision_mixin import CanonicalRevisionMixin
 
 
 class DerivativeContractRevision(CanonicalRevisionMixin, Base):
-    """保存真实合约规格的双时间版本，后续更正绝不覆盖已知条款。"""
+    """保存真实合约规格的双时态版本；后续更正绝不覆盖已知条款。
+
+    合约乘数、最小变动价位、报价/成交单位、结算方式和最后交易/交割日期共同定义一张真实合约，
+    不应与品种、连续代码或另一到期月共享。有效范围表示交易所规则何时适用，知识范围表示平台何时
+    接受该规则；排斥约束阻止同一合约在两轴重叠时出现矛盾规格。
+    """
 
     __tablename__ = "derivative_contract_revision"
     __table_args__ = (
@@ -126,7 +135,12 @@ class DerivativeContractRevision(CanonicalRevisionMixin, Base):
 
 
 class DerivativeDailyBarRevision(CanonicalRevisionMixin, Base):
-    """保存交易所真实合约日行情 revision，结算价与收盘价保持独立字段。"""
+    """保存交易所真实合约日行情 `revision`，结算价与收盘价保持独立字段。
+
+    `trade_date` 由场所交易日历归属，夜盘不能按自然日期猜测；成交量、持仓量、成交额和单位分别
+    保存，结算、前结算与收盘也绝不互相代填。内容或来源可用时间变化时新增版本，市场 `PIT` 查询
+    须同时遵守 `public_usable_at`、知识时间、方法学和冻结 `release`，不能从主力连续行情补值。
+    """
 
     __tablename__ = "derivative_daily_bar_revision"
     __table_args__ = (

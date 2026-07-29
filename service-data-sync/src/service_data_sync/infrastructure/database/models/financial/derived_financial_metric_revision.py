@@ -1,4 +1,4 @@
-"""平台派生财务指标双时态修订模型。"""
+"""平台公式计算的财务指标双时态 `revision`、输入摘要与年度分区模型。"""
 
 from __future__ import annotations
 
@@ -28,7 +28,12 @@ from ..base import Base
 
 
 class DerivedFinancialMetricRevision(Base):
-    """保存可重算的平台派生指标，公式或输入变化必须追加新 revision。"""
+    """保存可重算的平台派生指标；公式或冻结输入变化必须追加新 `revision`。
+
+    它与供应商直接给出的指标分表，避免把“披露值”“来源计算值”和“平台公式值”混作同一事实。
+    `formula_version`、输入清单摘要、方法学和双时态范围共同说明该数值如何得到、何时业务有效、
+    何时平台可以知道。质量未通过的计算可保留审计，但不能进入消费者 `publication`。
+    """
 
     __tablename__ = "derived_financial_metric_revision"
     __table_args__ = (

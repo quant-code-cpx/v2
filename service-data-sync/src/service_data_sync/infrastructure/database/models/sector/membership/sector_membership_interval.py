@@ -1,4 +1,4 @@
-"""板块成分观察区间模型。"""
+"""由连续完整成分快照推导的板块成员观察半开区间模型。"""
 
 from __future__ import annotations
 
@@ -23,7 +23,12 @@ from ...base import Base
 
 
 class SectorMembershipInterval(Base):
-    """表达完整快照观察到的半开成分区间，不宣称真实调入或调出发生时间。"""
+    """表达完整快照观察到的半开成分区间，不宣称真实调入或调出发生时间。
+
+    只有相邻且质量通过的完整快照才能延长或关闭区间；`observed_from`/`observed_to` 表示本服务
+    首次/最后一次看到成员存在，不是指数公司或板块管理人实际调仓的精确日期。待确认、隔离、空响应
+    或不完整快照都不得关闭现有区间，宁可留下开放观察也不能制造错误退出事件。
+    """
 
     __tablename__ = "sector_membership_interval"
     __table_args__ = (

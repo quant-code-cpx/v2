@@ -1,4 +1,8 @@
-"""canonical release 发布用例：在触及仓储前固化内容哈希并执行 fail-closed 门禁。"""
+"""`canonical` 发布用例。
+
+在仓储创建消费者可见版本前，本模块先固定内容摘要、检查必需血缘和质量规则；任一条件不完整即停止发布。
+这使同一输入可幂等重跑，也防止半成品或无法解释的数据穿过 `fail-closed` 门禁。
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""资金流方法学稳定身份模型。"""
+"""不随算法修订变化的资金流公开方法学稳定身份模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ..base import Base
 
 
 class MoneyFlowMethodology(Base):
-    """保存不随算法版本变化的公开方法学身份。"""
+    """保存不随算法版本变化的公开方法学身份。
+
+    `public_key` 表示对外可引用的一种资金流口径，而版本表才冻结来源、窗口、单位、方向和可发布状态。
+    同一供应商不同算法或同名指标不同定义不能共享这个身份；停用或新增版本保留历史引用，避免消费
+    者因“当前最新算法”改变旧序列的含义。
+    """
 
     __tablename__ = "money_flow_methodology"
     __table_args__ = (

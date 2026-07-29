@@ -1,4 +1,8 @@
-"""ETF 强类型 revision 模型；价格、NAV、份额和状态绝不静默混算。"""
+"""`ETF` 强类型 `revision` 模型；价格、`NAV`、份额和状态绝不静默混算。
+
+各表以独立来源、方法学、`release` 与知识时间保存：市场交易、基金估值、申赎可用性和公司行动
+有不同业务日期与终态，必须分别发布和审计，不能借由任意一项缺失或变化推断另一项。
+"""
 
 from __future__ import annotations
 
@@ -30,7 +34,12 @@ from ..base import Base
 
 
 class EtfProfileVersion(Base):
-    """保存 ETF 上市工具的产品属性双时间版本，基金、份额和 listing 保持分层。"""
+    """保存 `ETF` 上市工具的产品属性双时态版本，基金、份额和 `listing` 保持分层。
+
+    产品类型、管理人、托管人、报价币种和上市状态描述的是可交易上市工具，不等同于法律基金或
+    份额类别；成立、上市和摘牌日期也有各自语义。排斥约束让同一 `ETF` 在业务时间和知识时间
+    不能出现相互矛盾的当前资料；行情缺席不能用来推断这里的上市或终止状态。
+    """
 
     __tablename__ = "etf_profile_version"
     __table_args__ = (
@@ -155,7 +164,12 @@ class EtfProfileVersion(Base):
 
 
 class EtfTrackingRelationVersion(Base):
-    """保存 ETF 与跟踪对象的关系版本；无法解析的对象保留原文而不强行映射。"""
+    """保存 `ETF` 与跟踪对象的双时态关系；无法解析的对象保留原文而不强行映射。
+
+    跟踪目标可能是指数、商品或其他受控实体，`relation_kind` 与复制方式不可因名称相似而猜测。
+    若尚不能精确解析永久身份，表约束要求保留 `target_name_raw` 而非制造错误外键；后续治理可新增
+    关系版本，不能回写旧观察。方法学与双时态范围让历史持仓解释按当时口径复验。
+    """
 
     __tablename__ = "etf_tracking_relation_version"
     __table_args__ = (
@@ -246,7 +260,12 @@ class EtfTrackingRelationVersion(Base):
 
 
 class EtfDailyBarRevision(Base):
-    """保存 ETF 未复权日线 revision，状态或行动不会原地修正原始交易价格。"""
+    """保存 `ETF` 未复权日线 `revision`，状态或行动不会原地修正原始交易价格。
+
+    OHLC、成交量和成交额均保留来源交易事实；`volume_unit` 明确区分股、手等单位，不能与其他产品
+    混算。`public_usable_at` 与可见性依据服务于保守 `PIT` 查询，`known_*` 保存平台采用版本的时间；
+    价格或来源内容更正时追加 `revision`，而非修改旧行或用 `NAV` 替代收盘价。
+    """
 
     __tablename__ = "etf_daily_bar_revision"
     __table_args__ = (
@@ -361,7 +380,12 @@ class EtfDailyBarRevision(Base):
 
 
 class EtfNavRevision(Base):
-    """保存 ETF 单位、累计 NAV 或 IOPV revision，盘中 IOPV 与日终 NAV 分 dataset 发布。"""
+    """保存 `ETF` 单位、累计 `NAV` 或 `IOPV` 的 `revision`，盘中和日终口径分数据集发布。
+
+    `NAV` 是基金估值，`IOPV` 是盘中估算，两者的日期、终态和可用时间不同，不能相互补值或把盘中值
+    当日终最终净值。正值、币种、来源时间精度和可见性依据共同约束该观察；来源更正产生新版本，
+    消费者只能读取匹配方法学和 `release` 的已发布数据。
+    """
 
     __tablename__ = "etf_nav_revision"
     __table_args__ = (
@@ -453,7 +477,12 @@ class EtfNavRevision(Base):
 
 
 class EtfShareRevision(Base):
-    """保存 ETF 份额存量 revision；不把价格乘份额得到的规模写回来源事实。"""
+    """保存 `ETF` 份额存量 `revision`；不把价格乘份额得到的规模写回来源事实。
+
+    份额是基金存量口径，可能与交易所可交易数量、`NAV` 日期或收盘价不同步；它必须保留来源日期、
+    单位、终态与知识时间。市值、规模等派生量应在独立方法学下计算，不能覆盖本表或借缺失份额
+    反推申赎状态；内容变化仅追加版本并保留来源批次。
+    """
 
     __tablename__ = "etf_share_revision"
     __table_args__ = (
@@ -540,7 +569,12 @@ class EtfShareRevision(Base):
 
 
 class EtfStatusRevision(Base):
-    """保存二级交易、申购和赎回状态的双时间版本，三个状态维度绝不互相替代。"""
+    """保存二级交易、申购和赎回状态的双时态版本，三个状态维度绝不互相替代。
+
+    二级市场可交易不表示一级申购或赎回开放，反之亦然；每个维度都必须来自明确来源事实，缺失时
+    保持未知而非从成交量、公告标题或基金上市状态猜测。双时态范围支持临时暂停与官方更正的历史
+    回放，状态变化不会改写既有日线、`NAV` 或份额 `revision`。
+    """
 
     __tablename__ = "etf_status_revision"
     __table_args__ = (
@@ -643,7 +677,12 @@ class EtfStatusRevision(Base):
 
 
 class EtfActionVersion(Base):
-    """保存基金分红、拆分和合并等行动版本，行动只作为复权和份额对账输入。"""
+    """保存基金分红、拆分和合并等行动版本；行动只作为复权和份额对账输入。
+
+    公告、登记、除权、支付和转换日期各自可缺失，不能互相代填；现金金额、币种与转换比例也只在
+    适用行动中出现。后续更正通过同一来源事件键追加 `revision`，不直接重写未复权行情或存量；
+    派生复权、份额调整必须明确绑定本表版本和方法学。
+    """
 
     __tablename__ = "etf_action_version"
     __table_args__ = (
@@ -733,7 +772,12 @@ class EtfActionVersion(Base):
 
 
 class EtfPremiumRevision(Base):
-    """保存收盘价与单位 NAV 的派生折溢价，输入版本变化必须产生新 revision。"""
+    """保存收盘价与单位 `NAV` 的派生折溢价；输入版本变化必须产生新 `revision`。
+
+    折溢价只在价格、`NAV`、币种、日历和时间可比时计算；不可比不是零值，而是保留受控状态和原因。
+    两条输入 `release` 外键固定计算所用版本，任何一项修订都应形成新派生版本；`public_usable_at`
+    取决于两项输入都可安全使用，避免未来已知的净值泄漏进历史 `PIT` 视图。
+    """
 
     __tablename__ = "etf_premium_revision"
     __table_args__ = (

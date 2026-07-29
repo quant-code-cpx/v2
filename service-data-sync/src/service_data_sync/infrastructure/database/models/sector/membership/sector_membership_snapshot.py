@@ -1,4 +1,4 @@
-"""板块成分来源快照头模型。"""
+"""单板块单日来源成分完整观察的快照头、质量状态与证据摘要模型。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,12 @@ from ...base import Base
 
 
 class SectorMembershipSnapshot(Base):
-    """保存一个板块完整成分观察；只有 COMPLETE 快照可推进 observed 区间。"""
+    """保存一个板块完整成分观察；只有 `COMPLETE` 快照可推进观察区间。
+
+    快照头固定 `scheme`、板块、观察日期、来源批次、响应行数、解析数量和处理状态，成员行只是其
+    组成部分。空响应、分页截断、结构漂移、待确认或隔离项都不能标记完整；重跑相同日期可保留新的
+    来源观察但复用相同业务内容，且不得凭“没有新行”关闭旧成员区间。
+    """
 
     __tablename__ = "sector_membership_snapshot"
     __table_args__ = (

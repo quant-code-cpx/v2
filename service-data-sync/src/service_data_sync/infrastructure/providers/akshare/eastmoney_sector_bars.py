@@ -1,4 +1,9 @@
-"""经由 AKShare SDK 实现的东财行业、概念板块历史行情适配器。"""
+"""经由 `AKShare` 获取东财行业、概念板块目录与原生历史行情的适配器。
+
+目录、日线、周线、月线是四项独立能力。行业与概念上游的周期字面量不同，模块在此
+显式映射，不能在应用层假设两者相同或从日线聚合。成交额以 `CNY` 输出，但成交量单位
+没有可靠的横向可比承诺，故保留为来源原生值并标记为 `provider_native`。
+"""
 
 from __future__ import annotations
 
@@ -41,7 +46,10 @@ _CONCEPT_PERIODS = {
 
 
 class AkshareEastmoneySectorBarsAdapter:
-    """调用东财板块目录与历史接口，分别获取目录和原生三周期 K 线。"""
+    """调用东财板块目录与历史接口，分别获取目录和原生三周期 K 线。
+
+    它不根据目录缺席推断板块停用，也不对来源的百分数展示字段擅自换成小数比例。
+    """
 
     provider_id = "akshare-eastmoney-sector"
 
@@ -54,7 +62,10 @@ class AkshareEastmoneySectorBarsAdapter:
         return _CAPABILITIES
 
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
-        """获取一个目录或板块周期窗口，并将 SDK 失败隔离为中立错误。"""
+        """获取一个目录或板块周期窗口，并将 `SDK` 失败隔离为中立错误。
+
+        标准 JSON 与完整原始行共同返回：前者供应用层严格解码，后者仅供失败留证审计。
+        """
         if request.capability == "sector.catalog.raw":
             return await self._fetch_catalog(request)
         identifier, period, start, end = _request_values(request)
@@ -245,7 +256,11 @@ def _fetch_catalog(*, scheme: SectorScheme) -> Any:
 
 
 def _normalize_record(record: dict[str, Any]) -> dict[str, str | None]:
-    """将东财中文列名映射为明确单位和百分比语义的标准字段。"""
+    """将东财中文列名映射为明确单位和百分比语义的标准字段。
+
+    `amplitudePercent`、`changePercent`、`turnoverPercent` 保持百分数展示口径，与个股
+    小数换手率字段不能混用。
+    """
     return {
         "periodEnd": _iso_date(record["日期"]),
         "open": str(_decimal(record["开盘"])),

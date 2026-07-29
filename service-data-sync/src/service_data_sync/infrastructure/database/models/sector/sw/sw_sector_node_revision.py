@@ -1,4 +1,4 @@
-"""申万行业节点双时间修订模型。"""
+"""申万三级行业节点、直接父级和成分数的观测日双时态 `revision` 模型。"""
 
 from __future__ import annotations
 
@@ -24,7 +24,12 @@ from ...base import Base
 
 
 class SwSectorNodeRevision(Base):
-    """保存指定观测日的三级节点、直接父级和成分数知识修订。"""
+    """保存指定观测日的三级节点、直接父级和成分数知识 `revision`。
+
+    每个节点的代码、名称、层级与直接父级共同构成该日 `taxonomy`，不是永久不变的当前目录；来源
+    更正或解析规则更新时追加知识版本。三级闭包在同一观测日和方法学内校验，不能用当前父级或名称
+    补全历史节点，更不能跨申万版本拼接成分数量。
+    """
 
     __tablename__ = "sw_sector_node_revision"
     __table_args__ = (

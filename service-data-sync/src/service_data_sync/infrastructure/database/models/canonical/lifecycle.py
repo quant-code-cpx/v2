@@ -1,4 +1,4 @@
-"""raw、规范化运行及其记录审计索引模型。"""
+"""记录来源证据、确定性规范化运行及其强类型事实审计索引。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,12 @@ from ..base import Base
 
 
 class RawPayloadManifest(Base):
-    """将一个来源观察内每个 raw、规范化或附件对象逐项固定为不可变证据。"""
+    """把来源观察关联的 raw、标准化载荷或附件逐项固定为不可变证据元数据。
+
+    数据库只保存对象 URI、摘要、大小和取得时间，不保存可能庞大或受限的载荷正文；对象内容由
+    私有存储的保留策略管理。一个 `SourceBatch` 可以有多个对象和角色，序号与摘要使历史重放、
+    schema 排障和证据校验不依赖“最新文件名”。成功路径未归档时也允许没有对应证据项。
+    """
 
     __tablename__ = "raw_payload_manifest"
     __table_args__ = (
@@ -77,7 +82,12 @@ class RawPayloadManifest(Base):
 
 
 class NormalizationRun(Base):
-    """记录 raw 证据转换为某个 canonical dataset 候选内容的一次确定性运行。"""
+    """记录将来源证据转换为一个 canonical 候选分区的确定性运行。
+
+    `adapter_version`、`mapping_version`、`schema_fingerprint` 与 `input_set_hash` 冻结本次转换的
+    可复算条件；同样原始数据在规则更新后可以产生新的运行，而不会覆盖旧候选。运行完成不等于
+    对消费者可见，仍须通过质量门并由不可变 release/publication 选择后才发布。
+    """
 
     __tablename__ = "normalization_run"
     __table_args__ = (
@@ -148,7 +158,12 @@ class NormalizationRun(Base):
 
 
 class NormalizedRecordManifest(Base):
-    """建立规范化记录到强类型事实行的审计索引，不充当消费者查询投影。"""
+    """建立规范化输入记录到强类型事实行的审计索引，不充当消费者查询投影。
+
+    它用内容摘要和 canonical 主键把一条输入定位到实际写入的领域表，`disposition` 同时记录
+    接受、去重、隔离等处置结果。消费者不能把此表当作最新事实，因为其行既可能来自未发布候选，
+    也可能只是失败审计；读取必须依附相应 release 或 publication。
+    """
 
     __tablename__ = "normalized_record_manifest"
     __table_args__ = (

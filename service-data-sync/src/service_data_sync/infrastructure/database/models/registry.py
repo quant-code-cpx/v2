@@ -1,4 +1,9 @@
-"""显式导入全部逻辑表模型，供维护者和 Alembic 使用唯一 metadata 入口。"""
+"""显式登记全部逻辑表模型，提供 Alembic 与架构测试唯一的 metadata 入口。
+
+列表按业务域组织而非按迁移顺序；导入顺序不表达外键写入顺序，也不会执行数据库 I/O。新增
+模型必须同时完成可迁移 schema、仓储边界和本注册表登记，否则迁移比对与模型覆盖测试无法
+看见它；物理分区仍由父表模型和 `partition_manager` 管理，不应单独登记为业务表。
+"""
 
 from __future__ import annotations
 
@@ -170,6 +175,7 @@ from .sector.sw import (
     SwSectorValuationRevision,
 )
 
+# 该元组是“已登记逻辑表”的显式清单；用于防止遗漏模型，而非运行时建表顺序。
 ALL_MODELS: tuple[type[Base], ...] = (
     CanonicalDataset,
     DataSource,

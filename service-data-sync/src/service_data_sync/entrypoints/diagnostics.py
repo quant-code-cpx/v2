@@ -1,4 +1,8 @@
-"""本地依赖诊断 CLI，输出稳定且不含密钥的健康状态。"""
+"""本地依赖诊断 CLI，输出稳定且不含密钥的健康状态。
+
+它只并发探测 PostgreSQL、Redis 和对象存储连通性，不创建表、不写业务数据也不调用行情
+来源；稳定的结果字段和退出码让部署编排能安全判断环境是否具备启动同步服务的条件。
+"""
 
 from __future__ import annotations
 
@@ -18,7 +22,7 @@ from service_data_sync.bootstrap.settings import Settings, load_settings
 
 
 class DiagnosticsExitCode(IntEnum):
-    """诊断 CLI 对外承诺的稳定退出码。"""
+    """诊断 CLI 对外承诺的稳定退出码，供脚本和编排系统区分故障类别。"""
 
     OK = 0
     INTERNAL_ERROR = 1
@@ -31,7 +35,11 @@ class DiagnosticsExitCode(IntEnum):
 
 @dataclass(frozen=True)
 class CheckResult:
-    """一项基础设施探测的成功状态、耗时与安全错误类型。"""
+    """一项基础设施探测的成功状态、耗时与安全错误类型。
+
+    `error_type` 只记录异常类别，不携带原始消息、连接串或响应体；诊断结果可安全
+    输出到控制台和自动化采集系统，而详细异常仍只留在受控日志中。
+    """
 
     dependency: str
     ok: bool
@@ -41,13 +49,13 @@ class CheckResult:
 
 @dataclass(frozen=True)
 class DiagnosticsReport:
-    """汇总全部依赖探测结果，并负责转换为 CLI 输出。"""
+    """汇总全部依赖探测结果，并负责转换为 CLI 输出和稳定退出码。"""
 
     results: tuple[CheckResult, ...]
 
     @property
     def exit_code(self) -> DiagnosticsExitCode:
-        """将各项探测结果归并为稳定的 CLI 退出码。"""
+        """将各项探测结果归并为稳定退出码，不因内部异常文本改变脚本语义。"""
         failed = {result.dependency for result in self.results if not result.ok}
         if not failed:
             return DiagnosticsExitCode.OK
@@ -76,7 +84,11 @@ def run_diagnostics(
     *,
     timeout_seconds: int,
 ) -> DiagnosticsReport:
-    """并发执行相互独立的依赖探测，并归类失败或超时。"""
+    """并发执行彼此独立的依赖探测，并归类失败或超时。
+
+    PostgreSQL、Redis 与对象存储没有先后依赖，故并发检查可将总等待时间限制在单项
+    超时附近。超时后不等待可能卡住的 I/O 线程，以确保健康检查本身不会拖住部署。
+    """
     started_at = {name: time.monotonic() for name in checks}
     executor = ThreadPoolExecutor(max_workers=len(checks), thread_name_prefix="dependency-check")
     futures: dict[Future[None], str] = {
@@ -118,7 +130,7 @@ def run_diagnostics(
 
 
 def _checks(container: ServiceContainer) -> dict[str, Callable[[], None]]:
-    """以对外文档约定的稳定名称暴露依赖探测函数。"""
+    """以文档承诺的稳定名称暴露只读连通性探测，禁止检查过程写入业务数据。"""
     return {
         "postgres": container.database.ping,
         "redis": container.broker.ping,
@@ -127,7 +139,11 @@ def _checks(container: ServiceContainer) -> dict[str, Callable[[], None]]:
 
 
 def diagnose(settings: Settings) -> DiagnosticsReport:
-    """创建临时容器、执行全部探测，并始终释放客户端。"""
+    """创建临时容器、执行全部只读探测，并无条件释放客户端。
+
+    诊断不会建表、投递任务或访问外部行情来源；因此可在上线前用于判断本地基础设施
+    是否就绪，而不会改变同步账本或生产数据。
+    """
     container = build_container(settings)
     try:
         return run_diagnostics(
@@ -150,7 +166,7 @@ def _render(report: DiagnosticsReport, output_format: str) -> str:
 
 
 def _configuration_report() -> DiagnosticsReport:
-    """配置无法加载时创建不泄漏细节的失败报告。"""
+    """配置无法加载时创建不泄漏字段值的失败报告，仍提供可判定退出码。"""
     return DiagnosticsReport(
         results=(
             CheckResult(

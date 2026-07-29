@@ -1,4 +1,4 @@
-"""可见数据版本发布模型。"""
+"""消费者可见数据版本、有效时间和知识截止点模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,13 @@ from ..base import Base
 
 
 class DatasetPublication(Base):
-    """声明一个 dataset 分区对消费者可见的版本，历史版本通过 superseded_at 保留。"""
+    """声明一个数据集分区对消费者可见的冻结版本，历史版本通过 `superseded_at` 保留。
+
+    `data_version` 是读取、缓存、ETag 和分页游标必须绑定的稳定标识；它指向已质量判定的
+    release，而非可变表中“最新一行”。`effective_as_of` 表示业务事实适用时间，
+    `knowledge_cutoff` 表示本次视图允许使用的信息截止点，两者不能混为抓取时间。回滚通过
+    受控地切换当前 publication 实现，历史版本和其来源仍保留。
+    """
 
     __tablename__ = "dataset_publication"
     __table_args__ = (

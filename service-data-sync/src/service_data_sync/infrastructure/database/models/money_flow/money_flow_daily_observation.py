@@ -1,4 +1,4 @@
-"""资金流日序列知识修订模型。"""
+"""按业务交易日和平台知识时间保存的资金流日序列 `revision` 模型。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,12 @@ from ..base import Base
 
 
 class MoneyFlowDailyObservation(Base):
-    """按 trade_date 保存供应商日序列的双时间 revision。"""
+    """按 `trade_date` 保存供应商日序列的双时态 `revision`。
+
+    一条观察绑定方法学、scope、样本池、分桶和窗口，因此只在同一完整序列内才可比较。`trade_date`
+    是来源定义的业务交易日，不是抓取时间；`known_*` 保留平台何时知道该值。来源更正、单位治理
+    或内容改变追加版本，不能用排行快照、相邻交易日或其他方法学数值填补缺失。
+    """
 
     __tablename__ = "money_flow_daily_observation"
     __table_args__ = (

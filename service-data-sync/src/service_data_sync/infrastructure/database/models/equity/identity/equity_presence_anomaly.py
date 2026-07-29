@@ -1,4 +1,4 @@
-"""证券目录连续缺席异常模型。"""
+"""已知证券在来源目录中连续缺席的观测异常与人工处置模型。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,12 @@ from ...base import Base
 
 
 class EquityPresenceAnomaly(Base):
-    """记录已知证券连续缺席目录快照的异常，不把缺席自动解释为退市。"""
+    """记录已知证券连续缺席目录快照的异常，不把缺席自动解释为退市。
+
+    来源截断、权限变化、上市地过滤和代码展示差异都可能导致缺席；本表只累计可审计的异常证据并
+    支持人工跟进。它不修改 `EquityListingStatusVersion`、不回收 `security_id`、也不关闭代码版本，
+    避免一次不完整目录把消费者历史和当前可读性错误地切断。
+    """
 
     __tablename__ = "equity_presence_anomaly"
     __table_args__ = (

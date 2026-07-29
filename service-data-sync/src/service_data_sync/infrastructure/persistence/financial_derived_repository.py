@@ -1,4 +1,9 @@
-"""平台派生财务指标的点时输入选择、revision、血缘与 publication 仓储。"""
+"""平台派生财务指标的时点输入选择、`revision`、血缘与 `publication` 仓储。
+
+派生公式只读取已发布且质量通过的报表快照，绝不直读刚写入、隔离或随后被替换的来源
+修订。输入 `publication` 在计算期间被锁定，输出 `manifest` 记录所用单季或 `TTM` 输入；
+公式、值或输入版本任一改变才产生新修订，旧输出不会静默遗留到新版本。
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""板块成分 release 组成清单模型。"""
+"""板块成分固定 `release` 内逐板块快照选择与延用原因清单模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ...base import Base
 
 
 class SectorMembershipReleaseSector(Base):
-    """固定 release 中每个板块采用的成分快照，避免消费者读取混用时间点。"""
+    """固定 `release` 中每个板块采用的成分快照，避免消费者读取混用时间点。
+
+    组件行把板块永久身份绑定到一个具体 `COMPLETE` 快照，并标记是否因受控策略延用旧结果；消费者
+    从这里解析成员而不是临时查询所有最新快照。延用原因是审计证据，不是允许无限期陈旧数据的开关；
+    主 `release` 被替代或回滚时，组件清单仍保持不可变，支持重放旧视图。
+    """
 
     __tablename__ = "sector_membership_release_sector"
     __table_args__ = (

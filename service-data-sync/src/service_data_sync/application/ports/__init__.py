@@ -1,4 +1,8 @@
-"""数据源无关的应用层端口。"""
+"""数据源无关的应用层端口集合。
+
+端口描述应用服务需要的能力和输入输出。
+它们不包含 `SDK`、`HTTP`、`SQL` 或对象存储细节；基础设施实现这些协议，组合根负责装配。
+"""
 
 from service_data_sync.application.ports.data_source import (
     DataSourcePort,

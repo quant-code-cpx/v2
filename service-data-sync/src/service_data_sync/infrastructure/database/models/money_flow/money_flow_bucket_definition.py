@@ -1,4 +1,4 @@
-"""资金流方法学分桶定义模型。"""
+"""资金流方法学版本内订单规模或全量成交分桶的受控定义模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ..base import Base
 
 
 class MoneyFlowBucketDefinition(Base):
-    """保存一个方法学版本内的 bucket 及已知或未知阈值。"""
+    """保存一个方法学版本内的 `bucket` 及已知或未知阈值。
+
+    主力、超大单、大单等标签并非跨供应商通用事实；它们由该方法学的订单规模或交易方向定义决定。
+    阈值已知时冻结数值和单位，未知时必须显式保留未知而非编造范围；因此后续来源口径变化要建立
+    新方法学/版本，不能修改旧分桶来重解释历史净流入。
+    """
 
     __tablename__ = "money_flow_bucket_definition"
     __table_args__ = (

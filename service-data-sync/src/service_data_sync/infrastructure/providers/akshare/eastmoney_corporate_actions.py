@@ -1,4 +1,9 @@
-"""经由 AKShare SDK 获取东方财富个股分红送转事件。"""
+"""经由 `AKShare SDK` 获取东方财富个股分红送转事件的适配器。
+
+标准事件保留报告、公告、登记和除权等来源日期，按“每十股”的原始方案单位输出；
+不会把尚未实施的方案当成已生效现金流，也不会将窗口外、但名称相似的记录拼入本次
+证券发布。供应商状态和可选日期均被保留，以支持后续修订而非覆盖历史。
+"""
 
 from __future__ import annotations
 
@@ -24,7 +29,10 @@ _SCHEMA = "quant-v2.equity-corporate-action.v1"
 
 
 class AkshareEastmoneyCorporateActionsAdapter:
-    """读取分红送转详情，并保留方案状态与实施日期供后续修订。"""
+    """读取分红送转详情，并保留方案状态与实施日期供后续修订。
+
+    能力只覆盖东财披露的分红送转，不能用于补齐拆并股、配股或其他公司行动类型。
+    """
 
     provider_id = "akshare-eastmoney-corporate-action"
 
@@ -135,7 +143,11 @@ def _record_intersects(record: dict[str, Any], *, start: date, end: date) -> boo
 
 
 def _normalize_record(record: dict[str, Any]) -> dict[str, str | None]:
-    """将东财分红送转中文字段映射为标准每十股事件值。"""
+    """将东财分红送转中文字段映射为标准每十股事件值。
+
+    数量和现金字段仍以“每十股”为单位，转换为每股由领域用例按明确规则完成，避免
+    适配器与消费者各自换算造成双重缩放。
+    """
     report_period = _required_date(record["报告期"])
     latest_announcement = _optional_date(record.get("最新公告日期"))
     initial_announcement = _optional_date(record.get("预案公告日"))

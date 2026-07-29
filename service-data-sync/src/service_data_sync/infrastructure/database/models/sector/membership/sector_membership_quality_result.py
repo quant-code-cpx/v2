@@ -1,4 +1,4 @@
-"""板块成分快照质量结果模型。"""
+"""板块成分快照逐规则数值证据、严重级别与发布处置模型。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,12 @@ from ...base import Base
 
 
 class SectorMembershipQualityResult(Base):
-    """记录一个成分快照对每条质量规则的数值证据和发布处置。"""
+    """记录一个成分快照对每条质量规则的数值证据和发布处置。
+
+    完整性、重复项、身份解析、覆盖率和异常数量等结论必须逐规则保存实际值、阈值与严重级别，不能
+    只存一个笼统状态。阻断规则会让快照留在候选/隔离路径，警告是否可发布由受控策略决定；质量行
+    本身不修改成员、区间或旧 `release`，以便后续审计能复现当时为什么放行或拦截。
+    """
 
     __tablename__ = "sector_membership_quality_result"
     __table_args__ = (

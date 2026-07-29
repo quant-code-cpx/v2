@@ -1,4 +1,9 @@
-"""资金流来源探针和显式单分区 Celery 同步任务。"""
+"""资金流来源探针和显式单分区 Celery 同步任务。
+
+资金流的能力、日期窗口、类别和方向共同构成独立分区；任务不得把不同供应商
+排行或日序列混在一次发布中。每次执行先登记可恢复运行，再由应用层发布 `canonical`
+版本，失败时保留来源证据并在账本中记录是否可重试。
+"""
 
 from __future__ import annotations
 
@@ -43,7 +48,10 @@ _CAPABILITIES = frozenset(
 
 
 def register_money_flow_tasks(app: Celery, *, settings: Settings) -> None:
-    """注册无隐式 beat 的探针和显式分区任务，重复初始化保持幂等。"""
+    """注册无隐式调度的探针和显式分区任务，重复初始化保持幂等。
+
+    调度者必须明确给出 capability 与完整参数，避免默认日期或排行口径被悄悄带入发布。
+    """
     if _PROBE_TASK not in app.tasks:
 
         @app.task(name=_PROBE_TASK, shared=False)
@@ -83,11 +91,16 @@ def register_money_flow_tasks(app: Celery, *, settings: Settings) -> None:
         parameters: dict[str, str],
         mode: str = "scheduled",
     ) -> dict[str, object]:
-        """同步一个完整显式参数分区；重试使用相同请求键恢复 checkpoint。"""
+        """同步一个完整显式参数分区；重试使用相同请求键恢复检查点。
+
+        参数按键排序后才进入 run ledger，保证字典传入顺序不同但业务含义相同的请求
+        映射到同一个可恢复分区。
+        """
         if not settings.money_flow_enabled:
             raise RuntimeError("money-flow sync is disabled")
         if capability not in _CAPABILITIES:
             raise ValueError("unsupported money-flow capability")
+        # 分区键必须稳定，否则同一日期窗口的重试会被误判为新任务并绕过检查点。
         parameter_items = tuple(sorted(parameters.items()))
         registry = build_source_registry(settings)
         providers = registry.for_capability(capability)
@@ -119,6 +132,7 @@ def register_money_flow_tasks(app: Celery, *, settings: Settings) -> None:
                     )
                 ),
             )
+            # 只有应用服务完成发布后才标记运行成功，避免“已完成”指向未发布数据。
             ledger.finish(run=run, result=result)
             return {
                 "dataVersion": (

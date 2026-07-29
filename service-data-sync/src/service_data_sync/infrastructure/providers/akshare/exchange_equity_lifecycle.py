@@ -1,4 +1,9 @@
-"""基于 AKShare 固定版本交易所接口的显式上市生命周期适配器。"""
+"""基于固定版本 `AKShare` 交易所接口的显式上市生命周期适配器。
+
+沪深终止上市表只生成有官方日期的 `DELISTED` 事实，北交所在册表只生成有官方上市日的
+`LISTED` 事实。适配器不会从目录缺席、名称变化或今日观察时间推断任何状态；历史日期
+必须重放归档批次，保证生命周期的双时间修订有可复核来源。
+"""
 
 from __future__ import annotations
 
@@ -26,7 +31,10 @@ _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 class AkshareExchangeEquityLifecycleAdapter:
-    """从沪深终止上市历史和北交所在册上市日输出中立生命周期事实。"""
+    """从沪深终止上市历史和北交所在册上市日输出中立生命周期事实。
+
+    交易所专有函数和表头仅留在此适配器内，应用层只收到统一的显式证据 `JSON`。
+    """
 
     provider_id = "akshare-official-exchange-equity-lifecycle"
 
@@ -40,7 +48,10 @@ class AkshareExchangeEquityLifecycleAdapter:
         return frozenset({_CAPABILITY})
 
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
-        """调用交易所对应接口，归档原始行并输出可重放的标准生命周期 JSON。"""
+        """调用交易所对应接口，归档原始行并输出可重放的标准生命周期 `JSON`。
+
+        目标日按上海时区验证，避免不同部署地区在午夜附近产生错误的观察分区。
+        """
         if request.capability != _CAPABILITY:
             raise ProviderError(
                 ProviderErrorCode.INVALID_REQUEST,
@@ -49,6 +60,7 @@ class AkshareExchangeEquityLifecycleAdapter:
             )
         exchange, target_date = _request_values(request)
         if target_date != datetime.now(_SHANGHAI).date():
+            # 这些上游接口只给当前集合；拒绝历史请求，不用当前行伪造过去生命周期。
             raise ProviderError(
                 ProviderErrorCode.INVALID_REQUEST,
                 "equity lifecycle source supports only the current Shanghai date",
@@ -153,7 +165,10 @@ def _request_values(request: SourceRequest) -> tuple[Exchange, date]:
 def _normalize_entries(
     records: list[dict[str, Any]], *, exchange: Exchange
 ) -> list[dict[str, str | None]]:
-    """按交易所真实表头映射显式事实，过滤 B 股且不从名称或目录缺席推断状态。"""
+    """按交易所真实表头映射显式事实，过滤 B 股且不从名称或目录缺席推断状态。
+
+    去重键包含代码、生效日和状态；同一代码的不同官方事实必须保留给状态机处理。
+    """
     if exchange is Exchange.BSE:
         entries = [_bse_listing_entry(record) for record in records]
     elif exchange is Exchange.SSE:

@@ -1,4 +1,4 @@
-"""上游直取的个股未复权月线模型。"""
+"""按周期结束日年度物理分区的个股上游直取未复权月线 `revision` 模型。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,12 @@ from ...base import Base
 
 
 class EquityMonthlyBar(Base):
-    """保存上游月线接口直接返回的 revision，不允许由日线聚合写入。"""
+    """保存月线接口直接返回的未复权 `revision`，不允许由日线或周线聚合写入。
+
+    `period_end` 是上游定义的月周期结束日，可能与自然月最后一天不同；所有价格、成交量、成交额
+    和换手率都继承该接口口径。修订以内容和知识时间追加，物理年度分区由 `partition_manager`
+    按 `period_end` 准备；不同周期没有共享 `checkpoint` 或可互相补齐的缺失行。
+    """
 
     __tablename__ = "equity_monthly_bar"
     __table_args__ = (

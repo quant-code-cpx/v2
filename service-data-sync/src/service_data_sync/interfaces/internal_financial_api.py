@@ -1,4 +1,8 @@
-"""财务与估值内部读取路由；所有响应仅选择生产 `publication` 的双时态视图。"""
+"""财务与估值内部读取路由；所有响应仅选择生产 `publication` 的双时态视图。
+
+报表、指标、估值和平台派生结果各自按冻结版本读取，并使用带签名的续页游标与条件请求；
+research、raw、quarantine、内部数据库键和半成品 revision 永远不进入服务间契约。
+"""
 
 from __future__ import annotations
 

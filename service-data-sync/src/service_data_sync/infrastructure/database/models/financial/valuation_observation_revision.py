@@ -1,4 +1,4 @@
-"""估值观察双时态修订模型。"""
+"""按估值观察日期年度分区的供应商估值双时态 `revision` 模型。"""
 
 from __future__ import annotations
 
@@ -28,7 +28,12 @@ from ..base import Base
 
 
 class ValuationObservationRevision(Base):
-    """保存供应商估值日期观察，不将其伪装成交易所或供应商官方最终值。"""
+    """保存供应商估值日期观察，不将其伪装成交易所或供应商官方最终值。
+
+    PE、PB、股息率等值是特定来源、特定日期、特定方法学下的观察，可能因报价、股本、财报或计算
+    规则更新而修订。`observation_date` 不是平台抓取时间，双时态范围则保留何时适用和何时可知；
+    空值、负值或不适用应按受控口径保存，不能用另一来源或当天收盘价自行补算。
+    """
 
     __tablename__ = "valuation_observation_revision"
     __table_args__ = (

@@ -1,4 +1,4 @@
-"""按月物理分区的已确认板块成分模型。"""
+"""按快照日期月度物理分区的已确认板块成分行与来源证据模型。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from ...base import Base
 
 
 class SectorMembershipItem(Base):
-    """保存一个快照内已确认成分；物理月分区不形成额外 ORM class。"""
+    """保存一个快照内已确认成分；物理月分区不形成额外 `ORM` 类。
+
+    行只有在来源代码被安全解析为永久 `security_id` 后写入，保存快照日期、板块、来源权重/排序等
+    观测信息；它不是当前成员投影，也不自动形成观察区间。分区按快照月创建以优化存储和反向查询，
+    历史重放必须落回原业务月，不能按今天日期或当前证券代码改写成员。
+    """
 
     __tablename__ = "sector_membership_item"
     __table_args__ = (

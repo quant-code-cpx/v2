@@ -1,4 +1,8 @@
-"""将 ORM 模型中的中文业务说明写入 PostgreSQL COMMENT。"""
+"""将 `ORM` 模型中的中文业务说明写入 `PostgreSQL COMMENT`。
+
+此迁移只变更数据库元数据，不改变表、字段、索引、约束或业务记录。说明来自生成时冻结的
+快照，避免运行时依赖仍会演进的应用模型；回退也只清除本迁移写入的说明。
+"""
 
 from __future__ import annotations
 
@@ -126,7 +130,7 @@ _COMPRESSED_COMMENT_SNAPSHOT = (
 
 
 def upgrade() -> None:
-    """为既有业务表与字段补充 ORM 定义的中文说明。"""
+    """为既有业务表和字段写入冻结快照的中文说明，不改变数据或结构。"""
     connection = op.get_bind()
 
     for table_name, specification in _comments().items():
@@ -136,7 +140,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """移除本迁移写入的表与字段说明。"""
+    """仅清除本迁移写入的说明，不恢复或删除业务数据，也不改变结构。"""
     connection = op.get_bind()
 
     for table_name, specification in _comments().items():

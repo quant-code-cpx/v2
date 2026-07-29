@@ -1,4 +1,9 @@
-"""经由 AKShare 中证接口提供目录、当前成分和当前权重影子快照。"""
+"""经由 `AKShare` 中证接口提供目录、当前成分和当前权重的影子快照。
+
+这些响应描述抓取时的供应商观察，不等同于指数公司的正式历史生效文件。目录不携带
+指数代码，成分和权重必须绑定到明确的中证指数；当前成分没有来源日期时输出空值，
+防止下游伪造 `PIT`（时点）有效区间。权重则要求同一批行暴露一个统一的收盘日期。
+"""
 
 from __future__ import annotations
 
@@ -32,7 +37,10 @@ _WEIGHT_SCHEMA = "quant-v2.index-weight-close-observed-snapshot.v1"
 
 
 class AkshareCsindexIndexSnapshotAdapter:
-    """调用中证目录、当前成分和权重接口，不伪造历史或正式生效事实。"""
+    """调用中证目录、当前成分和权重接口，不伪造历史或正式生效事实。
+
+    每一能力独立产生标准批次和来源指纹，不能用目录结果补充成分或用权重日期倒推名单。
+    """
 
     provider_id = "akshare-csindex-index-snapshot"
 
@@ -51,7 +59,10 @@ class AkshareCsindexIndexSnapshotAdapter:
         )
 
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
-        """获取一批标准化快照，同时保留完整来源记录和 schema 指纹。"""
+        """获取一批标准化快照，同时保留完整来源记录和 `schema` 指纹。
+
+        供应商短暂不可用可重试；表头、日期或数值形状变化则标记为不可重试的口径漂移。
+        """
         capability, identifier = _request_values(request)
         try:
             async with asyncio.timeout(self._request_timeout_seconds):
@@ -177,7 +188,10 @@ def _normalize_payload(
     identifier: IndexIdentifier | None,
     records: list[dict[str, Any]],
 ) -> dict[str, object]:
-    """将固定版中文列名转为中立 JSON，且不把观察快照升级为历史有效事实。"""
+    """将固定版中文列名转为中立 JSON，且不把观察快照升级为历史有效事实。
+
+    每个分支只输出其所属的指数数据集，避免当前成员、权重和目录间不受证据支持的拼接。
+    """
     if capability is IndexCapability.CATALOG_SNAPSHOT:
         entries = [_normalize_catalog_entry(record) for record in records]
         return {

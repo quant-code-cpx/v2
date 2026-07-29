@@ -1,4 +1,8 @@
-"""日频资金流方法学、序列、修订、排行与质量模型。"""
+"""日频资金流方法学、适用范围、序列、`revision`、供应商排行与质量模型。
+
+资金流的订单规模、主动交易方向、窗口、样本池、分桶和金额单位都可能不同；本包将它们显式
+固定，避免把同名“主力净流入”或不同供应商排行无依据地合成一个时间序列。
+"""
 
 from .money_flow_bucket_definition import MoneyFlowBucketDefinition
 from .money_flow_daily_observation import MoneyFlowDailyObservation

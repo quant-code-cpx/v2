@@ -1,4 +1,8 @@
-"""申万三级 taxonomy、估值同步与按日 raw replay 的受控 CLI。"""
+"""申万三级 taxonomy、估值同步与按日 raw replay 的受控 CLI。
+
+入口以固定版本方法学同步一至三级行业、父级闭包和估值观察；重放模式只消费已有失败
+证据或归档载荷，禁止网络抓取，从而让修复过程保持可复现且不混入新的上游观察。
+"""
 
 from __future__ import annotations
 

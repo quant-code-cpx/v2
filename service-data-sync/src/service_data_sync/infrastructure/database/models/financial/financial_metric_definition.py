@@ -1,4 +1,4 @@
-"""财务行项目与指标治理字典模型。"""
+"""允许进入 `canonical` 财务表的行项目、指标与单位治理字典模型。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,12 @@ from ..base import Base
 
 
 class FinancialMetricDefinition(Base):
-    """定义可进入 canonical 表的财务字段，未知字段必须进入 quarantine。"""
+    """定义可进入 `canonical` 表的财务字段；未知字段必须进入 `quarantine`。
+
+    字典不仅给字段一个名称，还固定业务含义、允许来源、计量单位、币种需求和报告维度；它防止把
+    供应商临时列、同名但不同会计口径的数值写入同一指标。新增或变更定义必须走治理和方法学版本，
+    不能靠应用代码中的字符串映射绕过审计。
+    """
 
     __tablename__ = "financial_metric_definition"
     __table_args__ = (

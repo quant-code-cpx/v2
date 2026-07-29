@@ -1,4 +1,4 @@
-"""资金流方法学窗口定义模型。"""
+"""资金流方法学版本内日源、当日和供应商滚动窗口的固定定义模型。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,12 @@ from ..base import Base
 
 
 class MoneyFlowMethodologyWindow(Base):
-    """冻结 daily source 与 supplier rolling 的不可混用窗口。"""
+    """冻结 `daily source` 与 `supplier rolling` 的不可混用窗口。
+
+    上游日源、供应商“今日”与 3/5/10/20 日滚动榜的截止时刻、样本范围和计算逻辑可能不同，即使
+    窗口长度相同也不能视为同一序列。窗口类型、长度、标签与方法学版本共同进入逻辑键，禁止用
+    日频观察自行重算供应商滚动排行或反向拆出每日流量。
+    """
 
     __tablename__ = "money_flow_methodology_window"
     __table_args__ = (
