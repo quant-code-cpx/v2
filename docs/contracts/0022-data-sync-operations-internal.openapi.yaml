@@ -1,0 +1,2791 @@
+openapi: 3.1.0
+info:
+  title: quant-v2 数据运维控制面内部 API
+  version: 1.0.0
+  x-contract-status: Proposed
+  description: >-
+    service-data-sync 拥有的数据目录、同步命令、运行、健康评估、自动计划和运维事件合同。
+    命令与运行状态以 data-sync PostgreSQL 为权威；Celery/Redis 仅负责唤醒和交付。
+    所有写操作均幂等，调用方不得在未知结果后更换 Idempotency-Key。
+servers:
+  - url: http://data-sync-api:8000
+security:
+  - serviceBearer: []
+paths:
+  /internal/v1/data-operations/overview/query:
+    post:
+      operationId: queryDataOperationsOverviewInternal
+      summary: 查询数据运维总览
+      requestBody:
+        $ref: "#/components/requestBodies/EmptyObject"
+      responses:
+        "200":
+          $ref: "#/components/responses/Overview"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/datasets/search:
+    post:
+      operationId: searchOperationalDatasetsInternal
+      summary: 检索数据集运维目录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetSearchRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/DatasetPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/datasets/detail:
+    post:
+      operationId: getOperationalDatasetInternal
+      summary: 查询数据集来源、覆盖、运行与健康详情
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetDetailRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/DatasetDetail"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/commands/preflight:
+    post:
+      operationId: preflightDataSyncCommandInternal
+      summary: 无副作用校验同步目标、模式和范围
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncPreflightRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Preflight"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/commands/submit:
+    post:
+      operationId: submitDataSyncCommandInternal
+      summary: 提交单个或批量同步命令
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncSubmitRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/CommandAccepted"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/commands/detail:
+    post:
+      operationId: getDataSyncCommandInternal
+      summary: 查询批量命令聚合状态与有序子运行
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommandDetailRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/CommandDetail"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/commands/cancel:
+    post:
+      operationId: cancelDataSyncCommandInternal
+      summary: 请求取消排队或运行中的同步命令
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommandMutationRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/CommandAccepted"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/commands/retry:
+    post:
+      operationId: retryDataSyncCommandInternal
+      summary: 基于失败运行创建新的可追溯重试命令
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommandMutationRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/CommandAccepted"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/runs/search:
+    post:
+      operationId: searchDataSyncRunsInternal
+      summary: 检索同步运行与队列
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunSearchRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/RunPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/runs/detail:
+    post:
+      operationId: getDataSyncRunInternal
+      summary: 查询运行、分区、错误和执行时间线
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunDetailRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/RunDetail"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/health/evaluations/search:
+    post:
+      operationId: searchDatasetHealthEvaluationsInternal
+      summary: 检索发布后健康评估
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HealthSearchRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/HealthPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/health/evaluations/detail:
+    post:
+      operationId: getDatasetHealthEvaluationInternal
+      summary: 查询不可变健康评估及当前问题投影
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HealthDetailRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/HealthDetail"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/health/checks/submit:
+    post:
+      operationId: submitDatasetHealthCheckInternal
+      summary: 提交独立的发布后健康检查
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HealthCheckSubmitRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/HealthCheckAccepted"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/health/checks/detail:
+    post:
+      operationId: getDatasetHealthCheckInternal
+      summary: 查询批量健康检查及有序目标结果
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HealthCheckDetailRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/HealthCheckDetail"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/schedules/search:
+    post:
+      operationId: searchDataSyncSchedulesInternal
+      summary: 检索自动同步计划及修订
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleSearchRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/SchedulePage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/schedules/upsert:
+    post:
+      operationId: upsertDataSyncScheduleInternal
+      summary: 创建或乐观锁更新自动同步计划
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleUpsertRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Schedule"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/schedules/set-enabled:
+    post:
+      operationId: setDataSyncScheduleEnabledInternal
+      summary: 启用或停用自动同步计划
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleEnabledRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Schedule"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/data-operations/events/search:
+    post:
+      operationId: searchDataOperationEventsInternal
+      summary: 检索不可变运维事件
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventSearchRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/EventPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+components:
+  securitySchemes:
+    serviceBearer:
+      type: http
+      scheme: bearer
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: service-api 由 submissionId 确定性派生；同一 submission 必须稳定复用，同 key 不同请求体返回 409
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  headers:
+    RequestId:
+      description: 跨服务调用链关联标识
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  requestBodies:
+    EmptyObject:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+  responses:
+    Overview:
+      description: 数据运维总览
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OperationsOverview"
+    DatasetPage:
+      description: 数据集运维目录分页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/DatasetPage"
+    DatasetDetail:
+      description: 数据集运维详情
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/DatasetDetail"
+    Preflight:
+      description: 同步预检结果；不代表锁定、批准或执行成功
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SyncPreflight"
+    CommandAccepted:
+      description: 命令已被 data-sync 权威账本受理
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CommandReceipt"
+    CommandDetail:
+      description: 命令聚合状态与按提交顺序排列的子运行
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CommandDetail"
+    RunPage:
+      description: 同步运行分页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/RunPage"
+    RunDetail:
+      description: 同步运行详情
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/RunDetail"
+    HealthPage:
+      description: 健康评估分页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/HealthPage"
+    HealthDetail:
+      description: 不可变健康评估及当前开放问题投影
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/HealthDetail"
+    HealthCheckAccepted:
+      description: 健康检查已进入独立检查队列
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/HealthCheckReceipt"
+    HealthCheckDetail:
+      description: 批量健康检查权威状态及有序目标结果
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/HealthCheckDetail"
+    SchedulePage:
+      description: 自动同步计划分页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SchedulePage"
+    Schedule:
+      description: 自动同步计划
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Schedule"
+    EventPage:
+      description: 运维事件分页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/EventPage"
+    Problem:
+      description: RFC 9457 Problem Details；不得包含堆栈、原始上游响应或 secret
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    CursorPageRequest:
+      type: object
+      properties:
+        cursor:
+          type: [string, "null"]
+          maxLength: 1024
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+    ActorContext:
+      type: object
+      additionalProperties: false
+      required: [actorRef, role, reason]
+      properties:
+        actorRef:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: service-api 生成的不透明主体引用，不得包含账号或邮箱
+        role:
+          enum: [ADMIN, SUPER_ADMIN, SYSTEM]
+        reason:
+          type: string
+          minLength: 2
+          maxLength: 500
+    OperationsOverview:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          datasetCount,
+          enabledDatasetCount,
+          healthSummary,
+          executionSlot,
+          queuedRunCount,
+          failedRunCount24h,
+          generatedAt,
+        ]
+      properties:
+        datasetCount:
+          type: integer
+          minimum: 0
+        enabledDatasetCount:
+          type: integer
+          minimum: 0
+        healthSummary:
+          $ref: "#/components/schemas/HealthSummary"
+        executionSlot:
+          $ref: "#/components/schemas/ExecutionSlot"
+        queuedRunCount:
+          type: integer
+          minimum: 0
+        failedRunCount24h:
+          type: integer
+          minimum: 0
+        generatedAt:
+          type: string
+          format: date-time
+    ExecutionSlot:
+      type: object
+      additionalProperties: false
+      required: [state, runId, datasetCode, leaseUntil, heartbeatAt]
+      properties:
+        state:
+          enum: [IDLE, RUNNING, RECOVERING]
+        runId:
+          type: [string, "null"]
+          format: uuid
+        datasetCode:
+          type: [string, "null"]
+        leaseUntil:
+          type: [string, "null"]
+          format: date-time
+        heartbeatAt:
+          type: [string, "null"]
+          format: date-time
+      oneOf:
+        - properties:
+            state:
+              const: IDLE
+            runId:
+              type: "null"
+            datasetCode:
+              type: "null"
+            leaseUntil:
+              type: "null"
+            heartbeatAt:
+              type: "null"
+        - properties:
+            state:
+              enum: [RUNNING, RECOVERING]
+            runId:
+              type: string
+              format: uuid
+            datasetCode:
+              type: string
+              minLength: 1
+            leaseUntil:
+              type: string
+              format: date-time
+            heartbeatAt:
+              type: string
+              format: date-time
+    DatasetSearchRequest:
+      allOf:
+        - $ref: "#/components/schemas/CursorPageRequest"
+        - type: object
+          properties:
+            query:
+              type: [string, "null"]
+              maxLength: 120
+            domains:
+              type: array
+              maxItems: 20
+              items:
+                type: string
+            providers:
+              type: array
+              maxItems: 20
+              items:
+                type: string
+            upstreamSources:
+              type: array
+              maxItems: 20
+              items:
+                type: string
+            availability:
+              type: array
+              maxItems: 4
+              items:
+                $ref: "#/components/schemas/DatasetAvailability"
+            observationStates:
+              type: array
+              maxItems: 5
+              items:
+                $ref: "#/components/schemas/DatasetObservationState"
+            runStatuses:
+              type: array
+              maxItems: 9
+              items:
+                $ref: "#/components/schemas/RunStatus"
+            healthStatuses:
+              type: array
+              maxItems: 4
+              items:
+                $ref: "#/components/schemas/HealthStatus"
+      unevaluatedProperties: false
+    DatasetDetailRequest:
+      type: object
+      additionalProperties: false
+      required: [datasetCode]
+      properties:
+        datasetCode:
+          type: string
+          minLength: 1
+          maxLength: 160
+    DatasetAvailability:
+      enum: [ENABLED, DISABLED, SOURCE_UNAVAILABLE, UNKNOWN]
+    DatasetObservationState:
+      enum: [PRESENT, EMPTY_VALID, EMPTY_UNEXPECTED, NOT_YET_SYNCED, UNKNOWN]
+      description: 区分有数据、业务上允许为空、异常空集、从未同步和暂不可判定
+    SourceBinding:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          providerId,
+          upstreamSource,
+          sourceDataset,
+          adapterId,
+          methodologyCode,
+          methodologyVersion,
+          approvalStatus,
+          role,
+          effective,
+        ]
+      properties:
+        providerId:
+          type: string
+          minLength: 1
+          maxLength: 80
+          example: akshare
+        upstreamSource:
+          type: string
+          minLength: 1
+          maxLength: 120
+          example: eastmoney
+        sourceDataset:
+          type: string
+          minLength: 1
+          maxLength: 160
+          example: eastmoney.stock-kline
+        adapterId:
+          type: string
+          minLength: 1
+          maxLength: 120
+        methodologyCode:
+          type: string
+          minLength: 1
+          maxLength: 120
+        methodologyVersion:
+          type: integer
+          minimum: 1
+        approvalStatus:
+          enum: [RESEARCH, CANDIDATE, APPROVED, SUSPENDED, UNSUPPORTED]
+        role:
+          enum: [PRIMARY, FALLBACK, SHADOW]
+        effective:
+          type: boolean
+    SyncMode:
+      enum: [FULL, INCREMENTAL, DATE_RANGE, OBSERVATION_DATE]
+    DatasetCapability:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          supportedModes,
+          scheduleSupportedModes,
+          scheduleTargetPolicyOptions,
+          maxRangeDays,
+          scheduleEligible,
+          manualEnabled,
+          correctionLookbackDays,
+        ]
+      properties:
+        supportedModes:
+          type: array
+          maxItems: 4
+          uniqueItems: true
+          description: 人工同步支持的模式；manualEnabled=false 时必须为空
+          items:
+            $ref: "#/components/schemas/SyncMode"
+        scheduleSupportedModes:
+          type: array
+          maxItems: 3
+          uniqueItems: true
+          description: 自动计划支持的模式；首版不允许 DATE_RANGE，scheduleEligible=false 时必须为空
+          items:
+            enum: [FULL, INCREMENTAL, OBSERVATION_DATE]
+        scheduleTargetPolicyOptions:
+          type: array
+          maxItems: 6
+          uniqueItems: true
+          description: >-
+            新建计划可选择的版本化目标解析策略。每个 scheduleSupportedModes 模式至少一项且恰有一个
+            isDefault=true；scheduleEligible=false 时必须为空
+          items:
+            $ref: "#/components/schemas/ScheduleTargetPolicyOption"
+        maxRangeDays:
+          type: [integer, "null"]
+          minimum: 1
+        scheduleEligible:
+          type: boolean
+        manualEnabled:
+          type: boolean
+        correctionLookbackDays:
+          type: integer
+          minimum: 0
+      allOf:
+        - if:
+            properties:
+              manualEnabled:
+                const: true
+            required: [manualEnabled]
+          then:
+            properties:
+              supportedModes:
+                minItems: 1
+          else:
+            properties:
+              supportedModes:
+                maxItems: 0
+        - if:
+            properties:
+              scheduleEligible:
+                const: true
+            required: [scheduleEligible]
+          then:
+            properties:
+              scheduleSupportedModes:
+                minItems: 1
+              scheduleTargetPolicyOptions:
+                minItems: 1
+          else:
+            properties:
+              scheduleSupportedModes:
+                maxItems: 0
+              scheduleTargetPolicyOptions:
+                maxItems: 0
+    DatasetTiming:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          lastAttemptStartedAt,
+          lastAttemptFinishedAt,
+          lastAttemptStatus,
+          lastSuccessAt,
+          lastPublishedAt,
+          dataAsOf,
+          dataAsOfKind,
+          dataAsOfLabel,
+          coverageFrom,
+          coverageTo,
+          freshnessStatus,
+          freshnessLagValue,
+          freshnessLagUnit,
+          freshnessReasonCode,
+          freshnessEvaluatedAt,
+        ]
+      properties:
+        lastAttemptStartedAt:
+          type: [string, "null"]
+          format: date-time
+          description: 最近一次尝试的 startedAt；从未运行时为 null
+        lastAttemptFinishedAt:
+          type: [string, "null"]
+          format: date-time
+          description: 最近一次尝试的终态 finishedAt；仍在排队或运行时为 null
+        lastAttemptStatus:
+          oneOf:
+            - $ref: "#/components/schemas/RunStatus"
+            - type: "null"
+        lastSuccessAt:
+          type: [string, "null"]
+          format: date-time
+          description: 最近一个 SUCCEEDED 运行的 finishedAt；PARTIAL 不计入成功
+        lastPublishedAt:
+          type: [string, "null"]
+          format: date-time
+        dataAsOf:
+          type: [string, "null"]
+          format: date
+        dataAsOfKind:
+          enum:
+            [
+              TRADING_DATE,
+              REPORT_PERIOD,
+              OBSERVATION_DATE,
+              SNAPSHOT_DATE,
+              EVENT_DATE,
+              NOT_APPLICABLE,
+            ]
+        dataAsOfLabel:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: data-sync 按数据集口径返回的中文标签，Web 不自行推断
+        coverageFrom:
+          type: [string, "null"]
+          format: date
+        coverageTo:
+          type: [string, "null"]
+          format: date
+        freshnessStatus:
+          $ref: "#/components/schemas/FreshnessStatus"
+        freshnessLagValue:
+          type: [integer, "null"]
+          minimum: 0
+          description: 按数据集 freshness policy 计算的落后量；不可计算时为 null
+        freshnessLagUnit:
+          type: ["string", "null"]
+          enum: [MINUTES, CALENDAR_DAYS, TRADING_DAYS, REPORTING_PERIODS, null]
+        freshnessReasonCode:
+          type: [string, "null"]
+          maxLength: 80
+          description: 服务端稳定原因码，Web 不自行推导过期原因
+        freshnessEvaluatedAt:
+          type: string
+          format: date-time
+    FreshnessStatus:
+      enum: [FRESH, WARNING, STALE, UNKNOWN, NOT_APPLICABLE]
+    ErrorSummary:
+      type: object
+      additionalProperties: false
+      description: 跨服务可传递的脱敏错误；不得含堆栈、Provider 正文、raw URI、查询参数或凭据
+      required: [code, stage, retryable, message]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 80
+        stage:
+          enum:
+            [
+              PREFLIGHT,
+              QUEUE,
+              DELIVERY,
+              PROVIDER_FETCH,
+              NORMALIZE,
+              QUALITY_GATE,
+              HEALTH_EVALUATION,
+              PERSIST,
+              PUBLISH,
+              CHECKPOINT,
+              SCHEDULE,
+              CANCEL,
+              RECOVERY,
+            ]
+        retryable:
+          type: boolean
+        message:
+          type: string
+          maxLength: 500
+    DatasetSummary:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          datasetCode,
+          displayName,
+          domain,
+          schemaVersion,
+          lifecycleStatus,
+          availability,
+          availabilityReasonCode,
+          observationState,
+          observationStateReasonCode,
+          sourceBindings,
+          capability,
+          timing,
+          latestRun,
+          healthSummary,
+          scheduleSummary,
+        ]
+      properties:
+        datasetCode:
+          type: string
+          maxLength: 160
+        displayName:
+          type: string
+          maxLength: 160
+        domain:
+          type: string
+          maxLength: 80
+        schemaVersion:
+          type: integer
+          minimum: 1
+        lifecycleStatus:
+          enum: [RESEARCH, CANDIDATE, PRODUCTION, RETIRED]
+        availability:
+          $ref: "#/components/schemas/DatasetAvailability"
+        availabilityReasonCode:
+          type: [string, "null"]
+          maxLength: 80
+        observationState:
+          $ref: "#/components/schemas/DatasetObservationState"
+        observationStateReasonCode:
+          type: [string, "null"]
+          maxLength: 80
+        sourceBindings:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/SourceBinding"
+        capability:
+          $ref: "#/components/schemas/DatasetCapability"
+        timing:
+          $ref: "#/components/schemas/DatasetTiming"
+        latestRun:
+          oneOf:
+            - $ref: "#/components/schemas/RunSummary"
+            - type: "null"
+        healthSummary:
+          $ref: "#/components/schemas/HealthSummary"
+        scheduleSummary:
+          oneOf:
+            - $ref: "#/components/schemas/ScheduleSummary"
+            - type: "null"
+    DatasetDetail:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          summary,
+          description,
+          ownerService,
+          grain,
+          freshnessPolicy,
+          latestPublication,
+          latestError,
+          healthRules,
+        ]
+      properties:
+        summary:
+          $ref: "#/components/schemas/DatasetSummary"
+        description:
+          type: string
+          maxLength: 1000
+        ownerService:
+          const: service-data-sync
+        grain:
+          type: string
+          maxLength: 200
+        freshnessPolicy:
+          description: 仅 summary.timing.freshnessStatus=NOT_APPLICABLE 的 MODEL_ONLY 数据集为 null
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required:
+                [timezone, calendarCode, warnAfterMinutes, criticalAfterMinutes]
+              properties:
+                timezone:
+                  type: string
+                  example: Asia/Shanghai
+                calendarCode:
+                  type: [string, "null"]
+                warnAfterMinutes:
+                  type: integer
+                  minimum: 1
+                criticalAfterMinutes:
+                  type: integer
+                  minimum: 1
+            - type: "null"
+        latestPublication:
+          type: [object, "null"]
+          additionalProperties: false
+          required: [dataVersion, releaseId, publishedAt, rowCount]
+          properties:
+            dataVersion:
+              type: string
+              format: uuid
+            releaseId:
+              type: string
+              format: uuid
+            publishedAt:
+              type: string
+              format: date-time
+            rowCount:
+              type: integer
+              minimum: 0
+        latestError:
+          oneOf:
+            - $ref: "#/components/schemas/ErrorSummary"
+            - type: "null"
+        healthRules:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [ruleCode, dimension, severity, version]
+            properties:
+              ruleCode:
+                type: string
+              dimension:
+                $ref: "#/components/schemas/HealthDimension"
+              severity:
+                enum: [INFO, WARN, CRITICAL]
+              version:
+                type: integer
+                minimum: 1
+      allOf:
+        - oneOf:
+            - properties:
+                freshnessPolicy:
+                  type: "null"
+                summary:
+                  properties:
+                    timing:
+                      properties:
+                        freshnessStatus:
+                          const: NOT_APPLICABLE
+            - properties:
+                freshnessPolicy:
+                  type: object
+                summary:
+                  properties:
+                    timing:
+                      properties:
+                        freshnessStatus:
+                          enum: [FRESH, WARNING, STALE, UNKNOWN]
+    DatasetPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor, totalEstimate, generatedAt]
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/DatasetSummary"
+        nextCursor:
+          type: [string, "null"]
+          maxLength: 1024
+        totalEstimate:
+          type: integer
+          minimum: 0
+        generatedAt:
+          type: string
+          format: date-time
+    SyncTarget:
+      type: object
+      additionalProperties: false
+      required: [datasetCode, mode]
+      properties:
+        datasetCode:
+          type: string
+          minLength: 1
+          maxLength: 160
+        mode:
+          $ref: "#/components/schemas/SyncMode"
+        dateFrom:
+          type: [string, "null"]
+          format: date
+        dateTo:
+          type: [string, "null"]
+          format: date
+        observationDate:
+          type: [string, "null"]
+          format: date
+      oneOf:
+        - properties:
+            mode:
+              const: DATE_RANGE
+            dateFrom:
+              type: string
+              format: date
+            dateTo:
+              type: string
+              format: date
+            observationDate:
+              type: "null"
+          required: [dateFrom, dateTo]
+        - properties:
+            mode:
+              const: OBSERVATION_DATE
+            dateFrom:
+              type: "null"
+            dateTo:
+              type: "null"
+            observationDate:
+              type: string
+              format: date
+          required: [observationDate]
+        - properties:
+            mode:
+              enum: [FULL, INCREMENTAL]
+            dateFrom:
+              type: "null"
+            dateTo:
+              type: "null"
+            observationDate:
+              type: "null"
+    SyncPreflightRequest:
+      type: object
+      additionalProperties: false
+      required: [targets]
+      properties:
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: v1 同一请求内 datasetCode 必须唯一，重复目标返回 422
+          x-unique-by: datasetCode
+          items:
+            $ref: "#/components/schemas/SyncTarget"
+    PreflightTargetResult:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          target,
+          eligible,
+          estimatedPartitions,
+          estimatedProviderCalls,
+          resolvedDateFrom,
+          resolvedDateTo,
+          warnings,
+        ]
+      properties:
+        target:
+          $ref: "#/components/schemas/SyncTarget"
+        eligible:
+          type: boolean
+        estimatedPartitions:
+          type: integer
+          minimum: 0
+        estimatedProviderCalls:
+          type: integer
+          minimum: 0
+        resolvedDateFrom:
+          type: [string, "null"]
+          format: date
+        resolvedDateTo:
+          type: [string, "null"]
+          format: date
+        warnings:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 300
+    SyncPreflight:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          preflightId,
+          requestHash,
+          expiresAt,
+          queueDepth,
+          executionSlot,
+          targets,
+          accepted,
+        ]
+      properties:
+        preflightId:
+          type: string
+          format: uuid
+        requestHash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        expiresAt:
+          type: string
+          format: date-time
+        queueDepth:
+          type: integer
+          minimum: 0
+        executionSlot:
+          $ref: "#/components/schemas/ExecutionSlot"
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/PreflightTargetResult"
+        accepted:
+          type: boolean
+    SyncSubmitRequest:
+      type: object
+      additionalProperties: false
+      required: [submissionId, preflightId, requestHash, targets, actor]
+      properties:
+        submissionId:
+          type: string
+          format: uuid
+          description: service-api 本地授权与交付意图标识
+        preflightId:
+          type: string
+          format: uuid
+        requestHash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: 必须与 preflight 冻结顺序一致，且 datasetCode 唯一
+          x-unique-by: datasetCode
+          items:
+            $ref: "#/components/schemas/SyncTarget"
+        actor:
+          $ref: "#/components/schemas/ActorContext"
+    CommandActionTarget:
+      type: object
+      additionalProperties: false
+      required: [resourceType, resourceId]
+      properties:
+        resourceType:
+          enum: [COMMAND, RUN]
+        resourceId:
+          type: string
+          format: uuid
+      description: >-
+        COMMAND 作用于整批命令；RUN 仅作用于单个子运行。取消整批时，未开始子运行直接取消，
+        活跃子运行进入合作式取消；重试整批时仅复制可重试的失败、部分成功或中断子运行。
+    CommandMutationRequest:
+      type: object
+      additionalProperties: false
+      required: [submissionId, target, actor]
+      properties:
+        submissionId:
+          type: string
+          format: uuid
+        target:
+          $ref: "#/components/schemas/CommandActionTarget"
+        actor:
+          $ref: "#/components/schemas/ActorContext"
+    CommandStatus:
+      enum:
+        [
+          QUEUED,
+          RUNNING,
+          CANCEL_REQUESTED,
+          SUCCEEDED,
+          PARTIAL,
+          FAILED,
+          CANCELLED,
+          REJECTED,
+        ]
+    CommandActionTargetStatus:
+      enum:
+        [
+          QUEUED,
+          RUNNING,
+          CANCEL_REQUESTED,
+          SUCCEEDED,
+          PARTIAL,
+          FAILED,
+          CANCELLED,
+          INTERRUPTED,
+          SKIPPED,
+          REJECTED,
+        ]
+    CommandDetailRequest:
+      type: object
+      additionalProperties: false
+      required: [commandId]
+      properties:
+        commandId:
+          type: string
+          format: uuid
+    CommandDetail:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          commandId,
+          submissionId,
+          status,
+          requestedAt,
+          startedAt,
+          finishedAt,
+          actorRef,
+          childRuns,
+          error,
+        ]
+      properties:
+        commandId:
+          type: string
+          format: uuid
+        submissionId:
+          type: [string, "null"]
+          format: uuid
+          description: API 用户命令为 submissionId；自动计划、legacy 或内部恢复命令为 null
+        status:
+          $ref: "#/components/schemas/CommandStatus"
+        requestedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: [string, "null"]
+          format: date-time
+        finishedAt:
+          type: [string, "null"]
+          format: date-time
+        actorRef:
+          type: string
+          maxLength: 128
+        childRuns:
+          type: array
+          maxItems: 100
+          description: >-
+            始终按提交时的 target 顺序返回，Web 不自行重建批次；命令在创建 child 前被
+            REJECTED 时允许为空，其余已受理命令至少一项
+          items:
+            $ref: "#/components/schemas/RunSummary"
+        error:
+          oneOf:
+            - $ref: "#/components/schemas/ErrorSummary"
+            - type: "null"
+    CommandReceipt:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          commandId,
+          submissionId,
+          status,
+          target,
+          targetStatus,
+          childRunIds,
+          queuePosition,
+          acceptedAt,
+        ]
+      properties:
+        commandId:
+          type: string
+          format: uuid
+          description: submit/retry 返回新命令；cancel 返回被取消 run 所属或被取消的 parent command
+        submissionId:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/CommandStatus"
+        target:
+          $ref: "#/components/schemas/CommandActionTarget"
+          description: >-
+            submit 为 {COMMAND, commandId}；cancel/retry 为请求中的原 target
+        targetStatus:
+          $ref: "#/components/schemas/CommandActionTargetStatus"
+          description: >-
+            submit 时等于 status；cancel 时为原目标接受取消后的状态；retry 时为原目标终态，
+            而 status/commandId 描述新建的重试命令
+        childRunIds:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+        queuePosition:
+          type: [integer, "null"]
+          minimum: 1
+          description: >-
+            submit/retry 时表示新命令首个 child run 在受理事务快照中的位置；cancel 为 null。
+            其余 child 的位置从 CommandDetail.childRuns 读取
+        acceptedAt:
+          type: string
+          format: date-time
+      oneOf:
+        - properties:
+            target:
+              properties:
+                resourceType:
+                  const: COMMAND
+            targetStatus:
+              $ref: "#/components/schemas/CommandStatus"
+        - properties:
+            target:
+              properties:
+                resourceType:
+                  const: RUN
+            targetStatus:
+              $ref: "#/components/schemas/RunStatus"
+    RunStatus:
+      enum:
+        [
+          QUEUED,
+          RUNNING,
+          CANCEL_REQUESTED,
+          SUCCEEDED,
+          PARTIAL,
+          FAILED,
+          CANCELLED,
+          INTERRUPTED,
+          SKIPPED,
+        ]
+    RunSummary:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          runId,
+          commandId,
+          datasetCode,
+          mode,
+          status,
+          queuePosition,
+          requestedAt,
+          startedAt,
+          finishedAt,
+          progress,
+          error,
+        ]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        commandId:
+          type: string
+          format: uuid
+        datasetCode:
+          type: string
+        mode:
+          $ref: "#/components/schemas/SyncMode"
+        status:
+          $ref: "#/components/schemas/RunStatus"
+        queuePosition:
+          type: [integer, "null"]
+          minimum: 1
+        requestedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: [string, "null"]
+          format: date-time
+        finishedAt:
+          type: [string, "null"]
+          format: date-time
+        progress:
+          type: object
+          additionalProperties: false
+          required:
+            [
+              completedPartitions,
+              totalPartitions,
+              processedRecords,
+              estimatedRecords,
+            ]
+          properties:
+            completedPartitions:
+              type: integer
+              minimum: 0
+            totalPartitions:
+              type: integer
+              minimum: 0
+            processedRecords:
+              type: integer
+              minimum: 0
+            estimatedRecords:
+              type: [integer, "null"]
+              minimum: 0
+              description: Provider 无法可靠估算时为 null，UI 不显示虚假百分比
+        error:
+          oneOf:
+            - $ref: "#/components/schemas/ErrorSummary"
+            - type: "null"
+    RunSearchRequest:
+      allOf:
+        - $ref: "#/components/schemas/CursorPageRequest"
+        - type: object
+          properties:
+            datasetCodes:
+              type: array
+              maxItems: 100
+              items:
+                type: string
+            statuses:
+              type: array
+              maxItems: 9
+              items:
+                $ref: "#/components/schemas/RunStatus"
+            requestedFrom:
+              type: [string, "null"]
+              format: date-time
+            requestedTo:
+              type: [string, "null"]
+              format: date-time
+      unevaluatedProperties: false
+    RunDetailRequest:
+      type: object
+      additionalProperties: false
+      required: [runId]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        partitionsCursor:
+          type: [string, "null"]
+          maxLength: 1024
+          description: 仅续取 partitions；与 timelineCursor 可独立或同时提供
+        partitionsLimit:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 100
+        timelineCursor:
+          type: [string, "null"]
+          maxLength: 1024
+          description: 仅续取 timeline；与 partitionsCursor 可独立或同时提供
+        timelineLimit:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 100
+    RunPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/RunSummary"
+        nextCursor:
+          type: [string, "null"]
+          maxLength: 1024
+    CheckpointSummary:
+      type: object
+      additionalProperties: false
+      description: 有界、脱敏的 checkpoint 摘要；不得返回 Provider cursor、token 或原始 payload
+      required: [kind, positionHash, updatedAt]
+      properties:
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 40
+        positionHash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        updatedAt:
+          type: string
+          format: date-time
+    RunDetail:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          run,
+          target,
+          sourceSnapshot,
+          attempt,
+          actorRef,
+          qualityGate,
+          partitionCount,
+          partitions,
+          partitionsNextCursor,
+          timelineEventCount,
+          timeline,
+          timelineNextCursor,
+          fencingToken,
+        ]
+      properties:
+        run:
+          $ref: "#/components/schemas/RunSummary"
+        target:
+          $ref: "#/components/schemas/SyncTarget"
+        sourceSnapshot:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: 运行受理时冻结的 Provider、真实上游、adapter 与方法学版本
+          items:
+            $ref: "#/components/schemas/SourceBinding"
+        attempt:
+          type: integer
+          minimum: 1
+        actorRef:
+          type: string
+        qualityGate:
+          $ref: "#/components/schemas/QualityGateSummary"
+        partitionCount:
+          type: integer
+          minimum: 0
+        partitions:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [partitionKey, status, attempt, checkpoint, error]
+            properties:
+              partitionKey:
+                type: string
+              status:
+                $ref: "#/components/schemas/RunStatus"
+              attempt:
+                type: integer
+                minimum: 0
+              checkpoint:
+                oneOf:
+                  - $ref: "#/components/schemas/CheckpointSummary"
+                  - type: "null"
+              error:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorSummary"
+                  - type: "null"
+        partitionsNextCursor:
+          type: [string, "null"]
+          maxLength: 1024
+        timelineEventCount:
+          type: integer
+          minimum: 0
+        timeline:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/OperationEvent"
+        timelineNextCursor:
+          type: [string, "null"]
+          maxLength: 1024
+        fencingToken:
+          type: [integer, "null"]
+          minimum: 1
+    QualityGateDisposition:
+      enum: [NOT_EVALUATED, PASSED, WARNED, BLOCKED]
+    QualityGateSummary:
+      type: object
+      additionalProperties: false
+      required: [disposition, policyCode, policyVersion, affectedCount, error]
+      properties:
+        disposition:
+          $ref: "#/components/schemas/QualityGateDisposition"
+        policyCode:
+          type: [string, "null"]
+          maxLength: 120
+        policyVersion:
+          type: [integer, "null"]
+          minimum: 1
+        affectedCount:
+          type: [integer, "null"]
+          minimum: 0
+        error:
+          oneOf:
+            - $ref: "#/components/schemas/ErrorSummary"
+            - type: "null"
+    HealthStatus:
+      enum: [HEALTHY, WARN, CRITICAL, UNKNOWN]
+    HealthRuleStatus:
+      enum: [PASSED, WARNED, FAILED, UNKNOWN, SKIPPED]
+      description: 单条规则执行结果；与规则配置的 severity、评估聚合 HealthStatus 分开
+    HealthIssueStatus:
+      enum: [OPEN, ACKNOWLEDGED]
+    HealthIssueSummary:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          issueId,
+          ruleCode,
+          dimension,
+          severity,
+          status,
+          firstDetectedAt,
+          lastDetectedAt,
+          affectedCount,
+          evidenceSummary,
+        ]
+      properties:
+        issueId:
+          type: string
+          format: uuid
+        ruleCode:
+          type: string
+          maxLength: 120
+        dimension:
+          $ref: "#/components/schemas/HealthDimension"
+        severity:
+          enum: [WARN, CRITICAL]
+        status:
+          $ref: "#/components/schemas/HealthIssueStatus"
+        firstDetectedAt:
+          type: string
+          format: date-time
+        lastDetectedAt:
+          type: string
+          format: date-time
+        affectedCount:
+          type: [integer, "null"]
+          minimum: 0
+        evidenceSummary:
+          type: [string, "null"]
+          maxLength: 500
+          description: 仅允许脱敏聚合证据，不返回原始记录或 Provider 正文
+    HealthDimension:
+      enum:
+        [
+          FRESHNESS,
+          COMPLETENESS,
+          VALIDITY,
+          UNIQUENESS,
+          CONSISTENCY,
+          IDENTITY,
+          SCHEMA,
+          TEMPORAL,
+        ]
+    HealthSummary:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          status,
+          score,
+          evaluatedAt,
+          evaluationId,
+          warningCount,
+          criticalCount,
+          openIssueCount,
+          affectedRecordCount,
+        ]
+      properties:
+        status:
+          $ref: "#/components/schemas/HealthStatus"
+        score:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 100
+          description: UNKNOWN 且无法评分时为 null
+        evaluatedAt:
+          type: [string, "null"]
+          format: date-time
+        evaluationId:
+          type: [string, "null"]
+          format: uuid
+        warningCount:
+          type: integer
+          minimum: 0
+        criticalCount:
+          type: integer
+          minimum: 0
+        openIssueCount:
+          type: integer
+          minimum: 0
+        affectedRecordCount:
+          type: [integer, "null"]
+          minimum: 0
+          description: 无法去重估算受影响记录时为 null
+    HealthEvaluation:
+      type: object
+      additionalProperties: false
+      description: 按 dataVersion、policyVersion 固化的不可变评估事实；当前问题状态由 HealthDetail 单独投影
+      required:
+        [
+          evaluationId,
+          healthCheckId,
+          datasetCode,
+          dataVersion,
+          releaseId,
+          policyCode,
+          policyVersion,
+          status,
+          score,
+          evaluatedAt,
+          results,
+        ]
+      properties:
+        evaluationId:
+          type: string
+          format: uuid
+        healthCheckId:
+          type: [string, "null"]
+          format: uuid
+          description: 主动健康检查生成时关联批次；同步发布后自动评估时为 null
+        datasetCode:
+          type: string
+        dataVersion:
+          type: string
+          format: uuid
+        releaseId:
+          type: string
+          format: uuid
+        policyCode:
+          type: string
+        policyVersion:
+          type: integer
+          minimum: 1
+        status:
+          $ref: "#/components/schemas/HealthStatus"
+        score:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 100
+        evaluatedAt:
+          type: string
+          format: date-time
+        results:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              [
+                ruleCode,
+                dimension,
+                severity,
+                status,
+                expected,
+                observed,
+                affectedCount,
+                sampleSummary,
+                message,
+              ]
+            properties:
+              ruleCode:
+                type: string
+              dimension:
+                $ref: "#/components/schemas/HealthDimension"
+              severity:
+                enum: [INFO, WARN, CRITICAL]
+              status:
+                $ref: "#/components/schemas/HealthRuleStatus"
+              expected:
+                type: [string, "null"]
+                maxLength: 300
+              observed:
+                type: [string, "null"]
+                maxLength: 300
+              affectedCount:
+                type: [integer, "null"]
+                minimum: 0
+              sampleSummary:
+                type: [string, "null"]
+                maxLength: 500
+                description: 仅返回脱敏、聚合后的安全样例摘要，不返回原始记录
+              message:
+                type: string
+                maxLength: 500
+    HealthEvaluationSummary:
+      type: object
+      additionalProperties: false
+      description: 不含规则结果；评估事实固定，currentOpenIssueCount 是查询时的当前问题投影
+      required:
+        [
+          evaluationId,
+          healthCheckId,
+          datasetCode,
+          dataVersion,
+          releaseId,
+          policyCode,
+          policyVersion,
+          status,
+          score,
+          evaluatedAt,
+          warningCount,
+          criticalCount,
+          currentOpenIssueCount,
+          issueProjectionAsOf,
+          affectedRecordCount,
+        ]
+      properties:
+        evaluationId:
+          type: string
+          format: uuid
+        healthCheckId:
+          type: [string, "null"]
+          format: uuid
+        datasetCode:
+          type: string
+        dataVersion:
+          type: string
+          format: uuid
+        releaseId:
+          type: string
+          format: uuid
+        policyCode:
+          type: string
+        policyVersion:
+          type: integer
+          minimum: 1
+        status:
+          $ref: "#/components/schemas/HealthStatus"
+        score:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 100
+        evaluatedAt:
+          type: string
+          format: date-time
+        warningCount:
+          type: integer
+          minimum: 0
+        criticalCount:
+          type: integer
+          minimum: 0
+        currentOpenIssueCount:
+          type: integer
+          minimum: 0
+        issueProjectionAsOf:
+          type: string
+          format: date-time
+        affectedRecordCount:
+          type: [integer, "null"]
+          minimum: 0
+    HealthSearchRequest:
+      allOf:
+        - $ref: "#/components/schemas/CursorPageRequest"
+        - type: object
+          properties:
+            datasetCodes:
+              type: array
+              maxItems: 100
+              items:
+                type: string
+            statuses:
+              type: array
+              maxItems: 4
+              items:
+                $ref: "#/components/schemas/HealthStatus"
+            evaluatedFrom:
+              type: [string, "null"]
+              format: date-time
+            evaluatedTo:
+              type: [string, "null"]
+              format: date-time
+      unevaluatedProperties: false
+    HealthDetailRequest:
+      type: object
+      additionalProperties: false
+      required: [evaluationId]
+      properties:
+        evaluationId:
+          type: string
+          format: uuid
+        issuesCursor:
+          type: [string, "null"]
+          maxLength: 1024
+        issuesLimit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+    HealthPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/HealthEvaluationSummary"
+        nextCursor:
+          type: [string, "null"]
+          maxLength: 1024
+    HealthDetail:
+      type: object
+      additionalProperties: false
+      description: 不可变评估事实与查询时开放问题投影的组合
+      required:
+        [
+          evaluation,
+          currentOpenIssueCount,
+          currentOpenIssues,
+          currentOpenIssuesNextCursor,
+          issueProjectionAsOf,
+        ]
+      properties:
+        evaluation:
+          $ref: "#/components/schemas/HealthEvaluation"
+        currentOpenIssueCount:
+          type: integer
+          minimum: 0
+        currentOpenIssues:
+          type: array
+          maxItems: 100
+          description: 仅含 OPEN、ACKNOWLEDGED；RESOLVED 只保留在内部历史与事件中
+          items:
+            $ref: "#/components/schemas/HealthIssueSummary"
+        currentOpenIssuesNextCursor:
+          type: [string, "null"]
+          maxLength: 1024
+        issueProjectionAsOf:
+          type: string
+          format: date-time
+    HealthCheckTarget:
+      type: object
+      additionalProperties: false
+      required: [datasetCode, dataVersion]
+      properties:
+        datasetCode:
+          type: string
+          minLength: 1
+          maxLength: 160
+        dataVersion:
+          type: [string, "null"]
+          format: uuid
+          description: null 表示在受理时绑定该数据集的最新 production publication
+    HealthCheckSubmitRequest:
+      type: object
+      additionalProperties: false
+      required: [submissionId, targets, actor]
+      properties:
+        submissionId:
+          type: string
+          format: uuid
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: v1 同一批次 datasetCode 必须唯一，避免同一版本重复评估
+          x-unique-by: datasetCode
+          items:
+            $ref: "#/components/schemas/HealthCheckTarget"
+        actor:
+          $ref: "#/components/schemas/ActorContext"
+    HealthCheckStatus:
+      enum: [QUEUED, RUNNING, SUCCEEDED, PARTIAL, FAILED, CANCELLED, REJECTED]
+      description: >-
+        全部目标成功为 SUCCEEDED；成功与非成功混合为 PARTIAL；无成功且含执行失败为 FAILED；
+        全部取消为 CANCELLED；全部在执行前拒绝为 REJECTED
+    HealthCheckTargetStatus:
+      enum: [QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED, REJECTED]
+      description: 单目标从 QUEUED/RUNNING 进入一个终态；REJECTED 表示执行前未受理
+    HealthCheckReceipt:
+      type: object
+      additionalProperties: false
+      required: [healthCheckId, submissionId, status, acceptedAt]
+      properties:
+        healthCheckId:
+          type: string
+          format: uuid
+        submissionId:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/HealthCheckStatus"
+        acceptedAt:
+          type: string
+          format: date-time
+    HealthCheckDetailRequest:
+      type: object
+      additionalProperties: false
+      required: [healthCheckId]
+      properties:
+        healthCheckId:
+          type: string
+          format: uuid
+    HealthCheckTargetResult:
+      type: object
+      additionalProperties: false
+      description: >-
+        保留原提交 target；SUCCEEDED 必有 evaluationId，失败或拒绝必有 error，
+        resolvedDataVersion 仅在目标版本成功绑定后有值
+      required: [target, resolvedDataVersion, status, evaluationId, error]
+      properties:
+        target:
+          $ref: "#/components/schemas/HealthCheckTarget"
+        resolvedDataVersion:
+          type: [string, "null"]
+          format: uuid
+        status:
+          $ref: "#/components/schemas/HealthCheckTargetStatus"
+        evaluationId:
+          type: [string, "null"]
+          format: uuid
+        error:
+          oneOf:
+            - $ref: "#/components/schemas/ErrorSummary"
+            - type: "null"
+      oneOf:
+        - properties:
+            status:
+              const: QUEUED
+            evaluationId:
+              type: "null"
+            error:
+              type: "null"
+        - properties:
+            status:
+              const: RUNNING
+            resolvedDataVersion:
+              type: string
+              format: uuid
+            evaluationId:
+              type: "null"
+            error:
+              type: "null"
+        - properties:
+            status:
+              const: SUCCEEDED
+            resolvedDataVersion:
+              type: string
+              format: uuid
+            evaluationId:
+              type: string
+              format: uuid
+            error:
+              type: "null"
+        - properties:
+            status:
+              const: FAILED
+            evaluationId:
+              type: "null"
+            error:
+              $ref: "#/components/schemas/ErrorSummary"
+        - properties:
+            status:
+              const: CANCELLED
+            evaluationId:
+              type: "null"
+            error:
+              type: "null"
+        - properties:
+            status:
+              const: REJECTED
+            resolvedDataVersion:
+              type: "null"
+            evaluationId:
+              type: "null"
+            error:
+              $ref: "#/components/schemas/ErrorSummary"
+    HealthCheckDetail:
+      type: object
+      additionalProperties: false
+      description: targets 始终按原提交顺序返回，供 API 对账与 Web 展示批量结果
+      required:
+        [
+          healthCheckId,
+          submissionId,
+          status,
+          requestedAt,
+          startedAt,
+          finishedAt,
+          actorRef,
+          targets,
+          error,
+        ]
+      properties:
+        healthCheckId:
+          type: string
+          format: uuid
+        submissionId:
+          type: [string, "null"]
+          format: uuid
+        status:
+          $ref: "#/components/schemas/HealthCheckStatus"
+        requestedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: [string, "null"]
+          format: date-time
+        finishedAt:
+          type: [string, "null"]
+          format: date-time
+        actorRef:
+          type: string
+          minLength: 1
+          maxLength: 128
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/HealthCheckTargetResult"
+        error:
+          oneOf:
+            - $ref: "#/components/schemas/ErrorSummary"
+            - type: "null"
+    ScheduleFrequency:
+      type: object
+      additionalProperties: false
+      required: [kind, timezone]
+      properties:
+        kind:
+          enum: [TRADING_DAY, DAILY, WEEKLY, MONTHLY, INTERVAL]
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 80
+          example: Asia/Shanghai
+        localTime:
+          type: [string, "null"]
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+        dayOfWeek:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 7
+        dayOfMonth:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 31
+        intervalMinutes:
+          type: [integer, "null"]
+          minimum: 5
+          maximum: 43200
+        calendarCode:
+          type: [string, "null"]
+          maxLength: 80
+      oneOf:
+        - properties:
+            kind:
+              const: TRADING_DAY
+            localTime:
+              type: string
+              pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+            dayOfWeek:
+              type: "null"
+            dayOfMonth:
+              type: "null"
+            intervalMinutes:
+              type: "null"
+            calendarCode:
+              type: string
+              minLength: 1
+          required: [localTime, calendarCode]
+        - properties:
+            kind:
+              const: DAILY
+            localTime:
+              type: string
+              pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+            dayOfWeek:
+              type: "null"
+            dayOfMonth:
+              type: "null"
+            intervalMinutes:
+              type: "null"
+          required: [localTime]
+        - properties:
+            kind:
+              const: WEEKLY
+            localTime:
+              type: string
+              pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+            dayOfWeek:
+              type: integer
+              minimum: 1
+              maximum: 7
+            dayOfMonth:
+              type: "null"
+            intervalMinutes:
+              type: "null"
+          required: [localTime, dayOfWeek]
+        - properties:
+            kind:
+              const: MONTHLY
+            localTime:
+              type: string
+              pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+            dayOfWeek:
+              type: "null"
+            dayOfMonth:
+              type: integer
+              minimum: 1
+              maximum: 31
+            intervalMinutes:
+              type: "null"
+          required: [localTime, dayOfMonth]
+        - properties:
+            kind:
+              const: INTERVAL
+            localTime:
+              type: "null"
+            dayOfWeek:
+              type: "null"
+            dayOfMonth:
+              type: "null"
+            intervalMinutes:
+              type: integer
+              minimum: 5
+              maximum: 43200
+            calendarCode:
+              type: "null"
+          required: [intervalMinutes]
+    ScheduleTargetPolicy:
+      type: object
+      additionalProperties: false
+      required: [policyVersion, dateResolution]
+      properties:
+        policyVersion:
+          type: integer
+          minimum: 1
+          description: 目标日期解析语义版本；修订计划时冻结
+        dateResolution:
+          enum: [NONE, SCHEDULED_LOCAL_DATE, LATEST_COMPLETED_TRADING_DATE]
+      description: >-
+        FULL 与 INCREMENTAL 必须使用 NONE；OBSERVATION_DATE 必须在计划触发时按计划本地日期
+        或最近已完成交易日解析。首版自动计划禁止 DATE_RANGE。
+    ScheduleTargetPolicyOption:
+      type: object
+      additionalProperties: false
+      required: [mode, policy, isDefault]
+      properties:
+        mode:
+          enum: [FULL, INCREMENTAL, OBSERVATION_DATE]
+        policy:
+          $ref: "#/components/schemas/ScheduleTargetPolicy"
+        isDefault:
+          type: boolean
+      description: >-
+        data-sync 返回的允许值；同一 mode 恰有一个默认项。ScheduleUpsertRequest.targetPolicy
+        必须逐字段匹配所选数据集、mode 的一个当前允许项，真正受理时再次校验。
+      oneOf:
+        - properties:
+            mode:
+              enum: [FULL, INCREMENTAL]
+            policy:
+              allOf:
+                - $ref: "#/components/schemas/ScheduleTargetPolicy"
+                - properties:
+                    dateResolution:
+                      const: NONE
+        - properties:
+            mode:
+              const: OBSERVATION_DATE
+            policy:
+              allOf:
+                - $ref: "#/components/schemas/ScheduleTargetPolicy"
+                - properties:
+                    dateResolution:
+                      enum:
+                        [SCHEDULED_LOCAL_DATE, LATEST_COMPLETED_TRADING_DATE]
+    ScheduleSummary:
+      type: object
+      additionalProperties: false
+      description: v1 每个 datasetCode 至多一个计划，因此该摘要无歧义
+      required: [scheduleId, enabled, frequency, nextRunAt, version]
+      properties:
+        scheduleId:
+          type: string
+          format: uuid
+        enabled:
+          type: boolean
+        frequency:
+          $ref: "#/components/schemas/ScheduleFrequency"
+        nextRunAt:
+          type: [string, "null"]
+          format: date-time
+        version:
+          type: integer
+          minimum: 1
+    Schedule:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          summary,
+          datasetCode,
+          mode,
+          targetPolicy,
+          misfirePolicy,
+          coalesce,
+          recentRunAt,
+          nextOccurrences,
+          revisionId,
+          updatedAt,
+          updatedByActorRef,
+        ]
+      properties:
+        summary:
+          $ref: "#/components/schemas/ScheduleSummary"
+        datasetCode:
+          type: string
+          description: v1 唯一计划键；创建重复 datasetCode 返回 409，更新不可改绑其他数据集
+        mode:
+          $ref: "#/components/schemas/SyncMode"
+        targetPolicy:
+          $ref: "#/components/schemas/ScheduleTargetPolicy"
+        misfirePolicy:
+          enum: [SKIP, RUN_ONCE]
+        coalesce:
+          type: boolean
+        recentRunAt:
+          type: [string, "null"]
+          format: date-time
+        nextOccurrences:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            format: date-time
+        revisionId:
+          type: string
+          format: uuid
+        updatedAt:
+          type: string
+          format: date-time
+        updatedByActorRef:
+          type: string
+      oneOf:
+        - properties:
+            mode:
+              enum: [FULL, INCREMENTAL]
+            targetPolicy:
+              allOf:
+                - $ref: "#/components/schemas/ScheduleTargetPolicy"
+                - properties:
+                    dateResolution:
+                      const: NONE
+        - properties:
+            mode:
+              const: OBSERVATION_DATE
+            targetPolicy:
+              allOf:
+                - $ref: "#/components/schemas/ScheduleTargetPolicy"
+                - properties:
+                    dateResolution:
+                      enum:
+                        [SCHEDULED_LOCAL_DATE, LATEST_COMPLETED_TRADING_DATE]
+    ScheduleSearchRequest:
+      allOf:
+        - $ref: "#/components/schemas/CursorPageRequest"
+        - type: object
+          properties:
+            datasetCodes:
+              type: array
+              maxItems: 100
+              items:
+                type: string
+            enabled:
+              type: [boolean, "null"]
+      unevaluatedProperties: false
+    ScheduleUpsertRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          submissionId,
+          scheduleId,
+          datasetCode,
+          mode,
+          targetPolicy,
+          frequency,
+          misfirePolicy,
+          coalesce,
+          enabled,
+          expectedVersion,
+          actor,
+        ]
+      properties:
+        submissionId:
+          type: string
+          format: uuid
+        scheduleId:
+          type: [string, "null"]
+          format: uuid
+          description: 创建时与 expectedVersion 同为 null；更新时两者都必须非 null
+        datasetCode:
+          type: string
+          description: v1 每个 datasetCode 至多一个计划；创建重复值返回 409
+        mode:
+          $ref: "#/components/schemas/SyncMode"
+        targetPolicy:
+          $ref: "#/components/schemas/ScheduleTargetPolicy"
+        frequency:
+          $ref: "#/components/schemas/ScheduleFrequency"
+        misfirePolicy:
+          enum: [SKIP, RUN_ONCE]
+        coalesce:
+          type: boolean
+        enabled:
+          type: boolean
+        expectedVersion:
+          type: [integer, "null"]
+          minimum: 1
+          description: 创建时为 null，更新时必须等于当前版本
+        actor:
+          $ref: "#/components/schemas/ActorContext"
+      oneOf:
+        - properties:
+            mode:
+              enum: [FULL, INCREMENTAL]
+            targetPolicy:
+              allOf:
+                - $ref: "#/components/schemas/ScheduleTargetPolicy"
+                - properties:
+                    dateResolution:
+                      const: NONE
+        - properties:
+            mode:
+              const: OBSERVATION_DATE
+            targetPolicy:
+              allOf:
+                - $ref: "#/components/schemas/ScheduleTargetPolicy"
+                - properties:
+                    dateResolution:
+                      enum:
+                        [SCHEDULED_LOCAL_DATE, LATEST_COMPLETED_TRADING_DATE]
+      allOf:
+        - oneOf:
+            - properties:
+                scheduleId:
+                  type: "null"
+                expectedVersion:
+                  type: "null"
+            - properties:
+                scheduleId:
+                  type: string
+                  format: uuid
+                expectedVersion:
+                  type: integer
+                  minimum: 1
+    ScheduleEnabledRequest:
+      type: object
+      additionalProperties: false
+      required: [submissionId, scheduleId, enabled, expectedVersion, actor]
+      properties:
+        submissionId:
+          type: string
+          format: uuid
+        scheduleId:
+          type: string
+          format: uuid
+        enabled:
+          type: boolean
+        expectedVersion:
+          type: integer
+          minimum: 1
+        actor:
+          $ref: "#/components/schemas/ActorContext"
+    SchedulePage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/Schedule"
+        nextCursor:
+          type: [string, "null"]
+          maxLength: 1024
+    EventSearchRequest:
+      allOf:
+        - $ref: "#/components/schemas/CursorPageRequest"
+        - type: object
+          properties:
+            actorRefs:
+              type: array
+              maxItems: 100
+              items:
+                type: string
+            resourceTypes:
+              type: array
+              maxItems: 20
+              items:
+                enum: [COMMAND, RUN, HEALTH_CHECK, SCHEDULE]
+            actions:
+              type: array
+              maxItems: 30
+              items:
+                type: string
+            occurredFrom:
+              type: [string, "null"]
+              format: date-time
+            occurredTo:
+              type: [string, "null"]
+              format: date-time
+      unevaluatedProperties: false
+    OperationEvent:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          eventId,
+          resourceType,
+          resourceId,
+          action,
+          result,
+          actorRef,
+          requestId,
+          occurredAt,
+          error,
+        ]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        resourceType:
+          enum: [COMMAND, RUN, HEALTH_CHECK, SCHEDULE]
+        resourceId:
+          type: string
+          format: uuid
+        action:
+          type: string
+          maxLength: 80
+        result:
+          enum:
+            [
+              ACCEPTED,
+              QUEUED,
+              STARTED,
+              CANCEL_REQUESTED,
+              SUCCEEDED,
+              PARTIAL,
+              FAILED,
+              CANCELLED,
+              INTERRUPTED,
+              SKIPPED,
+              REJECTED,
+            ]
+          description: 动作事件结论而非资源终态；cancel_too_late 使用 FAILED，目标 run 可保持 SUCCEEDED
+        actorRef:
+          type: string
+          maxLength: 128
+        requestId:
+          type: string
+          maxLength: 128
+        occurredAt:
+          type: string
+          format: date-time
+        error:
+          oneOf:
+            - $ref: "#/components/schemas/ErrorSummary"
+            - type: "null"
+    EventPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/OperationEvent"
+        nextCursor:
+          type: [string, "null"]
+          maxLength: 1024
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail, code, requestId]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 500
+        code:
+          type: string
+          maxLength: 80
+        requestId:
+          type: string
+          maxLength: 128

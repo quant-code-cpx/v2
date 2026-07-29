@@ -60,3 +60,11 @@ service-api  <---  service-web
 - [ADR-0007：Docker Compose 开发与生产环境分层](../decisions/0007-compose-environment-strategy.md)
 
 当前生产 Compose 是单节点部署基线，不代表高可用或最终云平台拓扑。
+
+## 跨服务控制面
+
+- [0002：数据运维控制面](0002-data-operations-control-plane/index.html) — Proposed
+- [ADR-0024：数据运维控制面与全局串行同步](../decisions/0024-data-operations-control-plane.md) — Proposed
+
+数据运维控制面统一来源目录、同步命令、全局执行槽、健康评估、动态计划和双层审计；
+`service-data-sync` 仍是同步与数据事实权威，`service-api` 只负责身份、授权和可靠 HTTP 投递。

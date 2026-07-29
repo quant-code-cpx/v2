@@ -1,0 +1,1901 @@
+openapi: 3.1.0
+x-http-method-policy: post-only
+info:
+  title: quant-v2 数据运维公开 POST API
+  version: 1.0.0
+  x-contract-status: Proposed
+  description: >-
+    service-api 面向 PC 管理端的数据运维合同。ADMIN 与 SUPER_ADMIN 可读，首版只有
+    SUPER_ADMIN 可发起同步、取消、重试、健康检查和计划变更。service-api 在本地事务中写入
+    DataOperationSubmission、API Outbox 与安全 AuditLog，再由 dispatcher 使用稳定幂等键投递；
+    因此 202 仅表示授权意图已持久化，deliveryStatus=PENDING 时不得解释为 data-sync 已受理。
+    浏览器 CORS allow-headers 必须包含 Idempotency-Key 与 X-Request-Id。
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+paths:
+  /data-operations/overview:
+    post:
+      operationId: queryDataOperationsOverview
+      summary: 查询数据运维总览
+      x-required-roles: [ADMIN, SUPER_ADMIN]
+      requestBody:
+        $ref: "#/components/requestBodies/EmptyObject"
+      responses:
+        "200":
+          $ref: "#/components/responses/Overview"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/datasets/search:
+    post:
+      operationId: searchOperationalDatasets
+      summary: 检索数据资产、来源和最新状态
+      x-required-roles: [ADMIN, SUPER_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetSearchRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/DatasetPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/datasets/detail:
+    post:
+      operationId: getOperationalDataset
+      summary: 查询一个数据集的来源、覆盖、发布与健康详情
+      x-required-roles: [ADMIN, SUPER_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [datasetCode]
+              properties:
+                datasetCode:
+                  type: string
+                  minLength: 1
+                  maxLength: 160
+      responses:
+        "200":
+          $ref: "#/components/responses/DatasetDetail"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/sync/preflight:
+    post:
+      operationId: preflightDataSync
+      summary: 预检单个或批量同步
+      x-required-roles: [SUPER_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncPreflightRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Preflight"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/sync/submit:
+    post:
+      operationId: submitDataSync
+      summary: 持久化并投递同步意图
+      x-required-roles: [SUPER_ADMIN]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncSubmitRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/Submission"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/sync/cancel:
+    post:
+      operationId: cancelDataSync
+      summary: 持久化并投递合作式取消意图
+      x-required-roles: [SUPER_ADMIN]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommandActionRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/Submission"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/sync/retry:
+    post:
+      operationId: retryDataSync
+      summary: 基于失败命令持久化并投递重试意图
+      x-required-roles: [SUPER_ADMIN]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommandActionRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/Submission"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/commands/detail:
+    post:
+      operationId: getDataSyncCommand
+      summary: 查询批量命令聚合状态与有序子运行
+      x-required-roles: [ADMIN, SUPER_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/CommandDetailRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/CommandDetail"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/runs/search:
+    post:
+      operationId: searchDataSyncRuns
+      summary: 检索全局串行队列与历史运行
+      x-required-roles: [ADMIN, SUPER_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunSearchRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/RunPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/runs/detail:
+    post:
+      operationId: getDataSyncRun
+      summary: 查询运行详情、分区和时间线
+      x-required-roles: [ADMIN, SUPER_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/RunDetailRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/RunDetail"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/health/evaluations/search:
+    post:
+      operationId: searchDatasetHealthEvaluations
+      summary: 检索发布后数据健康评估
+      x-required-roles: [ADMIN, SUPER_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HealthSearchRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/HealthPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/health/evaluations/detail:
+    post:
+      operationId: getDatasetHealthEvaluation
+      summary: 查询不可变健康评估及当前问题投影
+      x-required-roles: [ADMIN, SUPER_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/HealthDetailRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/HealthDetail"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/health/checks/submit:
+    post:
+      operationId: submitDatasetHealthCheck
+      summary: 持久化并投递主动健康检查
+      x-required-roles: [SUPER_ADMIN]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HealthCheckSubmitRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/Submission"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/health/checks/detail:
+    post:
+      operationId: getDatasetHealthCheck
+      summary: 查询批量健康检查及有序目标结果
+      x-required-roles: [ADMIN, SUPER_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/HealthCheckDetailRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/HealthCheckDetail"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/schedules/search:
+    post:
+      operationId: searchDataSyncSchedules
+      summary: 检索自动同步计划
+      x-required-roles: [ADMIN, SUPER_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleSearchRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/SchedulePage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/schedules/upsert:
+    post:
+      operationId: upsertDataSyncSchedule
+      summary: 持久化并投递计划创建或更新
+      x-required-roles: [SUPER_ADMIN]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleUpsertRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/Submission"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/schedules/set-enabled:
+    post:
+      operationId: setDataSyncScheduleEnabled
+      summary: 持久化并投递计划启停
+      x-required-roles: [SUPER_ADMIN]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleEnabledRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/Submission"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/submissions/detail:
+    post:
+      operationId: getDataOperationSubmission
+      summary: 对账本地交付状态与 data-sync 权威回执
+      x-required-roles: [ADMIN, SUPER_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [submissionId]
+              properties:
+                submissionId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          $ref: "#/components/responses/Submission"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /data-operations/operations/search:
+    post:
+      operationId: searchDataOperations
+      summary: 检索谁在何时执行了什么以及最终结果
+      x-required-roles: [ADMIN, SUPER_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OperationSearchRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/OperationPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 每个用户意图生成一次，并在同一 actor 的公开请求重试时稳定复用；不会原样透传到 data-sync
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  headers:
+    RequestId:
+      description: 跨浏览器、API、outbox 与 data-sync 的关联标识
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    RetryAfter:
+      description: 仅 429 返回的建议重试等待秒数
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 3600
+  requestBodies:
+    EmptyObject:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+  responses:
+    Overview:
+      description: 数据运维总览
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OperationsOverview"
+    DatasetPage:
+      description: 数据资产分页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/DatasetPage"
+    DatasetDetail:
+      description: 数据资产详情
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/DatasetDetail"
+    Preflight:
+      description: 无副作用预检；未锁定队列位置或 Provider 预算
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SyncPreflight"
+    Submission:
+      description: service-api 已持久化的授权与交付意图
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SubmissionReceipt"
+    CommandDetail:
+      description: data-sync 权威命令状态与 service-api 用户展示信息
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CommandDetailView"
+    RunPage:
+      description: 运行分页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/RunPage"
+    RunDetail:
+      description: 运行详情
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/RunDetail"
+    HealthPage:
+      description: 健康评估分页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/HealthPage"
+    HealthDetail:
+      description: 不可变健康评估及当前开放问题投影
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/HealthDetail"
+    HealthCheckDetail:
+      description: 批量健康检查状态及用户展示信息
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/HealthCheckDetailView"
+    SchedulePage:
+      description: 自动同步计划分页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SchedulePage"
+    OperationPage:
+      description: 用户动作与执行结果合并投影
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OperationPage"
+    Problem:
+      description: 公开 Problem Details；不透传下游正文、堆栈、URI 或凭据
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    CursorPageRequest:
+      type: object
+      properties:
+        cursor:
+          type: [string, "null"]
+          maxLength: 1024
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+    OperationsOverview:
+      type: object
+      additionalProperties: false
+      required: [dataSync, deliveryPendingCount, deliveryDeadLetterCount]
+      properties:
+        dataSync:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/OperationsOverview"
+        deliveryPendingCount:
+          type: integer
+          minimum: 0
+        deliveryDeadLetterCount:
+          type: integer
+          minimum: 0
+    DatasetSearchRequest:
+      allOf:
+        - $ref: "#/components/schemas/CursorPageRequest"
+        - type: object
+          properties:
+            query:
+              type: [string, "null"]
+              maxLength: 120
+            domains:
+              type: array
+              maxItems: 20
+              items:
+                type: string
+            providers:
+              type: array
+              maxItems: 20
+              items:
+                type: string
+            upstreamSources:
+              type: array
+              maxItems: 20
+              items:
+                type: string
+            availability:
+              type: array
+              maxItems: 4
+              items:
+                $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/DatasetAvailability"
+            observationStates:
+              type: array
+              maxItems: 5
+              items:
+                $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/DatasetObservationState"
+            runStatuses:
+              type: array
+              maxItems: 9
+              items:
+                $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/RunStatus"
+            healthStatuses:
+              type: array
+              maxItems: 4
+              items:
+                $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/HealthStatus"
+      unevaluatedProperties: false
+    DatasetSummary:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          datasetCode,
+          displayName,
+          domain,
+          lifecycleStatus,
+          availability,
+          availabilityReasonCode,
+          observationState,
+          observationStateReasonCode,
+          sourceBindings,
+          capability,
+          timing,
+          latestRun,
+          healthSummary,
+          scheduleSummary,
+        ]
+      properties:
+        datasetCode:
+          type: string
+        displayName:
+          type: string
+        domain:
+          type: string
+        lifecycleStatus:
+          enum: [RESEARCH, CANDIDATE, PRODUCTION, RETIRED]
+        availability:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/DatasetAvailability"
+        availabilityReasonCode:
+          type: [string, "null"]
+          maxLength: 80
+        observationState:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/DatasetObservationState"
+        observationStateReasonCode:
+          type: [string, "null"]
+          maxLength: 80
+        sourceBindings:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SourceBinding"
+        capability:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/DatasetCapability"
+        timing:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/DatasetTiming"
+        latestRun:
+          oneOf:
+            - $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/RunSummary"
+            - type: "null"
+        healthSummary:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/HealthSummary"
+        scheduleSummary:
+          oneOf:
+            - $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ScheduleSummary"
+            - type: "null"
+    DatasetDetail:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          summary,
+          description,
+          grain,
+          freshnessPolicy,
+          latestPublication,
+          latestError,
+          healthRules,
+        ]
+      properties:
+        summary:
+          $ref: "#/components/schemas/DatasetSummary"
+        description:
+          type: string
+        grain:
+          type: string
+        freshnessPolicy:
+          description: 仅 freshnessStatus=NOT_APPLICABLE 的 MODEL_ONLY 数据集为 null
+          oneOf:
+            - $ref: "#/components/schemas/FreshnessPolicy"
+            - type: "null"
+        latestPublication:
+          oneOf:
+            - $ref: "#/components/schemas/PublicationSummary"
+            - type: "null"
+        latestError:
+          oneOf:
+            - $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ErrorSummary"
+            - type: "null"
+        healthRules:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/HealthRuleSummary"
+      allOf:
+        - oneOf:
+            - properties:
+                freshnessPolicy:
+                  type: "null"
+                summary:
+                  properties:
+                    timing:
+                      properties:
+                        freshnessStatus:
+                          const: NOT_APPLICABLE
+            - properties:
+                freshnessPolicy:
+                  type: object
+                summary:
+                  properties:
+                    timing:
+                      properties:
+                        freshnessStatus:
+                          enum: [FRESH, WARNING, STALE, UNKNOWN]
+    FreshnessPolicy:
+      type: object
+      additionalProperties: false
+      required: [timezone, calendarCode, warnAfterMinutes, criticalAfterMinutes]
+      properties:
+        timezone:
+          type: string
+          example: Asia/Shanghai
+        calendarCode:
+          type: [string, "null"]
+        warnAfterMinutes:
+          type: integer
+          minimum: 1
+        criticalAfterMinutes:
+          type: integer
+          minimum: 1
+    PublicationSummary:
+      type: object
+      additionalProperties: false
+      required: [dataVersion, releaseId, publishedAt, rowCount]
+      properties:
+        dataVersion:
+          type: string
+          format: uuid
+        releaseId:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        rowCount:
+          type: integer
+          minimum: 0
+    HealthRuleSummary:
+      type: object
+      additionalProperties: false
+      required: [ruleCode, dimension, severity, version]
+      properties:
+        ruleCode:
+          type: string
+          maxLength: 120
+        dimension:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/HealthDimension"
+        severity:
+          enum: [INFO, WARN, CRITICAL]
+        version:
+          type: integer
+          minimum: 1
+    DatasetPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor, totalEstimate, generatedAt]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/DatasetSummary"
+        nextCursor:
+          type: [string, "null"]
+        totalEstimate:
+          type: integer
+          minimum: 0
+        generatedAt:
+          type: string
+          format: date-time
+    SyncPreflightRequest:
+      type: object
+      additionalProperties: false
+      required: [targets]
+      properties:
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: v1 同一请求内 datasetCode 必须唯一
+          x-unique-by: datasetCode
+          items:
+            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SyncTarget"
+    SyncSubmitRequest:
+      type: object
+      additionalProperties: false
+      required: [preflightId, requestHash, targets, reason]
+      properties:
+        preflightId:
+          type: string
+          format: uuid
+        requestHash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: 必须与 preflight 冻结顺序一致，且 datasetCode 唯一
+          x-unique-by: datasetCode
+          items:
+            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SyncTarget"
+        reason:
+          type: string
+          minLength: 2
+          maxLength: 500
+    CommandActionRequest:
+      type: object
+      additionalProperties: false
+      required: [target, reason]
+      properties:
+        target:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/CommandActionTarget"
+        reason:
+          type: string
+          minLength: 2
+          maxLength: 500
+    CommandDetailView:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          commandId,
+          submissionId,
+          status,
+          requestedAt,
+          startedAt,
+          finishedAt,
+          childRuns,
+          requestedBy,
+          error,
+        ]
+      properties:
+        commandId:
+          type: string
+          format: uuid
+        submissionId:
+          type: [string, "null"]
+          format: uuid
+          description: API 用户命令为 submissionId；系统计划、legacy 或恢复命令为 null
+        status:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/CommandStatus"
+        requestedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: [string, "null"]
+          format: date-time
+        finishedAt:
+          type: [string, "null"]
+          format: date-time
+        childRuns:
+          type: array
+          maxItems: 100
+          description: >-
+            按原 target 提交顺序返回；命令在创建 child 前被 REJECTED 时允许为空
+          items:
+            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/RunSummary"
+        requestedBy:
+          $ref: "#/components/schemas/ActorDisplay"
+        error:
+          oneOf:
+            - $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ErrorSummary"
+            - type: "null"
+    DeliveryStatus:
+      enum: [PENDING, DELIVERING, ACCEPTED, REJECTED, DEAD_LETTER]
+    OperationDeliveryStatus:
+      enum:
+        [PENDING, DELIVERING, ACCEPTED, REJECTED, DEAD_LETTER, NOT_APPLICABLE]
+    OperationResult:
+      enum:
+        [
+          UNKNOWN,
+          QUEUED,
+          RUNNING,
+          CANCEL_REQUESTED,
+          SUCCEEDED,
+          PARTIAL,
+          FAILED,
+          CANCELLED,
+          INTERRUPTED,
+          SKIPPED,
+          REJECTED,
+        ]
+      description: >-
+        操作动作本身的结论，不等同于 authorityResource 终态。SYNC_CANCEL 仅在目标进入
+        CANCELLED 时算达成；cancel_too_late 映射 FAILED 并保留 CANCEL 阶段错误，
+        即使真实 target 最终为 SUCCEEDED
+    SubmissionReceipt:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          submissionId,
+          action,
+          deliveryStatus,
+          operationResult,
+          authorityResource,
+          queuePosition,
+          authorizedAt,
+          updatedAt,
+          requestId,
+          error,
+        ]
+      properties:
+        submissionId:
+          type: string
+          format: uuid
+        action:
+          enum:
+            [
+              SYNC_SUBMIT,
+              SYNC_CANCEL,
+              SYNC_RETRY,
+              HEALTH_CHECK_SUBMIT,
+              SCHEDULE_UPSERT,
+              SCHEDULE_SET_ENABLED,
+            ]
+        deliveryStatus:
+          $ref: "#/components/schemas/DeliveryStatus"
+        operationResult:
+          $ref: "#/components/schemas/OperationResult"
+        authorityResource:
+          type: [object, "null"]
+          additionalProperties: false
+          description: >-
+            PENDING 时为 null；SYNC_SUBMIT/SYNC_RETRY 接受后指向新 COMMAND(commandId)；
+            SYNC_CANCEL 接受后指向原 target；健康检查和计划动作分别指向 HEALTH_CHECK、SCHEDULE
+          required: [resourceType, resourceId]
+          properties:
+            resourceType:
+              enum: [COMMAND, RUN, HEALTH_CHECK, SCHEDULE]
+            resourceId:
+              type: string
+              format: uuid
+        queuePosition:
+          type: [integer, "null"]
+          minimum: 1
+          description: >-
+            SYNC_SUBMIT/SYNC_RETRY 接受后表示新命令首个 child run 在受理事务快照中的位置；
+            cancel、健康检查、计划动作与未接受交付均为 null，其余 child 位置从 commands/detail 读取
+        authorizedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        requestId:
+          type: string
+        error:
+          oneOf:
+            - $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ErrorSummary"
+            - type: "null"
+      allOf:
+        - oneOf:
+            - properties:
+                deliveryStatus:
+                  enum: [PENDING, DELIVERING]
+                operationResult:
+                  const: UNKNOWN
+                authorityResource:
+                  type: "null"
+                queuePosition:
+                  type: "null"
+            - properties:
+                deliveryStatus:
+                  const: ACCEPTED
+                authorityResource:
+                  type: object
+            - properties:
+                deliveryStatus:
+                  const: REJECTED
+                operationResult:
+                  const: REJECTED
+                authorityResource:
+                  type: "null"
+                queuePosition:
+                  type: "null"
+                error:
+                  $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ErrorSummary"
+            - properties:
+                deliveryStatus:
+                  const: DEAD_LETTER
+                operationResult:
+                  const: UNKNOWN
+                authorityResource:
+                  type: "null"
+                queuePosition:
+                  type: "null"
+                error:
+                  $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ErrorSummary"
+        - if:
+            properties:
+              deliveryStatus:
+                const: ACCEPTED
+          then:
+            oneOf:
+              - properties:
+                  action:
+                    enum: [SYNC_SUBMIT, SYNC_RETRY]
+                  authorityResource:
+                    properties:
+                      resourceType:
+                        const: COMMAND
+              - properties:
+                  action:
+                    const: SYNC_CANCEL
+                  authorityResource:
+                    properties:
+                      resourceType:
+                        enum: [COMMAND, RUN]
+                  queuePosition:
+                    type: "null"
+              - properties:
+                  action:
+                    const: HEALTH_CHECK_SUBMIT
+                  authorityResource:
+                    properties:
+                      resourceType:
+                        const: HEALTH_CHECK
+                  queuePosition:
+                    type: "null"
+              - properties:
+                  action:
+                    enum: [SCHEDULE_UPSERT, SCHEDULE_SET_ENABLED]
+                  authorityResource:
+                    properties:
+                      resourceType:
+                        const: SCHEDULE
+                  queuePosition:
+                    type: "null"
+    RunSearchRequest:
+      allOf:
+        - $ref: "#/components/schemas/CursorPageRequest"
+        - type: object
+          properties:
+            datasetCodes:
+              type: array
+              maxItems: 100
+              items:
+                type: string
+            statuses:
+              type: array
+              maxItems: 9
+              items:
+                $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/RunStatus"
+            requestedFrom:
+              type: [string, "null"]
+              format: date-time
+            requestedTo:
+              type: [string, "null"]
+              format: date-time
+      unevaluatedProperties: false
+    RunPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/RunSummary"
+        nextCursor:
+          type: [string, "null"]
+    OperationEventView:
+      type: object
+      additionalProperties: false
+      description: 公开运行时间线事件；内部 actorRef 已投影为 ActorDisplay
+      required:
+        [
+          eventId,
+          resourceType,
+          resourceId,
+          action,
+          result,
+          actor,
+          requestId,
+          occurredAt,
+          error,
+        ]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        resourceType:
+          enum: [COMMAND, RUN, HEALTH_CHECK, SCHEDULE]
+        resourceId:
+          type: string
+          format: uuid
+        action:
+          type: string
+          maxLength: 80
+        result:
+          enum:
+            [
+              ACCEPTED,
+              QUEUED,
+              STARTED,
+              CANCEL_REQUESTED,
+              SUCCEEDED,
+              PARTIAL,
+              FAILED,
+              CANCELLED,
+              INTERRUPTED,
+              SKIPPED,
+              REJECTED,
+            ]
+        actor:
+          $ref: "#/components/schemas/ActorDisplay"
+        requestId:
+          type: string
+          maxLength: 128
+        occurredAt:
+          type: string
+          format: date-time
+        error:
+          oneOf:
+            - $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ErrorSummary"
+            - type: "null"
+    RunDetail:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          run,
+          target,
+          sourceSnapshot,
+          qualityGate,
+          partitionCount,
+          partitions,
+          partitionsNextCursor,
+          timelineEventCount,
+          timeline,
+          timelineNextCursor,
+          requestedBy,
+        ]
+      properties:
+        run:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/RunSummary"
+        target:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SyncTarget"
+        sourceSnapshot:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: 运行受理时冻结的 Provider、真实上游、adapter 与方法学版本
+          items:
+            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SourceBinding"
+        qualityGate:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/QualityGateSummary"
+        partitionCount:
+          type: integer
+          minimum: 0
+        partitions:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [partitionKey, status, attempt, error]
+            properties:
+              partitionKey:
+                type: string
+                maxLength: 240
+              status:
+                $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/RunStatus"
+              attempt:
+                type: integer
+                minimum: 0
+              error:
+                oneOf:
+                  - $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ErrorSummary"
+                  - type: "null"
+        partitionsNextCursor:
+          type: [string, "null"]
+          maxLength: 1024
+        timelineEventCount:
+          type: integer
+          minimum: 0
+        timeline:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/OperationEventView"
+        timelineNextCursor:
+          type: [string, "null"]
+          maxLength: 1024
+        requestedBy:
+          $ref: "#/components/schemas/ActorDisplay"
+    HealthSearchRequest:
+      allOf:
+        - $ref: "#/components/schemas/CursorPageRequest"
+        - type: object
+          properties:
+            datasetCodes:
+              type: array
+              maxItems: 100
+              items:
+                type: string
+            statuses:
+              type: array
+              maxItems: 4
+              items:
+                $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/HealthStatus"
+            evaluatedFrom:
+              type: [string, "null"]
+              format: date-time
+            evaluatedTo:
+              type: [string, "null"]
+              format: date-time
+      unevaluatedProperties: false
+    HealthPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/HealthEvaluationSummary"
+        nextCursor:
+          type: [string, "null"]
+    HealthCheckSubmitRequest:
+      type: object
+      additionalProperties: false
+      required: [targets, reason]
+      properties:
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: v1 同一批次 datasetCode 必须唯一
+          x-unique-by: datasetCode
+          items:
+            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/HealthCheckTarget"
+        reason:
+          type: string
+          minLength: 2
+          maxLength: 500
+    HealthCheckDetailView:
+      type: object
+      additionalProperties: false
+      description: 不暴露内部 actorRef；目标结果保持原提交顺序
+      required:
+        [
+          healthCheckId,
+          submissionId,
+          status,
+          requestedAt,
+          startedAt,
+          finishedAt,
+          requestedBy,
+          targets,
+          error,
+        ]
+      properties:
+        healthCheckId:
+          type: string
+          format: uuid
+        submissionId:
+          type: [string, "null"]
+          format: uuid
+        status:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/HealthCheckStatus"
+        requestedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: [string, "null"]
+          format: date-time
+        finishedAt:
+          type: [string, "null"]
+          format: date-time
+        requestedBy:
+          $ref: "#/components/schemas/ActorDisplay"
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/HealthCheckTargetResult"
+        error:
+          oneOf:
+            - $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ErrorSummary"
+            - type: "null"
+    ScheduleSearchRequest:
+      allOf:
+        - $ref: "#/components/schemas/CursorPageRequest"
+        - type: object
+          properties:
+            datasetCodes:
+              type: array
+              maxItems: 100
+              items:
+                type: string
+            enabled:
+              type: [boolean, "null"]
+      unevaluatedProperties: false
+    ScheduleView:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          scheduleId,
+          datasetCode,
+          mode,
+          targetPolicy,
+          enabled,
+          frequency,
+          misfirePolicy,
+          coalesce,
+          nextRunAt,
+          nextOccurrences,
+          version,
+          updatedAt,
+          updatedBy,
+        ]
+      properties:
+        scheduleId:
+          type: string
+          format: uuid
+        datasetCode:
+          type: string
+        mode:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SyncMode"
+        targetPolicy:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ScheduleTargetPolicy"
+        enabled:
+          type: boolean
+        frequency:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ScheduleFrequency"
+        misfirePolicy:
+          enum: [SKIP, RUN_ONCE]
+        coalesce:
+          type: boolean
+        nextRunAt:
+          type: [string, "null"]
+          format: date-time
+        nextOccurrences:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            format: date-time
+        version:
+          type: integer
+          minimum: 1
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          $ref: "#/components/schemas/ActorDisplay"
+      oneOf:
+        - properties:
+            mode:
+              enum: [FULL, INCREMENTAL]
+            targetPolicy:
+              allOf:
+                - $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ScheduleTargetPolicy"
+                - properties:
+                    dateResolution:
+                      const: NONE
+        - properties:
+            mode:
+              const: OBSERVATION_DATE
+            targetPolicy:
+              allOf:
+                - $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ScheduleTargetPolicy"
+                - properties:
+                    dateResolution:
+                      enum:
+                        [SCHEDULED_LOCAL_DATE, LATEST_COMPLETED_TRADING_DATE]
+    SchedulePage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/ScheduleView"
+        nextCursor:
+          type: [string, "null"]
+    ScheduleUpsertRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          scheduleId,
+          datasetCode,
+          mode,
+          targetPolicy,
+          frequency,
+          misfirePolicy,
+          coalesce,
+          enabled,
+          expectedVersion,
+          reason,
+        ]
+      properties:
+        scheduleId:
+          type: [string, "null"]
+          format: uuid
+          description: 创建时与 expectedVersion 同为 null；更新时两者都必须非 null
+        datasetCode:
+          type: string
+          minLength: 1
+          maxLength: 160
+          description: v1 每个 datasetCode 至多一个计划；创建重复值返回 409
+        mode:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SyncMode"
+        targetPolicy:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ScheduleTargetPolicy"
+        frequency:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ScheduleFrequency"
+        misfirePolicy:
+          enum: [SKIP, RUN_ONCE]
+        coalesce:
+          type: boolean
+        enabled:
+          type: boolean
+        expectedVersion:
+          type: [integer, "null"]
+          minimum: 1
+        reason:
+          type: string
+          minLength: 2
+          maxLength: 500
+      oneOf:
+        - properties:
+            mode:
+              enum: [FULL, INCREMENTAL]
+            targetPolicy:
+              allOf:
+                - $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ScheduleTargetPolicy"
+                - properties:
+                    dateResolution:
+                      const: NONE
+        - properties:
+            mode:
+              const: OBSERVATION_DATE
+            targetPolicy:
+              allOf:
+                - $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ScheduleTargetPolicy"
+                - properties:
+                    dateResolution:
+                      enum:
+                        [SCHEDULED_LOCAL_DATE, LATEST_COMPLETED_TRADING_DATE]
+      allOf:
+        - oneOf:
+            - properties:
+                scheduleId:
+                  type: "null"
+                expectedVersion:
+                  type: "null"
+            - properties:
+                scheduleId:
+                  type: string
+                  format: uuid
+                expectedVersion:
+                  type: integer
+                  minimum: 1
+    ScheduleEnabledRequest:
+      type: object
+      additionalProperties: false
+      required: [scheduleId, enabled, expectedVersion, reason]
+      properties:
+        scheduleId:
+          type: string
+          format: uuid
+        enabled:
+          type: boolean
+        expectedVersion:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          minLength: 2
+          maxLength: 500
+    ActorDisplay:
+      type: object
+      additionalProperties: false
+      required: [actorType, systemKind, actorId, displayName, deleted]
+      properties:
+        actorType:
+          enum: [USER, SYSTEM]
+        systemKind:
+          type: ["string", "null"]
+          enum: [SCHEDULE, LEGACY, RECOVERY, OTHER, null]
+        actorId:
+          type: [string, "null"]
+          format: uuid
+        displayName:
+          type: string
+          maxLength: 120
+          description: 用户删除后返回“已删除用户”
+        deleted:
+          type: boolean
+      description: >-
+        USER 的 systemKind 为 null；已删除用户可隐藏 actorId 并显示“已删除用户”。
+        SYSTEM 的 actorId=null、deleted=false，并把 system:schedule/*、system:legacy、
+        system:recovery 分别映射为“系统计划”“遗留任务”“系统恢复”。
+      oneOf:
+        - properties:
+            actorType:
+              const: USER
+            systemKind:
+              type: "null"
+        - properties:
+            actorType:
+              const: SYSTEM
+            systemKind:
+              enum: [SCHEDULE, LEGACY, RECOVERY, OTHER]
+            actorId:
+              type: "null"
+            deleted:
+              const: false
+    OperationSearchRequest:
+      allOf:
+        - $ref: "#/components/schemas/CursorPageRequest"
+        - type: object
+          properties:
+            actorIds:
+              type: array
+              maxItems: 100
+              items:
+                type: string
+                format: uuid
+            actions:
+              type: array
+              maxItems: 20
+              items:
+                type: string
+            deliveryStatuses:
+              type: array
+              maxItems: 6
+              items:
+                $ref: "#/components/schemas/OperationDeliveryStatus"
+            operationResults:
+              type: array
+              maxItems: 11
+              items:
+                $ref: "#/components/schemas/OperationResult"
+            occurredFrom:
+              type: [string, "null"]
+              format: date-time
+            occurredTo:
+              type: [string, "null"]
+              format: date-time
+      unevaluatedProperties: false
+    OperationRecord:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          submissionId,
+          action,
+          targetSummary,
+          actor,
+          reason,
+          deliveryStatus,
+          operationResult,
+          authorityResource,
+          authorizedAt,
+          completedAt,
+          lastObservedAt,
+          requestId,
+          error,
+        ]
+      properties:
+        submissionId:
+          type: [string, "null"]
+          format: uuid
+          description: 系统计划、legacy 或恢复操作没有 API submission，返回 null
+        action:
+          type: string
+        targetSummary:
+          type: string
+          maxLength: 300
+        actor:
+          $ref: "#/components/schemas/ActorDisplay"
+        reason:
+          type: string
+          maxLength: 500
+        deliveryStatus:
+          $ref: "#/components/schemas/OperationDeliveryStatus"
+          description: 系统来源操作为 NOT_APPLICABLE
+        operationResult:
+          $ref: "#/components/schemas/OperationResult"
+        authorityResource:
+          type: [object, "null"]
+          additionalProperties: false
+          description: 与对应 SubmissionReceipt 使用相同动作映射，用于跳转权威 command/run/health/schedule
+          required: [resourceType, resourceId]
+          properties:
+            resourceType:
+              enum: [COMMAND, RUN, HEALTH_CHECK, SCHEDULE]
+            resourceId:
+              type: string
+              format: uuid
+        authorizedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: [string, "null"]
+          format: date-time
+        lastObservedAt:
+          type: [string, "null"]
+          format: date-time
+          description: service-api 最近一次从 data-sync 权威状态完成对账的时间
+        requestId:
+          type: string
+        error:
+          oneOf:
+            - $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ErrorSummary"
+            - type: "null"
+      allOf:
+        - oneOf:
+            - properties:
+                submissionId:
+                  type: "null"
+                actor:
+                  properties:
+                    actorType:
+                      const: SYSTEM
+                deliveryStatus:
+                  const: NOT_APPLICABLE
+            - properties:
+                submissionId:
+                  type: string
+                  format: uuid
+                actor:
+                  properties:
+                    actorType:
+                      const: USER
+                deliveryStatus:
+                  enum: [PENDING, DELIVERING, ACCEPTED, REJECTED, DEAD_LETTER]
+        - oneOf:
+            - properties:
+                deliveryStatus:
+                  enum: [PENDING, DELIVERING]
+                operationResult:
+                  const: UNKNOWN
+                authorityResource:
+                  type: "null"
+                completedAt:
+                  type: "null"
+                lastObservedAt:
+                  type: "null"
+            - properties:
+                deliveryStatus:
+                  const: ACCEPTED
+                authorityResource:
+                  type: object
+                lastObservedAt:
+                  type: string
+                  format: date-time
+            - properties:
+                deliveryStatus:
+                  const: REJECTED
+                operationResult:
+                  const: REJECTED
+                authorityResource:
+                  type: "null"
+                completedAt:
+                  type: string
+                  format: date-time
+                lastObservedAt:
+                  type: string
+                  format: date-time
+                error:
+                  $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ErrorSummary"
+            - properties:
+                deliveryStatus:
+                  const: DEAD_LETTER
+                operationResult:
+                  const: UNKNOWN
+                authorityResource:
+                  type: "null"
+                completedAt:
+                  type: string
+                  format: date-time
+                lastObservedAt:
+                  type: "null"
+                error:
+                  $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ErrorSummary"
+            - properties:
+                deliveryStatus:
+                  const: NOT_APPLICABLE
+                authorityResource:
+                  type: object
+                lastObservedAt:
+                  type: string
+                  format: date-time
+    OperationPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/OperationRecord"
+        nextCursor:
+          type: [string, "null"]
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail, instance, code, requestId]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 500
+        instance:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        code:
+          type: string
+          maxLength: 80
+        requestId:
+          type: string
+          maxLength: 128

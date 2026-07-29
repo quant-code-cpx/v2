@@ -1,0 +1,2476 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="service-api 数据运维公开控制面、可靠 HTTP Outbox、权限、审计、契约和发布技术方案"
+    />
+    <title>数据运维公开控制面｜service-api 技术方案</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #172033;
+        --muted: #667085;
+        --line: #dfe4ec;
+        --surface: #f6f8fb;
+        --accent: #3157d5;
+        --accent-soft: #eef2ff;
+        --success: #176b4d;
+        --warning: #8a4b08;
+        --danger: #a1392f;
+        --radius: 14px;
+        --shadow: 0 12px 30px rgb(23 32 51 / 7%);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        min-width: 1200px;
+        color: var(--ink);
+        background: #fff;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        font-size: 15px;
+        line-height: 1.7;
+      }
+
+      a {
+        color: var(--accent);
+        text-underline-offset: 0.2em;
+      }
+
+      a:focus-visible {
+        outline: 3px solid rgb(49 87 213 / 28%);
+        outline-offset: 3px;
+        border-radius: 3px;
+      }
+
+      code {
+        padding: 0.08em 0.32em;
+        border-radius: 4px;
+        background: #eef1f6;
+        color: #293d78;
+        font:
+          0.9em ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+        overflow-wrap: anywhere;
+      }
+
+      .shell {
+        width: min(1120px, calc(100% - 40px));
+        margin: 0 auto;
+      }
+
+      header {
+        padding: 50px 0 34px;
+        border-bottom: 1px solid var(--line);
+        background: linear-gradient(180deg, var(--surface), #fff);
+      }
+
+      .eyebrow,
+      .label {
+        color: var(--accent);
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        line-height: 1.26;
+        letter-spacing: -0.02em;
+      }
+
+      h1 {
+        max-width: 900px;
+        margin: 8px 0 0;
+        font-size: clamp(2.2rem, 5vw, 3.7rem);
+      }
+
+      h2 {
+        margin: 0 0 20px;
+        font-size: clamp(1.45rem, 3vw, 2rem);
+      }
+
+      h3 {
+        margin: 8px 0;
+        font-size: 1.08rem;
+      }
+
+      h4 {
+        margin: 20px 0 6px;
+        font-size: 1rem;
+      }
+
+      p {
+        max-width: 82ch;
+      }
+
+      .lede {
+        max-width: 860px;
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 1.08rem;
+      }
+
+      .summary,
+      .meta,
+      .grid,
+      .grid-2 {
+        display: grid;
+        gap: 15px;
+      }
+
+      .summary {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-top: 26px;
+      }
+
+      .summary article,
+      .meta div {
+        padding: 14px 15px;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        background: #fff;
+      }
+
+      .summary strong {
+        display: block;
+        color: var(--accent);
+        font-size: 0.78rem;
+      }
+
+      .summary p {
+        margin: 5px 0 0;
+        color: var(--muted);
+        font-size: 0.88rem;
+        line-height: 1.55;
+      }
+
+      .meta {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-top: 15px;
+      }
+
+      .meta dt {
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      .meta dd {
+        margin: 3px 0 0;
+        font-weight: 700;
+      }
+
+      .status {
+        color: var(--warning);
+      }
+
+      nav {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        overflow-x: auto;
+        border-bottom: 1px solid var(--line);
+        background: rgb(255 255 255 / 95%);
+        backdrop-filter: blur(10px);
+      }
+
+      nav ul {
+        display: flex;
+        gap: 19px;
+        width: max-content;
+        margin: 0;
+        padding: 12px 0;
+        list-style: none;
+      }
+
+      nav a {
+        color: var(--muted);
+        font-size: 0.84rem;
+        font-weight: 720;
+        text-decoration: none;
+      }
+
+      main {
+        padding: 18px 0 72px;
+      }
+
+      section {
+        padding: 46px 0;
+        border-bottom: 1px solid var(--line);
+        scroll-margin-top: 56px;
+      }
+
+      .grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .grid-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid > *,
+      .grid-2 > * {
+        min-width: 0;
+      }
+
+      .card {
+        padding: 21px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+        box-shadow: var(--shadow);
+      }
+
+      .card p:last-child,
+      .card ul:last-child {
+        margin-bottom: 0;
+      }
+
+      .fact {
+        color: var(--success);
+      }
+
+      .decision {
+        color: var(--accent);
+      }
+
+      .risk {
+        color: var(--warning);
+      }
+
+      .open {
+        color: var(--danger);
+      }
+
+      .callout {
+        margin-top: 19px;
+        padding: 18px 21px;
+        border-left: 4px solid var(--accent);
+        border-radius: 0 var(--radius) var(--radius) 0;
+        background: var(--accent-soft);
+      }
+
+      .callout.warning {
+        border-color: var(--warning);
+        background: #fff7e8;
+      }
+
+      .callout.danger {
+        border-color: var(--danger);
+        background: #fff1ef;
+      }
+
+      .callout strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      pre {
+        overflow-x: auto;
+        padding: 20px;
+        border: 1px solid #263247;
+        border-radius: var(--radius);
+        background: #111827;
+        color: #e5e7eb;
+        font:
+          0.86rem/1.65 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+      }
+
+      pre code {
+        padding: 0;
+        color: inherit;
+        background: transparent;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+      }
+
+      table {
+        width: 100%;
+        min-width: 860px;
+        border-collapse: collapse;
+      }
+
+      table.wide {
+        min-width: 1180px;
+      }
+
+      th,
+      td {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: var(--surface);
+        color: #344054;
+        font-size: 0.8rem;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      ul,
+      ol {
+        padding-left: 1.25rem;
+      }
+
+      li + li {
+        margin-top: 5px;
+      }
+
+      .mt {
+        margin-top: 22px;
+      }
+
+      .small {
+        color: var(--muted);
+        font-size: 0.86rem;
+      }
+
+      .pill {
+        display: inline-block;
+        margin: 2px 4px 2px 0;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 0.73rem;
+        font-weight: 750;
+        white-space: nowrap;
+      }
+
+      footer {
+        padding: 28px 0 48px;
+        color: var(--muted);
+        font-size: 0.86rem;
+      }
+
+      @media print {
+        @page {
+          size: A4 landscape;
+          margin: 10mm;
+        }
+
+        body {
+          min-width: 0;
+          font-size: 9pt;
+        }
+
+        nav {
+          display: none;
+        }
+
+        header,
+        main,
+        section {
+          padding-top: 16px;
+        }
+
+        .shell {
+          width: 100%;
+        }
+
+        .card {
+          box-shadow: none;
+          break-inside: avoid;
+        }
+
+        pre,
+        .table-wrap {
+          break-inside: avoid;
+        }
+
+        table,
+        table.wide {
+          min-width: 0;
+          font-size: 7pt;
+        }
+
+        th,
+        td {
+          padding: 4px 5px;
+        }
+
+        pre {
+          white-space: pre-wrap;
+          color: #111;
+          background: #fff;
+        }
+
+        a {
+          color: inherit;
+          text-decoration: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="shell">
+        <p class="eyebrow">Apex · service-api · Technical solution · 0006</p>
+        <h1>数据运维公开控制面</h1>
+        <p class="lede">
+          在现有默认拒绝鉴权、固定三级角色、PostgreSQL 审计和
+          <code>DataSyncModule</code> 防腐客户端之上，增加 POST-only 数据运维
+          API。 API
+          只负责身份、授权、可靠投递与脱敏投影；数据目录、命令、运行、健康、计划和全局单运行锁
+          始终由 <code>service-data-sync</code> 权威持有。
+        </p>
+
+        <div class="summary" aria-label="方案一屏摘要">
+          <article>
+            <strong>问题</strong>
+            <p>
+              现有 API 只读
+              data-sync，缺少手工同步、健康检查、动态计划、交付对账与运维记录。
+            </p>
+          </article>
+          <article>
+            <strong>选择</strong>
+            <p>
+              新增 DataOperationsModule；所有写意图同事务落 Submission、HTTP
+              Outbox 与 AuditLog。
+            </p>
+          </article>
+          <article>
+            <strong>理由</strong>
+            <p>
+              跨库无法原子提交；本地 outbox
+              加下游幂等账本可防丢失、重复执行和伪造同步锁。
+            </p>
+          </article>
+          <article>
+            <strong>主要风险</strong>
+            <p>
+              首次写入只证明本地意图已持久化；实时
+              capability、资源状态和计划资格 可能在 dispatcher 投递后异步
+              REJECTED。
+            </p>
+          </article>
+        </div>
+
+        <dl class="meta">
+          <div>
+            <dt>状态</dt>
+            <dd class="status">Proposed</dd>
+          </div>
+          <div>
+            <dt>负责人</dt>
+            <dd>service-api</dd>
+          </div>
+          <div>
+            <dt>最后修改</dt>
+            <dd>2026-07-29</dd>
+          </div>
+          <div>
+            <dt>关联决策</dt>
+            <dd>
+              <a href="../../decisions/0024-data-operations-control-plane.md"
+                >ADR-0024</a
+              >
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </header>
+
+    <nav aria-label="页面目录">
+      <div class="shell">
+        <ul>
+          <li><a href="#facts">现状</a></li>
+          <li><a href="#scope">目标与能力</a></li>
+          <li><a href="#architecture">边界与模块</a></li>
+          <li><a href="#security">权限与安全</a></li>
+          <li><a href="#contract">公开合同</a></li>
+          <li><a href="#delivery-flow">可靠投递</a></li>
+          <li><a href="#data">数据与事务</a></li>
+          <li><a href="#reliability">可靠性与观测</a></li>
+          <li><a href="#rollout">实施与验收</a></li>
+          <li><a href="#questions">待决项</a></li>
+        </ul>
+      </div>
+    </nav>
+
+    <main class="shell">
+      <section id="facts">
+        <h2>现状事实与约束</h2>
+        <div class="grid">
+          <article class="card">
+            <span class="label fact">已验证事实</span>
+            <h3>认证默认拒绝，角色固定</h3>
+            <p>
+              <code>DefaultJwtAuthGuard</code> 与
+              <code>RolesGuard</code> 已全局注册； 每次受保护请求复验 PostgreSQL
+              Session、ACTIVE User、角色和
+              <code>securityVersion</code>。角色只有 USER、ADMIN、SUPER_ADMIN。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label fact">已验证事实</span>
+            <h3>审计有权威存储与脱敏读取</h3>
+            <p>
+              <code>AuditLog</code> 保存 actor、action、target、requestId、JSON
+              metadata 与时间； 安全审计详情只经过服务端 action
+              registry。在线保留 90 天，当前完整安全审计只允许 SUPER_ADMIN
+              读取。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label fact">已验证事实</span>
+            <h3>DataSyncModule 当前只读</h3>
+            <p>
+              现有客户端使用专用 Bearer、硬超时、请求关联和 Zod schema
+              校验，网络或合同漂移映射为 503；没有同步任务、Provider
+              SDK、同步库凭据、统一重试、熔断或命令 outbox。
+            </p>
+          </article>
+        </div>
+
+        <div class="grid mt">
+          <article class="card">
+            <span class="label fact">已验证事实</span>
+            <h3>API PostgreSQL 不含同步事实</h3>
+            <p>
+              Prisma 当前只有 User、Credential、Session 与 AuditLog。API 不拥有
+              canonical dataset、publication、run、健康结论或自动计划。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label fact">已验证事实</span>
+            <h3>浏览器边界已有基础</h3>
+            <p>
+              CORS 只允许配置的单一 Origin、credentialed POST 和固定
+              header；全局 ValidationPipe 拒绝未知字段。当前 allow-headers
+              尚未包含 <code>Idempotency-Key</code>。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label risk">关键缺口</span>
+            <h3>不能靠 API 判断“当前无任务”</h3>
+            <p>
+              多 API 实例、CLI、scheduler 和 worker
+              都可能竞态。全局串行权威必须在 data-sync PostgreSQL 执行槽、租约与
+              fencing token 中实现，API 不能另建锁或缓存锁。
+            </p>
+          </article>
+        </div>
+
+        <aside class="callout">
+          <strong>跨服务基线</strong>
+          本方案遵循
+          <a href="../../decisions/0002-data-sync-ownership-and-access.md"
+            >ADR-0002</a
+          >、
+          <a
+            href="../../decisions/0008-default-deny-auth-and-hierarchical-rbac.md"
+            >ADR-0008</a
+          >、
+          <a href="../../decisions/0018-service-api-post-only-http-method.md"
+            >ADR-0018</a
+          >
+          与
+          <a
+            href="../../decisions/0019-account-security-audit-and-workspace-boundary.md"
+            >ADR-0019</a
+          >。 API 不读取 data-sync PostgreSQL、对象存储或 Provider；Web 不绕过
+          API。
+        </aside>
+      </section>
+
+      <section id="scope">
+        <h2>目标、非目标与能力卡</h2>
+        <div class="grid">
+          <article class="card">
+            <h3>目标</h3>
+            <ul>
+              <li>
+                查询数据资产、双层来源、观测与新鲜度、命令批次、运行、质量门、健康与计划。
+              </li>
+              <li>
+                可靠提交单个/批量同步、取消、重试、主动健康检查和计划变更。
+              </li>
+              <li>
+                对每个主动操作保留操作者、理由、授权、交付和权威执行结果关联。
+              </li>
+              <li>
+                下游暂不可用时不丢意图、不重复命令，并可从 PENDING 对账到终态。
+              </li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>非目标</h3>
+            <ul>
+              <li>API 持有同步全局锁、run、计划或质量事实。</li>
+              <li>
+                API 在 outbox 前复制或预判实时
+                capability、计划资格、资源存在性或可重试状态。
+              </li>
+              <li>API 直连同步库、对象存储、AKShare、Tushare 或进一步来源。</li>
+              <li>
+                浏览器传任意 task 名、Provider 参数、Python 表达式、SQL 或原始
+                cron。
+              </li>
+              <li>
+                v1 删除计划、回滚 publication、切换来源、强杀 worker 或查看 raw
+                失败载荷。
+              </li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>规划容量与 SLO</h3>
+            <ul>
+              <li>公开 JSON body ≤ 64 KiB；响应 ≤ 2 MiB；批量目标 ≤ 100。</li>
+              <li>健康下游时只读请求 p95 ≤ 1 s；总 deadline ≤ 5 s。</li>
+              <li>本地持久化 submit p95 ≤ 300 ms，不等待下游。</li>
+              <li>
+                下游健康时 99% Submission 在 30 s
+                内完成交付；队列等待不计交付延迟。
+              </li>
+            </ul>
+          </article>
+        </div>
+
+        <h3 class="mt">能力卡</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Actor / 权限</th>
+                <th>用例与成功结果</th>
+                <th>权威 Owner / Consumer</th>
+                <th>一致性、SLO 与兼容</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>ADMIN、SUPER_ADMIN：<code>data-operations:read</code></td>
+                <td>
+                  目录、命令详情、运行、健康、计划、Submission 与窄化操作记录
+                </td>
+                <td>data-sync 事实 + API 身份投影 / service-web</td>
+                <td>请求时快照；健康下游 p95 ≤ 1 s；v1 additive</td>
+              </tr>
+              <tr>
+                <td>仅 SUPER_ADMIN：同步、取消、重试、主动健康检查</td>
+                <td>
+                  首次创建一律 202 PENDING；随后出现权威 command / health check
+                  回执
+                </td>
+                <td>API 授权/交付，data-sync 执行 / service-web</td>
+                <td>至少一次 HTTP 交付、下游幂等；未知结果保持 PENDING</td>
+              </tr>
+              <tr>
+                <td>仅 SUPER_ADMIN：计划 upsert、set-enabled</td>
+                <td>
+                  首次创建一律 202 PENDING；data-sync 按 expectedVersion 更新
+                  revision
+                </td>
+                <td>data-sync schedule / service-web</td>
+                <td>乐观并发；v1 不删除；冲突异步回写 REJECTED</td>
+              </tr>
+              <tr>
+                <td>系统 dispatcher / 独立 service credential</td>
+                <td>冻结的下游 key 投递、重试、对账、DEAD_LETTER</td>
+                <td>API Submission/Outbox / 运维</td>
+                <td>多实例安全；99% 健康交付 ≤ 30 s；不是事件平台</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <h2>权威边界与模块依赖</h2>
+        <pre aria-label="service-api 数据运维模块依赖图">
+service-web
+  │ JWT + POST /api/v1/data-operations/*
+  ▼
+DataOperationsModule
+  ├─ DataOperationsQueryService ───────────▶ DataSyncModule
+  │                                          └─ DataOperationsReadClient
+  ├─ DataOperationSubmissionService ───────▶ DatabaseService
+  │                                          ├─ DataOperationSubmission
+  │                                          ├─ DataOperationHttpOutbox
+  │                                          └─ AuditLog
+  └─ DataOperationsProjectionService ─────▶ User + Submission + data-sync event projection
+                                             └─ nullable submissionId + actorRef → ActorDisplay
+
+独立进程：DataOperationsOutboxDispatcher
+  ├─ DatabaseService：SKIP LOCKED + lease
+  ├─ DataOperationsCommandClient：内部 POST、冻结的 downstreamIdempotencyKey
+  └─ Reconciler：读取 data-sync 权威资源并更新 authorityResource/lastObservedAt
+
+全局 Auth Guard / RolesGuard
+  └─ AuthModule ─▶ UserModule + RedisModule（原单向依赖不变）
+
+禁止：
+  DataOperationsModule ─X─▶ data-sync DB / Provider
+  UserModule ─X─▶ AuthModule
+  API Submission ─X─▶ 全局同步锁或权威 run 状态</pre>
+
+        <div class="table-wrap mt">
+          <table class="wide">
+            <thead>
+              <tr>
+                <th>能力模块</th>
+                <th>唯一职责</th>
+                <th>输入 / 输出与状态</th>
+                <th>依赖</th>
+                <th>失败边界</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>DataOperationsQuery</td>
+                <td>公开 DTO、角色校验、严格下游投影</td>
+                <td>
+                  filters/id → catalog、command、run、health evaluation/check、
+                  schedule、overview
+                </td>
+                <td>DataOperationsReadClient</td>
+                <td>
+                  超时、合同漂移、内部鉴权失败统一安全映射；不返回缓存伪事实
+                </td>
+              </tr>
+              <tr>
+                <td>Submission</td>
+                <td>把已授权用户意图变成可恢复的本地交付记录</td>
+                <td>
+                  actor、action、reason、规范 body、公开幂等 → 首次 202 PENDING
+                </td>
+                <td>API PostgreSQL、AuditLog</td>
+                <td>
+                  只校验本地安全与结构；Submission、Outbox
+                  或审计任一写失败，整个事务回滚
+                </td>
+              </tr>
+              <tr>
+                <td>HTTP Outbox Dispatcher</td>
+                <td>将 Submission 至少一次投递到版本化内部 HTTP</td>
+                <td>PENDING row → ACCEPTED / REJECTED / DEAD_LETTER</td>
+                <td>API PostgreSQL、DataOperationsCommandClient</td>
+                <td>多实例 lease 隔离；未知结果只用原下游 key 重试</td>
+              </tr>
+              <tr>
+                <td>Projection / Reconciler</td>
+                <td>关联本地授权记录与 data-sync 权威执行结果</td>
+                <td>
+                  submissionId、authorityResource、command/health-check detail、
+                  operational events → operation record
+                </td>
+                <td>Submission、User、data-sync read API</td>
+                <td>
+                  用户与 SYSTEM actor 分流；actorRef 不公开；下游不可用保留
+                  lastObservedAt 并标 UNKNOWN，不伪造终态
+                </td>
+              </tr>
+              <tr>
+                <td>Audit action registry</td>
+                <td>将 data-operations action metadata 映射为脱敏摘要</td>
+                <td>AuditLog → actor、action、target、授权/交付摘要</td>
+                <td>现有 AuditLog</td>
+                <td>未知 action 返回通用摘要与空详情，不透传 metadata</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="mt">状态所有权</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>状态</th>
+                <th>唯一权威</th>
+                <th>API 可保存内容</th>
+                <th>禁止</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>用户、角色、Session、安全审计</td>
+                <td>service-api PostgreSQL</td>
+                <td>权威</td>
+                <td>转发用户 JWT、密码、账号或邮箱到 data-sync</td>
+              </tr>
+              <tr>
+                <td>授权与交付意图</td>
+                <td>service-api Submission / Outbox</td>
+                <td>权威</td>
+                <td>把 PENDING 解释为 data-sync 已受理</td>
+              </tr>
+              <tr>
+                <td>数据目录、来源、运行、健康、计划、事件</td>
+                <td>service-data-sync PostgreSQL</td>
+                <td>带 <code>lastObservedAt</code> 的非权威投影</td>
+                <td>API 建同名业务表或跨库查询</td>
+              </tr>
+              <tr>
+                <td>全局运行槽、租约、fencing token</td>
+                <td>service-data-sync PostgreSQL</td>
+                <td>只读展示</td>
+                <td>Redis 锁、API 锁、前端按钮锁或进程内互斥冒充全局保证</td>
+              </tr>
+              <tr>
+                <td>唤醒、短期防滥用计数</td>
+                <td>可丢失基础设施状态</td>
+                <td>Redis TTL key 或 Celery delivery</td>
+                <td>把 Redis/Celery 当作 command、run 或用户权威</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="security">
+        <h2>权限、资源范围与浏览器安全</h2>
+        <div class="table-wrap">
+          <table class="wide">
+            <thead>
+              <tr>
+                <th>能力</th>
+                <th>USER</th>
+                <th>ADMIN</th>
+                <th>SUPER_ADMIN</th>
+                <th>服务层资源约束</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>目录 / overview / command / run / health / schedule</td>
+                <td>拒绝</td>
+                <td>读取</td>
+                <td>读取</td>
+                <td>单实例部署级全局范围；不引入租户或自定义 dataset scope</td>
+              </tr>
+              <tr>
+                <td>窄化 data-operations 操作记录</td>
+                <td>拒绝</td>
+                <td>读取</td>
+                <td>读取</td>
+                <td>
+                  只含运维动作、actor
+                  display、理由、交付与执行投影；不是完整安全 AuditLog
+                </td>
+              </tr>
+              <tr>
+                <td>同步 preflight / submit / cancel / retry</td>
+                <td>拒绝</td>
+                <td>拒绝</td>
+                <td>允许</td>
+                <td>
+                  preflight 直接查询权威服务；其他写入前只校验 target/preflight
+                  引用形状，实时 capability 与 COMMAND/RUN 状态由 data-sync 校验
+                </td>
+              </tr>
+              <tr>
+                <td>主动健康检查</td>
+                <td>拒绝</td>
+                <td>拒绝</td>
+                <td>允许</td>
+                <td>
+                  API 只校验 datasetCode 与 dataVersion|null 形状；publication
+                  绑定和规则适用性由 data-sync 决定
+                </td>
+              </tr>
+              <tr>
+                <td>计划 upsert / set-enabled</td>
+                <td>拒绝</td>
+                <td>拒绝</td>
+                <td>允许</td>
+                <td>
+                  API 只校验 targetPolicy/frequency/expectedVersion 结构，并要求
+                  upsert 的 scheduleId/expectedVersion 同空或同为非空；
+                  scheduleEligible、资源存在性与当前版本由 data-sync 原子校验
+                </td>
+              </tr>
+              <tr>
+                <td>DEAD_LETTER replay</td>
+                <td>拒绝</td>
+                <td>拒绝</td>
+                <td>受控 runbook</td>
+                <td>
+                  只重投原 outbox、原 body、原下游 key；不重新授权、不创建新
+                  Submission 或内部 key
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid mt">
+          <article class="card">
+            <h3>双层授权</h3>
+            <p>
+              Controller 用 <code>@Roles()</code> 做粗粒度拒绝；DataOperations
+              use case 再检查 actor ACTIVE、action、DTO/大小、限流、公开幂等和
+              preflight 引用形状。它不查询或复制 catalog capability、 schedule
+              eligibility、COMMAND/RUN 状态。data-sync 只信任专用 service
+              identity 携带的 opaque actorRef 和 role
+              snapshot，不信任浏览器字段。
+            </p>
+          </article>
+          <article class="card">
+            <h3>权限与 securityVersion</h3>
+            <p>
+              <code>/users/me</code> 增加固定 data-operations
+              permission。只增加代码映射不批量递增
+              securityVersion；用户角色变化、禁用或删除仍按现有事务递增并立即使旧
+              token/session 失效。 Web 权限显隐不是授权依据。
+            </p>
+          </article>
+          <article class="card">
+            <h3>理由与最小化</h3>
+            <p>
+              所有写操作要求 2–500 字理由。API 传递
+              actorRef、role、reason、submissionId、requestId； 不传用户
+              JWT、账号、邮箱、Session ID、密码、Cookie、Provider secret
+              或原始请求头。
+            </p>
+          </article>
+        </div>
+
+        <h3 class="mt">CORS、CSRF、Cookie 与代理</h3>
+        <ul>
+          <li>
+            data-operations 使用 Authorization Bearer，不使用 Refresh Cookie
+            作为业务授权；即使浏览器自动携带 refresh
+            cookie，它也不能授权任一运维 route。
+          </li>
+          <li>
+            写操作仅接受
+            <code>application/json</code>。浏览器请求必须精确匹配配置的
+            Origin，并通过 <code>Sec-Fetch-Site</code> same-origin/same-site
+            检查；跨站与缺少 Bearer 的请求统一拒绝。
+          </li>
+          <li>
+            CORS 继续只声明 POST；<code>allowedHeaders</code> 增加
+            <code>Idempotency-Key</code>， 保留
+            Authorization、Content-Type、X-Request-Id；响应暴露
+            X-Request-Id、Location、 Retry-After。框架处理 preflight，不注册
+            OPTIONS Controller。
+          </li>
+          <li>
+            非浏览器自动化若未来开放，必须使用独立主体与契约，不通过放宽浏览器
+            Origin 校验复用个人 JWT。
+            <code>TRUST_PROXY</code> 继续显式配置，禁止无条件信任转发头。
+          </li>
+          <li>
+            读取响应与 Submission、操作记录统一
+            <code>Cache-Control: no-store</code>；Web 可按页面策略保留 TanStack
+            Query 内存缓存，但退出或权限变化必须清除。
+          </li>
+        </ul>
+
+        <aside class="callout warning">
+          <strong>防滥用边界</strong>
+          应用层对 actor + action 使用短 TTL 安全计数；写操作初始上限建议 10
+          次/分钟，preflight 30 次/分钟，读取 120
+          次/分钟。计数不是任务状态；Redis 不可用时写操作 fail closed。
+          data-sync 仍以队列深度、Provider 预算和 dataset capability
+          作第二道容量限制。
+        </aside>
+      </section>
+
+      <section id="contract">
+        <h2>公开 POST 合同</h2>
+        <p>
+          机器可读合同：
+          <a
+            href="../../contracts/0023-service-api-data-operations.openapi.yaml"
+            >Contract 0023</a
+          >； 下游合同：
+          <a
+            href="../../contracts/0022-data-sync-operations-internal.openapi.yaml"
+            >Contract 0022</a
+          >。 全部公开 operation 位于 <code>/api/v1/data-operations/*</code>，共
+          19 条且只声明 POST。内部 Contract 0022 共 18 条 POST：overview
+          1、datasets 2、commands 5、runs 2、health 4、schedules 3、events
+          1；API 不增删或猜测内部路径。
+        </p>
+
+        <div class="table-wrap">
+          <table class="wide">
+            <thead>
+              <tr>
+                <th>POST path</th>
+                <th>权限</th>
+                <th>成功</th>
+                <th>关键输入 / 输出</th>
+                <th>失败与并发语义</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>/overview</code></td>
+                <td>ADMIN / SUPER_ADMIN</td>
+                <td>200</td>
+                <td>
+                  唯一执行槽、queued count、24h failure、API pending/dead-letter
+                  count
+                </td>
+                <td>data-sync 不可用 503；不使用 API 缓存推断 active run</td>
+              </tr>
+              <tr>
+                <td>
+                  <code>/datasets/search</code><br /><code
+                    >/datasets/detail</code
+                  >
+                </td>
+                <td>ADMIN / SUPER_ADMIN</td>
+                <td>200</td>
+                <td>
+                  provider + upstreamSources
+                  筛选；来源绑定、availability/observationState、capability、
+                  DatasetTiming/freshness、健康、计划；capability 含
+                  scheduleTargetPolicyOptions；sourceBindings ≤ 10、detail
+                  healthRules ≤ 200
+                </td>
+                <td>未知 dataset 404；合同漂移/下游失败 503</td>
+              </tr>
+              <tr>
+                <td><code>/sync/preflight</code></td>
+                <td>SUPER_ADMIN</td>
+                <td>200</td>
+                <td>
+                  1–100 targets →
+                  preflightId、requestHash、解析范围、成本、队列和最多 20 条
+                  warnings
+                </td>
+                <td>
+                  无副作用、不预留队列；data-sync 不可用 503；不支持模式/范围
+                  422，已过期或冲突 409
+                </td>
+              </tr>
+              <tr>
+                <td><code>/sync/submit</code></td>
+                <td>SUPER_ADMIN</td>
+                <td>202</td>
+                <td>
+                  Idempotency-Key + preflightId/hash + targets + reason →
+                  Submission
+                </td>
+                <td>
+                  首次创建只做本地事务并一律返回 PENDING/null queuePosition；
+                  同公开 key 异请求 409
+                </td>
+              </tr>
+              <tr>
+                <td><code>/sync/cancel</code><br /><code>/sync/retry</code></td>
+                <td>SUPER_ADMIN</td>
+                <td>202</td>
+                <td>
+                  target{resourceType=COMMAND|RUN, resourceId} + reason +
+                  Idempotency-Key → Submission
+                </td>
+                <td>
+                  COMMAND 作用整批、RUN 只作用子运行；首次 PENDING；公开
+                  cancel/retry 不同步返回 404；入口即不合法可异步
+                  REJECTED；已受理取消若错过窗口则操作结果
+                  FAILED/cancel_too_late， 不改写目标真实终态
+                </td>
+              </tr>
+              <tr>
+                <td><code>/commands/detail</code></td>
+                <td>ADMIN / SUPER_ADMIN</td>
+                <td>200</td>
+                <td>
+                  commandId → nullable submissionId、完整 CommandStatus、原顺序
+                  childRuns、requestedBy ActorDisplay；创建 child 前 REJECTED 时
+                  childRuns 可为空
+                </td>
+                <td>
+                  用户命令联结 Submission/User；schedule、legacy、recovery 命令
+                  submissionId=null 并投影 SYSTEM actor；不公开 actorRef
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>/runs/search</code><br /><code>/runs/detail</code>
+                </td>
+                <td>ADMIN / SUPER_ADMIN</td>
+                <td>200</td>
+                <td>
+                  状态、dataset、时间筛选；详情含 target、受理时
+                  sourceSnapshot、
+                  qualityGate、partition、timeline、requestedBy、脱敏
+                  failure。详情请求用 partitionsCursor/partitionsLimit 与
+                  timelineCursor/timelineLimit，可独立或同时续页（默认 100、最大
+                  200）；响应分别带总数与 nextCursor，两个数组均 ≤ 200；progress
+                  保留 completedPartitions、totalPartitions、 processedRecords
+                  与 estimatedRecords；公开 timeline 项必须是
+                  OperationEventView， actorRef 映射为 ActorDisplay；partition
+                  不返回 checkpoint
+                </td>
+                <td>
+                  run 不存在 404；sourceSnapshot 只做安全投影，历史 run
+                  不用当前来源回填；内部 checkpoint 仅为有界脱敏摘要
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>/health/evaluations/search</code><br /><code
+                    >/health/evaluations/detail</code
+                  >
+                </td>
+                <td>ADMIN / SUPER_ADMIN</td>
+                <td>200</td>
+                <td>
+                  search 只返 HealthEvaluationSummary（含
+                  currentOpenIssueCount、issueProjectionAsOf），不含逐规则
+                  results；不可变 HealthEvaluation 含 healthCheckId；detail
+                  组合不可变 evaluation 与查询时 currentOpenIssues，issuesLimit
+                  默认/最大 100，规则 results ≤ 500
+                </td>
+                <td>
+                  currentOpenIssues 只含 OPEN/ACKNOWLEDGED、安全
+                  evidenceSummary，并带
+                  currentOpenIssuesNextCursor；不暴露原始坏记录
+                </td>
+              </tr>
+              <tr>
+                <td><code>/health/checks/submit</code></td>
+                <td>SUPER_ADMIN</td>
+                <td>202</td>
+                <td>
+                  targets[{datasetCode,
+                  dataVersion|null}]、reason、Idempotency-Key → Submission
+                </td>
+                <td>
+                  首次 PENDING；没有 publication / 不适用规则由 data-sync 异步
+                  REJECTED
+                </td>
+              </tr>
+              <tr>
+                <td><code>/health/checks/detail</code></td>
+                <td>ADMIN / SUPER_ADMIN</td>
+                <td>200</td>
+                <td>
+                  healthCheckId → 批次状态、时间、requestedBy
+                  ActorDisplay、按原提交 target 顺序的
+                  resolvedDataVersion/status/evaluationId/error； 每个 target
+                  result 由 status 的 oneOf 约束字段组合
+                </td>
+                <td>
+                  未知批次 404；不公开 actorRef；HealthEvaluation.healthCheckId
+                  可从评估反查主动批次；SUCCEEDED 必含
+                  resolvedDataVersion/evaluationId 且
+                  error=null，FAILED/REJECTED 必含安全 error
+                </td>
+              </tr>
+              <tr>
+                <td><code>/schedules/search</code></td>
+                <td>ADMIN / SUPER_ADMIN</td>
+                <td>200</td>
+                <td>
+                  mode + targetPolicy{policyVersion,dateResolution}、结构化
+                  frequency、IANA timezone、nextRunAt、未来 5
+                  次、version、updatedBy
+                </td>
+                <td>下游不可用 503；无原始 cron；v1 自动计划禁止 DATE_RANGE</td>
+              </tr>
+              <tr>
+                <td>
+                  <code>/schedules/upsert</code><br /><code
+                    >/schedules/set-enabled</code
+                  >
+                </td>
+                <td>SUPER_ADMIN</td>
+                <td>202</td>
+                <td>
+                  从 capability 的 mode 对应 scheduleTargetPolicyOptions
+                  选择并原样提交 policy + expectedVersion + reason +
+                  Idempotency-Key → Submission；create 的
+                  scheduleId/expectedVersion 同为 null，update 同为非 null
+                </td>
+                <td>
+                  半空 create/update 判别同步 422 且不建 outbox；结构合法时首次
+                  PENDING；set-enabled 不同步返回 404；v1 每 datasetCode
+                  至多一条计划，重复创建或更新改绑由 data-sync 权威 409 后异步
+                  REJECTED；v1 不提供 delete
+                </td>
+              </tr>
+              <tr>
+                <td><code>/submissions/detail</code></td>
+                <td>ADMIN / SUPER_ADMIN</td>
+                <td>200</td>
+                <td>
+                  submissionId →
+                  deliveryStatus、authorityResource、queuePosition、operationResult
+                </td>
+                <td>
+                  PENDING/DELIVERING 强制
+                  authorityResource/queuePosition=null、operationResult=UNKNOWN；
+                  ACCEPTED 必含按 action 映射的权威资源。queuePosition 仅
+                  submit/retry 接受后表示新命令首 child
+                  的受理事务快照位置；cancel、健康、计划和未受理为 null；
+                  REJECTED/DEAD_LETTER 必含安全 error
+                </td>
+              </tr>
+              <tr>
+                <td><code>/operations/search</code></td>
+                <td>ADMIN / SUPER_ADMIN</td>
+                <td>200</td>
+                <td>
+                  actor/action/delivery/result/time 筛选 → nullable
+                  submissionId、谁、做什么、理由、交付、authorityResource、
+                  执行结果、lastObservedAt
+                </td>
+                <td>
+                  系统操作
+                  submissionId=null、deliveryStatus=NOT_APPLICABLE；不开放原始
+                  AuditLog metadata。USER/SYSTEM 与 submission、delivery
+                  双向绑定，并按交付状态约束 authorityResource/lastObservedAt
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid mt">
+          <article class="card">
+            <h3>输入和分页边界</h3>
+            <p>
+              未知字段拒绝；cursor 最长 1024 字符；公开 page limit 1–100；目录
+              domain/provider/ upstreamSource 各最多 20；其他 dataset filter
+              与批量 target 最多 100；理由 2–500 字。<code>/runs/detail</code>
+              直接复用 RunDetailRequest：partitionsCursor/partitionsLimit 与
+              timelineCursor/timelineLimit 可独立或同时续页，limit 默认
+              100、最大 200；响应给 partitionCount/partitionsNextCursor 与
+              timelineEventCount/timelineNextCursor，partitions、timeline 各最多
+              200。目录 sourceBindings 最多 10，detail healthRules 最多
+              200，preflight warnings 最多 20；health detail 的
+              issuesCursor/issuesLimit 独立分页，limit 默认与最大值均为 100，
+              currentOpenIssues 最多 100。日期使用 RFC 3339 或 ISO date；
+              响应完整解析后才返回，最大 2 MiB，超限不截断成伪完整响应。
+            </p>
+          </article>
+          <article class="card">
+            <h3>来源、观测与时间字段</h3>
+            <p>
+              每个 source binding 同时给
+              providerId、upstreamSource、sourceDataset、adapter、
+              methodology、approval 与 PRIMARY/FALLBACK/SHADOW。availability
+              使用 ENABLED/DISABLED/SOURCE_UNAVAILABLE/UNKNOWN，并与
+              observationState 分开；后者明确 PRESENT、EMPTY_VALID、
+              EMPTY_UNEXPECTED、NOT_YET_SYNCED、UNKNOWN，二者分别携带稳定
+              availabilityReasonCode/observationStateReasonCode。RunDetail
+              另投影 受理时冻结的 sourceSnapshot；禁止用当前目录来源改写历史。
+              sourceBindings 与 sourceSnapshot 均最多 10 项。
+            </p>
+          </article>
+          <article class="card">
+            <h3>DatasetTiming 与 freshness</h3>
+            <p>
+              显式投影 <code>lastAttemptStartedAt</code> /
+              <code>lastAttemptFinishedAt</code> /
+              <code>lastAttemptStatus</code>、lastSuccessAt、lastPublishedAt、
+              dataAsOf/Kind/Label、coverageFrom/To，以及 freshnessStatus、lag
+              value/unit、reasonCode、evaluatedAt。Web 不从 run success
+              或日期自行推导新鲜度。MODEL_ONLY 数据集明确
+              freshnessPolicy=null、dataAsOfKind/freshnessStatus=NOT_APPLICABLE；
+              合同 oneOf 同时保证 freshnessPolicy=null 当且仅当
+              freshnessStatus=NOT_APPLICABLE；非 null policy 的状态只能是
+              FRESH/WARNING/STALE/UNKNOWN。Web 显示“不适用”，不得当成缺配置或
+              UNKNOWN。
+            </p>
+          </article>
+        </div>
+
+        <div class="grid-2 mt">
+          <article class="card">
+            <h3>健康评估与 ingestion quality gate</h3>
+            <p>
+              HealthEvaluation 是按 dataVersion/policyVersion 固化的不可变事实，
+              含 nullable
+              healthCheckId；主动检查产生时可反查批次，自动发布后评估为
+              null。search 的 HealthEvaluationSummary
+              只返回评估标识、状态、分数、
+              evaluatedAt、规则计数、affectedRecordCount，以及查询时
+              currentOpenIssueCount/issueProjectionAsOf，不含逐规则
+              results。detail 请求直接引用 0022 HealthDetailRequest，以
+              evaluationId 加可选 issuesCursor/issuesLimit 续取当前 issue，limit
+              默认/最大 100；响应 HealthDetail 组合 immutable evaluation 与
+              currentOpenIssueCount/currentOpenIssues/
+              currentOpenIssuesNextCursor/issueProjectionAsOf。不可变 evaluation
+              内的规则 results 最多 500 条，规则保留 INFO/WARN/CRITICAL
+              severity，以及 PASSED/WARNED/FAILED/UNKNOWN/SKIPPED 的规则
+              status、 expected/observed、affectedCount 与脱敏
+              sampleSummary；当前 issue 最多 100 条，只含 OPEN/ACKNOWLEDGED
+              与安全 evidenceSummary，不含原始记录或 Provider 正文。RunDetail 的
+              qualityGate 独立返回 NOT_EVALUATED/PASSED/WARNED/BLOCKED、policy
+              code/version、 受影响数与安全错误。发布后 CRITICAL 不撤销
+              publication； 发布前 BLOCKED 才阻止新版本发布。
+            </p>
+          </article>
+          <article class="card">
+            <h3>同步模式、preflight 与自动计划</h3>
+            <p>
+              人工 <code>supportedModes</code> 可声明 FULL、INCREMENTAL、
+              DATE_RANGE、OBSERVATION_DATE，也可在 manualEnabled=false
+              时为空；独立 <code>scheduleSupportedModes</code> 只允许 FULL、
+              INCREMENTAL、OBSERVATION_DATE。range 含两端，snapshot 只用
+              observationDate。preflight 依赖 data-sync，停机返回 503；submit
+              只校验 preflightId/requestHash/targets 的引用形状。targetPolicy
+              必填 policyVersion，前两种计划模式 dateResolution=NONE，
+              观察日只能选计划本地日期或最近完成交易日。公开 capability 同步投影
+              <code>scheduleTargetPolicyOptions</code>；每项包含 mode、版本化
+              policy 与 isDefault。新建计划表单按所选 mode 过滤选项，以该 mode
+              唯一 isDefault 初始选中，并原样提交 policy；不得由 mode
+              自行猜测日期解析规则。scheduleEligible=false 时选项必须为空；否则
+              scheduleSupportedModes 中每个 mode 至少一个选项且恰有一个默认项。
+              ScheduleUpsertRequest 以
+              <code>scheduleId/expectedVersion</code> 成对判别 create 或
+              update： create 两者同为 null，update 两者同为非
+              null；半空组合是本地结构错误， 同步返回 422 且不得创建
+              Submission/Outbox。v1 以 datasetCode
+              作为计划唯一绑定：每数据集最多一条； 重复 create 由 data-sync 返回
+              409，update 不得把 scheduleId 改绑到其他 datasetCode，Web
+              编辑时固定数据集字段。
+            </p>
+          </article>
+        </div>
+
+        <div class="grid-2 mt">
+          <article class="card">
+            <h3>健康检查批次对账</h3>
+            <p>
+              HEALTH_CHECK_SUBMIT 被权威服务受理后，Submission.authorityResource
+              固定为 HEALTH_CHECK(healthCheckId)，queuePosition=null。reconciler
+              用新增内部 <code>/health/checks/detail</code> 轮询批次状态；公开
+              <code>/health/checks/detail</code> 保持 targets 原提交顺序，把
+              actorRef 投影为 requestedBy ActorDisplay，并返回每个目标的
+              resolvedDataVersion、status、evaluationId 与安全 error。目标结果按
+              status 机器约束：SUCCEEDED 必有 resolvedDataVersion/evaluationId
+              且 error=null；FAILED、REJECTED 必有 error，REJECTED 的
+              resolvedDataVersion=null；排队、运行、取消分支也固定 nullable
+              字段，Web 不凭空组合状态。成功评估再以
+              HealthEvaluation.healthCheckId 反查所属主动批次。
+            </p>
+          </article>
+          <article class="card">
+            <h3>公开 timeline、checkpoint 与 ErrorSummary</h3>
+            <p>
+              RunDetail.timeline 只使用公开 OperationEventView；事件 actor
+              必须是 ActorDisplay，禁止透出 actorRef；result 完整保留
+              CANCEL_REQUESTED、INTERRUPTED、SKIPPED 等权威状态。内部 partition
+              checkpoint 仅返回 kind、positionHash、updatedAt
+              的有界脱敏摘要；公开 partitions 不含
+              checkpoint。ErrorSummary.stage 固定为
+              PREFLIGHT、QUEUE、DELIVERY、PROVIDER_FETCH、NORMALIZE、QUALITY_GATE、
+              HEALTH_EVALUATION、PERSIST、PUBLISH、CHECKPOINT、SCHEDULE、CANCEL、
+              RECOVERY；API 只投影 code、stage、retryable 与安全 message。
+            </p>
+          </article>
+        </div>
+
+        <p>
+          公开投影完整保留八种 CommandStatus：QUEUED、RUNNING、
+          <code>CANCEL_REQUESTED</code>、SUCCEEDED、PARTIAL、FAILED、CANCELLED、
+          REJECTED。CommandDetail 在命令创建 child 前即被 REJECTED 时允许
+          <code>childRuns=[]</code>；其余已受理命令至少一个 child，且始终按原
+          target 顺序返回。九种 RunStatus 则为 QUEUED、RUNNING、
+          <code>CANCEL_REQUESTED</code>、SUCCEEDED、PARTIAL、FAILED、CANCELLED、
+          <code>INTERRUPTED</code>、<code>SKIPPED</code>；总览中的 ExecutionSlot
+          也完整保留 IDLE、RUNNING 与 <code>RECOVERING</code>，API
+          不合并或猜测这些权威状态。合同 oneOf 规定 IDLE 时
+          runId/datasetCode/leaseUntil/heartbeatAt 全为 null；RUNNING 或
+          RECOVERING 时四项全为非空的权威执行上下文，Web
+          不从残缺字段自行推断槽位。
+        </p>
+
+        <aside class="callout">
+          <strong>COMMAND 与 RUN 作用域</strong>
+          COMMAND 取消会直接取消未开始 child，并对活跃 child 发起合作式取消；
+          COMMAND 重试只复制可重试的 FAILED、PARTIAL 或 INTERRUPTED child。RUN
+          只作用一个子运行，不得误伤或重建整批。API 仅校验
+          resourceType/resourceId 形状，资格和终态由 data-sync 在 dispatcher
+          投递后裁决。
+        </aside>
+
+        <aside class="callout">
+          <strong>取消动作结果不等于 target 终态</strong>
+          只有权威 target 最终为
+          CANCELLED，才算取消达成。若取消意图已受理但执行过晚， deliveryStatus
+          可保持 ACCEPTED，Submission/OperationRecord 的 operationResult 投影
+          FAILED，并返回稳定 ErrorSummary(code=cancel_too_late,
+          stage=CANCEL)。authorityResource 仍指向原 target；该 COMMAND/RUN
+          可以真实完成为 SUCCEEDED，Web 必须允许跳转查看，
+          不得把目标状态改写为取消失败。
+        </aside>
+
+        <aside class="callout">
+          <strong>CommandReceipt 同时描述新命令与原目标</strong>
+          data-sync 受理回执固定返回 commandId、submissionId、status、target、
+          targetStatus、childRunIds、queuePosition 与 acceptedAt。submit 的
+          target 固定为新 <code>COMMAND(commandId)</code>，且
+          targetStatus=status。cancel 的 commandId/status 描述被取消 RUN
+          所属或被取消的 parent command； target/targetStatus
+          描述实际目标。retry 的 target/targetStatus 仍描述原 COMMAND 或 RUN，而
+          commandId/status 与 childRunIds 描述新建、可追溯的 retry command，API
+          不把原目标状态误投影成新命令状态。合同 oneOf 按 target.resourceType
+          机器约束 targetStatus：COMMAND 只能引用 CommandStatus，RUN 只能引用
+          RunStatus；后者可为 INTERRUPTED 或 SKIPPED，顶层 status 只使用上述八种
+          CommandStatus。queuePosition 在 submit/retry 回执中表示新命令首个
+          child run 的受理事务快照位置；cancel 为 null，其余 child 的位置从
+          commands/detail.childRuns 读取。
+        </aside>
+
+        <aside class="callout">
+          <strong>ActorDisplay 先区分 USER 与 SYSTEM</strong>
+          USER 的 systemKind=null；用户删除后可隐藏 actorId，以
+          deleted=true、displayName=“已删除用户”投影。SYSTEM 固定
+          actorId=null、deleted=false，并以 systemKind 区分
+          SCHEDULE、LEGACY、RECOVERY、OTHER；前三者分别显示“系统计划”“遗留任务”“系统恢复”。
+          系统 actor 永不误标为已删除用户，command/run requestedBy 与
+          OperationRecord.actor 复用同一映射。
+        </aside>
+
+        <h3 class="mt">完整提交示例</h3>
+        <pre><code>POST /api/v1/data-operations/sync/submit
+Authorization: Bearer &lt;access-token&gt;
+Content-Type: application/json
+Idempotency-Key: 01JZ7DJ7Y3E7XH1P4N7HB3R5RK
+X-Request-Id: 7b8d196b-6bbc-48ef-9e9b-973a1cd5b126
+
+{
+  "preflightId": "7806612a-c2d7-4714-a2fc-45199e7d8638",
+  "requestHash": "9f8e17f076d1968d1843eed54d27126c680e85bdf819ca23f3dd63bbf24442a1",
+  "targets": [
+    {
+      "datasetCode": "equity.bar.1d.raw",
+      "mode": "DATE_RANGE",
+      "dateFrom": "2026-07-01",
+      "dateTo": "2026-07-28",
+      "observationDate": null
+    }
+  ],
+  "reason": "补齐七月日线缺口并复核数据健康度"
+}</code></pre>
+
+        <pre><code>HTTP/1.1 202 Accepted
+Cache-Control: no-store
+X-Request-Id: 7b8d196b-6bbc-48ef-9e9b-973a1cd5b126
+
+{
+  "submissionId": "45ea5915-3184-4491-8181-18026c8a6f34",
+  "action": "SYNC_SUBMIT",
+  "deliveryStatus": "PENDING",
+  "operationResult": "UNKNOWN",
+  "authorityResource": null,
+  "queuePosition": null,
+  "authorizedAt": "2026-07-29T03:12:20Z",
+  "updatedAt": "2026-07-29T03:12:20Z",
+  "requestId": "7b8d196b-6bbc-48ef-9e9b-973a1cd5b126",
+  "error": null
+}</code></pre>
+
+        <aside class="callout">
+          <strong>202 的唯一含义</strong>
+          授权意图、HTTP Outbox 和安全审计已经在 API PostgreSQL 同一事务提交。
+          首次创建的任一主动写都必须返回
+          <code>deliveryStatus=PENDING</code>、<code>queuePosition=null</code>；
+          HTTP 请求线程不得在提交后 immediate/best-effort 直投，唯一投递者是独立
+          dispatcher。 示例 Submission 首次创建后，服务端冻结
+          <code
+            >downstreamIdempotencyKey=dataops:45ea5915-3184-4491-8181-18026c8a6f34</code
+          >； 该内部 key 不返回浏览器。 只有
+          <code>deliveryStatus=ACCEPTED</code> 且出现 authorityResource，才表示
+          data-sync 权威账本已经受理；queuePosition
+          不是通用受理标志，cancel、健康检查、计划动作仍为
+          null。运行成功仍必须等待 operationResult。
+        </aside>
+
+        <aside class="callout">
+          <strong>authorityResource 按 action 固定映射</strong>
+          PENDING 一律为 null。SYNC_SUBMIT 与 SYNC_RETRY 接受后指向新
+          COMMAND(commandId)；SYNC_CANCEL 指向原 target 的 COMMAND 或 RUN；
+          HEALTH_CHECK_SUBMIT 指向 HEALTH_CHECK；SCHEDULE_UPSERT 与
+          SCHEDULE_SET_ENABLED 指向 SCHEDULE。Submission 与 OperationRecord
+          使用同一映射，Web 只据此跳转权威资源。接受后的 queuePosition 只有
+          SYNC_SUBMIT/SYNC_RETRY 非空，且指向新命令首 child
+          的受理事务快照位置；cancel、健康、计划与所有未受理交付均为 null。
+        </aside>
+
+        <aside class="callout">
+          <strong>Submission 与操作记录都是机器状态机</strong>
+          SubmissionReceipt 的 deliveryStatus oneOf 拒绝非法组合：
+          PENDING/DELIVERING 只能是 UNKNOWN 且无 authority/queue；REJECTED 必为
+          operationResult=REJECTED，DEAD_LETTER 保持 UNKNOWN，两者均无 authority
+          且必须有安全 error；ACCEPTED 必有 authority，并再按 action 绑定
+          COMMAND、原 COMMAND/RUN、HEALTH_CHECK 或 SCHEDULE，只有接受的
+          submit/retry 可带首 child queuePosition。OperationRecord 同时保证 USER
+          当且仅当 submissionId 为 UUID 且 deliveryStatus 非
+          NOT_APPLICABLE，SYSTEM 当且仅当 submissionId=null 且
+          deliveryStatus=NOT_APPLICABLE；其第二层 oneOf 再约束
+          pending/delivering 无 authority 与观测时间、accepted 或系统 操作有
+          authority/lastObservedAt、rejected/dead-letter 的终态时间与错误。
+        </aside>
+
+        <h3 class="mt">幂等与乐观并发</h3>
+        <ul>
+          <li>
+            所有写 route 要求 16–128 字符
+            <code>Idempotency-Key</code>。唯一作用域是 actorId + key；
+            requestHash 包含 route 与规范 body。同步 submit 只验证
+            preflightId、requestHash、targets 的 DTO/引用形状，不在 API 复验
+            preflight 时效、实时 capability 或来源状态。
+          </li>
+          <li>
+            同 actor、同公开 key、同 hash 返回原 Submission，不新写 outbox
+            或审计，并继续复用已冻结的内部 key；同公开 key 异 hash 返回 409
+            <code>idempotency-key-reused</code>。key 与 Submission 终态至少保留
+            90 天。
+          </li>
+          <li>
+            首次创建 Submission 时，以
+            <code>submissionId</code> 确定性派生
+            <code>dataops:&lt;submissionId&gt;</code>，作为
+            <code>downstreamIdempotencyKey</code> 与规范内部 body 一起冻结到
+            Outbox。不同 actor 即使使用相同公开 key，也得到不同内部 key。
+          </li>
+          <li>
+            dispatcher 每次尝试都传原下游 key 与原内部 body。网络断开、timeout
+            或 5xx 后禁止生成新内部 key，防止 data-sync 已受理但 API
+            未收到响应时重复命令；公开 key 绝不原样透传到 data-sync。
+          </li>
+          <li>
+            schedule 创建要求 scheduleId/expectedVersion 为
+            null；更新要求两者同为非 null，启停要求 scheduleId 与当前
+            expectedVersion。半空 upsert 组合在 DTO 阶段返回 422，不进入
+            outbox。结构合法写入后，版本由 data-sync
+            在单事务中比较并递增；异步冲突令 Submission 进入 REJECTED，错误码
+            <code>schedule-version-conflict</code>，Web
+            必须刷新后重做，不自动覆盖。API 不在 outbox 前查询 datasetCode
+            是否已有计划；重复 create 或 update 改绑由 data-sync 返回权威 409，
+            再异步投影 REJECTED。
+          </li>
+        </ul>
+
+        <h3 class="mt">Problem Details 与下游映射</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>场景</th>
+                <th>公开 HTTP / code</th>
+                <th>行为</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>未知字段、格式、页长、时间窗无效</td>
+                <td>400 <code>validation-error</code></td>
+                <td>只返回安全摘要，不回显完整 body</td>
+              </tr>
+              <tr>
+                <td>JWT/Session/User 无效</td>
+                <td>401 <code>unauthorized</code></td>
+                <td>沿用全局默认拒绝</td>
+              </tr>
+              <tr>
+                <td>USER、ADMIN 尝试主动写</td>
+                <td>403 <code>forbidden</code></td>
+                <td>不创建 Submission、Outbox 或 data-sync command</td>
+              </tr>
+              <tr>
+                <td>读取 dataset/command/run/evaluation 不存在或不可见</td>
+                <td>404 <code>not-found</code></td>
+                <td>不泄露内部标识和来源细节</td>
+              </tr>
+              <tr>
+                <td>公开幂等 key 同 actor 异请求复用</td>
+                <td>409 稳定业务 code</td>
+                <td>
+                  API 本地拒绝，不创建第二个 Submission；客户端不自动换 key
+                </td>
+              </tr>
+              <tr>
+                <td>preflight 的模式、日期、能力或状态冲突</td>
+                <td>409/422 稳定业务 code</td>
+                <td>同步读取 data-sync 权威；依赖不可用返回 503</td>
+              </tr>
+              <tr>
+                <td>
+                  schedule upsert 的 scheduleId/expectedVersion 只有一项为 null
+                </td>
+                <td>422 <code>validation-error</code></td>
+                <td>本地结构校验拒绝，不创建 Submission、Outbox 或审计</td>
+              </tr>
+              <tr>
+                <td>
+                  结构合法写的资源不存在、版本或 capability 冲突；尤其是
+                  cancel/retry/set-enabled 的未知目标，以及 schedule 重复
+                  datasetCode 或更新改绑
+                </td>
+                <td>先 202 PENDING，随后 REJECTED</td>
+                <td>
+                  由 dispatcher 获得权威 400/404/409/422；这三条公开 route
+                  不声明同步 404，API 不预判或降级
+                </td>
+              </tr>
+              <tr>
+                <td>取消已受理，但 target 在合作式取消前真实完成</td>
+                <td>
+                  delivery ACCEPTED；operation FAILED
+                  <code>cancel_too_late</code>
+                </td>
+                <td>
+                  ErrorSummary.stage=CANCEL；authorityResource
+                  保留且可跳转，目标可为 SUCCEEDED，不能伪造 CANCELLED
+                </td>
+              </tr>
+              <tr>
+                <td>actor/queue 防滥用上限</td>
+                <td>429 <code>rate-limited</code></td>
+                <td>有界 Retry-After；submit 不在客户端自动生成新 key</td>
+              </tr>
+              <tr>
+                <td>API PostgreSQL，或只读/preflight 下游不可用</td>
+                <td>503 <code>dependency-unavailable</code></td>
+                <td>
+                  本地写事务失败不返回 202；读取与 preflight 不返回过期伪事实
+                </td>
+              </tr>
+              <tr>
+                <td>data-sync 停机但主动写 DTO 与引用形状合法</td>
+                <td>202 <code>PENDING</code></td>
+                <td>
+                  不调用下游；dispatcher 恢复后投递并 ACCEPTED 或 REJECTED
+                </td>
+              </tr>
+              <tr>
+                <td>内部 401/403、非法 JSON、schema drift</td>
+                <td>公开 503；内部严重告警</td>
+                <td>不把服务凭据故障误报成用户 403，不透传下游正文</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="small">
+          公开 Problem 保持现有 RFC 9457 风格
+          type/title/status/detail/instance/requestId/code。Proposed Contract
+          0023 已声明主动写的 429/503、缺失 Idempotency-Key、Problem Retry-After
+          与查询 Submission 的 503；实现和合同测试必须持续保持这些失败语义。
+        </p>
+      </section>
+
+      <section id="delivery-flow">
+        <h2>Submission、HTTP Outbox 与终态对账</h2>
+        <pre aria-label="可靠投递流程">
+SUPER_ADMIN 写请求
+  │
+  ├─ 1. JWT / ACTIVE User / RBAC / Origin / DTO / 64 KiB / rate limit
+  │      └─ 公开幂等 + preflight 引用形状；不查实时 capability/schedule/resource
+  ├─ 2. PostgreSQL transaction
+  │      ├─ INSERT DataOperationSubmission（公开 actorId + key 去重）
+  │      ├─ DERIVE downstreamIdempotencyKey = "dataops:" + submissionId
+  │      ├─ INSERT DataOperationHttpOutbox（冻结内部 key 与请求，不含 secret）
+  │      └─ INSERT AuditLog(dataops.request.authorized)
+  │         任一失败 → 全部回滚，公开 503
+  └─ 3. COMMIT → 首次一律 202 delivery=PENDING, queuePosition=null
+                    │
+                    │ 无 immediate / best-effort HTTP 快路径
+                    ▼
+独立 dispatcher，多实例
+  ├─ 短事务 FOR UPDATE SKIP LOCKED，领取最多 20 条，lease=30s
+  ├─ downstreamIdempotencyKey + X-Request-Id + service bearer POST data-sync
+  ├─ 2xx：ACCEPTED，按 action 映射 authorityResource；仅 submit/retry 保存首 child queuePosition
+  ├─ 4xx 业务终态：REJECTED，保存稳定安全 code
+  ├─ network / 429 / 502 / 503 / 504：原下游 key 退避重试
+  └─ 20 次或 24h 未交付：DEAD_LETTER + 告警
+
+reconciler
+  ├─ 用 authorityResource/requestId 读取权威 command/run/health-check/schedule
+  ├─ HEALTH_CHECK 轮询批次 detail，保持 targets 原顺序并投影 requestedBy
+  ├─ 更新 operationResult + authorityResource + lastObservedAt（非权威快照）
+  └─ 发现终态不一致时以 data-sync 覆盖投影并告警，不反向修改 data-sync</pre>
+
+        <div class="grid mt">
+          <article class="card">
+            <span class="label decision">部署决策</span>
+            <h3>同镜像、独立 dispatcher 进程</h3>
+            <p>
+              新增
+              <code>pnpm data-operations:dispatch</code>
+              入口和独立部署实例，不在 HTTP 请求进程内启动无限
+              poll。可运行多个副本；PostgreSQL lease 与 SKIP LOCKED
+              防重复领取。它是唯一投递者；请求进程不做 post-commit 直投。无需
+              BullMQ、跨服务事件平台或业务 Redis。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label decision">重试决策</span>
+            <h3>只对冻结下游 key 的 mutation 重试</h3>
+            <p>
+              full-jitter 指数退避初值 1 s、上限 5 min；429 遵守 1–300 s
+              Retry-After。 400/404/409/422 是业务终态；内部 401/403 立即
+              DEAD_LETTER 并触发凭据事故告警。重试、对账和 replay 均不得换内部
+              key。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label decision">人工恢复</span>
+            <h3>原 outbox replay，不重新授权</h3>
+            <p>
+              Contract 0023 v1 不开放浏览器 replay route。受控 runbook 校验
+              ACTIVE SUPER_ADMIN、 submissionId 与明确确认值，只把原 DEAD_LETTER
+              行重置为 PENDING，并追加
+              <code>dataops.delivery.replayed</code> 审计。
+            </p>
+          </article>
+        </div>
+
+        <aside class="callout warning">
+          <strong>不是跨服务事件平台</strong>
+          HTTP Outbox 只解决 API PostgreSQL 提交后到一个 data-sync 内部 POST
+          的可靠交付。 它没有订阅者、广播、顺序分区或通用 schema
+          registry；未来引入事件平台必须另建 ADR。
+        </aside>
+
+        <h3 class="mt">所有写操作统一入口</h3>
+        <p>
+          SYNC_SUBMIT、SYNC_CANCEL、SYNC_RETRY、HEALTH_CHECK_SUBMIT、SCHEDULE_UPSERT、
+          SCHEDULE_SET_ENABLED 全部使用同一 Submission/Outbox 模板。禁止某些
+          route 直接同步调用下游、 另一些 route 走
+          outbox；否则审计、未知结果和故障恢复语义会分裂。
+        </p>
+      </section>
+
+      <section id="data">
+        <h2>Prisma 模型、约束、事务与迁移</h2>
+        <div class="table-wrap">
+          <table class="wide">
+            <thead>
+              <tr>
+                <th>模型</th>
+                <th>关键字段</th>
+                <th>约束与索引</th>
+                <th>生命周期 / 删除</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>DataOperationSubmission</code></td>
+                <td>
+                  id、actorId、actorRole、action、idempotencyKey、requestHash、sanitizedRequest、
+                  actorRef、reason、deliveryStatus、operationResult、authorityType/Id、
+                  queuePosition、requestId、safeError、version、authorizedAt、updatedAt、
+                  completedAt、lastObservedAt
+                </td>
+                <td>
+                  UNIQUE(actorId, idempotencyKey)；requestHash 为 64 位
+                  SHA-256； INDEX(deliveryStatus, updatedAt,
+                  id)；INDEX(authorityType, authorityId)；INDEX(actorRef)
+                </td>
+                <td>
+                  终态后至少 90 天；User 软删除不破坏 actorRef；不保存
+                  JWT、token 或 raw error
+                </td>
+              </tr>
+              <tr>
+                <td><code>DataOperationHttpOutbox</code></td>
+                <td>
+                  id、submissionId、downstreamIdempotencyKey、internalPath、canonicalPayload、
+                  state、attemptCount、nextAttemptAt、leaseOwner、leaseUntil、lastProblemCode、
+                  deliveredAt、created/updatedAt
+                </td>
+                <td>
+                  UNIQUE(submissionId)；UNIQUE(downstreamIdempotencyKey)；内部
+                  key 固定为 dataops:&lt;submissionId&gt;；INDEX(state,
+                  nextAttemptAt, id)； INDEX(leaseUntil)；payload ≤ 64 KiB；path
+                  来自 action registry，不接受用户字符串
+                </td>
+                <td>
+                  DELIVERED/DEAD_LETTER 与 Submission 同期保留；replay
+                  修改同一行，不复制 payload
+                </td>
+              </tr>
+              <tr>
+                <td><code>AuditLog</code></td>
+                <td>
+                  复用
+                  actorId、action、targetId、requestId、metadata、occurredAt
+                </td>
+                <td>
+                  复用时间/action 索引；action registry 增加 dataops allowlist
+                </td>
+                <td>
+                  现行 90 天在线保留、不归档；不保存原 body、secret、stack
+                  或下游 Problem 正文
+                </td>
+              </tr>
+              <tr>
+                <td>User permission mapping</td>
+                <td>增加固定 data-operations read/write 权限常量</td>
+                <td>角色矩阵编译期类型 + 表驱动测试；不新增动态 RBAC 表</td>
+                <td>
+                  consumer-first 更新 Web 枚举，再由 API 返回新增 permission
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="mt">事务边界</h3>
+        <ol>
+          <li>
+            Guard/用例只完成身份、RBAC、Origin、DTO、64 KiB、限流、公开幂等和
+            preflight 引用形状；规范化 body 与 action 后计算 requestHash。reason
+            仅 trim，不记录不可控 header。不得在此查询实时 capability、schedule
+            eligibility、resource existence 或 version。
+          </li>
+          <li>
+            Prisma 事务尝试插入 Submission。唯一键冲突时读取既有行：hash
+            相同返回原资源，hash 不同返回 409。
+          </li>
+          <li>
+            首次插入时用 submissionId 派生
+            <code>downstreamIdempotencyKey</code>，再在同一事务写冻结该 key
+            与规范内部请求的 Outbox，以及
+            <code>dataops.request.authorized</code> AuditLog。 AuditLog
+            写失败必须使 Submission 和 Outbox 一起回滚；提交后直接返回 PENDING。
+          </li>
+          <li>
+            只有独立 dispatcher 可领取 lease 并执行内部 HTTP；请求进程没有
+            immediate/best-effort 投递分支，且 dispatcher
+            不在持有数据库事务时等待网络。
+          </li>
+          <li>
+            每次交付终态在一个短事务内更新 Outbox、Submission，并追加
+            accepted/rejected/dead-letter 审计。reconciler 只更新明确标为
+            projection 的字段。
+          </li>
+        </ol>
+
+        <h3 class="mt">审计 action 与公开投影</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Action</th>
+                <th>回答的问题</th>
+                <th>允许公开详情</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>dataops.request.authorized</code></td>
+                <td>谁以什么角色请求了什么</td>
+                <td>
+                  action、targetSummary、reason、actorRole、requestId、authorizedAt
+                </td>
+              </tr>
+              <tr>
+                <td><code>dataops.delivery.accepted</code></td>
+                <td>data-sync 是否受理</td>
+                <td>
+                  submissionId、authorityResource、queuePosition、acceptedAt
+                </td>
+              </tr>
+              <tr>
+                <td><code>dataops.delivery.rejected</code></td>
+                <td>请求为何未进入权威账本</td>
+                <td>稳定 code、stage、retryable、安全 message</td>
+              </tr>
+              <tr>
+                <td><code>dataops.delivery.dead_lettered</code></td>
+                <td>可靠交付为何需要人工处理</td>
+                <td>
+                  attemptCount、lastProblemCode、lastAttemptAt；不含响应正文
+                </td>
+              </tr>
+              <tr>
+                <td><code>dataops.delivery.replayed</code></td>
+                <td>谁触发原 outbox 重投</td>
+                <td>
+                  submissionId、replayedBy、replayedAt、下游 key 的 HMAC 摘要
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          <code>/data-operations/operations/search</code> 是运维投影，不等同
+          <code>/audit-events/list</code>。前者允许 ADMIN/SUPER_ADMIN 查看
+          data-operations 动作、authorityResource、lastObservedAt 与 data-sync
+          执行结果；后者仍是 SUPER_ADMIN-only 完整安全审计入口。command/run
+          详情的 requestedBy 与 OperationRecord.actor 均投影为 ActorDisplay：
+          USER 通过非空 submissionId/actorRef 联结 Submission 与
+          User；系统计划、 legacy、recovery 无 API
+          Submission，submissionId=null、 deliveryStatus=NOT_APPLICABLE，并按
+          systemKind 显示系统身份。永不透出内部 actorRef，也不把系统 actor
+          显示成“已删除用户”。
+        </p>
+
+        <h3 class="mt">迁移、backfill 与回滚</h3>
+        <ul>
+          <li>
+            独立 Prisma migration job 新增
+            enum、两张表、FK、唯一约束与索引；生产 API 启动不执行 migration。
+            新表为空，不需要历史 backfill。
+          </li>
+          <li>
+            expand 后旧 API 完全忽略新表；先部署理解新 permission 的 Web，再部署
+            API DTO/只读 route， 最后部署 dispatcher 与写 route。
+          </li>
+          <li>
+            回滚先关闭 data-operations 写 feature gate，再停止 dispatcher；保留
+            Submission、Outbox 与 AuditLog。 已被 data-sync 接受的 command
+            不撤销、不删除、不改写为失败。
+          </li>
+          <li>
+            Prisma/PostgreSQL enum 不做破坏性移除。已有 Submission 后只允许 roll
+            forward 修复； 回滚脚本只删除确认从未启用且为空的新表。
+          </li>
+        </ul>
+      </section>
+
+      <section id="reliability">
+        <h2>下游可靠性、安全失败与可观测性</h2>
+        <div class="table-wrap">
+          <table class="wide">
+            <thead>
+              <tr>
+                <th>关注点</th>
+                <th>只读客户端</th>
+                <th>写 dispatcher</th>
+                <th>公开行为</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>身份</td>
+                <td>专用 read-only service bearer</td>
+                <td>与读取分权的 operations service identity</td>
+                <td>内部 401/403 → 503 + 严重告警，不转发内部权限详情</td>
+              </tr>
+              <tr>
+                <td>超时</td>
+                <td>查询与 preflight 单次 2 s，总 deadline 5 s</td>
+                <td>单次 5 s；不占用 HTTP 请求 deadline</td>
+                <td>查询/preflight 503；结构合法主动写保持 PENDING</td>
+              </tr>
+              <tr>
+                <td>重试</td>
+                <td>POST 读取语义可安全重试 1 次，50–150 ms full jitter</td>
+                <td>只有冻结 downstreamIdempotencyKey 的 mutation 才重试</td>
+                <td>429 不由浏览器自动重提；dispatcher 尊重 Retry-After</td>
+              </tr>
+              <tr>
+                <td>重试条件</td>
+                <td>network、timeout、502/503/504</td>
+                <td>network、timeout、429、502/503/504</td>
+                <td>400/404/409/422 不重试；401/403 进入事故处理</td>
+              </tr>
+              <tr>
+                <td>schema / 大小</td>
+                <td>严格 Zod；额外字段按合同策略；最大 2 MiB</td>
+                <td>严格 receipt/problem allowlist；payload ≤ 64 KiB</td>
+                <td>非法 JSON、超限或 schema drift 不返回部分数据</td>
+              </tr>
+              <tr>
+                <td>熔断</td>
+                <td>20 请求滑窗、失败率 ≥ 50% 开 30 s，半开单探针</td>
+                <td>不丢 outbox；内部身份事故暂停对应 action</td>
+                <td>读取快速 503；写继续安全积压并告警</td>
+              </tr>
+              <tr>
+                <td>fallback</td>
+                <td>无 DB/Provider/旧路径 fallback</td>
+                <td>无直调同步用例或换 key fallback</td>
+                <td>fail closed，不用旧 publication 冒充运维状态</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="mt">故障不变量</h3>
+        <div class="grid">
+          <article class="card">
+            <h3>data-sync 停机</h3>
+            <p>
+              catalog/command/run/health/schedule 读取和 sync preflight 返回
+              503；已持有 preflight 引用的
+              submit，以及取消、重试、健康检查和计划 等结构合法写仍可在 API
+              PostgreSQL 落为 PENDING。API readiness
+              不因下游停机而重启风暴；outbox oldest age 告警。
+            </p>
+          </article>
+          <article class="card">
+            <h3>API PostgreSQL 停机</h3>
+            <p>
+              写操作不得返回 202，因授权、outbox 和审计均未持久化；读取
+              data-sync 的 route 也按 ready policy fail
+              closed，避免身份/审计边界不完整。
+            </p>
+          </article>
+          <article class="card">
+            <h3>接受响应丢失</h3>
+            <p>
+              Submission 保持 PENDING；dispatcher 用原下游 key 重试。data-sync
+              在 caller service + 内部 key 域内，同 key 同 hash 返回原 command
+              receipt，因此最多一个权威 command。
+            </p>
+          </article>
+        </div>
+
+        <div class="grid mt">
+          <article class="card">
+            <h3>合同拒绝</h3>
+            <p>
+              data-sync 400/404/409/422 更新 Submission 为 REJECTED，并保留安全
+              code。这是 dispatcher 交付后的异步权威结论，不改变初次 HTTP
+              202/PENDING。公开 cancel、retry 与 schedules/set-enabled 不把下游
+              404 改写成同步公开 404。用户刷新 capability/preflight/version
+              后提交新意图与新 key；旧意图不可改写。
+            </p>
+          </article>
+          <article class="card">
+            <h3>重复 dispatcher</h3>
+            <p>
+              lease 限制领取，但网络延迟或进程暂停仍可能重复 POST；正确性依赖
+              data-sync idempotency inbox，不依赖“理论上只发一次”。
+            </p>
+          </article>
+          <article class="card">
+            <h3>对账漂移</h3>
+            <p>
+              ACCEPTED 超过 5 分钟仍查不到 authority resource、终态超过 2
+              分钟未投影、lastObservedAt 过期或状态回退时告警。API 以 data-sync
+              重新同步 authorityResource/operationResult
+              投影，不反向修正权威事件。
+            </p>
+          </article>
+        </div>
+
+        <h3 class="mt">日志、指标、追踪与告警</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>信号</th>
+                <th>低基数字段</th>
+                <th>目的</th>
+                <th>禁止字段</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>data_operation_submission_total</code></td>
+                <td>action、deliveryStatus、operationResult</td>
+                <td>授权量、拒绝、终态</td>
+                <td>actorId、submissionId、datasetCode、reason</td>
+              </tr>
+              <tr>
+                <td><code>data_operation_outbox_depth</code></td>
+                <td>state、action</td>
+                <td>PENDING / DEAD_LETTER 与容量</td>
+                <td>idempotency key、requestId</td>
+              </tr>
+              <tr>
+                <td><code>data_operation_outbox_oldest_seconds</code></td>
+                <td>action</td>
+                <td>识别交付停滞</td>
+                <td>单行 ID</td>
+              </tr>
+              <tr>
+                <td><code>data_sync_operations_client_duration</code></td>
+                <td>operation、attempt、outcome</td>
+                <td>deadline、重试、依赖 SLO</td>
+                <td>URL query、body、actor</td>
+              </tr>
+              <tr>
+                <td><code>data_operation_reconciliation_lag</code></td>
+                <td>resourceType、terminal</td>
+                <td>权威结果投影滞后</td>
+                <td>resourceId</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          结构化日志可含 requestId、submissionId、authorityResourceId、actorId
+          HMAC、action、attempt、 duration、safe code；不得含
+          Bearer、Cookie、公开或下游 Idempotency-Key 原文、reason 全文、请求
+          body、 Provider URL/响应或 stack。trace 通过 requestId/submissionId
+          串联浏览器、API outbox 与 data-sync。
+        </p>
+        <p>
+          告警至少覆盖：内部 401/403 立即告警；DEAD_LETTER &gt; 0；oldest
+          PENDING &gt; 60 s； schema drift；交付失败率连续 10 分钟超 1%；对账
+          lag &gt; 5 min；API PostgreSQL transaction failure；data-operations
+          route 5xx/error budget。
+        </p>
+      </section>
+
+      <section id="rollout">
+        <h2>实施、灰度、回滚与验收</h2>
+        <ol>
+          <li>
+            <strong>阶段 0｜决策与合同：</strong>评审 ADR-0024、Contract
+            0022/0023、公开 19/内部 18 条 POST、权限矩阵、dispatcher-only 202
+            语义、来源/观测/freshness、质量门与 schedule
+            targetPolicy。合同状态为 Proposed，不能描述成已实现。
+          </li>
+          <li>
+            <strong>阶段 1｜Expand：</strong>独立 Prisma migration 新增
+            Submission/Outbox； consumer-first 扩展 permissions；增加配置、严格
+            contracts、read client 与 CORS header。
+          </li>
+          <li>
+            <strong>阶段 2｜只读灰度：</strong>部署
+            overview、datasets、commands、runs、health、schedules；
+            验证角色、DTO、分页、双层来源、观测状态、DatasetTiming/freshness、
+            历史 sourceSnapshot、USER/SYSTEM ActorDisplay、nullable
+            submissionId、qualityGate、健康不可变 evaluation、
+            currentOpenIssueCount/issueProjectionAsOf、健康批次对账与 2 MiB
+            上限。
+          </li>
+          <li>
+            <strong>阶段 3｜可靠交付暗启：</strong>部署
+            dispatcher/reconciler，但写 route 保持 feature gate 关闭；用 fake
+            data-sync 注入 timeout、重复接受、409、429、schema drift、lease
+            过期，并用架构测试证明 HTTP 请求进程不存在直投快路径。
+          </li>
+          <li>
+            <strong>阶段 4｜写操作灰度：</strong>先单数据集 sync，再
+            batch/取消/重试/健康，最后计划； 每阶段验证同公开 key 返回原
+            Submission、同 submission 下游 key 稳定且唯一、PENDING
+            恢复、DEAD_LETTER replay 与双层审计。
+          </li>
+          <li>
+            <strong>阶段 5｜全局串行门禁：</strong>只有 data-sync 证明所有
+            CLI/Celery/schedule 入口均进入权威 command queue、双 worker 故障注入
+            max concurrency=1 后，UI 才移除 “互斥迁移中”提示。
+          </li>
+        </ol>
+
+        <div class="grid mt">
+          <article class="card">
+            <span class="label">回滚</span>
+            <h3>先停写，再停 dispatcher</h3>
+            <p>
+              关闭写 feature gate、隐藏 Web 动作、停止 outbox
+              dispatcher；只读可保留。保留所有 Submission、Outbox、AuditLog
+              和已受理 data-sync command。不得清库后重新提交。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label">兼容</span>
+            <h3>受控消费者下 additive v1</h3>
+            <p>
+              新增独立 POST 路由，不改变已有业务 API。Permission enum 先由 Web
+              宽容解析再由 API 发出； internal/public schema consumer-first
+              部署。破坏字段、状态或错误语义时新开 v2。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label">健康 / readiness</span>
+            <h3>依赖故障不触发重启风暴</h3>
+            <p>
+              <code>POST /health</code> 保持进程存活；<code>POST /ready</code>
+              继续要求 API PostgreSQL/Redis。data-sync 下线通过 route 503 和
+              outbox backlog 告警表达，不让 API pod 循环重启。
+            </p>
+          </article>
+        </div>
+
+        <h3 class="mt">验收矩阵</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>类别</th>
+                <th>必须验证</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>架构</td>
+                <td>
+                  公开 19、内部 18 条 operation 全为 POST；Auth → User 单向；无
+                  forwardRef；API 无 data-sync DB/Provider 凭据或源码导入；只有
+                  dispatcher 投递主动写
+                </td>
+              </tr>
+              <tr>
+                <td>角色</td>
+                <td>
+                  USER 全拒绝；ADMIN 只读；SUPER_ADMIN
+                  写；服务层只重复安全/结构校验、不复制下游权威；禁用/改角后旧
+                  token 立即失效
+                </td>
+              </tr>
+              <tr>
+                <td>合同</td>
+                <td>
+                  OpenAPI 可解析；DTO
+                  additionalProperties=false；分页/body/响应边界；provider/upstreamSource
+                  与历史
+                  sourceSnapshot、observationState、DatasetTiming/freshness、
+                  freshnessPolicy=null ⇔ freshnessStatus=NOT_APPLICABLE 的
+                  oneOf；COMMAND|RUN； 完整 CommandStatus、CommandReceipt
+                  target.resourceType/targetStatus 状态全集联动、新 retry
+                  command 与 REJECTED 空 childRuns；command nullable
+                  submissionId、USER/SYSTEM ActorDisplay 与系统显示名； health
+                  search 只含 summary、detail results ≤
+                  500、currentOpenIssueCount/currentOpenIssues ≤ 100、
+                  issueProjectionAsOf、issues cursor/limit 默认/最大
+                  100、healthCheckId、健康批次 detail 原 target
+                  顺序/requestedBy， 并验证 SUCCEEDED 必有
+                  resolvedDataVersion/evaluationId、FAILED/REJECTED 必有 error
+                  的 target status oneOf、
+                  score/severity/sample/evidence、qualityGate；
+                  scheduleTargetPolicyOptions(mode/policy/isDefault) 与
+                  targetPolicy.policyVersion；OperationRecord
+                  authorityResource/lastObservedAt，并验证 PENDING=null、
+                  submit/retry→新 COMMAND、cancel→原
+                  target、健康/计划→各自资源；SubmissionReceipt 按
+                  delivery/action 约束
+                  authority/queue/error/operationResult；OperationRecord
+                  USER/SYSTEM 与 submission/delivery 双向绑定，并按 delivery
+                  约束 authority/lastObservedAt；ExecutionSlot IDLE 上下文全
+                  null、 RUNNING/RECOVERING 上下文全非空； RunDetail 双
+                  cursor/limit 默认 100、最大 200，partition/timeline
+                  各带总数、nextCursor 且 ≤ 200，timeline 使用
+                  OperationEventView/ActorDisplay，公开无
+                  checkpoint；ErrorSummary 全 stage；sourceBindings ≤
+                  10、healthRules ≤ 200、warnings ≤ 20；ScheduleUpsert create 双
+                  null、update 双非 null，每 datasetCode 唯一且 update 不改绑
+                </td>
+              </tr>
+              <tr>
+                <td>幂等</td>
+                <td>
+                  同 actor + 公开 key + hash 返回原 Submission；异 hash
+                  409；内部 key 由 submissionId 派生并冻结；不同 actor
+                  的相同公开 key 不碰撞；响应丢失后只一个 data-sync
+                  command；两类 key 原文均不进日志
+                </td>
+              </tr>
+              <tr>
+                <td>事务</td>
+                <td>
+                  Submission/Outbox/Audit 任一失败全部回滚；dispatcher
+                  不持事务等网络；首次创建总是 PENDING/null queuePosition；无
+                  immediate/best-effort 快路径；cancel/retry/set-enabled
+                  未知目标不返回同步 404；schedule 半空组合 422
+                  且无事务副作用；仅 submit/retry 接受后投影首 child
+                  queuePosition，其他动作保持 null；终态更新与交付审计同事务
+                </td>
+              </tr>
+              <tr>
+                <td>并发</td>
+                <td>
+                  多 dispatcher SKIP LOCKED、lease 过期、重复 POST；schedule
+                  expectedVersion 冲突、重复 datasetCode create 409、update
+                  改绑拒绝；COMMAND 整批与 RUN 单子任务边界；cancel_too_late
+                  操作 FAILED 但目标可 SUCCEEDED；人工 replay 不新建意图
+                </td>
+              </tr>
+              <tr>
+                <td>依赖失败</td>
+                <td>
+                  preflight 停机 503；其他结构合法写停机时 PENDING 后异步
+                  ACCEPTED/REJECTED；timeout、429、502/503/504、内部
+                  401/403、非法 JSON、2 MiB、schema drift、circuit
+                  half-open、恢复
+                </td>
+              </tr>
+              <tr>
+                <td>安全</td>
+                <td>
+                  Origin/Fetch Metadata/JSON、CORS header、CSRF、rate
+                  limit、reason/error 脱敏、无 JWT/账号/邮箱下传；RunDetail
+                  timeline 不泄漏 actorRef/checkpoint
+                </td>
+              </tr>
+              <tr>
+                <td>审计</td>
+                <td>
+                  谁/动作/理由/授权/交付/authorityResource/lastObservedAt/结果关联；
+                  actorRef 不公开；OperationRecord 验证 USER⇔submission UUID/非
+                  NOT_APPLICABLE、SYSTEM⇔submission null/NOT_APPLICABLE
+                  及各交付状态字段 oneOf；系统 actor 不误标删除用户；未知 action
+                  fail closed；ADMIN 不能读取完整安全 AuditLog
+                </td>
+              </tr>
+              <tr>
+                <td>运维</td>
+                <td>
+                  backlog/dead-letter/reconciliation 指标、告警、runbook、读写
+                  feature gate、回滚与恢复演练
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="mt">实现验收命令（规划，本次未运行）</h3>
+        <pre><code>cd service-api
+corepack pnpm@11.17.0 install
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm prisma:deploy
+
+cd ..
+node .github/scripts/check-service-api-contract-methods.mjs
+docker build --target test --tag quant-v2/service-api:test service-api
+docker build --tag quant-v2/service-api:local service-api
+curl -fsS -X POST http://127.0.0.1:13000/health
+curl -fsS -X POST http://127.0.0.1:13000/ready</code></pre>
+
+        <p class="small">
+          本文只新增设计文档，没有修改实现、Prisma schema、环境变量、OpenAPI
+          或部署配置，因此不运行 service-api
+          format/lint/typecheck/test/build/Docker/migration。实现 PR
+          必须运行以上完整命令， 另加真实 PostgreSQL 并发、fake data-sync
+          故障注入和跨服务 contract tests。
+        </p>
+      </section>
+
+      <section id="questions">
+        <h2>待决问题与关联产物</h2>
+        <div class="grid-2">
+          <article class="card">
+            <span class="label open">待决</span>
+            <h3>内部 workload identity</h3>
+            <p>
+              进入预发前由 API/data-sync/SRE 决定短期 JWT、mTLS 绑定 token 或
+              service mesh identity。 不变量：写凭据必须与现有读取 Bearer
+              分权、可轮换、只允许
+              <code>/internal/v1/data-operations/*</code>。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label open">待决</span>
+            <h3>保留与归档</h3>
+            <p>
+              API AuditLog 维持既定 90 天；Submission/Outbox 建议终态后至少 90
+              天。 data-sync operational event 的 365 天在线建议与归档策略仍由
+              ADR 评审冻结。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label open">待决</span>
+            <h3>容量参数</h3>
+            <p>
+              每个 dataset 的 full 边界、修订回看、最大 range、Provider
+              调用预算、队列上限、 rate limit
+              与告警阈值需用预发基线校准；放宽必须配置化并受 contract 上限约束。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label decision">已对齐</span>
+            <h3>合同验收</h3>
+            <p>
+              Proposed Contract 0023/0022 已冻结公开 19/内部 18 条 POST、
+              dispatcher-only PENDING、COMMAND|RUN、CommandReceipt 双层状态及
+              resourceType/targetStatus oneOf、nullable
+              submissionId、USER/SYSTEM ActorDisplay、OperationRecord
+              身份/交付状态机、SubmissionReceipt delivery/action
+              状态机、ExecutionSlot 上下文状态机、freshnessPolicy 与
+              NOT_APPLICABLE 双向约束、qualityGate、不可变 HealthEvaluation
+              与当前 issue 投影、健康批次 detail 及目标状态
+              oneOf、OperationEventView timeline 与公开无
+              checkpoint、每数据集唯一 schedule、首 child
+              queuePosition，以及完整 ErrorSummary
+              stage。验收需固定这些语义，并保留 authorityResource/lastObservedAt
+              与原 outbox replay 约束。
+            </p>
+          </article>
+        </div>
+
+        <h3 class="mt">关联方案与合同</h3>
+        <ul>
+          <li>
+            <a
+              href="../../architecture/0002-data-operations-control-plane/index.html"
+            >
+              跨服务数据运维控制面方案
+            </a>
+          </li>
+          <li>
+            <a href="../../decisions/0024-data-operations-control-plane.md">
+              ADR-0024：数据运维控制面与全局串行同步
+            </a>
+          </li>
+          <li>
+            <a
+              href="../../contracts/0022-data-sync-operations-internal.openapi.yaml"
+            >
+              Contract 0022：data-sync 内部数据运维 API
+            </a>
+          </li>
+          <li>
+            <a
+              href="../../contracts/0023-service-api-data-operations.openapi.yaml"
+            >
+              Contract 0023：service-api 公开数据运维 API
+            </a>
+          </li>
+          <li>
+            <a
+              href="../../service-data-sync/0031-data-operations-control-plane/index.html"
+            >
+              service-data-sync 详细方案
+            </a>
+          </li>
+          <li>
+            <a href="../../service-web/0006-data-operations-console/index.html">
+              service-web 数据运维工作台方案
+            </a>
+          </li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      <div class="shell">
+        数据运维公开控制面 · 变更摘要：新增 POST-only
+        查询与主动操作设计、SUPER_ADMIN 写权限、Submission + HTTP Outbox +
+        AuditLog 原子边界、dispatcher-only PENDING、公开/内部幂等分域、命令与
+        USER/SYSTEM ActorDisplay 投影、CommandReceipt 双层状态及状态联动、
+        Submission/OperationRecord/ExecutionSlot 状态机、freshness 双向
+        oneOf、质量门、不可变健康评估与当前 issue 分页、健康检查批次
+        detail、scheduleTargetPolicyOptions 与每数据集唯一计划、 RunDetail
+        双游标/公开 timeline/内部 checkpoint 边界、首 child
+        queuePosition、主动写异步资源裁决、终态对账、迁移与验收方案；不实现代码，不赋予
+        API 同步状态或全局锁权威。
+      </div>
+    </footer>
+  </body>
+</html>

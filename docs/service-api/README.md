@@ -12,8 +12,8 @@
 - 个人部署已实现 `POST /api/v1/market-data/query`：它经 `MarketDataAccessClient` 调用 data-sync
   typed query；已注册但无 publication 时返回带可用性状态的成功空 records。
 - 公开契约：[0019-service-api-equity-market-data.openapi.yaml](../contracts/0019-service-api-equity-market-data.openapi.yaml)
-所有 `service-api` 路由仅允许 `POST`；强制规则与迁移边界见
-[ADR-0018](../decisions/0018-service-api-post-only-http-method.md)。
+  所有 `service-api` 路由仅允许 `POST`；强制规则与迁移边界见
+  [ADR-0018](../decisions/0018-service-api-post-only-http-method.md)。
 
 ## 方案索引
 
@@ -23,6 +23,8 @@
 - [0004：账户安全与运营查询技术方案](0004-account-security-and-operations/index.html) — Implemented
 - [0005：高价值市场数据访问的 service-api 影响方案](0005-market-data-access-impact/index.html) — Proposed；
   个人部署的最小通用 query 网关已按 ADR-0023 实现，领域化 DTO、细粒度权限、缓存与导出仍为后续工作。
+- [0006：数据运维控制面 API 方案](0006-data-operations-control-plane/index.html) — Proposed；
+  定义 POST-only 管理契约、RBAC、submission/outbox 可靠投递、幂等与双层审计投影。
 
 ## 跨服务关联方案
 

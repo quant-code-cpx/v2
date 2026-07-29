@@ -31,8 +31,14 @@
 - [0019：service-api 个股行情与参考数据公开 OpenAPI](0019-service-api-equity-market-data.openapi.yaml) — Implemented
 - [0020：service-data-sync 申万行业内部 OpenAPI](0020-data-sync-sw-sector-internal.openapi.yaml) — Implemented
 - [0021：service-api 申万行业公开 OpenAPI](0021-service-api-sw-sector.openapi.yaml) — Implemented
+- [0022：service-data-sync 数据运维控制面内部 OpenAPI](0022-data-sync-operations-internal.openapi.yaml) — Proposed
+- [0023：service-api 数据运维公开 POST OpenAPI](0023-service-api-data-operations.openapi.yaml) — Proposed
 
 0007/0008、0011/0012、0015/0016 是对应既有市场数据契约的增量能力。0009/0010 对
 0003/0004 中证券目录、详情和上市状态相关路径具有局部权威性；0013/0014 取代其中基于
 `instrumentId` 的财务报表与财务指标路径，并新增估值路径。0003/0004 的行情、复权、公司行动等
 早期路径由 0018/0019 取代；新契约统一使用 `exchange + symbol`，并明确周/月线为上游接口直取。
+
+0022/0023 共同定义数据目录、同步命令、运行、健康评估、自动计划和运维记录。0022 的
+`service-data-sync` 命令/run 是执行权威；0023 的 `service-api` submission/outbox 只表示授权与交付意图。
+公开写操作返回 `202 delivery=PENDING` 时，不得解释为同步服务已经受理。

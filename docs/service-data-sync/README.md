@@ -35,6 +35,8 @@
 - [0027：高价值市场数据 Canonical Model 与 PostgreSQL 设计](0027-canonical-data-model/index.html) — Proposed
 - [0028：data-sync 市场数据访问契约方案](0028-data-access-contract/index.html) — Proposed
 - [0029：高价值市场数据扩展路线图](0029-market-data-expansion-roadmap/index.html) — Proposed
+- [0030：同步来源载荷仅失败留存方案](0030-failure-only-source-payload-retention/index.html) — Implemented
+- [0031：数据运维控制面与全局串行同步方案](0031-data-operations-control-plane/index.html) — Proposed
 
 从 0011 开始，方案状态与实施完成度只由技术证据决定：AKShare 接口签名和返回事实、连续探针与 fixture、
 同步幂等和恢复、Declarative 模型与 migration、数据质量、内部读取以及 `service-api` 的 POST 公开契约。

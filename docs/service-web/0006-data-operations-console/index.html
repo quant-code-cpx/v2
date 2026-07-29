@@ -1,0 +1,2659 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="service-web 数据运维控制台技术方案：统一查看数据资产、来源、新鲜度、串行同步任务、健康检查、自动计划与主动操作记录。"
+    />
+    <title>数据运维控制台｜service-web 技术方案</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #1c252e;
+        --muted: #637381;
+        --disabled: #919eab;
+        --line: rgb(145 158 171 / 24%);
+        --surface: #f4f6f8;
+        --surface-soft: #f9fafb;
+        --paper: #ffffff;
+        --accent: #6d5ce7;
+        --accent-dark: #4f46b8;
+        --accent-soft: #f0eeff;
+        --info: #008fb3;
+        --info-soft: rgb(0 143 179 / 9%);
+        --success: #16833e;
+        --success-soft: rgb(34 197 94 / 10%);
+        --warning: #9a610b;
+        --warning-soft: rgb(217 145 24 / 12%);
+        --danger: #c53e24;
+        --danger-soft: rgb(255 86 48 / 10%);
+        --radius-control: 8px;
+        --radius-card: 16px;
+        --shadow:
+          0 0 2px 0 rgb(145 158 171 / 20%),
+          0 12px 24px -4px rgb(145 158 171 / 12%);
+        --focus: 0 0 0 3px rgb(109 92 231 / 28%);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        min-width: 1200px;
+        margin: 0;
+        color: var(--ink);
+        background: var(--paper);
+        font-family:
+          "Public Sans Variable",
+          "PingFang SC",
+          "Microsoft YaHei",
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        font-size: 15px;
+        line-height: 1.72;
+        font-variant-numeric: tabular-nums;
+      }
+
+      a {
+        color: var(--accent-dark);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 0.2em;
+      }
+
+      a:hover {
+        color: var(--accent);
+      }
+
+      a:focus-visible {
+        border-radius: 3px;
+        outline: 0;
+        box-shadow: var(--focus);
+      }
+
+      code,
+      pre {
+        font-family:
+          "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      }
+
+      code {
+        padding: 0.12em 0.35em;
+        border-radius: 5px;
+        background: var(--surface);
+        font-size: 0.9em;
+      }
+
+      .shell {
+        width: min(1120px, calc(100% - 48px));
+        margin: 0 auto;
+      }
+
+      .hero {
+        padding: 52px 0 36px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface-soft);
+      }
+
+      .eyebrow {
+        margin: 0 0 8px;
+        color: var(--accent-dark);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        line-height: 1.28;
+        letter-spacing: -0.018em;
+      }
+
+      h1 {
+        max-width: 860px;
+        margin: 0;
+        font-size: 42px;
+        line-height: 1.18;
+      }
+
+      h2 {
+        margin: 0 0 18px;
+        font-size: 28px;
+      }
+
+      h3 {
+        margin: 0 0 8px;
+        font-size: 18px;
+      }
+
+      h4 {
+        margin: 20px 0 6px;
+        font-size: 15px;
+      }
+
+      p {
+        max-width: 78ch;
+      }
+
+      .lede {
+        max-width: 850px;
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 17px;
+      }
+
+      .decision-line {
+        display: grid;
+        margin-top: 24px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .decision-line article {
+        min-height: 118px;
+        padding: 17px 18px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--paper);
+      }
+
+      .decision-line p {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .label {
+        display: inline-flex;
+        min-height: 24px;
+        padding: 2px 8px;
+        align-items: center;
+        border-radius: 6px;
+        color: var(--accent-dark);
+        background: var(--accent-soft);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+      }
+
+      .label.fact {
+        color: #086e86;
+        background: var(--info-soft);
+      }
+
+      .label.risk {
+        color: var(--warning);
+        background: var(--warning-soft);
+      }
+
+      .label.open {
+        color: var(--danger);
+        background: var(--danger-soft);
+      }
+
+      .meta {
+        display: grid;
+        margin: 22px 0 0;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .meta div {
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-control);
+        background: rgb(255 255 255 / 80%);
+      }
+
+      .meta dt {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .meta dd {
+        margin: 2px 0 0;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .status {
+        color: var(--warning);
+      }
+
+      .doc-nav {
+        position: sticky;
+        z-index: 10;
+        top: 0;
+        overflow-x: auto;
+        border-bottom: 1px solid var(--line);
+        background: rgb(255 255 255 / 94%);
+        backdrop-filter: blur(12px);
+      }
+
+      .doc-nav ul {
+        display: flex;
+        width: max-content;
+        margin: 0;
+        padding: 12px 0;
+        gap: 22px;
+        list-style: none;
+      }
+
+      .doc-nav a {
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .doc-nav a:hover {
+        color: var(--accent-dark);
+      }
+
+      main {
+        padding: 16px 0 72px;
+      }
+
+      section {
+        padding: 48px 0;
+        border-bottom: 1px solid var(--line);
+        scroll-margin-top: 56px;
+      }
+
+      section:last-child {
+        border-bottom: 0;
+      }
+
+      .section-lede {
+        margin-top: -8px;
+        color: var(--muted);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .card {
+        min-width: 0;
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-card);
+        background: var(--paper);
+        box-shadow: var(--shadow);
+      }
+
+      .card > :last-child {
+        margin-bottom: 0;
+      }
+
+      .card ul {
+        padding-left: 20px;
+      }
+
+      .card li + li {
+        margin-top: 7px;
+      }
+
+      .callout {
+        margin: 18px 0;
+        padding: 17px 20px;
+        border-left: 4px solid var(--accent);
+        border-radius: 0 var(--radius-card) var(--radius-card) 0;
+        background: var(--accent-soft);
+      }
+
+      .callout.info {
+        border-left-color: var(--info);
+        background: var(--info-soft);
+      }
+
+      .callout.warning {
+        border-left-color: var(--warning);
+        background: var(--warning-soft);
+      }
+
+      .callout strong {
+        display: block;
+        margin-bottom: 3px;
+      }
+
+      .callout p {
+        margin: 0;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-card);
+      }
+
+      table {
+        width: 100%;
+        min-width: 760px;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        color: var(--muted);
+        background: var(--surface);
+        font-size: 12px;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+
+      td p {
+        margin: 0;
+      }
+
+      td ul {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      .flow,
+      pre {
+        overflow-x: auto;
+        padding: 18px 20px;
+        border: 1px solid #263142;
+        border-radius: var(--radius-card);
+        color: #e7edf7;
+        background: #141a21;
+        font-size: 13px;
+        line-height: 1.65;
+        white-space: pre;
+      }
+
+      .steps {
+        margin: 0;
+        padding-left: 22px;
+      }
+
+      .steps li {
+        padding: 3px 0 12px 6px;
+      }
+
+      .diagram {
+        display: grid;
+        margin: 18px 0;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        align-items: stretch;
+        gap: 10px;
+      }
+
+      .diagram div {
+        position: relative;
+        min-height: 92px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--surface-soft);
+      }
+
+      .diagram div:not(:last-child)::after {
+        position: absolute;
+        top: 50%;
+        right: -10px;
+        width: 10px;
+        color: var(--accent);
+        content: "›";
+        text-align: center;
+        transform: translateY(-50%);
+      }
+
+      .diagram strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 13px;
+      }
+
+      .diagram small {
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.45;
+      }
+
+      .prototype-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 24px;
+      }
+
+      figure {
+        margin: 0;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-card);
+        background: var(--surface-soft);
+      }
+
+      figure img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--paper);
+      }
+
+      figcaption {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .checklist {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px 24px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .checklist li {
+        position: relative;
+        padding-left: 24px;
+      }
+
+      .checklist li::before {
+        position: absolute;
+        top: 0.08em;
+        left: 0;
+        color: var(--success);
+        content: "✓";
+        font-weight: 900;
+      }
+
+      .checklist li.pending::before {
+        color: var(--warning);
+        content: "○";
+      }
+
+      footer {
+        padding: 28px 0 44px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+      }
+
+      @media print {
+        body {
+          min-width: 0;
+          font-size: 11pt;
+        }
+
+        .hero,
+        main,
+        section {
+          padding-top: 20px;
+        }
+
+        .doc-nav {
+          display: none;
+        }
+
+        .shell {
+          width: 100%;
+        }
+
+        .card,
+        figure,
+        .table-wrap,
+        .callout {
+          box-shadow: none;
+          break-inside: avoid;
+        }
+
+        a {
+          color: inherit;
+          text-decoration: none;
+        }
+
+        img {
+          max-height: 88vh;
+          object-fit: contain;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <div class="shell">
+        <p class="eyebrow">Service Web · Technical solution 0006</p>
+        <h1>数据运维控制台</h1>
+        <p class="lede">
+          为管理员提供统一的数据资产目录、来源血缘、新鲜度、串行同步任务、健康检查、自动计划和主动操作记录。
+          选择复用现有白色桌面壳层，以五个任务型 Tab 组织信息；Contract 0023 的
+          19 条公开 POST 与状态语义已完成跨服务收口，生命周期仍保持
+          Proposed，生产接入前继续用 fixture / MSW 验证。
+        </p>
+
+        <div class="decision-line">
+          <article>
+            <span class="label fact">问题</span>
+            <h3>数据可用性无法在一个界面判断</h3>
+            <p>
+              当前数据能力分散在 CLI、任务、checkpoint、quality 与 publication
+              中，Web 没有统一运维入口。
+            </p>
+          </article>
+          <article>
+            <span class="label">决策</span>
+            <h3>一个路由、五个任务型工作区</h3>
+            <p>
+              顶部常驻全局运行条；资产、任务、健康度、自动计划、操作记录各自保留清晰责任边界。
+            </p>
+          </article>
+          <article>
+            <span class="label risk">主要风险</span>
+            <h3>全局串行仍受 Lock gate 约束</h3>
+            <p>
+              旧 CLI / Celery / schedule
+              未全部收口前，只能显示“互斥迁移中”，不能仅凭界面承诺全局唯一。
+            </p>
+          </article>
+        </div>
+
+        <dl class="meta">
+          <div>
+            <dt>状态</dt>
+            <dd class="status">Proposed</dd>
+          </div>
+          <div>
+            <dt>负责人</dt>
+            <dd>service-web / 数据平台</dd>
+          </div>
+          <div>
+            <dt>最后修改</dt>
+            <dd>2026-07-29</dd>
+          </div>
+          <div>
+            <dt>页面类型</dt>
+            <dd>新页面 · PC 桌面</dd>
+          </div>
+        </dl>
+      </div>
+    </header>
+
+    <nav class="doc-nav" aria-label="方案目录">
+      <div class="shell">
+        <ul>
+          <li><a href="#summary">摘要</a></li>
+          <li><a href="#understanding">业务理解</a></li>
+          <li><a href="#research">现状调研</a></li>
+          <li><a href="#architecture">页面架构</a></li>
+          <li><a href="#flows">核心流程</a></li>
+          <li><a href="#state">状态与数据</a></li>
+          <li><a href="#prototype">原型</a></li>
+          <li><a href="#delivery">交付与验收</a></li>
+        </ul>
+      </div>
+    </nav>
+
+    <main class="shell">
+      <section id="summary">
+        <h2>摘要与跨服务边界</h2>
+        <div class="grid">
+          <article class="card">
+            <span class="label">Web 决策</span>
+            <h3>路由与信息架构</h3>
+            <p>
+              新增
+              <code>/data-operations</code
+              >。页面标题下先显示全局唯一运行任务与排队数量，再提供 “数据资产 /
+              同步任务 / 健康度 / 自动计划 / 操作记录”五个 Tab。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label">权限决策</span>
+            <h3>首版严格只读 / 写分层</h3>
+            <p>
+              <code>ADMIN</code> 与
+              <code>SUPER_ADMIN</code> 可读；同步、主动健康检查、取消 /
+              重试和计划管理 仅
+              <code>SUPER_ADMIN</code> 可用。服务端始终再次授权。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label">契约决策</span>
+            <h3>19 条公开 POST，语义固定</h3>
+            <p>
+              Web adapter 只实现 Contract 0023 的 19 条路径并复用共享
+              <code>POST</code> transport； 业务调用方不能选择 HTTP
+              method。合同仍为 Proposed，表示尚未实现 /
+              接受，不表示字段可自行改写。
+            </p>
+          </article>
+        </div>
+
+        <aside class="callout warning">
+          <strong>契约与生产门禁</strong>
+          <p>
+            <a href="../../decisions/0024-data-operations-control-plane.md"
+              >ADR-0024</a
+            >、
+            <a
+              href="../../architecture/0002-data-operations-control-plane/index.html"
+              >Architecture 0002</a
+            >
+            与
+            <a
+              href="../../contracts/0023-service-api-data-operations.openapi.yaml"
+              >Contract 0023</a
+            >
+            已收口权限、submission 交付 /
+            运行状态、全局串行语义、数据时间口径、健康规则与计划并发控制。
+            正式开放写操作仍需 Contract 0023 进入
+            Accepted、实现通过契约测试，并完成全局互斥 Lock gate。
+          </p>
+        </aside>
+
+        <div class="grid two">
+          <article class="card">
+            <h3>目标</h3>
+            <ul>
+              <li>
+                30
+                秒内回答“当前有哪些数据、来自哪里、是否新鲜、最近同步是否成功”。
+              </li>
+              <li>
+                支持单个或批量下发，并按每个数据集 capability
+                配置增量、全量、日期范围或观察日；同一批次
+                <code>datasetCode</code> 唯一。
+              </li>
+              <li>
+                明确展示全局一次只运行一个子任务；批量命令拆分后按队列顺序串行。
+              </li>
+              <li>聚合健康检查、自动计划和可审计的主动操作结果。</li>
+              <li>
+                严格消费 19 条公开 POST，不由 Web 聚合批次、推算 freshness
+                或猜测计划模式。
+              </li>
+              <li>保持桌面键盘、焦点、语义、对比度与 reduced-motion 可用。</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>非目标</h3>
+            <ul>
+              <li>不让浏览器直连数据库、AKShare、Tushare 或任何上游来源。</li>
+              <li>不在 Web 中解释、修复或下载 raw / quarantine 私有证据。</li>
+              <li>
+                不消费或展示 0022 内部 checkpoint、Provider cursor、token 或原始
+                payload；0023 未公开这些字段。
+              </li>
+              <li>不在未冻结合同上伪造生产 endpoint、WebSocket 或权限常量。</li>
+              <li>
+                不在首版提供任意 cron 文本、工作流编排器或跨任务依赖 DAG。
+              </li>
+              <li>不设计、生成或验收移动端、平板、触控或窄屏布局。</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="understanding">
+        <h2>业务理解简报</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>维度</th>
+                <th>结论</th>
+                <th>设计影响</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Actor 与入口</td>
+                <td>平台管理员从桌面侧栏“数据管理 / 数据运维”进入。</td>
+                <td>
+                  复用受保护 <code>AppShell</code>、权限路由和顶部账号上下文。
+                </td>
+              </tr>
+              <tr>
+                <td>首要业务问题</td>
+                <td>
+                  哪些数据可用、来源是否可信、是否足够新、当前是否有故障或任务占用。
+                </td>
+                <td>首屏顺序固定为全局运行条、资产摘要、筛选与数据目录。</td>
+              </tr>
+              <tr>
+                <td>首要任务</td>
+                <td>定位异常数据集并安全下发修复性同步或健康检查。</td>
+                <td>
+                  行详情保留上下文；写动作先 capability
+                  preflight，再确认进入串行队列。
+                </td>
+              </tr>
+              <tr>
+                <td>次要任务</td>
+                <td>
+                  调整自动计划、复核失败原因、追踪命令 /
+                  运行结果、审计谁做了什么。
+                </td>
+                <td>
+                  分别进入任务、健康度、自动计划、操作记录 Tab，避免首屏堆叠。
+                </td>
+              </tr>
+              <tr>
+                <td>成功</td>
+                <td>
+                  授权意图持久化不等于下游已受理，更不等于同步成功；必须持续看到
+                  delivery 与权威 run 结果。
+                </td>
+                <td>
+                  先显示 submission ID；只有
+                  <code>deliveryStatus=ACCEPTED</code>
+                  才显示下游已受理，并可跳到权威资源。
+                </td>
+              </tr>
+              <tr>
+                <td>失败恢复</td>
+                <td>
+                  网络未知结果复用幂等键；异步拒绝需重新预检；运行失败保留安全错误码与最近成功版本。
+                </td>
+                <td>
+                  保留旧数据、显示 stale / partial；刷新或重进批次只查询
+                  <code>commands/detail</code>，不靠本地选择恢复。
+                </td>
+              </tr>
+              <tr>
+                <td>权威来源</td>
+                <td>
+                  service-api 是 Web 唯一边界；service-data-sync
+                  持有运行、质量、发布与内部恢复水位等权威状态。
+                </td>
+                <td>
+                  <code>commands/detail</code> 是批量聚合与有序 child runs
+                  唯一来源；<code>health/checks/detail</code> 是主动健康检查批次恢复
+                  来源；Web 不接触内部 checkpoint。
+                </td>
+              </tr>
+              <tr>
+                <td>新鲜度与时间</td>
+                <td>
+                  必须区分最近尝试开始 /
+                  结束、最近成功、最近发布和数据截至时间。
+                </td>
+                <td>
+                  直接展示服务端 <code>freshnessStatus</code>、lag、reason 与
+                  evaluatedAt；禁止本地日期运算。
+                </td>
+              </tr>
+              <tr>
+                <td>权限与敏感性</td>
+                <td>
+                  目录和安全摘要可读；raw、内部 URI、秘密、未脱敏样本不可见。
+                </td>
+                <td>
+                  列表只展示稳定错误码和安全摘要；详情不展示 payload_ref
+                  或供应商凭据。
+                </td>
+              </tr>
+              <tr>
+                <td>分享 / 重访</td>
+                <td>
+                  Tab 与目录筛选需要可分享；批量选择和未提交表单不应写 URL。
+                </td>
+                <td>
+                  URL 持有
+                  tab、q、provider、upstream、status、health、cursor；临时选择留本地。
+                </td>
+              </tr>
+              <tr>
+                <td>桌面与可访问性</td>
+                <td>默认 1440×900，最低宽度 1200；鼠标与键盘并重。</td>
+                <td>
+                  表格内部滚动、Dialog 焦点锁定、Drawer
+                  恢复焦点、状态不只靠颜色。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="section-lede">
+          <span class="label">分类</span>
+          此工作新增路由、主要任务与信息架构，属于<strong>新页面</strong>，必须通过桌面原型门禁后才可写生产页面。
+        </p>
+      </section>
+
+      <section id="research">
+        <h2>现状调研</h2>
+        <p class="section-lede">
+          调研依据为当前仓库源码、<a href="../../../service-web/README.md"
+            >service-web README</a
+          >、
+          <a href="../../../service-data-sync/README.md"
+            >service-data-sync README</a
+          >
+          与已实现模型；以下只把已验证现状标为事实。
+        </p>
+
+        <div class="grid">
+          <article class="card">
+            <span class="label fact">事实 · Web</span>
+            <h3>已有可复用管理页骨架</h3>
+            <ul>
+              <li>React 19、React Router 7、MUI 7、TanStack Query。</li>
+              <li>白色 300px 侧栏、72px 顶栏、浅灰内容区。</li>
+              <li>路由 lazy、默认拒绝权限守卫、URL 驱动筛选。</li>
+              <li>
+                管理表格、720px Dialog、360px Drawer 与全局反馈已有主题几何。
+              </li>
+              <li>
+                共享传输固定 <code>POST</code>，复用现有 access-token 注入
+                <code>Authorization: Bearer …</code>，并只暴露安全 Problem
+                code；Refresh Cookie 仅用于刷新 access token，绝不授权业务路由。
+              </li>
+            </ul>
+          </article>
+          <article class="card">
+            <span class="label fact">事实 · Data Sync</span>
+            <h3>已有运维事实，但未统一投影</h3>
+            <ul>
+              <li>
+                运行、内部 checkpoint、publication、质量评估、逐规则结果与
+                quarantine 均有持久模型；公开 0023 不投影 checkpoint。
+              </li>
+              <li>
+                同步 RunDetail 的 ingestion
+                <code>qualityGate=BLOCKED</code> 会阻止新版本发布；旧
+                publication 继续可见。
+              </li>
+              <li>多条链路有 CLI / Celery 入口、重试、租约或受控回填能力。</li>
+              <li>部分来源默认关闭、research-only 或仍需生产观测门禁。</li>
+              <li>
+                成功 AKShare 批次采取“仅失败留证”，Web 不能承诺成功 raw 可回放。
+              </li>
+            </ul>
+          </article>
+          <article class="card">
+            <span class="label open">实现缺口</span>
+            <h3>统一合同已形成，控制面尚未落地</h3>
+            <ul>
+              <li>service-web 当前无数据运维路由、页面或 query adapter。</li>
+              <li>
+                Contract 0023 已定义 19 条公开 POST，但生命周期仍为 Proposed。
+              </li>
+              <li>
+                人工与计划模式分别来自 <code>supportedModes</code> /
+                <code>scheduleSupportedModes</code>。
+              </li>
+              <li>
+                不能从 CLI 参数、dataset code 或日期差反推表单与 freshness。
+              </li>
+            </ul>
+          </article>
+        </div>
+
+        <h3 style="margin-top: 28px">当前数据能力范围</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>业务域</th>
+                <th>仓库已实现能力</th>
+                <th>运维界面注意点</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>证券与行情</td>
+                <td>
+                  A 股主数据 /
+                  生命周期、日周月线、复权因子、公司行动、公司概况。
+                </td>
+                <td>
+                  周期接口独立；不能声称周 /
+                  月由日线生成。生命周期来源与目录来源也需分开。
+                </td>
+              </tr>
+              <tr>
+                <td>板块与行业</td>
+                <td>
+                  东财行业 / 概念目录、三周期行情、成分、EOD 横截面；申万三级
+                  taxonomy 与估值。
+                </td>
+                <td>
+                  EOD 有 shadow / publish
+                  开关；成分使用观察日，不等于真实调入调出日。
+                </td>
+              </tr>
+              <tr>
+                <td>财务与估值</td>
+                <td>东财财务三表、报告期指标、历史估值与平台派生指标。</td>
+                <td>
+                  默认 dark launch、无自动
+                  beat；数据集可发布状态与来源政策必须可见。
+                </td>
+              </tr>
+              <tr>
+                <td>资金流</td>
+                <td>个股、板块、市场日频资金流、供应商排行与方法学。</td>
+                <td>
+                  东财订单规模与同花顺方向排行方法学不同，不能合成一个“资金流来源”。
+                </td>
+              </tr>
+              <tr>
+                <td>ETF / 两融 / 港通</td>
+                <td>
+                  ETF 目录、状态、日线、净值；市场 /
+                  证券两融；港通市场与活跃证券快照。
+                </td>
+                <td>
+                  部分 capability 合法返回空数组；空数据不一定是同步失败。
+                </td>
+              </tr>
+              <tr>
+                <td>事件与衍生品</td>
+                <td>公告、龙虎榜、大宗交易、真实合约日线。</td>
+                <td>
+                  多数为受控手工运行；衍生品仍有来源批准和质量门前置条件。
+                </td>
+              </tr>
+              <tr>
+                <td>指数</td>
+                <td>中证 / 国证目录、成分、权重影子探测。</td>
+                <td>
+                  research-only，不创建 production
+                  publication；界面需明确“研究观察”，不能显示为可消费数据。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 style="margin-top: 28px">供应商与进一步来源</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>适配层供应商</th>
+                <th>已验证进一步来源示例</th>
+                <th>页面表达</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>AKShare</strong></td>
+                <td>东方财富：证券目录、周 / 月线、板块、财务、资金流等。</td>
+                <td>
+                  分列展示 <code>provider=AKShare</code> 与
+                  <code>upstream=东方财富</code>，可附 capability 名。
+                </td>
+              </tr>
+              <tr>
+                <td><strong>AKShare</strong></td>
+                <td>
+                  腾讯：A 股未复权日线；新浪：累计后复权因子；巨潮：公司概况。
+                </td>
+                <td>
+                  同一 provider 下允许多个
+                  upstream，筛选与详情必须保留二级血缘。
+                </td>
+              </tr>
+              <tr>
+                <td><strong>AKShare</strong></td>
+                <td>
+                  同花顺：资金流主动方向排行；交易所：显式上市 / 退市事实。
+                </td>
+                <td>
+                  来源标签不能只写“AKShare”，否则无法解释方法学与权威程度。
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Tushare</strong></td>
+                <td>当前仓库未验证为已实现 adapter。</td>
+                <td>
+                  不在 fixture 中伪装为当前数据；未来加入时沿用 provider /
+                  upstream 双字段。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <aside class="callout info">
+          <strong>来源展示原则</strong>
+          <p>
+            “供应商”指平台接入 SDK / adapter
+            的提供者；“上游来源”指其进一步抓取或代理的站点 / 机构。 二者都必须由
+            service-data-sync 的注册与血缘投影提供，Web
+            不从函数名或错误消息猜测。
+          </p>
+        </aside>
+      </section>
+
+      <section id="architecture">
+        <h2>页面与组件架构</h2>
+        <p class="section-lede">
+          页面采用现有管理页模式：路由页只编排信息顺序和页面级状态；远程状态、表单副作用、URL
+          解析与可测试派生各有归属。
+        </p>
+
+        <div class="diagram" aria-label="页面信息架构">
+          <div>
+            <strong>全局运行条</strong
+            ><small
+              >ExecutionSlot 的 IDLE / RUNNING / RECOVERING、进度与排队数；跨
+              Tab 常驻。</small
+            >
+          </div>
+          <div>
+            <strong>数据资产</strong
+            ><small
+              >目录、来源、服务端
+              freshness、observationState、最近状态、健康与计划摘要。</small
+            >
+          </div>
+          <div>
+            <strong>同步任务</strong
+            ><small
+              >扁平队列 / 历史；批量恢复与聚合只消费 commands/detail。</small
+            >
+          </div>
+          <div>
+            <strong>健康 / 计划</strong
+            ><small
+              >发布后健康“严重”语义；计划模式与 targetPolicy 均来自服务端
+              capability。</small
+            >
+          </div>
+          <div>
+            <strong>操作记录</strong
+            ><small
+              >主动操作人、动作、目标、结果、submission / request 关联。</small
+            >
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>建议模块</th>
+                <th>唯一职责</th>
+                <th>状态 / 依赖</th>
+                <th>失败边界</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>DataOperationsView.tsx</code></td>
+                <td>
+                  组合标题、全局运行条、Tab 与页面级 loading / forbidden 分支。
+                </td>
+                <td>读取页面 model；不发请求、不持有表单。</td>
+                <td>壳层和其他管理页不受本路由失败影响。</td>
+              </tr>
+              <tr>
+                <td><code>DataOperationsRunBar.tsx</code></td>
+                <td>
+                  展示 ExecutionSlot、active run、processed / estimated records
+                  与 queued count。
+                </td>
+                <td>只消费 overview / queue snapshot。</td>
+                <td>
+                  RECOVERING 显示“恢复中，暂不领取下一任务”；快照失败不推断
+                  IDLE。
+                </td>
+              </tr>
+              <tr>
+                <td><code>DatasetCatalogPanel.tsx</code></td>
+                <td>筛选、批量选择、目录表格和分页。</td>
+                <td>URL 筛选 + Query；选择集合为本地临时状态。</td>
+                <td>保留旧页并显示 stale；错误与无结果分开。</td>
+              </tr>
+              <tr>
+                <td><code>DatasetDetailDrawer.tsx</code></td>
+                <td>
+                  展示二级来源、观测状态、五类时间、服务端
+                  freshness、健康、计划和最近操作。
+                </td>
+                <td>URL 中 dataset key 打开；详情 Query 独立。</td>
+                <td>单个详情失败不影响目录；关闭恢复到触发行焦点。</td>
+              </tr>
+              <tr>
+                <td><code>SyncCommandDialog.tsx</code></td>
+                <td>预检后按数据集 capability 配置并确认命令。</td>
+                <td>表单与 preflight 结果由专用 Hook 管理。</td>
+                <td>preflight 过期或异步 rejected 时不显示为成功 run。</td>
+              </tr>
+              <tr>
+                <td><code>TaskQueuePanel.tsx</code></td>
+                <td>
+                  显示 active / queued / recent runs；打开批次时呈现权威有序
+                  child runs。
+                </td>
+                <td>
+                  queue、submission、run 与 command detail Query；取消 /
+                  重试显式选择 COMMAND 或 RUN。
+                </td>
+                <td>局部刷新失败保留最近快照；操作失败回滚乐观标记。</td>
+              </tr>
+              <tr>
+                <td><code>RunDetailDrawer.tsx</code></td>
+                <td>
+                  展示 target、受理时来源快照、运行状态、进度、分区、时间线及
+                  ingestion qualityGate。
+                </td>
+                <td>
+                  独立 RunDetail Query；来源只读
+                  <code>sourceSnapshot</code>，未发布原因只读
+                  <code>qualityGate</code>。
+                </td>
+                <td>
+                  与 post-publication health 分栏；CRITICAL
+                  只描述已发布版本的健康严重程度。
+                </td>
+              </tr>
+              <tr>
+                <td><code>HealthEvaluationsPanel.tsx</code></td>
+                <td>
+                  发布后不可变评估、逐规则结果、当前开放问题投影与主动检查。
+                </td>
+                <td>
+                  evaluation search/detail Query；summary 读取
+                  <code>currentOpenIssueCount</code> /
+                  <code>issueProjectionAsOf</code>。
+                </td>
+                <td>
+                  严重、警告、未知与读取失败不能合并；CRITICAL 不改变
+                  publication。
+                </td>
+              </tr>
+              <tr>
+                <td><code>HealthCheckDetailDrawer.tsx</code></td>
+                <td>
+                  恢复主动健康检查批次，按原 target 顺序展示 status、
+                  resolvedDataVersion、evaluationId 与 error。
+                </td>
+                <td>
+                  Submission ACCEPTED 且 authorityResource=HEALTH_CHECK 后，以
+                  healthCheckId 独立轮询 <code>health/checks/detail</code>。
+                </td>
+                <td>
+                  批次失败不覆盖已成功 target；成功 target 才可按 evaluationId
+                  打开不可变评估详情。
+                </td>
+              </tr>
+              <tr>
+                <td><code>SchedulePanel.tsx</code></td>
+                <td>计划列表、启停和短表单编辑。</td>
+                <td>
+                  只渲染 <code>scheduleSupportedModes</code>；targetPolicy /
+                  policyVersion 由服务端提供；版本并发保护。
+                </td>
+                <td>冲突时重新加载并要求复核，禁止覆盖他人修改。</td>
+              </tr>
+              <tr>
+                <td><code>DataOperationAuditPanel.tsx</code></td>
+                <td>
+                  筛选主动操作与关联 submission / authority resource / run /
+                  request。
+                </td>
+                <td>URL 筛选 + cursor Query。</td>
+                <td>按服务端可见范围投影，不在客户端过滤敏感记录。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <pre aria-label="建议目录结构">
+src/views/DataOperationsView/
+├── DataOperationsView.tsx
+├── components/
+│   ├── DataOperationsRunBar.tsx
+│   ├── DatasetCatalogPanel.tsx
+│   ├── DatasetDetailDrawer.tsx
+│   ├── SyncCommandDialog.tsx
+│   ├── TaskQueuePanel.tsx
+│   ├── RunDetailDrawer.tsx
+│   ├── HealthEvaluationsPanel.tsx
+│   ├── HealthCheckDetailDrawer.tsx
+│   ├── SchedulePanel.tsx
+│   └── DataOperationAuditPanel.tsx
+├── hooks/
+│   ├── useDataOperationsPage.ts
+│   └── useSyncCommandDialog.ts
+├── utils/
+│   ├── data-operations-url.ts
+│   └── data-operations-presentation.ts
+└── test/
+    ├── DataOperationsView.test.tsx
+    ├── useSyncCommandDialog.test.ts
+    └── data-operations-url.test.ts</pre>
+
+        <aside class="callout">
+          <strong>React / MUI 取舍</strong>
+          <p>
+            路由动态加载；MUI 从包导出直接导入。单实例布局使用
+            <code>sx</code>，可复用复杂壳层再用
+            <code>styled()</code>；不为此页改全局 theme。同步表单使用显式
+            capability 组合，不增加 <code>isFull</code>、<code>hasDate</code>
+            等布尔 prop 链。
+          </p>
+        </aside>
+      </section>
+
+      <section id="flows">
+        <h2>核心流程</h2>
+
+        <h3>单个 / 批量同步</h3>
+        <ol class="steps">
+          <li>
+            <strong>选择：</strong>用户从目录行或批量选择进入同步
+            Dialog；普通管理员看不到写入口。
+          </li>
+          <li>
+            <strong>预检：</strong>Web
+            请求语义上的“同步预检”，获取每个数据集允许的
+            <code>incremental</code>、<code>full</code>、<code>date-range</code>
+            或 <code>observation-date</code>、边界、预计子任务、queueDepth 与
+            ExecutionSlot；预检不承诺 <code>queuePosition</code>。
+          </li>
+          <li>
+            <strong>配置：</strong
+            >每个子任务独立展示能力；混合批次不能用一个通用日期范围覆盖全部数据集。
+            不支持的模式不渲染；Web 保持原顺序并先按
+            <code>datasetCode</code> 去重，服务端重复目标返回 422。
+          </li>
+          <li>
+            <strong>确认：</strong>明确提示“批量将拆成 N
+            个子任务并串行执行”，同时展示当前 active 与 queued count。
+          </li>
+          <li>
+            <strong>持久化意图：</strong>公开写操作返回
+            <code>SubmissionReceipt</code>。UI 先展示 submission ID； 初始 toast
+            固定为“已提交，等待同步服务受理”；<code>PENDING</code>
+            不能写“已接受”或“同步成功”。
+          </li>
+          <li>
+            <strong>跟踪：</strong>活动 submission 短轮询；只有
+            <code>ACCEPTED</code> 且返回
+            <code>authorityResource</code> 后才写“同步服务已受理”。异步
+            <code>REJECTED</code> /
+            <code>DEAD_LETTER</code> 显示安全原因；若权威资源为
+            COMMAND，则立即查询 <code>commands/detail</code>。
+          </li>
+          <li>
+            <strong>恢复与完成：</strong>刷新、重进、分享批次详情均以
+            <code>commands/detail</code> 的
+            <code>CommandDetailView.childRuns</code>
+            为唯一聚合来源；终态后精确失效相关 Query。
+          </li>
+        </ol>
+
+        <pre class="flow" aria-label="同步命令时序">
+SUPER_ADMIN
+  │ 选择单个 / 批量数据集
+  ▼
+service-web ── capability preflight ──▶ service-api
+  │                                      │
+  │ 每数据集模式、范围、约束、队列快照   │
+  ◀──────────────────────────────────────┘
+  │ 确认提交
+  ▼
+Submission（授权意图已持久化） ──▶ outbox / control plane
+  │                                      │
+  │ 轮询 submission                      ├─ PENDING：已提交，等待同步服务受理
+  │                                      ├─ REJECTED / DEAD_LETTER：异步失败并展示原因
+  │                                      └─ ACCEPTED：关联 authority resource
+  ▼
+commands/detail（批量恢复 / 聚合唯一来源）──▶ 有序 childRuns ──▶ 全局串行队列
+  │
+  └─ RunDetail：运行进度、分区、timeline、ingestion qualityGate</pre>
+
+        <div class="grid">
+          <article class="card">
+            <h3>健康检查</h3>
+            <ol>
+              <li>
+                选择数据集或规则范围；请求按数据集组装 <code>targets[]</code>，
+                同批 <code>datasetCode</code> 唯一，服务端重复目标返回 422。
+              </li>
+              <li>
+                每个 target 独立绑定
+                <code>{ datasetCode, dataVersion | null }</code
+                >，批量操作禁止共享一个版本值。
+              </li>
+              <li>展示规则、severity、阈值与数据时间口径。</li>
+              <li>
+                主动检查先创建可追踪 Submission；只有
+                <code>deliveryStatus=ACCEPTED</code> 且
+                <code>authorityResource.resourceType=HEALTH_CHECK</code>，才按
+                healthCheckId 轮询 <code>health/checks/detail</code>。
+              </li>
+              <li>
+                <code>HealthCheckDetailView.targets</code> 按原 target 顺序展示
+                status、resolvedDataVersion、evaluationId 与 error；刷新、深链和跨会话
+                都可恢复批次，成功 target 才进入 evaluation detail。
+              </li>
+              <li>
+                HealthEvaluation 是绑定 dataVersion、releaseId、policyVersion 与
+                evaluatedAt 的不可变事实；HealthDetail 另呈现查询时当前开放问题投影。
+              </li>
+              <li>
+                发布后 <code>CRITICAL</code> 统一显示“严重”，只标记已发布
+                dataVersion，不撤销或阻止 publication。
+              </li>
+              <li>
+                同步未发布原因只在 RunDetail 的 ingestion
+                <code>qualityGate=BLOCKED</code> 区域展示。
+              </li>
+            </ol>
+          </article>
+          <article class="card">
+            <h3>自动计划</h3>
+            <ol>
+              <li>列表显示频率、策略、时区、下次运行与启停状态。</li>
+              <li>
+                v1 每个 <code>datasetCode</code> 至多一个计划；创建重复返回
+                409，编辑时 datasetCode 只读且不可改绑。
+              </li>
+              <li>用受控预设表达交易日 / 每日 / 周期，不首版暴露任意 cron。</li>
+              <li>
+                表单模式只读 <code>scheduleSupportedModes</code>；v1 不渲染
+                DATE_RANGE。
+              </li>
+              <li>
+                OBSERVATION_DATE 必选 targetPolicy；policyVersion
+                与默认策略由服务端带入，Web 不自造。
+              </li>
+              <li>保存前再次验证 capability、expectedVersion 与策略版本。</li>
+              <li>计划触发后仍进入同一串行队列。</li>
+            </ol>
+          </article>
+          <article class="card">
+            <h3>主动操作审计</h3>
+            <ol>
+              <li>
+                记录
+                actor、action、target、request、submission、权威资源、结果和时间。
+              </li>
+              <li>
+                ADMIN 与 SUPER_ADMIN
+                读取同一数据运维操作投影；它不等同于平台完整 AuditLog。
+              </li>
+              <li>submission 投递、下游受理 / 拒绝和最终 run 结果均可追踪。</li>
+              <li>不展示 raw 错误 detail、token 或内部对象 URI。</li>
+            </ol>
+          </article>
+        </div>
+      </section>
+
+      <section id="state">
+        <h2>契约、状态与所有权</h2>
+
+        <aside class="callout warning">
+          <strong>合同状态为 Proposed</strong>
+          <p>
+            Contract 0023 的路由与字段已完成本轮跨服务收口；<code
+              >x-contract-status=Proposed</code
+            >
+            表示尚未实现 / 接受。开发期由 <code>DataOperationsGateway</code> 的
+            fixture / MSW 提供；生产 adapter 只可实现合同列出的 19
+            条路径，并由共享 <code>requestJson</code> 固定发送 POST。
+          </p>
+        </aside>
+
+        <h3>资产目录最小视图模型</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>字段语义</th>
+                <th>用途</th>
+                <th>约束</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <code>datasetCode</code> / <code>displayName</code> /
+                  <code>domain</code>
+                </td>
+                <td>稳定身份、名称与业务域。</td>
+                <td>key 不使用数据库自增 ID；名称变化不改变 key。</td>
+              </tr>
+              <tr>
+                <td>
+                  <code>sourceBindings[].providerId</code> /
+                  <code>upstreamSource</code> / <code>sourceDataset</code>
+                </td>
+                <td>供应商、进一步来源与具体上游能力。</td>
+                <td>受控词汇；未知值明确显示“未声明”，禁止 Web 猜测。</td>
+              </tr>
+              <tr>
+                <td>RunDetail <code>sourceSnapshot[]</code></td>
+                <td>
+                  运行受理时冻结的 Provider、真实上游、adapter 与方法学版本。
+                </td>
+                <td>
+                  历史运行必须读快照；禁止用当前 dataset sourceBindings 回填旧
+                  run。
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>lifecycleStatus</code> / <code>availability</code>
+                </td>
+                <td>
+                  区分 PRODUCTION / CANDIDATE / RESEARCH / RETIRED 与 ENABLED /
+                  DISABLED / SOURCE_UNAVAILABLE / UNKNOWN。
+                </td>
+                <td>研究观察不能与可发布数据混为同一绿色“正常”。</td>
+              </tr>
+              <tr>
+                <td>
+                  <code>observationState</code> /
+                  <code>observationStateReasonCode</code>
+                </td>
+                <td>
+                  <code>PRESENT</code
+                  >、<code>EMPTY_VALID</code>、<code>EMPTY_UNEXPECTED</code>、
+                  <code>NOT_YET_SYNCED</code>、<code>UNKNOWN</code>。
+                </td>
+                <td>
+                  与 availability、run status、health
+                  分离；合法空集不能显示成失败。
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>lastAttemptStartedAt</code> /
+                  <code>lastAttemptFinishedAt</code>
+                </td>
+                <td>最近一次尝试的开始与终态结束时间。</td>
+                <td>
+                  QUEUED / RUNNING / CANCEL_REQUESTED 的 finishedAt 为
+                  null，页面明确写“尚未结束”。
+                </td>
+              </tr>
+              <tr>
+                <td><code>lastSuccessAt</code></td>
+                <td>最近完成成功同步的时间。</td>
+                <td>
+                  只取最近 <code>SUCCEEDED.finishedAt</code>；PARTIAL
+                  永不计入“最近成功”。
+                </td>
+              </tr>
+              <tr>
+                <td><code>lastPublishedAt</code></td>
+                <td>消费者可见 publication 最近推进时间。</td>
+                <td>
+                  仅 ingestion qualityGate=BLOCKED 会阻止新 publication；健康
+                  CRITICAL 不回退已发布版本。
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>dataAsOf</code> / <code>dataAsOfKind</code> /
+                  <code>dataAsOfLabel</code>
+                </td>
+                <td>交易日、报告期、观察日或快照时点。</td>
+                <td>
+                  合同必须返回 kind 与 label；Web 直接显示 label，禁止按 dataset
+                  code 推断。
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>freshnessStatus</code> / <code>lag</code> /
+                  <code>reason</code> /
+                  <code>evaluatedAt</code>
+                </td>
+                <td>新鲜度状态、落后量 / 单位、稳定原因码与计算时间。</td>
+                <td>
+                  全部由服务端版本化 policy 计算；Web
+                  不比较本地日期、不猜交易日。
+                </td>
+              </tr>
+              <tr>
+                <td><code>latestRun.status</code> / <code>error</code></td>
+                <td>最近运行终态与安全失败原因。</td>
+                <td>
+                  错误文本由服务端安全投影；列表不显示堆栈或 provider payload。
+                </td>
+              </tr>
+              <tr>
+                <td><code>healthSummary</code></td>
+                <td>
+                  HEALTHY / WARN / CRITICAL / UNKNOWN、score、warning / critical
+                  count、<code>currentOpenIssueCount</code> 与
+                  <code>issueProjectionAsOf</code>。
+                </td>
+                <td>
+                  CRITICAL 统一写“严重”；颜色之外必须有文字，并与 ingestion
+                  quality gate 分栏。
+                </td>
+              </tr>
+              <tr>
+                <td><code>HealthDetail</code></td>
+                <td>
+                  <code>evaluation</code> 是不可变事实；当前投影单独读取
+                  <code>currentOpenIssueCount</code>、<code>currentOpenIssues</code>、
+                  <code>currentOpenIssuesNextCursor</code> 与
+                  <code>issueProjectionAsOf</code>。
+                </td>
+                <td>
+                  evaluation.results 不随问题处置改写；当前问题仅含 OPEN /
+                  ACKNOWLEDGED，并显示投影时间与独立分页。
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>supportedModes</code> /
+                  <code>scheduleSupportedModes</code> /
+                  <code>scheduleTargetPolicyOptions</code>
+                </td>
+                <td>分别驱动人工模式、计划模式与版本化目标解析策略选项。</td>
+                <td>
+                  计划 v1 禁 DATE_RANGE；OBSERVATION_DATE 还必须带服务端
+                  targetPolicy / policyVersion；每个计划模式恰有一个默认 option。
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>progress.processedRecords</code> /
+                  <code>estimatedRecords</code>
+                </td>
+                <td>运行处理量与可选估算总量。</td>
+                <td>
+                  estimatedRecords=null 时只显示已处理数量，不画确定百分比。
+                </td>
+              </tr>
+              <tr>
+                <td>MODEL_ONLY 与公开 RunDetail 边界</td>
+                <td>
+                  MODEL_ONLY 表现为 <code>freshnessStatus=NOT_APPLICABLE</code> 且
+                  <code>freshnessPolicy=null</code>；公开分区不含 checkpoint。
+                </td>
+                <td>
+                  显示“模型数据 / 新鲜度不适用”，不显示 lag / stale；不消费 0022
+                  内部 checkpoint、cursor 或 fencing token。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 style="margin-top: 28px">状态集合与页面文案</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>层级</th>
+                <th>需表达的语义状态</th>
+                <th>页面规则</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Submission delivery</td>
+                <td>
+                  <code>PENDING</code
+                  >、<code>DELIVERING</code>、<code>ACCEPTED</code>、<code>REJECTED</code>、<code>DEAD_LETTER</code>。
+                </td>
+                <td>
+                  PENDING 只表示授权意图已持久化；ACCEPTED 也不等于 operation
+                  succeeded。
+                </td>
+              </tr>
+              <tr>
+                <td>OperationRecord delivery</td>
+                <td>
+                  用户操作沿用 PENDING / DELIVERING / ACCEPTED / REJECTED /
+                  DEAD_LETTER；SYSTEM 操作为 <code>NOT_APPLICABLE</code>，且
+                  <code>submissionId=null</code>。
+                </td>
+                <td>
+                  公开 actor 只读 <code>ActorDisplay</code>；Run timeline 只消费
+                  <code>OperationEventView</code>，不展示内部 actorRef。deliveryStatus
+                  与 operationResult 必须分栏。
+                </td>
+              </tr>
+              <tr>
+                <td>Operation result</td>
+                <td>
+                  <code>UNKNOWN</code
+                  >、<code>QUEUED</code>、<code>RUNNING</code>、<code>CANCEL_REQUESTED</code>、<code>SUCCEEDED</code>、<code>PARTIAL</code>、<code>FAILED</code>、<code>CANCELLED</code>、<code>INTERRUPTED</code>、<code>SKIPPED</code>、<code>REJECTED</code>。
+                </td>
+                <td>
+                  来自权威资源对账；页面不得从 delivery 状态推断运行结果。
+                </td>
+              </tr>
+              <tr>
+                <td>Command</td>
+                <td>
+                  <code>QUEUED</code
+                  >、<code>RUNNING</code>、<code>CANCEL_REQUESTED</code>、<code>SUCCEEDED</code>、<code>PARTIAL</code>、<code>FAILED</code>、<code>CANCELLED</code>、<code>REJECTED</code>。
+                </td>
+                <td>
+                  只展示 commands/detail 的聚合状态；不从 child runs
+                  在客户端重算。
+                </td>
+              </tr>
+              <tr>
+                <td>Run</td>
+                <td>
+                  QUEUED、RUNNING、CANCEL_REQUESTED、SUCCEEDED、PARTIAL、FAILED、CANCELLED、INTERRUPTED、SKIPPED。
+                </td>
+                <td>
+                  使用下方固定文案 / 动作矩阵；不把已请求取消显示为已取消。
+                </td>
+              </tr>
+              <tr>
+                <td>ExecutionSlot</td>
+                <td>
+                  <code>IDLE</code> 空闲、<code>RUNNING</code> 运行中、<code
+                    >RECOVERING</code
+                  >
+                  恢复中。
+                </td>
+                <td>
+                  RECOVERING
+                  显示“恢复中，暂不领取下一任务”；不得推断成空闲或第二个
+                  active。
+                </td>
+              </tr>
+              <tr>
+                <td>Health</td>
+                <td>
+                  <code>HEALTHY</code> 健康、<code>WARN</code> 警告、<code
+                    >CRITICAL</code
+                  >
+                  严重、<code>UNKNOWN</code> 未知。
+                </td>
+                <td>这是发布后健康；“严重”不撤销、不阻止已有 publication。</td>
+              </tr>
+              <tr>
+                <td>Health rule</td>
+                <td>PASSED、WARNED、FAILED、UNKNOWN、SKIPPED。</td>
+                <td>
+                  规则执行状态与 INFO/WARN/CRITICAL severity 分开；SKIPPED
+                  表示规则不适用。
+                </td>
+              </tr>
+              <tr>
+                <td>Health check / target</td>
+                <td>
+                  批次 QUEUED / RUNNING / SUCCEEDED / PARTIAL / FAILED / CANCELLED /
+                  REJECTED；目标无 PARTIAL。
+                </td>
+                <td>
+                  每个 target 独立展示 resolvedDataVersion、evaluationId 与
+                  ErrorSummary；批次结果不覆盖目标结果。
+                </td>
+              </tr>
+              <tr>
+                <td>Freshness</td>
+                <td>
+                  <code>FRESH</code
+                  >、<code>WARNING</code>、<code>STALE</code>、<code>UNKNOWN</code>、<code>NOT_APPLICABLE</code>。
+                </td>
+                <td>
+                  同时展示服务端 lag value / unit、reasonCode 与
+                  evaluatedAt；Web 不自行推导。
+                </td>
+              </tr>
+              <tr>
+                <td>Remote UI</td>
+                <td>
+                  loading、empty、stale、partial、error / retry、forbidden。
+                </td>
+                <td>
+                  Skeleton
+                  匹配最终几何；旧数据与失败提示共存；无权限不泄漏资源。
+                </td>
+              </tr>
+              <tr>
+                <td>Mutation UI</td>
+                <td>
+                  disabled、preflighting、ready、submitting、pending-delivery、accepted、rejected。
+                </td>
+                <td>
+                  初始 PENDING toast 写“已提交，等待同步服务受理”；异步 REJECTED
+                  单独告警。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 style="margin-top: 28px">批量命令恢复与聚合</h3>
+        <aside class="callout info">
+          <strong><code>commands/detail</code> 是唯一批量权威</strong>
+          <p>
+            接口直接返回扁平 <code>CommandDetailView</code>：
+            commandId、submissionId、status、requested / started / finished
+            时间、按原 target 顺序排列的 childRuns、requestedBy 与
+            error。刷新、深链、浏览器后退和跨会话恢复均以 commandId 重查；
+            禁止从 <code>runs/search</code>、客户端选择集合或 runId
+            前缀重建批次。
+          </p>
+        </aside>
+
+        <aside class="callout info">
+          <strong><code>health/checks/detail</code> 是主动健康检查批次权威</strong>
+          <p>
+            <code>HealthCheckDetailView</code> 返回 healthCheckId、nullable
+            submissionId、status、requested / started / finished 时间、
+            requestedBy、按原提交顺序的 targets 与 error。每个 target 展示原始
+            datasetCode / dataVersion、resolvedDataVersion、status、evaluationId
+            和 error；禁止从 evaluation search 或客户端选择重建批次。
+          </p>
+        </aside>
+
+        <aside class="callout warning">
+          <strong>queuePosition 与取消结果不能混用</strong>
+          <p>
+            <code>queuePosition</code> 只在 SYNC_SUBMIT / SYNC_RETRY 被 ACCEPTED
+            后，表示新命令首个 child 的受理快照位置；其余 child 查询
+            commands/detail，cancel / health / schedule 与未接受交付均为 null。
+            <code>cancel_too_late</code> 显示取消动作
+            <code>operationResult=FAILED</code>、<code>error.stage=CANCEL</code>，
+            真实目标仍可保持 <code>SUCCEEDED</code>。
+          </p>
+        </aside>
+
+        <h3 style="margin-top: 28px">RunStatus 文案与动作矩阵</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>RunStatus</th>
+                <th>固定中文文案</th>
+                <th>允许的页面动作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>QUEUED</code></td>
+                <td>已排队</td>
+                <td>
+                  查看队列；可提交合作式取消，必须选择 RUN 或 COMMAND 作用域。
+                </td>
+              </tr>
+              <tr>
+                <td><code>RUNNING</code></td>
+                <td>运行中</td>
+                <td>
+                  查看进度 / 详情；可请求取消此 RUN 或整批
+                  COMMAND，不承诺立即停止。
+                </td>
+              </tr>
+              <tr>
+                <td><code>CANCEL_REQUESTED</code></td>
+                <td>取消处理中</td>
+                <td>禁用重复取消与重试；继续轮询到真实终态。</td>
+              </tr>
+              <tr>
+                <td><code>SUCCEEDED</code></td>
+                <td>成功</td>
+                <td>查看详情；不显示重试，可另行创建新同步。</td>
+              </tr>
+              <tr>
+                <td><code>PARTIAL</code></td>
+                <td>部分成功</td>
+                <td>
+                  展示成功 / 未成功范围；仅在权威错误可重试时开放 RUN 或 COMMAND
+                  重试。
+                </td>
+              </tr>
+              <tr>
+                <td><code>FAILED</code></td>
+                <td>失败</td>
+                <td>
+                  展示安全错误；仅
+                  <code>retryable=true</code> 时开放显式作用域重试。
+                </td>
+              </tr>
+              <tr>
+                <td><code>CANCELLED</code></td>
+                <td>已取消</td>
+                <td>终态详情；不把“重新同步”伪装成 retry。</td>
+              </tr>
+              <tr>
+                <td><code>INTERRUPTED</code></td>
+                <td>已中断</td>
+                <td>
+                  ExecutionSlot=RECOVERING 时仅等待 / 查看恢复；结算后按权威
+                  retryable 决定是否重试。
+                </td>
+              </tr>
+              <tr>
+                <td><code>SKIPPED</code></td>
+                <td>已跳过</td>
+                <td>
+                  展示计划合并 / 目标失效等原因；不显示成功，不直接重试无效
+                  target。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="section-lede">
+          取消 / 重试 Dialog 必须显式展示
+          <code>target={resourceType: COMMAND|RUN, resourceId}</code>。COMMAND
+          作用整批，RUN 只作用单个 child；
+          不能由当前页面、选中行或服务端猜测作用域。
+        </p>
+
+        <h3 style="margin-top: 28px">公开 POST 合同（19 条）</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>能力</th>
+                <th>固定路径</th>
+                <th>数量</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>总览与资产</td>
+                <td>
+                  <code>/data-operations/overview</code
+                  >、<code>/data-operations/datasets/search</code>、<code
+                    >/data-operations/datasets/detail</code
+                  >
+                </td>
+                <td>3</td>
+              </tr>
+              <tr>
+                <td>同步写动作</td>
+                <td>
+                  <code>/data-operations/sync/preflight</code
+                  >、<code>/data-operations/sync/submit</code>、<code>/data-operations/sync/cancel</code>、<code
+                    >/data-operations/sync/retry</code
+                  >
+                </td>
+                <td>4</td>
+              </tr>
+              <tr>
+                <td>命令与运行</td>
+                <td>
+                  <code>/data-operations/commands/detail</code
+                  >、<code>/data-operations/runs/search</code>、<code
+                    >/data-operations/runs/detail</code
+                  >
+                </td>
+                <td>3</td>
+              </tr>
+              <tr>
+                <td>发布后健康</td>
+                <td>
+                  <code>/data-operations/health/evaluations/search</code
+                  >、<code>/data-operations/health/evaluations/detail</code>、<code
+                    >/data-operations/health/checks/submit</code
+                  >、<code>/data-operations/health/checks/detail</code
+                  >
+                </td>
+                <td>4</td>
+              </tr>
+              <tr>
+                <td>自动计划</td>
+                <td>
+                  <code>/data-operations/schedules/search</code
+                  >、<code>/data-operations/schedules/upsert</code>、<code
+                    >/data-operations/schedules/set-enabled</code
+                  >
+                </td>
+                <td>3</td>
+              </tr>
+              <tr>
+                <td>投递与操作记录</td>
+                <td>
+                  <code>/data-operations/submissions/detail</code>、<code
+                    >/data-operations/operations/search</code
+                  >
+                </td>
+                <td>2</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="2">
+                  <strong>全部由共享 transport 固定发送 POST</strong>
+                </td>
+                <td><strong>19</strong></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <h3 style="margin-top: 28px">前端状态所有权</h3>
+        <div class="grid">
+          <article class="card">
+            <h3>URL</h3>
+            <p>
+              <code>tab</code
+              >、<code>q</code>、<code>provider</code>、<code>upstream</code>、
+              <code>runStatus</code
+              >、<code>health</code>、<code>cursor</code>、详情 dataset key。
+              Dialog 仅在支持浏览器后退关闭时写轻量标识，不写未提交字段。
+            </p>
+          </article>
+          <article class="card">
+            <h3>TanStack Query</h3>
+            <p>
+              目录、摘要、全局队列、详情、submission、run、健康、计划、审计均为
+              server state。 Query key 必须包含可分享筛选；活动 submission /
+              queue 使用有界轮询。
+            </p>
+          </article>
+          <article class="card">
+            <h3>组件 / Hook</h3>
+            <p>
+              批量选择、Dialog
+              字段、展开规则、确认状态与焦点恢复是短暂交互状态。
+              不把远程结果复制进本地 state，也不用 Effect 回写派生值。
+            </p>
+          </article>
+        </div>
+
+        <div class="table-wrap" style="margin-top: 18px">
+          <table>
+            <thead>
+              <tr>
+                <th>建议 Query key</th>
+                <th>刷新策略</th>
+                <th>失效触发</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>["dataOperations","summary"]</code></td>
+                <td>页面可见时 15 秒；后台暂停。</td>
+                <td>任何 submission / run / health 终态。</td>
+              </tr>
+              <tr>
+                <td><code>["dataOperations","queue"]</code></td>
+                <td>有 active / queued 时 2 秒；空闲时 15 秒。</td>
+                <td>提交、取消、重试与 run 终态。</td>
+              </tr>
+              <tr>
+                <td><code>["dataOperations","catalog",filters]</code></td>
+                <td>60 秒 stale；换页保留旧数据。</td>
+                <td>run / health / schedule 终态按 dataset key 精确失效。</td>
+              </tr>
+              <tr>
+                <td>
+                  <code>["dataOperations","submission",submissionId]</code>
+                </td>
+                <td>活动时 2 秒；终态停止。</td>
+                <td>自身状态变化。</td>
+              </tr>
+              <tr>
+                <td><code>["dataOperations","command",commandId]</code></td>
+                <td>命令非终态时 2 秒；终态停止。</td>
+                <td>
+                  submission ACCEPTED 后、取消 / 重试提交后；它是批量聚合唯一
+                  Query。
+                </td>
+              </tr>
+              <tr>
+                <td><code>["dataOperations","run",runId]</code></td>
+                <td>运行非终态时 2 秒；终态停止。</td>
+                <td>
+                  run 状态、progress、qualityGate、partition 或 timeline 更新；
+                  <code>partitionsCursor</code> 与 <code>timelineCursor</code>
+                  独立或同时续取，不能共用游标；对应
+                  <code>partitionsLimit</code> / <code>timelineLimit</code>
+                  默认 100、最大 200。
+                </td>
+              </tr>
+              <tr>
+                <td><code>["dataOperations","healthCheck",healthCheckId]</code></td>
+                <td>批次非终态时 2 秒；终态停止。</td>
+                <td>
+                  HEALTH_CHECK authorityResource 接受后开始；target 状态或
+                  evaluationId 更新。
+                </td>
+              </tr>
+              <tr>
+                <td><code>["dataOperations","health",filters]</code></td>
+                <td>60 秒 stale；用户可手动刷新。</td>
+                <td>主动检查终态、同步发布完成。</td>
+              </tr>
+              <tr>
+                <td><code>["dataOperations","healthEvaluation",evaluationId,issuesCursor]</code></td>
+                <td>evaluation 长缓存；当前问题投影按 cursor 刷新。</td>
+                <td>
+                  currentOpenIssuesNextCursor 或 issueProjectionAsOf 变化；不可改写
+                  evaluation.results。
+                </td>
+              </tr>
+              <tr>
+                <td><code>["dataOperations","schedules",filters]</code></td>
+                <td>5 分钟 stale。</td>
+                <td>创建、更新、启停或删除成功。</td>
+              </tr>
+              <tr>
+                <td><code>["dataOperations","audit",filters]</code></td>
+                <td>30 秒 stale；cursor 分页。</td>
+                <td>主动操作 submission 状态变化。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="security">
+        <h2>权限、安全、可靠性与性能</h2>
+        <div class="grid">
+          <article class="card">
+            <span class="label">权限</span>
+            <h3>默认拒绝 + 服务端强制</h3>
+            <ul>
+              <li>
+                <code>ADMIN</code>、<code>SUPER_ADMIN</code> 可进入只读页面。
+              </li>
+              <li>首版写动作只向 <code>SUPER_ADMIN</code> 展示。</li>
+              <li>直接路由、过期权限和并发撤权仍处理 403。</li>
+              <li>
+                两类角色读取同一运维操作投影；不能前端过滤后称为授权，也不能把它称为完整
+                AuditLog。
+              </li>
+            </ul>
+          </article>
+          <article class="card">
+            <span class="label">安全</span>
+            <h3>最小安全投影</h3>
+            <ul>
+              <li>
+                受保护业务 POST 复用现有 access-token 注入
+                <code>Authorization: Bearer …</code>；Refresh Cookie 只用于刷新，
+                不能授权数据运维路由。
+              </li>
+              <li>不展示 token、secret、raw URI、payload_ref 或数据库键。</li>
+              <li>
+                Run timeline 与操作记录只消费 <code>ActorDisplay</code>；SYSTEM
+                显示 systemKind 对应名称，actorId 为 null，不接触 actorRef。
+              </li>
+              <li>失败原因使用稳定 code + 服务端安全摘要。</li>
+              <li>质量 sample 默认仅计数；脱敏样本另行权限决定。</li>
+              <li>
+                操作记录包含 request / submission / authority resource
+                关联，不包含请求 Body 全量镜像。
+              </li>
+            </ul>
+          </article>
+          <article class="card">
+            <span class="label">可靠性</span>
+            <h3>旧数据可见，动作不虚假成功</h3>
+            <ul>
+              <li>读取失败保留最近快照并标 stale / partial。</li>
+              <li>
+                submission 持久化、delivery accepted 与 run 成功分为三层反馈。
+              </li>
+              <li>
+                ErrorSummary 展示安全 code、stage、retryable、message；stage 还覆盖
+                DELIVERY、HEALTH_EVALUATION、SCHEDULE，完整集合以 0022 为准。
+              </li>
+              <li>队列多 active 属于严重一致性异常，显式告警。</li>
+              <li>计划编辑使用服务端版本或 ETag 等价并发保护。</li>
+            </ul>
+          </article>
+        </div>
+
+        <h3 style="margin-top: 28px">性能预算（提议）</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>指标</th>
+                <th>预算</th>
+                <th>设计措施</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>路由增量 bundle</td>
+                <td>gzip ≤ 120 KB，adapter 实现后以构建报告校验。</td>
+                <td>
+                  路由 lazy；无图表依赖；直接导入 MUI 组件；不加通用工作流库。
+                </td>
+              </tr>
+              <tr>
+                <td>目录首屏 payload</td>
+                <td>每页 20 条，响应目标 ≤ 256 KB。</td>
+                <td>摘要与详情分离；错误样本和长历史不进入列表。</td>
+              </tr>
+              <tr>
+                <td>首次可用内容</td>
+                <td>同地域温缓存 p75 ≤ 1.5 秒。</td>
+                <td>
+                  summary / queue / catalog 并行；Skeleton 保留几何；不串行请求
+                  Tab 数据。
+                </td>
+              </tr>
+              <tr>
+                <td>筛选反馈</td>
+                <td>本地输入 ≤ 100ms；搜索请求 250ms debounce。</td>
+                <td>
+                  URL 更新 transition；keepPreviousData；服务端 cursor 分页。
+                </td>
+              </tr>
+              <tr>
+                <td>运行进度</td>
+                <td>
+                  直接展示
+                  <code>processedRecords</code>；总量可靠时再展示百分比。
+                </td>
+                <td>
+                  <code>estimatedRecords=null</code> 时使用不定进度与“已处理 N
+                  条”，禁止假定 0% 或 100%。
+                </td>
+              </tr>
+              <tr>
+                <td>活动状态可见延迟</td>
+                <td>轮询下 ≤ 3 秒。</td>
+                <td>
+                  只有 active submission / queue 使用 2
+                  秒轮询；拿到权威资源后转为 run 轮询，终态立即停止。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 style="margin-top: 28px">可访问性与桌面布局</h3>
+        <ul class="checklist">
+          <li>
+            页面唯一 <code>h1</code>，Tab、table、Dialog、Drawer 和 alert
+            使用对应语义。
+          </li>
+          <li>状态同时使用文字、图标 / 符号和颜色，不依赖红绿区分。</li>
+          <li>批量 checkbox、行操作、关闭与重试均有可访问名称。</li>
+          <li>Dialog 打开后锁定焦点，关闭后恢复至触发控件。</li>
+          <li>1440×900 无页面级横向溢出；1200 宽时只允许表格内部横向滚动。</li>
+          <li>
+            尊重 <code>prefers-reduced-motion</code>；进度更新不使用持续闪烁。
+          </li>
+          <li>
+            时间展示含时区，数字使用 tabular numerals，code 使用等宽字体。
+          </li>
+          <li>仅覆盖 PC 桌面鼠标和键盘，不新增移动、触控或窄屏行为。</li>
+        </ul>
+      </section>
+
+      <section id="tradeoffs">
+        <h2>方案取舍</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>候选</th>
+                <th>优势</th>
+                <th>成本 / 风险</th>
+                <th>结论</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>一个超长运维 Dashboard</td>
+                <td>所有内容同页。</td>
+                <td>首屏拥挤、多个远程区域耦合、操作上下文混乱。</td>
+                <td>不采用；保留全局运行条，其余分五个任务型 Tab。</td>
+              </tr>
+              <tr>
+                <td>通用“模式 + 日期范围”表单</td>
+                <td>表单简单。</td>
+                <td>无法表达观察日、无历史参数、独立周期和合法空能力。</td>
+                <td>
+                  <strong>采用 capability-aware preflight</strong
+                  >，每个子任务独立配置。
+                </td>
+              </tr>
+              <tr>
+                <td>Web 直接调用 data-sync / provider</td>
+                <td>少一跳。</td>
+                <td>越过鉴权、审计与版本化公开合同，暴露内部服务。</td>
+                <td>拒绝；所有调用只经 service-api。</td>
+              </tr>
+              <tr>
+                <td>首版 WebSocket / SSE</td>
+                <td>状态推送更快。</td>
+                <td>协议、鉴权、重连和部署边界未冻结。</td>
+                <td>首版使用有界轮询；达到规模阈值后另立 ADR。</td>
+              </tr>
+              <tr>
+                <td>先猜 endpoint 再改</td>
+                <td>页面代码可提前联调。</td>
+                <td>形成影子合同，返工并可能绕过 POST-only 传输。</td>
+                <td>
+                  拒绝；fixture / MSW + gateway interface 等待 Contract 0023。
+                </td>
+              </tr>
+              <tr>
+                <td>任意 cron 编辑器</td>
+                <td>最灵活。</td>
+                <td>易产生拥塞、时区误解和无效组合。</td>
+                <td>首版只提供服务端允许的频率预设与下一次运行预览。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="prototype">
+        <h2>桌面高保真原型</h2>
+        <p class="section-lede">
+          可编辑源：<a href="prototype.html">prototype.html</a>。原型使用静态
+          fixture，不包含生产 endpoint、真实账号或真实运行数据。
+        </p>
+
+        <div class="prototype-grid">
+          <figure>
+            <img
+              src="assets/prototype-desktop.png"
+              alt="1440×900 数据运维控制台数据资产页，包含白色桌面壳层、全局串行运行条、摘要、筛选和数据资产表格。"
+            />
+            <figcaption>
+              prototype-desktop.png · 1440×900 · 数据资产首屏。provider 与
+              upstream source 分层； lastAttempt started / finished、仅
+              SUCCEEDED 的 lastSuccess、lastPublished、dataAsOf 与服务端
+              freshness 分开。
+            </figcaption>
+          </figure>
+
+          <figure>
+            <img
+              src="assets/prototype-states.png"
+              alt="1440×900 数据运维状态集合与同步预检面板，展示加载、空、部分、错误、只读、异步拒绝及混合 capability 批量任务配置。"
+            />
+            <figcaption>
+              prototype-states.png · 1440×900 · 远程状态与写动作。初始反馈为
+              PENDING，异步 REJECTED 独立提示；
+              三个子任务分别展示日期范围、增量和观察日。
+            </figcaption>
+          </figure>
+        </div>
+
+        <div class="table-wrap" style="margin-top: 20px">
+          <table>
+            <thead>
+              <tr>
+                <th>审查项</th>
+                <th>结论</th>
+                <th>处理</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>信息层级</td>
+                <td>通过</td>
+                <td>首屏先回答全局任务占用、资产规模与异常，再进入目录。</td>
+              </tr>
+              <tr>
+                <td>来源与时间语义</td>
+                <td>通过</td>
+                <td>
+                  来源分层；观测状态、服务端 freshness、尝试开始 / 结束、最近
+                  SUCCEEDED 与发布分开。
+                </td>
+              </tr>
+              <tr>
+                <td>串行与批量</td>
+                <td>通过</td>
+                <td>全局运行条常驻；批量预检明确拆分子任务和队列位置。</td>
+              </tr>
+              <tr>
+                <td>远程 / 权限状态</td>
+                <td>通过</td>
+                <td>
+                  覆盖 loading、empty、partial、error、forbidden、PENDING 与异步
+                  REJECTED。
+                </td>
+              </tr>
+              <tr>
+                <td>桌面溢出</td>
+                <td>通过</td>
+                <td>实机 1440×900 无页面级横向溢出；主内容区独立纵向滚动。</td>
+              </tr>
+              <tr>
+                <td>进入生产实现</td>
+                <td>暂不通过</td>
+                <td>
+                  字段语义已收口；等待 Contract 0023
+                  Accepted、实现契约测试与全局互斥 Lock gate。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="delivery">
+        <h2>实施、验证与回滚</h2>
+
+        <ol class="steps">
+          <li>
+            <strong>阶段 0 · 合同门禁：</strong>已收口 19 条公开
+            POST、数据集词汇、submission delivery / operation
+            result、CommandDetail、全部
+            RunStatus、ExecutionSlot、时间、health、schedule 与 audit 投影。
+            退出条件：Contract 0023 进入 Accepted 并通过契约测试。
+          </li>
+          <li>
+            <strong>阶段 1 · 只读 fixture：</strong>在 feature flag
+            下实现路由、壳层、五个 Tab、URL 状态和 MSW 场景。
+            退出条件：组件测试、1440×900 视觉回归、键盘路径通过。
+          </li>
+          <li>
+            <strong>阶段 2 · 只读真实合同：</strong>接共享 POST transport，引入
+            schema 校验，开放 ADMIN 与
+            SUPER_ADMIN。退出条件：目录、队列、健康、计划、审计在 staging
+            对账通过。
+          </li>
+          <li>
+            <strong>阶段 3 · 超级管理员写动作：</strong>依次开放预检 /
+            同步、健康检查、取消 / 重试、计划管理。
+            退出条件：异步拒绝、并发冲突、审计、幂等和串行约束 E2E 通过。
+          </li>
+          <li>
+            <strong>阶段 4 · 观测与收口：</strong
+            >确认轮询负载、任务完成延迟、错误码覆盖、未授权尝试与审计完整率。
+            满足 SLO 后移除 fixture feature flag。
+          </li>
+        </ol>
+
+        <div class="grid">
+          <article class="card">
+            <h3>测试计划</h3>
+            <ul>
+              <li>URL parser / serializer：非法值、cursor、Tab 与详情恢复。</li>
+              <li>capability form：混合批次、边界日期、观察日、预检过期。</li>
+              <li>
+                命令恢复：刷新 / 深链后仅靠 commands/detail 恢复原序 childRuns。
+              </li>
+              <li>
+                状态映射：全部 RunStatus、ExecutionSlot
+                RECOVERING、health、freshness 与 observationState。
+              </li>
+              <li>
+                RunDetail：历史 sourceSnapshot 不被当前 sourceBindings
+                覆盖；qualityGate 与发布后 health 分栏。
+              </li>
+              <li>
+                进度：estimatedRecords 有值显示比例；null 时只显示
+                processedRecords。
+              </li>
+              <li>
+                计划：仅 scheduleSupportedModes；无 DATE_RANGE；观察日必选服务端
+                targetPolicy / policyVersion。
+              </li>
+              <li>权限：ADMIN 只读、SUPER_ADMIN 写、403 竞态。</li>
+              <li>
+                MSW：loading、empty、stale、partial、PENDING、ACCEPTED、异步
+                REJECTED。
+              </li>
+              <li>
+                E2E：批量拆分、全局串行、COMMAND / RUN
+                取消与重试、计划冲突、审计关联。
+              </li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>发布观测</h3>
+            <ul>
+              <li>路由加载错误率和首屏时延。</li>
+              <li>queue / submission / run 轮询 QPS、429 与 p95 延迟。</li>
+              <li>preflight 到提交转化、rejected 比例和主要 code。</li>
+              <li>页面 active run 数不为 0 / 1 的一致性告警。</li>
+              <li>ExecutionSlot RECOVERING 持续时间与恢复失败率。</li>
+              <li>submission、权威资源与 audit 关联缺失率必须为 0。</li>
+              <li>权限拒绝按角色 / 动作聚合，不记录敏感 Body。</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>回滚</h3>
+            <p>
+              关闭 <code>dataOperations</code> feature flag
+              并移除侧栏入口；保留后端 submission、command / run
+              与审计，不因隐藏页面取消已经接受的任务。若只读 adapter
+              异常，可退回 fixture 仅限非生产演示环境； 生产不得用 fixture
+              替代权威状态。
+            </p>
+          </article>
+        </div>
+
+        <h3 style="margin-top: 28px">验收标准</h3>
+        <ul class="checklist">
+          <li>
+            首屏 30 秒内可判断有哪些数据、来源、新鲜度、最近同步与全局任务占用。
+          </li>
+          <li>provider 与 upstream source 可分别筛选、展示和在详情复核。</li>
+          <li>
+            历史 RunDetail 使用 sourceSnapshot，不用当前 sourceBindings 回填。
+          </li>
+          <li>
+            lastAttempt started / finished、仅 SUCCEEDED 的
+            lastSuccess、lastPublished、dataAsOf 不混用。
+          </li>
+          <li>
+            freshnessStatus、lag、reason 与 evaluatedAt
+            直接来自服务端，不做客户端日期推导。
+          </li>
+          <li>
+            PRESENT、合法空集、异常空集、从未同步与 UNKNOWN 可筛选且不会合并。
+          </li>
+          <li>批量命令拆成可见子任务，任何时刻最多一个 run 处于运行中。</li>
+          <li>
+            批量恢复与聚合只消费 commands/detail；runs/search 不重建 child
+            顺序。
+          </li>
+          <li>
+            全部九种 RunStatus 与三种 ExecutionSlot 状态有固定中文文案和动作。
+          </li>
+          <li>取消 / 重试提交明确 COMMAND 或 RUN 作用域。</li>
+          <li>同步表单按 capability 展示模式；观察日与日期范围不互相替代。</li>
+          <li>
+            发布后健康只使用“健康 / 警告 / 严重 / 未知”；CRITICAL 保持既有
+            publication 可见。
+          </li>
+          <li>
+            RunDetail 单独展示 ingestion qualityGate 的 BLOCKED
+            与新版本未发布原因。
+          </li>
+          <li>
+            健康检查批量 target 各自绑定 dataVersion；不能共享一个版本值。
+          </li>
+          <li>
+            自动计划只显示 scheduleSupportedModes；v1 禁
+            DATE_RANGE，观察日必选服务端 targetPolicy / policyVersion。
+          </li>
+          <li>
+            初始写反馈为“已提交，等待同步服务受理”；异步 REJECTED 明确告警。
+          </li>
+          <li>
+            进度使用 processedRecords /
+            estimatedRecords；估算未知时不显示百分比。
+          </li>
+          <li>
+            每个主动操作可关联
+            actor、request、submission、authorityResource、run 与最终结果。
+          </li>
+          <li>19 条真实 service-api 路径全部经共享 transport 固定为 POST。</li>
+          <li>1440×900 与最低 1200px 桌面宽度无页面级横向溢出。</li>
+          <li>键盘、焦点、语义、对比度和 reduced-motion 验收通过。</li>
+          <li>
+            生产写操作前 Contract 0023 Accepted、契约测试与全局 Lock gate
+            均通过。
+          </li>
+        </ul>
+
+        <h3 style="margin-top: 28px">待决问题</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>问题</th>
+                <th>建议</th>
+                <th>负责人 / 触发条件</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>首版目录包含哪些 research / disabled 数据集？</td>
+                <td>默认全部可见但明确环境状态；提供“仅可消费”筛选。</td>
+                <td>数据平台 · 首批 profile 上线前</td>
+              </tr>
+              <tr>
+                <td>每个数据集的新鲜度 SLA 与交易日历如何配置？</td>
+                <td>
+                  由服务端注册表权威计算 freshness，不下发给 Web 自行运算。
+                </td>
+                <td>service-data-sync · 首批 profile 上线前</td>
+              </tr>
+              <tr>
+                <td>批量上限与 preflight 有效期？</td>
+                <td>
+                  合同给出服务端上限、版本与 expiresAt；Web 展示剩余有效时间。
+                </td>
+                <td>service-api · 容量测试后</td>
+              </tr>
+              <tr>
+                <td>取消处理中最大等待时间与告警阈值？</td>
+                <td>
+                  继续显示 CANCEL_REQUESTED
+                  与运行心跳；不承诺立即停止，阈值由恢复演练决定。
+                </td>
+                <td>service-data-sync · 故障注入后</td>
+              </tr>
+              <tr>
+                <td>首批开放哪些 scheduleEligible 数据集？</td>
+                <td>
+                  仅开放 scheduleSupportedModes、targetPolicy 默认值和
+                  policyVersion 完整的数据集。
+                </td>
+                <td>数据平台 · 写操作灰度前</td>
+              </tr>
+              <tr>
+                <td>质量失败样本是否可见？</td>
+                <td>首版只显示规则、计数和脱敏摘要；原始证据继续留内部。</td>
+                <td>安全 / 数据平台 · 权限评审后</td>
+              </tr>
+              <tr>
+                <td>主动操作投影保留期？</td>
+                <td>
+                  ADMIN 与 SUPER_ADMIN
+                  读取同一运维投影；保留期由后端合规策略定义，完整审计另走
+                  AuditLog。
+                </td>
+                <td>service-api / 安全 · 上线前</td>
+              </tr>
+              <tr>
+                <td>是否引入 Tushare？</td>
+                <td>
+                  本方案不假设；接入后必须注册 provider、upstream、许可与
+                  capability。
+                </td>
+                <td>数据源治理 · 新来源 ADR</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 style="margin-top: 28px">本方案验证</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>项目</th>
+                <th>状态</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>HTML 结构、标题与本地资源</td>
+                <td>通过</td>
+                <td>
+                  脚本校验无重复 ID、引用资源均存在；index / prototype
+                  均为离线静态 HTML。
+                </td>
+              </tr>
+              <tr>
+                <td>1440×900 原型渲染与视觉检查</td>
+                <td>通过</td>
+                <td>
+                  真实浏览器渲染并人工检查 desktop / states；两张截图均为
+                  1440×900，控制台无错误。
+                </td>
+              </tr>
+              <tr>
+                <td>1280×720 技术文档桌面布局</td>
+                <td>通过</td>
+                <td>
+                  真实浏览器检查无页面级横向溢出；产品原型仍只验收 1440×900。
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>vp check</code> / <code>vp test</code> /
+                  <code>vp build</code>
+                </td>
+                <td>计划，不在本方案任务运行</td>
+                <td>本次没有生产代码改动；实现阶段必须完整执行。</td>
+              </tr>
+              <tr>
+                <td>E2E / Docker build / <code>/healthz</code></td>
+                <td>计划，不在本方案任务运行</td>
+                <td>合同接入与生产实现后执行。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="shell">
+        数据运维控制台 · service-web 0006 · 变更摘要：对齐 19 条公开
+        POST、CommandDetail / HealthCheckDetail 权威批次恢复、完整运行 /
+        恢复状态、不可变健康事实、服务端 freshness、计划策略及桌面原型。
+      </div>
+    </footer>
+  </body>
+</html>

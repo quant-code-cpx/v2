@@ -1,0 +1,2822 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="QUANT V2 数据运维控制台 1440×900 PC 桌面高保真原型，使用静态 fixture 展示数据资产、串行任务、健康度、自动计划和操作记录。"
+    />
+    <title>数据运维控制台｜QUANT V2 桌面原型</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --qv-neutral-0: #ffffff;
+        --qv-neutral-50: #fcfdfd;
+        --qv-neutral-100: #f9fafb;
+        --qv-neutral-200: #f4f6f8;
+        --qv-neutral-300: #dfe3e8;
+        --qv-neutral-400: #c4cdd5;
+        --qv-neutral-500: #919eab;
+        --qv-neutral-600: #637381;
+        --qv-neutral-700: #454f5b;
+        --qv-neutral-800: #1c252e;
+        --qv-neutral-900: #141a21;
+        --qv-primary-lighter: #f0eeff;
+        --qv-primary-light: #a99ef7;
+        --qv-primary-main: #6d5ce7;
+        --qv-primary-dark: #4f46b8;
+        --qv-secondary-lighter: #eaf0ff;
+        --qv-secondary-main: #2f6bff;
+        --qv-info-main: #008fb3;
+        --qv-success-main: #22c55e;
+        --qv-warning-main: #d99118;
+        --qv-error-main: #ff5630;
+        --qv-bg-canvas: var(--qv-neutral-0);
+        --qv-bg-paper: var(--qv-neutral-0);
+        --qv-bg-neutral: var(--qv-neutral-200);
+        --qv-bg-subtle: var(--qv-neutral-100);
+        --qv-text-primary: var(--qv-neutral-800);
+        --qv-text-secondary: var(--qv-neutral-600);
+        --qv-text-disabled: var(--qv-neutral-500);
+        --qv-border-subtle: rgb(145 158 171 / 20%);
+        --qv-border-strong: rgb(145 158 171 / 32%);
+        --qv-action-hover: rgb(145 158 171 / 8%);
+        --qv-primary-soft: rgb(109 92 231 / 8%);
+        --qv-success-soft: rgb(34 197 94 / 10%);
+        --qv-warning-soft: rgb(217 145 24 / 12%);
+        --qv-error-soft: rgb(255 86 48 / 10%);
+        --qv-info-soft: rgb(0 143 179 / 10%);
+        --qv-font-sans:
+          "Public Sans Variable", "PingFang SC", "Microsoft YaHei",
+          ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        --qv-font-display:
+          Barlow, "Public Sans Variable", "PingFang SC", "Microsoft YaHei",
+          ui-sans-serif, system-ui, sans-serif;
+        --qv-font-mono:
+          "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        --qv-radius-xs: 4px;
+        --qv-radius-sm: 8px;
+        --qv-radius-lg: 16px;
+        --qv-shadow-card:
+          0 0 2px 0 rgb(145 158 171 / 20%),
+          0 12px 24px -4px rgb(145 158 171 / 12%);
+        --qv-shadow-drawer: -40px 40px 80px -8px rgb(145 158 171 / 24%);
+        --qv-shadow-primary: 0 8px 16px rgb(109 92 231 / 24%);
+        --qv-focus-ring: 0 0 0 3px rgb(109 92 231 / 28%);
+        --qv-sidebar-width: 300px;
+        --qv-appbar-height: 72px;
+        --qv-content-max-width: 1536px;
+        --qv-grid-gap: 24px;
+        --qv-duration-fast: 120ms;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        min-width: 1200px;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      body {
+        color: var(--qv-text-primary);
+        background: var(--qv-bg-canvas);
+        font-family: var(--qv-font-sans);
+        font-size: 14px;
+        line-height: 1.45;
+        font-variant-numeric: tabular-nums;
+      }
+
+      button,
+      input,
+      select {
+        color: inherit;
+        font: inherit;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      a:focus-visible,
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible {
+        outline: 0;
+        box-shadow: var(--qv-focus-ring);
+      }
+
+      .app-shell {
+        display: grid;
+        grid-template-columns: var(--qv-sidebar-width) minmax(0, 1fr);
+        width: 100%;
+        height: 100%;
+      }
+
+      .sidebar {
+        position: relative;
+        z-index: 5;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        border-right: 1px solid var(--qv-border-subtle);
+        background: var(--qv-bg-paper);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        min-height: var(--qv-appbar-height);
+        padding: 0 28px;
+        border-bottom: 1px solid transparent;
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+
+      .brand-mark {
+        position: relative;
+        width: 18px;
+        height: 24px;
+        margin-right: 10px;
+      }
+
+      .brand-mark::before,
+      .brand-mark::after {
+        position: absolute;
+        left: 5px;
+        width: 8px;
+        height: 14px;
+        border-radius: 8px;
+        background: var(--qv-primary-main);
+        content: "";
+        transform: rotate(-35deg);
+      }
+
+      .brand-mark::before {
+        top: 0;
+        background: var(--qv-secondary-main);
+      }
+
+      .brand-mark::after {
+        bottom: 0;
+      }
+
+      .side-nav {
+        overflow-y: auto;
+        padding: 14px 16px 28px;
+      }
+
+      .nav-group {
+        margin-top: 16px;
+      }
+
+      .nav-group:first-child {
+        margin-top: 0;
+      }
+
+      .nav-group-title {
+        margin: 0 0 8px;
+        padding: 0 12px;
+        color: var(--qv-text-disabled);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+
+      .nav-list {
+        display: grid;
+        gap: 4px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .nav-link {
+        display: flex;
+        align-items: center;
+        min-height: 44px;
+        padding: 0 12px;
+        border-radius: var(--qv-radius-sm);
+        color: var(--qv-text-secondary);
+        font-weight: 700;
+      }
+
+      .nav-link:hover {
+        color: var(--qv-text-primary);
+        background: var(--qv-neutral-100);
+      }
+
+      .nav-link.selected {
+        color: var(--qv-primary-dark);
+        background: var(--qv-primary-lighter);
+      }
+
+      .nav-icon {
+        display: grid;
+        width: 28px;
+        margin-right: 4px;
+        place-items: center;
+        color: currentcolor;
+        font-size: 17px;
+        font-weight: 500;
+      }
+
+      .sidebar-footnote {
+        margin: auto 20px 20px;
+        padding: 14px 16px;
+        border-radius: var(--qv-radius-sm);
+        background: var(--qv-bg-subtle);
+        color: var(--qv-text-secondary);
+        font-size: 12px;
+      }
+
+      .sidebar-footnote strong {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--qv-text-primary);
+        font-size: 13px;
+      }
+
+      .workspace {
+        display: grid;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        grid-template-rows: var(--qv-appbar-height) minmax(0, 1fr);
+        background: var(--qv-bg-neutral);
+      }
+
+      .topbar {
+        display: grid;
+        min-width: 0;
+        padding: 0 32px;
+        grid-template-columns: minmax(320px, 1fr) auto;
+        align-items: center;
+        gap: 24px;
+        border-bottom: 1px solid var(--qv-border-subtle);
+        background: var(--qv-bg-paper);
+      }
+
+      .global-search {
+        display: flex;
+        width: min(560px, 100%);
+        height: 42px;
+        margin: 0 auto;
+        padding: 0 14px;
+        align-items: center;
+        gap: 10px;
+        border: 1px solid var(--qv-border-subtle);
+        border-radius: var(--qv-radius-sm);
+        color: var(--qv-text-secondary);
+        background: var(--qv-bg-paper);
+      }
+
+      .search-symbol {
+        color: var(--qv-text-disabled);
+        font-size: 18px;
+        line-height: 1;
+      }
+
+      .keycap {
+        margin-left: auto;
+        padding: 2px 7px;
+        border: 1px solid var(--qv-border-subtle);
+        border-radius: 6px;
+        background: var(--qv-bg-subtle);
+        color: var(--qv-text-disabled);
+        font-size: 11px;
+      }
+
+      .top-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .icon-button {
+        display: grid;
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        place-items: center;
+        color: var(--qv-neutral-700);
+        background: transparent;
+        cursor: pointer;
+      }
+
+      .icon-button:hover {
+        background: var(--qv-action-hover);
+      }
+
+      .account {
+        display: flex;
+        min-width: 172px;
+        height: 48px;
+        margin-left: 8px;
+        padding: 0;
+        align-items: center;
+        gap: 10px;
+        border: 0;
+        background: transparent;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .avatar {
+        display: grid;
+        width: 36px;
+        height: 36px;
+        flex: 0 0 36px;
+        border-radius: 50%;
+        place-items: center;
+        color: var(--qv-neutral-0);
+        background: var(--qv-primary-main);
+        font-weight: 700;
+      }
+
+      .account-copy {
+        display: grid;
+        line-height: 1.25;
+      }
+
+      .account-copy strong {
+        font-size: 14px;
+      }
+
+      .account-copy small {
+        margin-top: 3px;
+        color: var(--qv-text-secondary);
+        font-size: 12px;
+      }
+
+      .main-scroll {
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        overflow: auto;
+      }
+
+      .content {
+        width: min(100%, var(--qv-content-max-width));
+        min-width: 0;
+        margin: 0 auto;
+        padding: 26px 32px 40px;
+      }
+
+      .page-heading {
+        display: flex;
+        min-height: 80px;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 24px;
+      }
+
+      .breadcrumbs {
+        display: flex;
+        margin-bottom: 4px;
+        align-items: center;
+        gap: 8px;
+        color: var(--qv-text-secondary);
+        font-size: 13px;
+      }
+
+      .breadcrumbs span:last-child {
+        color: var(--qv-text-primary);
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        margin-bottom: 2px;
+        font-family: var(--qv-font-display);
+        font-size: 24px;
+        line-height: 36px;
+        letter-spacing: -0.02em;
+      }
+
+      .page-heading p {
+        margin-bottom: 0;
+        color: var(--qv-text-secondary);
+        font-size: 14px;
+      }
+
+      .heading-actions {
+        display: flex;
+        padding-top: 23px;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .button {
+        display: inline-flex;
+        min-height: 36px;
+        padding: 6px 12px;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        border: 1px solid transparent;
+        border-radius: var(--qv-radius-sm);
+        font-weight: 700;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+
+      .button:hover {
+        background: var(--qv-action-hover);
+      }
+
+      .button.outlined {
+        border-color: var(--qv-border-subtle);
+        background: var(--qv-bg-paper);
+      }
+
+      .button.primary {
+        min-height: 40px;
+        padding-inline: 16px;
+        color: var(--qv-neutral-0);
+        background: var(--qv-primary-main);
+        box-shadow: var(--qv-shadow-primary);
+      }
+
+      .button.primary:hover {
+        background: var(--qv-primary-dark);
+      }
+
+      .button.small {
+        min-height: 32px;
+        padding: 4px 9px;
+        font-size: 13px;
+      }
+
+      .button.text {
+        color: var(--qv-primary-dark);
+        background: transparent;
+      }
+
+      .button[aria-disabled="true"],
+      .button:disabled {
+        color: var(--qv-text-disabled);
+        background: var(--qv-action-hover);
+        box-shadow: none;
+        cursor: not-allowed;
+      }
+
+      .run-strip {
+        display: grid;
+        min-height: 68px;
+        padding: 12px 16px;
+        grid-template-columns:
+          auto minmax(260px, 1fr) minmax(180px, 280px)
+          auto;
+        align-items: center;
+        gap: 14px;
+        border: 1px solid rgb(109 92 231 / 18%);
+        border-radius: var(--qv-radius-lg);
+        background: var(--qv-bg-paper);
+        box-shadow: var(--qv-shadow-card);
+      }
+
+      .run-pulse {
+        position: relative;
+        display: grid;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        place-items: center;
+        color: var(--qv-primary-main);
+        background: var(--qv-primary-lighter);
+      }
+
+      .run-pulse::after {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentcolor;
+        content: "";
+      }
+
+      .run-copy {
+        min-width: 0;
+      }
+
+      .run-copy strong {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+      }
+
+      .run-copy small {
+        display: block;
+        overflow: hidden;
+        margin-top: 3px;
+        color: var(--qv-text-secondary);
+        font-family: var(--qv-font-mono);
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .progress-block {
+        display: grid;
+        gap: 5px;
+      }
+
+      .progress-meta {
+        display: flex;
+        justify-content: space-between;
+        color: var(--qv-text-secondary);
+        font-size: 12px;
+      }
+
+      .progress-track {
+        height: 6px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--qv-neutral-200);
+      }
+
+      .progress-value {
+        display: block;
+        width: 62%;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--qv-primary-main);
+      }
+
+      .queue-count {
+        padding-left: 14px;
+        border-left: 1px solid var(--qv-border-subtle);
+        color: var(--qv-text-secondary);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .queue-count strong {
+        margin-right: 3px;
+        color: var(--qv-text-primary);
+        font-size: 16px;
+      }
+
+      .tabs {
+        display: flex;
+        height: 48px;
+        margin-top: 10px;
+        align-items: flex-end;
+        gap: 28px;
+        border-bottom: 1px solid var(--qv-border-subtle);
+      }
+
+      .tab {
+        position: relative;
+        display: inline-flex;
+        height: 42px;
+        align-items: center;
+        color: var(--qv-text-secondary);
+        font-weight: 700;
+      }
+
+      .tab:hover {
+        color: var(--qv-primary-dark);
+      }
+
+      body[data-scene="assets"] .tab[data-scene-link="assets"],
+      body[data-scene="detail"] .tab[data-scene-link="assets"],
+      body[data-scene="queue"] .tab[data-scene-link="queue"],
+      body[data-scene="health"] .tab[data-scene-link="health"],
+      body[data-scene="schedules"] .tab[data-scene-link="schedules"],
+      body[data-scene="audit"] .tab[data-scene-link="audit"] {
+        color: var(--qv-primary-main);
+      }
+
+      body[data-scene="assets"] .tab[data-scene-link="assets"]::after,
+      body[data-scene="detail"] .tab[data-scene-link="assets"]::after,
+      body[data-scene="queue"] .tab[data-scene-link="queue"]::after,
+      body[data-scene="health"] .tab[data-scene-link="health"]::after,
+      body[data-scene="schedules"] .tab[data-scene-link="schedules"]::after,
+      body[data-scene="audit"] .tab[data-scene-link="audit"]::after {
+        position: absolute;
+        right: 0;
+        bottom: -1px;
+        left: 0;
+        height: 2px;
+        border-radius: 2px 2px 0 0;
+        background: var(--qv-primary-main);
+        content: "";
+      }
+
+      .scene {
+        display: none;
+      }
+
+      body[data-scene="assets"] .scene-assets,
+      body[data-scene="detail"] .scene-assets,
+      body[data-scene="queue"] .scene-queue,
+      body[data-scene="health"] .scene-health,
+      body[data-scene="schedules"] .scene-schedules,
+      body[data-scene="audit"] .scene-audit,
+      body[data-scene="states"] .scene-states {
+        display: block;
+      }
+
+      body[data-scene="states"] .run-strip,
+      body[data-scene="states"] .tabs {
+        display: none;
+      }
+
+      .metric-grid {
+        display: grid;
+        margin-top: 14px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .metric-card {
+        min-width: 0;
+        min-height: 82px;
+        padding: 14px 16px;
+        border-radius: var(--qv-radius-lg);
+        background: var(--qv-bg-paper);
+        box-shadow: var(--qv-shadow-card);
+      }
+
+      .metric-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--qv-text-secondary);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .metric-value {
+        margin-top: 5px;
+        font-family: var(--qv-font-display);
+        font-size: 24px;
+        line-height: 1.2;
+        font-weight: 700;
+      }
+
+      .metric-foot {
+        margin-top: 3px;
+        color: var(--qv-text-secondary);
+        font-size: 12px;
+      }
+
+      .metric-foot.success {
+        color: #14883f;
+      }
+
+      .metric-foot.warning {
+        color: #a56608;
+      }
+
+      .filter-band {
+        display: grid;
+        min-height: 66px;
+        margin-top: 14px;
+        padding: 10px 12px;
+        grid-template-columns: minmax(230px, 1fr) 148px 148px 148px auto;
+        align-items: center;
+        gap: 10px;
+        border-radius: var(--qv-radius-lg);
+        background: var(--qv-bg-paper);
+        box-shadow: var(--qv-shadow-card);
+      }
+
+      .field {
+        display: flex;
+        min-width: 0;
+        height: 44px;
+        padding: 0 12px;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--qv-border-subtle);
+        border-radius: var(--qv-radius-sm);
+        background: var(--qv-bg-paper);
+      }
+
+      .field input,
+      .field select {
+        width: 100%;
+        min-width: 0;
+        height: 100%;
+        padding: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+      }
+
+      .field select {
+        cursor: pointer;
+      }
+
+      .filter-actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+
+      .selection-count {
+        margin-right: 2px;
+        color: var(--qv-primary-dark);
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .list-meta {
+        display: flex;
+        min-height: 40px;
+        padding: 0 2px;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--qv-text-secondary);
+        font-size: 12px;
+      }
+
+      .list-meta strong {
+        margin-right: 6px;
+        color: var(--qv-text-primary);
+        font-size: 14px;
+      }
+
+      .table-card {
+        overflow: hidden;
+        border-radius: var(--qv-radius-lg);
+        background: var(--qv-bg-paper);
+        box-shadow: var(--qv-shadow-card);
+      }
+
+      .table-scroll {
+        overflow-x: auto;
+      }
+
+      table {
+        width: 100%;
+        min-width: 980px;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+
+      th,
+      td {
+        padding: 10px 12px;
+        border-bottom: 1px dashed var(--qv-border-subtle);
+        text-align: left;
+        vertical-align: middle;
+      }
+
+      th {
+        height: 52px;
+        color: var(--qv-text-secondary);
+        background: var(--qv-bg-neutral);
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      tbody tr {
+        height: 64px;
+      }
+
+      tbody tr:hover {
+        background: var(--qv-action-hover);
+      }
+
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .checkbox {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        accent-color: var(--qv-primary-main);
+      }
+
+      .dataset-name {
+        min-width: 0;
+      }
+
+      .dataset-name strong {
+        display: block;
+        overflow: hidden;
+        font-size: 13px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .code {
+        display: block;
+        overflow: hidden;
+        margin-top: 3px;
+        color: var(--qv-text-secondary);
+        font-family: var(--qv-font-mono);
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .source-cell strong,
+      .time-cell strong {
+        display: block;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .source-cell small,
+      .time-cell small,
+      .health-cell small {
+        display: block;
+        overflow: hidden;
+        margin-top: 3px;
+        color: var(--qv-text-secondary);
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .source-cell small {
+        max-width: 150px;
+      }
+
+      .status-line {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+      }
+
+      .chip {
+        display: inline-flex;
+        min-height: 24px;
+        padding: 2px 8px;
+        align-items: center;
+        gap: 5px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 18px;
+        white-space: nowrap;
+      }
+
+      .chip::before {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentcolor;
+        content: "";
+      }
+
+      .chip.success {
+        color: #14883f;
+        background: var(--qv-success-soft);
+      }
+
+      .chip.warning {
+        color: #9d620a;
+        background: var(--qv-warning-soft);
+      }
+
+      .chip.error {
+        color: #c53e24;
+        background: var(--qv-error-soft);
+      }
+
+      .chip.running {
+        color: var(--qv-primary-dark);
+        background: var(--qv-primary-lighter);
+      }
+
+      .chip.info {
+        color: #087b96;
+        background: var(--qv-info-soft);
+      }
+
+      .chip.neutral {
+        color: var(--qv-text-secondary);
+        background: var(--qv-neutral-200);
+      }
+
+      .chip.no-dot::before {
+        display: none;
+      }
+
+      .row-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 4px;
+      }
+
+      .row-action {
+        display: inline-flex;
+        min-height: 32px;
+        padding: 4px 8px;
+        align-items: center;
+        border-radius: var(--qv-radius-sm);
+        color: var(--qv-primary-dark);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .row-action:hover {
+        background: var(--qv-primary-soft);
+      }
+
+      .pager {
+        display: flex;
+        min-height: 48px;
+        padding: 8px 14px;
+        align-items: center;
+        justify-content: space-between;
+        border-top: 1px solid var(--qv-border-subtle);
+        color: var(--qv-text-secondary);
+        font-size: 12px;
+      }
+
+      .pager-actions {
+        display: flex;
+        gap: 6px;
+      }
+
+      .scene-panel {
+        margin-top: 16px;
+      }
+
+      .two-column {
+        display: grid;
+        margin-top: 16px;
+        grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.9fr);
+        gap: var(--qv-grid-gap);
+      }
+
+      .card {
+        min-width: 0;
+        padding: 20px;
+        border-radius: var(--qv-radius-lg);
+        background: var(--qv-bg-paper);
+        box-shadow: var(--qv-shadow-card);
+      }
+
+      .card-header {
+        display: flex;
+        margin-bottom: 16px;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .card-header h2 {
+        margin-bottom: 3px;
+        font-size: 17px;
+        line-height: 1.4;
+      }
+
+      .card-header p {
+        margin-bottom: 0;
+        color: var(--qv-text-secondary);
+        font-size: 12px;
+      }
+
+      .queue-hero {
+        display: grid;
+        padding: 18px;
+        grid-template-columns: 48px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 14px;
+        border-radius: var(--qv-radius-sm);
+        background: var(--qv-primary-lighter);
+      }
+
+      .queue-hero .run-pulse {
+        width: 48px;
+        height: 48px;
+        background: var(--qv-bg-paper);
+      }
+
+      .queue-hero h3 {
+        margin-bottom: 4px;
+        font-size: 15px;
+      }
+
+      .queue-hero p {
+        margin-bottom: 0;
+        color: var(--qv-text-secondary);
+        font-size: 12px;
+      }
+
+      .queue-list,
+      .compact-list,
+      .rule-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .queue-item,
+      .compact-item,
+      .rule-item {
+        display: grid;
+        min-height: 58px;
+        padding: 10px 0;
+        align-items: center;
+        gap: 12px;
+        border-bottom: 1px dashed var(--qv-border-subtle);
+      }
+
+      .queue-item {
+        grid-template-columns: 34px minmax(0, 1fr) auto;
+      }
+
+      .queue-item:last-child,
+      .compact-item:last-child,
+      .rule-item:last-child {
+        border-bottom: 0;
+      }
+
+      .queue-position {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        place-items: center;
+        color: var(--qv-primary-dark);
+        background: var(--qv-primary-lighter);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .queue-item strong,
+      .compact-item strong {
+        display: block;
+        font-size: 13px;
+      }
+
+      .queue-item small,
+      .compact-item small {
+        color: var(--qv-text-secondary);
+        font-size: 11px;
+      }
+
+      .compact-item {
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
+
+      .health-score {
+        display: flex;
+        margin: 12px 0 18px;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      .health-score strong {
+        font-family: var(--qv-font-display);
+        font-size: 42px;
+        line-height: 1;
+      }
+
+      .health-score span {
+        color: var(--qv-text-secondary);
+      }
+
+      .rule-item {
+        grid-template-columns: minmax(0, 1fr) auto auto;
+      }
+
+      .rule-item strong {
+        font-size: 13px;
+      }
+
+      .rule-item small {
+        display: block;
+        margin-top: 2px;
+        color: var(--qv-text-secondary);
+      }
+
+      .schedule-table td,
+      .audit-table td {
+        height: 58px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+      }
+
+      .audit-action {
+        font-weight: 700;
+      }
+
+      .audit-target {
+        display: block;
+        margin-top: 2px;
+        color: var(--qv-text-secondary);
+        font-family: var(--qv-font-mono);
+        font-size: 11px;
+      }
+
+      .states-intro {
+        display: flex;
+        min-height: 52px;
+        margin-top: 12px;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .states-intro h2 {
+        margin-bottom: 2px;
+        font-size: 17px;
+      }
+
+      .states-intro p {
+        margin-bottom: 0;
+        color: var(--qv-text-secondary);
+        font-size: 12px;
+      }
+
+      .states-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .submission-inline {
+        max-width: 310px;
+        padding: 8px 11px;
+        border-radius: var(--qv-radius-sm);
+        color: var(--qv-neutral-0);
+        background: var(--qv-neutral-800);
+        box-shadow: 0 8px 20px rgb(20 26 33 / 18%);
+        font-size: 11px;
+        line-height: 1.35;
+      }
+
+      .submission-inline strong {
+        margin-right: 5px;
+      }
+
+      .states-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 420px;
+        gap: 20px;
+      }
+
+      .state-gallery {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .state-card {
+        min-height: 144px;
+        padding: 16px;
+        border-radius: var(--qv-radius-lg);
+        background: var(--qv-bg-paper);
+        box-shadow: var(--qv-shadow-card);
+      }
+
+      .state-label {
+        display: flex;
+        margin-bottom: 12px;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--qv-text-secondary);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+      }
+
+      .skeleton-line,
+      .skeleton-block {
+        overflow: hidden;
+        border-radius: 6px;
+        background: var(--qv-neutral-200);
+      }
+
+      .skeleton-line {
+        width: 80%;
+        height: 12px;
+        margin-bottom: 10px;
+      }
+
+      .skeleton-line.short {
+        width: 46%;
+      }
+
+      .skeleton-block {
+        height: 44px;
+      }
+
+      .state-symbol {
+        display: grid;
+        width: 38px;
+        height: 38px;
+        margin-bottom: 8px;
+        border-radius: 50%;
+        place-items: center;
+        color: var(--qv-text-secondary);
+        background: var(--qv-neutral-200);
+        font-size: 17px;
+        font-weight: 700;
+      }
+
+      .state-card h3 {
+        margin-bottom: 3px;
+        font-size: 14px;
+      }
+
+      .state-card p {
+        margin-bottom: 10px;
+        color: var(--qv-text-secondary);
+        font-size: 12px;
+      }
+
+      .alert {
+        padding: 10px 12px;
+        border-left: 3px solid currentcolor;
+        border-radius: 0 var(--qv-radius-sm) var(--qv-radius-sm) 0;
+        font-size: 12px;
+      }
+
+      .alert.error {
+        color: #a9321d;
+        background: var(--qv-error-soft);
+      }
+
+      .alert.warning {
+        color: #8a5607;
+        background: var(--qv-warning-soft);
+      }
+
+      .alert.info {
+        color: #086a80;
+        background: var(--qv-info-soft);
+      }
+
+      .command-panel {
+        min-height: 590px;
+        padding: 18px;
+        border-radius: var(--qv-radius-lg);
+        background: var(--qv-bg-paper);
+        box-shadow: var(--qv-shadow-drawer);
+      }
+
+      .command-panel header {
+        display: flex;
+        margin: 0 -18px 14px;
+        padding: 0 18px 14px;
+        align-items: flex-start;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--qv-border-subtle);
+      }
+
+      .command-panel h2 {
+        margin-bottom: 2px;
+        font-size: 17px;
+      }
+
+      .command-panel header p {
+        margin-bottom: 0;
+        color: var(--qv-text-secondary);
+        font-size: 12px;
+      }
+
+      .preflight {
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        border-radius: var(--qv-radius-sm);
+        color: #086a80;
+        background: var(--qv-info-soft);
+        font-size: 12px;
+      }
+
+      .task-config {
+        padding: 12px 0;
+        border-bottom: 1px dashed var(--qv-border-subtle);
+      }
+
+      .task-config:last-of-type {
+        border-bottom: 0;
+      }
+
+      .task-config-head {
+        display: flex;
+        margin-bottom: 8px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .task-config-head strong {
+        overflow: hidden;
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .mode-group {
+        display: inline-flex;
+        padding: 3px;
+        border-radius: var(--qv-radius-sm);
+        background: var(--qv-bg-neutral);
+      }
+
+      .mode {
+        min-height: 28px;
+        padding: 4px 9px;
+        border: 0;
+        border-radius: 6px;
+        color: var(--qv-text-secondary);
+        background: transparent;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .mode.selected {
+        color: var(--qv-primary-dark);
+        background: var(--qv-bg-paper);
+        box-shadow: 0 1px 4px rgb(145 158 171 / 22%);
+      }
+
+      .date-row {
+        display: grid;
+        margin-top: 8px;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .date-box {
+        height: 36px;
+        padding: 8px 9px;
+        border: 1px solid var(--qv-border-subtle);
+        border-radius: var(--qv-radius-sm);
+        color: var(--qv-text-secondary);
+        font-size: 11px;
+      }
+
+      .observation-row {
+        display: flex;
+        min-height: 34px;
+        margin-top: 8px;
+        padding: 7px 9px;
+        align-items: center;
+        justify-content: space-between;
+        border: 1px solid var(--qv-border-subtle);
+        border-radius: var(--qv-radius-sm);
+        font-size: 11px;
+      }
+
+      .confirm-row {
+        display: flex;
+        margin-top: 14px;
+        align-items: flex-start;
+        gap: 8px;
+        color: var(--qv-text-secondary);
+        font-size: 11px;
+      }
+
+      .command-actions {
+        display: flex;
+        margin-top: 14px;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .drawer-preview {
+        position: fixed;
+        z-index: 20;
+        top: var(--qv-appbar-height);
+        right: 0;
+        display: none;
+        width: 360px;
+        height: calc(100vh - var(--qv-appbar-height));
+        overflow-y: auto;
+        padding: 24px;
+        border-left: 1px solid var(--qv-border-subtle);
+        background: rgb(255 255 255 / 96%);
+        box-shadow: var(--qv-shadow-drawer);
+        backdrop-filter: blur(20px);
+      }
+
+      body[data-scene="detail"] .drawer-preview {
+        display: block;
+      }
+
+      body[data-scene="detail"] .main-scroll::after {
+        position: fixed;
+        z-index: 19;
+        inset: var(--qv-appbar-height) 360px 0 var(--qv-sidebar-width);
+        background: rgb(20 26 33 / 16%);
+        content: "";
+      }
+
+      .drawer-preview header {
+        display: flex;
+        margin-bottom: 20px;
+        align-items: flex-start;
+        justify-content: space-between;
+      }
+
+      .drawer-preview h2 {
+        margin-bottom: 3px;
+        font-size: 18px;
+      }
+
+      .drawer-preview header p {
+        margin-bottom: 0;
+        color: var(--qv-text-secondary);
+        font-family: var(--qv-font-mono);
+        font-size: 11px;
+      }
+
+      .detail-section {
+        padding: 16px 0;
+        border-top: 1px dashed var(--qv-border-subtle);
+      }
+
+      .detail-section h3 {
+        margin-bottom: 10px;
+        font-size: 13px;
+      }
+
+      .detail-grid {
+        display: grid;
+        grid-template-columns: 100px minmax(0, 1fr);
+        gap: 8px;
+        font-size: 12px;
+      }
+
+      .detail-grid dt {
+        color: var(--qv-text-secondary);
+      }
+
+      .detail-grid dd {
+        margin: 0;
+        text-align: right;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        :root {
+          --qv-duration-fast: 0ms;
+        }
+
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important;
+        }
+      }
+
+      @media print {
+        html,
+        body {
+          min-width: 0;
+          height: auto;
+          overflow: visible;
+        }
+
+        .app-shell {
+          display: block;
+        }
+
+        .sidebar,
+        .topbar,
+        .drawer-preview {
+          display: none !important;
+        }
+
+        .workspace,
+        .main-scroll {
+          display: block;
+          overflow: visible;
+          background: #fff;
+        }
+
+        .content {
+          width: 100%;
+          padding: 0;
+        }
+
+        .card,
+        .table-card,
+        .run-strip,
+        .metric-card,
+        .filter-band {
+          box-shadow: none;
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body data-scene="assets">
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <a
+          class="brand"
+          href="?scene=assets"
+          aria-label="Apex 数据智能分析平台"
+        >
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>Apex数据智能分析平台</span>
+        </a>
+
+        <nav class="side-nav">
+          <section class="nav-group" aria-labelledby="nav-workspace">
+            <p class="nav-group-title" id="nav-workspace">工作区</p>
+            <ul class="nav-list">
+              <li>
+                <a class="nav-link" href="#"
+                  ><span class="nav-icon">⌂</span>平台工作台</a
+                >
+              </li>
+            </ul>
+          </section>
+
+          <section class="nav-group" aria-labelledby="nav-personal">
+            <p class="nav-group-title" id="nav-personal">个人</p>
+            <ul class="nav-list">
+              <li>
+                <a class="nav-link" href="#"
+                  ><span class="nav-icon">♙</span>我的账户</a
+                >
+              </li>
+            </ul>
+          </section>
+
+          <section class="nav-group" aria-labelledby="nav-data">
+            <p class="nav-group-title" id="nav-data">数据管理</p>
+            <ul class="nav-list">
+              <li>
+                <a
+                  class="nav-link selected"
+                  href="?scene=assets"
+                  aria-current="page"
+                >
+                  <span class="nav-icon">▦</span>数据运维
+                </a>
+              </li>
+            </ul>
+          </section>
+
+          <section class="nav-group" aria-labelledby="nav-system">
+            <p class="nav-group-title" id="nav-system">系统管理</p>
+            <ul class="nav-list">
+              <li>
+                <a class="nav-link" href="#"
+                  ><span class="nav-icon">♧</span>用户管理</a
+                >
+              </li>
+              <li>
+                <a class="nav-link" href="#"
+                  ><span class="nav-icon">▤</span>安全审计</a
+                >
+              </li>
+            </ul>
+          </section>
+        </nav>
+
+        <aside class="sidebar-footnote">
+          <strong>生产环境 · Asia/Shanghai</strong>
+          当前角色：超级管理员
+        </aside>
+      </aside>
+
+      <div class="workspace">
+        <header class="topbar">
+          <button
+            class="global-search"
+            type="button"
+            aria-label="全局搜索功能尚未开放"
+          >
+            <span class="search-symbol" aria-hidden="true">⌕</span>
+            <span>搜索股票、页面或功能</span>
+            <span class="keycap">⌘ K</span>
+          </button>
+
+          <div class="top-actions">
+            <button
+              class="icon-button"
+              type="button"
+              aria-label="通知功能尚未开放"
+            >
+              ♧
+            </button>
+            <button
+              class="icon-button"
+              type="button"
+              aria-label="帮助与系统提示"
+            >
+              ?
+            </button>
+            <button class="account" type="button" aria-label="打开用户菜单">
+              <span class="avatar">系</span>
+              <span class="account-copy">
+                <strong>系统管理员</strong>
+                <small>超级管理员</small>
+              </span>
+              <span aria-hidden="true">⌄</span>
+            </button>
+          </div>
+        </header>
+
+        <main class="main-scroll" id="main-content">
+          <div class="content">
+            <header class="page-heading">
+              <div>
+                <div class="breadcrumbs" aria-label="当前位置">
+                  <span>数据管理</span><span>/</span><span>数据运维</span>
+                </div>
+                <h1>数据运维</h1>
+                <p>
+                  查看数据、追踪来源与新鲜度；所有主动任务进入全局串行队列。
+                </p>
+              </div>
+              <div class="heading-actions">
+                <button class="button outlined" type="button">
+                  <span aria-hidden="true">↻</span>刷新
+                </button>
+                <a class="button primary" href="?scene=states">
+                  <span aria-hidden="true">＋</span>下发同步任务
+                </a>
+              </div>
+            </header>
+
+            <section class="run-strip" aria-label="全局同步运行状态">
+              <span class="run-pulse" aria-hidden="true"></span>
+              <div class="run-copy">
+                <strong>
+                  全局串行执行
+                  <span class="chip running">运行中</span>
+                </strong>
+                <small
+                  >equity.bar.1d.raw · SSE.600519 · 增量同步 ·
+                  RUN-20260729-103801</small
+                >
+              </div>
+              <div
+                class="progress-block"
+                aria-label="已处理四千九百八十二条，预计八千零一十二条，进度百分之六十二"
+              >
+                <div class="progress-meta">
+                  <span>已处理 4,982 / 预计 8,012 条</span><strong>62%</strong>
+                </div>
+                <div class="progress-track">
+                  <span class="progress-value"></span>
+                </div>
+              </div>
+              <div class="queue-count">
+                <strong>3</strong>个排队 · 已运行 02:41
+              </div>
+            </section>
+
+            <nav class="tabs" aria-label="数据运维分区">
+              <a class="tab" data-scene-link="assets" href="?scene=assets"
+                >数据资产</a
+              >
+              <a class="tab" data-scene-link="queue" href="?scene=queue"
+                >同步任务</a
+              >
+              <a class="tab" data-scene-link="health" href="?scene=health"
+                >健康度</a
+              >
+              <a class="tab" data-scene-link="schedules" href="?scene=schedules"
+                >自动计划</a
+              >
+              <a class="tab" data-scene-link="audit" href="?scene=audit"
+                >操作记录</a
+              >
+            </nav>
+
+            <section class="scene scene-assets" aria-label="数据资产">
+              <div class="metric-grid">
+                <article class="metric-card">
+                  <div class="metric-label">
+                    <span>已登记数据集</span><span aria-hidden="true">▦</span>
+                  </div>
+                  <div class="metric-value">27</div>
+                  <div class="metric-foot">12 个业务域 · 1 个停用</div>
+                </article>
+                <article class="metric-card">
+                  <div class="metric-label">
+                    <span>服务端判定新鲜</span><span aria-hidden="true">✓</span>
+                  </div>
+                  <div class="metric-value">22</div>
+                  <div class="metric-foot success">FRESH · 81.5%</div>
+                </article>
+                <article class="metric-card">
+                  <div class="metric-label">
+                    <span>需关注</span><span aria-hidden="true">!</span>
+                  </div>
+                  <div class="metric-value">4</div>
+                  <div class="metric-foot warning">
+                    过期 2 · 警告 1 · 失败 1
+                  </div>
+                </article>
+                <article class="metric-card">
+                  <div class="metric-label">
+                    <span>最近 24 小时</span><span aria-hidden="true">↻</span>
+                  </div>
+                  <div class="metric-value">36</div>
+                  <div class="metric-foot">成功 33 · 部分 2 · 失败 1</div>
+                </article>
+              </div>
+
+              <section class="filter-band" aria-label="数据资产筛选">
+                <label class="field">
+                  <span aria-hidden="true">⌕</span>
+                  <input
+                    type="search"
+                    placeholder="数据集名称或 code"
+                    aria-label="搜索数据集"
+                  />
+                </label>
+                <label class="field">
+                  <select aria-label="供应商">
+                    <option>全部供应商</option>
+                    <option>AKShare</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <select aria-label="上游来源">
+                    <option>全部上游来源</option>
+                    <option>东方财富</option>
+                    <option>同花顺</option>
+                    <option>交易所</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <select aria-label="观测状态">
+                    <option>全部观测状态</option>
+                    <option>有数据</option>
+                    <option>合法空集</option>
+                    <option>异常空集</option>
+                    <option>从未同步</option>
+                    <option>暂不可判定</option>
+                  </select>
+                </label>
+                <div class="filter-actions">
+                  <span class="selection-count">已选 2 项</span>
+                  <a class="button outlined small" href="?scene=states"
+                    >批量同步</a
+                  >
+                  <button class="button small" type="button">重置</button>
+                </div>
+              </section>
+
+              <div class="list-meta">
+                <span
+                  ><strong>数据目录</strong>显示 27 个数据集中的 5 个 · 更新于
+                  10:39:12</span
+                >
+                <span
+                  >观测：有数据 24 · 合法空集 1 · 异常空集 1 · 从未同步 1</span
+                >
+              </div>
+
+              <section class="table-card" aria-label="数据资产目录">
+                <div class="table-scroll">
+                  <table>
+                    <colgroup>
+                      <col style="width: 38px" />
+                      <col style="width: 202px" />
+                      <col style="width: 160px" />
+                      <col style="width: 175px" />
+                      <col style="width: 174px" />
+                      <col style="width: 110px" />
+                      <col style="width: 108px" />
+                      <col style="width: 74px" />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>
+                          <input
+                            class="checkbox"
+                            type="checkbox"
+                            aria-label="选择当前页全部数据集"
+                          />
+                        </th>
+                        <th>数据集</th>
+                        <th>供应商 / 上游来源</th>
+                        <th>数据时点 / 发布</th>
+                        <th>最近尝试 / 最近成功</th>
+                        <th>健康度</th>
+                        <th>自动计划</th>
+                        <th style="text-align: right">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>
+                          <input
+                            class="checkbox"
+                            type="checkbox"
+                            checked
+                            aria-label="选择 A 股日线"
+                          />
+                        </td>
+                        <td>
+                          <div class="dataset-name">
+                            <strong>A 股未复权日线</strong>
+                            <span class="code">equity.bar.1d.raw</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="source-cell">
+                            <strong>AKShare</strong>
+                            <small>腾讯 · stock_zh_a_hist_tx</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="time-cell">
+                            <strong>数据截至 07-28</strong>
+                            <small>最近发布 07-29 10:34</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="status-line">
+                            <span class="chip running">运行中</span
+                            ><strong>开始 10:38</strong>
+                          </div>
+                          <div class="time-cell">
+                            <small>未结束 · 成功 09:31</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="health-cell">
+                            <span class="chip success">98 分</span
+                            ><small>0 条严重</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="time-cell">
+                            <strong>交易日 18:10</strong><small>下次今天</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="row-actions">
+                            <a class="row-action" href="?scene=detail">详情</a>
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <input
+                            class="checkbox"
+                            type="checkbox"
+                            checked
+                            aria-label="选择证券主数据"
+                          />
+                        </td>
+                        <td>
+                          <div class="dataset-name">
+                            <strong>A 股证券主数据</strong>
+                            <span class="code">equity.master.catalog</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="source-cell">
+                            <strong>AKShare</strong>
+                            <small>东方财富 · 沪深北目录</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="time-cell">
+                            <strong>数据截至 07-29</strong>
+                            <small>最近发布 09:06</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="status-line">
+                            <span class="chip success">成功</span
+                            ><strong>开始 09:01</strong>
+                          </div>
+                          <div class="time-cell">
+                            <small>结束 09:06 · 成功 09:06</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="health-cell">
+                            <span class="chip success">100 分</span
+                            ><small>全部通过</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="time-cell">
+                            <strong>每日 08:50</strong><small>下次明天</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="row-actions">
+                            <a class="row-action" href="?scene=detail">详情</a>
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <input
+                            class="checkbox"
+                            type="checkbox"
+                            aria-label="选择 ETF 净值"
+                          />
+                        </td>
+                        <td>
+                          <div class="dataset-name">
+                            <strong>ETF 日净值</strong>
+                            <span class="code">fund.etf.nav.1d.reported</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="source-cell">
+                            <strong>AKShare</strong>
+                            <small>东方财富 · ETF 净值</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="time-cell">
+                            <strong>数据截至 07-25</strong>
+                            <small>最近发布 07-26 07:42</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="status-line">
+                            <span class="chip success">成功</span
+                            ><strong>开始 07:37</strong>
+                          </div>
+                          <div class="time-cell">
+                            <small>结束 07:42 · 成功 07:42</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="health-cell">
+                            <span class="chip warning">STALE</span
+                            ><small>服务端 · 落后 2 日</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="time-cell">
+                            <strong>未启用</strong><small>手动任务</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="row-actions">
+                            <a class="row-action" href="?scene=detail">详情</a>
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <input
+                            class="checkbox"
+                            type="checkbox"
+                            aria-label="选择资金流排行"
+                          />
+                        </td>
+                        <td>
+                          <div class="dataset-name">
+                            <strong>资金流供应商排行</strong>
+                            <span class="code">money_flow.ranking</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="source-cell">
+                            <strong>AKShare</strong>
+                            <small>同花顺 · 主动方向排行</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="time-cell">
+                            <strong>数据截至 07-28</strong>
+                            <small>最近发布 07-28 18:36</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="status-line">
+                            <span class="chip error">失败</span
+                            ><strong>开始 09:18</strong>
+                          </div>
+                          <div class="time-cell">
+                            <small>结束 09:20 · 成功 07-28</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="health-cell">
+                            <span class="chip warning">警告</span
+                            ><small>1 条待复核</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="time-cell">
+                            <strong>交易日 18:35</strong
+                            ><small>已暂停重试</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="row-actions">
+                            <a class="row-action" href="?scene=detail">详情</a>
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <input
+                            class="checkbox"
+                            type="checkbox"
+                            aria-label="选择板块成分"
+                          />
+                        </td>
+                        <td>
+                          <div class="dataset-name">
+                            <strong>东方财富板块成分</strong>
+                            <span class="code">sector.membership.release</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="source-cell">
+                            <strong>AKShare</strong>
+                            <small>东方财富 · 行业 / 概念板块</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="time-cell">
+                            <strong>观察日 07-29</strong>
+                            <small>最近发布 08:22</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="status-line">
+                            <span class="chip success">成功</span
+                            ><strong>开始 08:18</strong>
+                          </div>
+                          <div class="time-cell">
+                            <small>结束 08:22 · 成功 08:22</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="health-cell">
+                            <span class="chip success">97 分</span
+                            ><small>覆盖完整</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="time-cell">
+                            <strong>每日 08:20</strong><small>下次明天</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="row-actions">
+                            <a class="row-action" href="?scene=detail">详情</a>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="pager">
+                  <span>每页 20 条 · 本页 5 条</span>
+                  <div class="pager-actions">
+                    <button class="button small" type="button" disabled>
+                      首页
+                    </button>
+                    <button class="button outlined small" type="button">
+                      下一页
+                    </button>
+                  </div>
+                </div>
+              </section>
+            </section>
+
+            <section class="scene scene-queue" aria-label="同步任务">
+              <div class="two-column">
+                <article class="card">
+                  <div class="card-header">
+                    <div>
+                      <h2>批量命令 CMD-8421</h2>
+                      <p>
+                        commands/detail 唯一恢复 / 聚合来源 · childRuns 保持原
+                        target 顺序。
+                      </p>
+                    </div>
+                    <span class="chip running">RUNNING</span>
+                  </div>
+                  <div class="queue-hero">
+                    <span class="run-pulse" aria-hidden="true"></span>
+                    <div>
+                      <h3>A 股未复权日线 · SSE.600519</h3>
+                      <p>
+                        增量 · 已处理 4,982 / 预计 8,012 条 · 已运行 02:41 ·
+                        RUN-A200
+                      </p>
+                    </div>
+                    <button class="button outlined small" type="button">
+                      取消此 RUN
+                    </button>
+                  </div>
+                  <ol class="queue-list" aria-label="等待中的任务">
+                    <li class="queue-item">
+                      <span class="queue-position">1</span>
+                      <span
+                        ><strong>ETF 日净值 · 全市场</strong
+                        ><small>增量 · RUN-A201 · 系统管理员</small></span
+                      >
+                      <span class="chip neutral">已排队</span>
+                    </li>
+                    <li class="queue-item">
+                      <span class="queue-position">2</span>
+                      <span
+                        ><strong>A 股证券主数据 · 沪深北</strong
+                        ><small>观察日 2026-07-29 · RUN-A202</small></span
+                      >
+                      <span class="chip neutral">已排队</span>
+                    </li>
+                    <li class="queue-item">
+                      <span class="queue-position">3</span>
+                      <span
+                        ><strong>东方财富板块成分</strong
+                        ><small>观察日 2026-07-29 · RUN-A203</small></span
+                      >
+                      <span class="chip neutral">已排队</span>
+                    </li>
+                  </ol>
+                  <div class="alert info">
+                    取消 / 重试必须选择作用域：COMMAND 作用整批，RUN
+                    只作用当前子任务。Submission 的 queuePosition
+                    仅表示新命令首个 child 的受理快照；其余位置读 commands/detail。
+                  </div>
+                </article>
+
+                <aside class="card">
+                  <div class="card-header">
+                    <div>
+                      <h2>任务概况</h2>
+                      <p>最近 24 小时</p>
+                    </div>
+                  </div>
+                  <ul class="compact-list">
+                    <li class="compact-item">
+                      <span><strong>待执行</strong><small>QUEUED</small></span
+                      ><b>3</b>
+                    </li>
+                    <li class="compact-item">
+                      <span
+                        ><strong>执行态</strong
+                        ><small>RUNNING / CANCEL_REQUESTED</small></span
+                      ><b>1</b>
+                    </li>
+                    <li class="compact-item">
+                      <span
+                        ><strong>完成态</strong
+                        ><small>SUCCEEDED / PARTIAL / FAILED</small></span
+                      ><b>36</b>
+                    </li>
+                    <li class="compact-item">
+                      <span
+                        ><strong>结束态</strong
+                        ><small>CANCELLED / INTERRUPTED / SKIPPED</small></span
+                      ><b>4</b>
+                    </li>
+                  </ul>
+                  <div class="alert info" style="margin-top: 12px">
+                    <strong>RunDetail sourceSnapshot</strong><br />
+                    AKShare / 腾讯 / akshare-tencent / methodology v3 ·
+                    受理时冻结。
+                  </div>
+                  <div class="alert warning" style="margin-top: 12px">
+                    <strong>ExecutionSlot RECOVERING</strong><br />
+                    恢复时暂停领取下一任务；已提交任务继续排队。
+                  </div>
+                  <div class="alert error" style="margin-top: 10px">
+                    <strong>RunDetail · ingestion qualityGate=BLOCKED</strong
+                    ><br />
+                    QUALITY_GATE · schema-drift · 不可重试；当前 publication
+                    保持不变。公开详情不展示内部 checkpoint。
+                  </div>
+                </aside>
+              </div>
+            </section>
+
+            <section class="scene scene-health" aria-label="健康度">
+              <div class="two-column">
+                <article class="card">
+                  <div class="card-header">
+                    <div>
+                      <h2>健康检查结果</h2>
+                      <p>
+                        HealthEvaluation 是绑定 dataVersion / policyVersion
+                        的不可变事实；CRITICAL 只表示既有版本严重异常。
+                      </p>
+                    </div>
+                    <button class="button primary small" type="button">
+                      主动检查
+                    </button>
+                  </div>
+                  <div class="alert info" style="margin-bottom: 12px">
+                    <strong>批量检查 HC-3A14 · HealthCheckDetailView</strong><br />
+                    按原 target 顺序：RUNNING · SUCCEEDED（EVAL-91A2） ·
+                    FAILED（HEALTH_EVALUATION，可重试）；刷新后仍可按 healthCheckId
+                    恢复。
+                  </div>
+                  <ul class="rule-list">
+                    <li class="rule-item">
+                      <span
+                        ><strong>数据完整性</strong
+                        ><small>交易日、分区与预期证券覆盖</small></span
+                      >
+                      <span>24 / 27</span
+                      ><span class="chip warning">3 异常</span>
+                    </li>
+                    <li class="rule-item">
+                      <span
+                        ><strong>唯一性与主键</strong
+                        ><small>重复业务键、代码复用冲突</small></span
+                      >
+                      <span>27 / 27</span><span class="chip success">通过</span>
+                    </li>
+                    <li class="rule-item">
+                      <span
+                        ><strong>值域与关系</strong
+                        ><small>价格、成交量、父子分类、状态转换</small></span
+                      >
+                      <span>26 / 27</span
+                      ><span class="chip warning">1 警告</span>
+                    </li>
+                    <li class="rule-item">
+                      <span
+                        ><strong>新鲜度</strong
+                        ><small>按交易日历与数据集 SLA 计算</small></span
+                      >
+                      <span>25 / 27</span><span class="chip error">2 过期</span>
+                    </li>
+                  </ul>
+                </article>
+
+                <aside class="card">
+                  <div class="card-header">
+                    <div>
+                      <h2>平台健康度</h2>
+                      <p>分数只作辅助，严重规则优先。</p>
+                    </div>
+                    <span class="chip warning">需关注</span>
+                  </div>
+                  <div class="health-score">
+                    <strong>94</strong><span>/ 100</span>
+                  </div>
+                  <div class="alert warning">
+                    4 个数据集需处理：2 个过期、1 个规则警告、1 个同步失败。
+                  </div>
+                  <ul class="compact-list" style="margin-top: 10px">
+                    <li class="compact-item">
+                      <span
+                        ><strong>当前开放问题投影</strong
+                        ><small>issueProjectionAsOf 10:12 · 仅 OPEN / ACKNOWLEDGED</small></span
+                      ><b>12</b>
+                    </li>
+                    <li class="compact-item">
+                      <span
+                        ><strong>严重健康版本</strong
+                        ><small>publication 继续可见</small></span
+                      ><b>1</b>
+                    </li>
+                  </ul>
+                </aside>
+              </div>
+            </section>
+
+            <section class="scene scene-schedules" aria-label="自动计划">
+              <div class="scene-panel">
+                <div class="card-header">
+                  <div>
+                    <h2>自动同步计划</h2>
+                    <p>
+                      超级管理员可编辑；所有计划使用 Asia/Shanghai
+                      并进入同一全局串行队列。
+                    </p>
+                  </div>
+                  <button class="button primary small" type="button">
+                    新建计划
+                  </button>
+                </div>
+                <div class="alert info" style="margin-bottom: 14px">
+                  表单只显示 scheduleSupportedModes；v1
+                  无日期范围。targetPolicy 只来自
+                  scheduleTargetPolicyOptions；v1 每个 datasetCode 至多一个计划，
+                  重复创建返回 409，编辑不可改绑。
+                </div>
+                <section class="table-card">
+                  <div class="table-scroll">
+                    <table class="schedule-table">
+                      <thead>
+                        <tr>
+                          <th style="width: 27%">数据集</th>
+                          <th style="width: 14%">频率</th>
+                          <th style="width: 16%">同步策略</th>
+                          <th style="width: 17%">下次运行</th>
+                          <th style="width: 13%">状态</th>
+                          <th style="width: 13%; text-align: right">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td>
+                            <strong>A 股未复权日线</strong
+                            ><span class="code">equity.bar.1d.raw</span>
+                          </td>
+                          <td>交易日 18:10</td>
+                          <td>增量</td>
+                          <td>今天 18:10</td>
+                          <td><span class="chip success">已启用</span></td>
+                          <td style="text-align: right">
+                            <a class="row-action" href="#">编辑</a>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td>
+                            <strong>A 股证券主数据</strong
+                            ><span class="code">equity.master.catalog</span>
+                          </td>
+                          <td>每日 08:50</td>
+                          <td>
+                            观察日 · 计划本地日<br /><span class="code"
+                              >policy v2</span
+                            >
+                          </td>
+                          <td>明天 08:50</td>
+                          <td><span class="chip success">已启用</span></td>
+                          <td style="text-align: right">
+                            <a class="row-action" href="#">编辑</a>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td>
+                            <strong>资金流供应商排行</strong
+                            ><span class="code">money_flow.ranking</span>
+                          </td>
+                          <td>交易日 18:35</td>
+                          <td>增量</td>
+                          <td>—</td>
+                          <td><span class="chip warning">已暂停</span></td>
+                          <td style="text-align: right">
+                            <a class="row-action" href="#">编辑</a>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td>
+                            <strong>东方财富板块成分</strong
+                            ><span class="code">sector.membership.release</span>
+                          </td>
+                          <td>每日 08:20</td>
+                          <td>
+                            观察日 · 最近交易日<br /><span class="code"
+                              >policy v1</span
+                            >
+                          </td>
+                          <td>明天 08:20</td>
+                          <td><span class="chip success">已启用</span></td>
+                          <td style="text-align: right">
+                            <a class="row-action" href="#">编辑</a>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
+            </section>
+
+            <section class="scene scene-audit" aria-label="操作记录">
+              <section
+                class="filter-band"
+                style="
+                  grid-template-columns:
+                    170px 170px minmax(240px, 1fr)
+                    160px auto;
+                "
+              >
+                <label class="field">
+                  <select aria-label="操作类型">
+                    <option>全部操作</option>
+                    <option>下发同步</option>
+                    <option>健康检查</option>
+                    <option>修改计划</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <select aria-label="操作结果">
+                    <option>全部结果</option>
+                    <option>成功</option>
+                    <option>失败</option>
+                    <option>进行中</option>
+                  </select>
+                </label>
+                <label class="field"
+                  ><input
+                    type="search"
+                    placeholder="操作人、数据集或 submission ID"
+                    aria-label="搜索操作记录"
+                /></label>
+                <label class="field"
+                  ><input value="最近 7 天" aria-label="时间范围" readonly
+                /></label>
+                <button class="button primary small" type="button">
+                  应用筛选
+                </button>
+              </section>
+              <div class="list-meta">
+                <span
+                  ><strong>主动操作记录</strong
+                  >同时展示 USER 与 SYSTEM ActorDisplay；交付与动作结果分开。</span
+                >
+                <span>本页 5 条 · ADMIN / 超级管理员可读</span>
+              </div>
+              <section class="table-card">
+                <div class="table-scroll">
+                  <table class="audit-table">
+                    <thead>
+                      <tr>
+                        <th style="width: 15%">时间</th>
+                        <th style="width: 15%">操作人</th>
+                        <th style="width: 29%">操作 / 目标</th>
+                        <th style="width: 15%">交付 / 动作结果</th>
+                        <th style="width: 18%">关联标识</th>
+                        <th style="width: 8%; text-align: right">详情</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>今天 10:38:01</td>
+                        <td>
+                          <strong>系统管理员</strong
+                          ><span class="code">USER · ActorDisplay</span>
+                        </td>
+                        <td>
+                          <span class="audit-action"
+                            >批量下发 3 个同步子任务</span
+                          ><span class="audit-target"
+                            >3 datasets · mixed capabilities</span
+                          >
+                        </td>
+                        <td><span class="chip running">执行中</span></td>
+                        <td><span class="code">CMD-8421 · REQ-91D2</span></td>
+                        <td style="text-align: right">
+                          <a class="row-action" href="#">查看</a>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>今天 10:12:44</td>
+                        <td>
+                          <strong>系统管理员</strong
+                          ><span class="code">USER · ActorDisplay</span>
+                        </td>
+                        <td>
+                          <span class="audit-action">主动运行健康检查</span
+                          ><span class="audit-target">money_flow.ranking</span>
+                        </td>
+                        <td><span class="chip success">成功</span></td>
+                        <td><span class="code">HC-3A14 · REQ-7C90</span></td>
+                        <td style="text-align: right">
+                          <a class="row-action" href="#">查看</a>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>今天 09:46:27</td>
+                        <td>
+                          <strong>系统计划</strong
+                          ><span class="code">SYSTEM · SCHEDULE</span>
+                        </td>
+                        <td>
+                          <span class="audit-action">暂停自动计划</span
+                          ><span class="audit-target">money_flow.ranking</span>
+                        </td>
+                        <td><span class="chip success">成功</span></td>
+                        <td><span class="code">SCH-22A8 · REQ-27F1</span></td>
+                        <td style="text-align: right">
+                          <a class="row-action" href="#">查看</a>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>昨天 18:44:10</td>
+                        <td>
+                          <strong>已删除用户</strong
+                          ><span class="code">USER · deleted</span>
+                        </td>
+                        <td>
+                          <span class="audit-action"
+                            >重试失败任务 · RUN 作用域</span
+                          ><span class="audit-target">RUN-20260728-183601</span>
+                        </td>
+                        <td><span class="chip error">失败</span></td>
+                        <td><span class="code">CMD-83F0 · REQ-119C</span></td>
+                        <td style="text-align: right">
+                          <a class="row-action" href="#">查看</a>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </section>
+
+            <section class="scene scene-states" aria-label="状态与动作集合">
+              <div class="states-intro">
+                <div>
+                  <h2>状态与动作集合</h2>
+                  <p>
+                    静态 fixture：验证远程状态、权限降级与 capability-aware
+                    同步预检。
+                  </p>
+                </div>
+                <div class="states-actions">
+                  <div class="submission-inline" role="status">
+                    <strong>已提交，等待同步服务受理</strong>PENDING · SUB-8F21
+                  </div>
+                  <a class="button outlined small" href="?scene=assets"
+                    >返回数据资产</a
+                  >
+                </div>
+              </div>
+
+              <div class="states-grid">
+                <div class="state-gallery">
+                  <article class="state-card" aria-label="加载状态">
+                    <div class="state-label">
+                      <span>LOADING</span><span>目录加载</span>
+                    </div>
+                    <div class="skeleton-line"></div>
+                    <div class="skeleton-line short"></div>
+                    <div class="skeleton-block"></div>
+                  </article>
+                  <article class="state-card" aria-label="空状态">
+                    <div class="state-label">
+                      <span>OBSERVATION</span><span>空状态不合并</span>
+                    </div>
+                    <span class="state-symbol" aria-hidden="true">∅</span>
+                    <h3>空不等于一种结果</h3>
+                    <p>
+                      合法空集 · 异常空集 · 从未同步，分别按 observationState
+                      展示。
+                    </p>
+                    <button class="button text small" type="button">
+                      查看状态原因
+                    </button>
+                  </article>
+                  <article class="state-card" aria-label="部分数据状态">
+                    <div class="state-label">
+                      <span>PARTIAL</span><span>部分可用</span>
+                    </div>
+                    <div class="alert warning">
+                      资产目录可用；同步任务摘要暂时不可用。最后完整更新 10:32。
+                    </div>
+                    <p class="code">估算未知 · 已处理 1,204 条 · 无百分比</p>
+                    <button
+                      class="button text small"
+                      type="button"
+                      style="margin-top: 8px"
+                    >
+                      重试摘要
+                    </button>
+                  </article>
+                  <article class="state-card" aria-label="错误状态">
+                    <div class="state-label">
+                      <span>ERROR</span><span>可恢复失败</span>
+                    </div>
+                    <div class="alert error">
+                      请求失败（dataops-temporarily-unavailable）。已保留旧数据。
+                    </div>
+                    <button
+                      class="button text small"
+                      type="button"
+                      style="margin-top: 8px"
+                    >
+                      重试
+                    </button>
+                  </article>
+                  <article class="state-card" aria-label="权限不足状态">
+                    <div class="state-label">
+                      <span>FORBIDDEN</span><span>只读降级</span>
+                    </div>
+                    <span class="state-symbol" aria-hidden="true">⌁</span>
+                    <h3>可查看，不能主动操作</h3>
+                    <p>
+                      管理员首版只读；同步、健康检查与计划变更仅超级管理员可用。
+                    </p>
+                  </article>
+                  <article class="state-card" aria-label="异步拒绝状态">
+                    <div class="state-label">
+                      <span>REJECTED</span><span>异步投递结果</span>
+                    </div>
+                    <div class="alert error">
+                      同步服务异步拒绝：预检后 capability 已变化。未创建 command
+                      / run。
+                    </div>
+                    <button
+                      class="button text small"
+                      type="button"
+                      style="margin-top: 8px"
+                    >
+                      重新预检
+                    </button>
+                  </article>
+                </div>
+
+                <aside class="command-panel" aria-label="下发同步任务">
+                  <header>
+                    <div>
+                      <h2>下发同步任务</h2>
+                      <p>3 个数据集 · capability preflight 已完成</p>
+                    </div>
+                    <a
+                      class="icon-button"
+                      href="?scene=assets"
+                      aria-label="关闭同步任务面板"
+                      >×</a
+                    >
+                  </header>
+
+                  <div class="preflight">
+                    ExecutionSlot
+                    RECOVERING：恢复期间暂停领取下一任务。提交后先进入
+                    PENDING，不承诺队列位置。
+                  </div>
+
+                  <section class="task-config">
+                    <div class="task-config-head">
+                      <strong>1. A 股未复权日线</strong>
+                      <span class="chip info no-dot">支持 3 种策略</span>
+                    </div>
+                    <div class="mode-group" aria-label="A 股日线同步策略">
+                      <button class="mode" type="button">增量</button>
+                      <button class="mode" type="button">全量</button>
+                      <button class="mode selected" type="button">
+                        日期范围
+                      </button>
+                    </div>
+                    <div class="date-row" aria-label="日期范围">
+                      <span class="date-box">2026-07-01</span>
+                      <span>—</span>
+                      <span class="date-box">2026-07-28</span>
+                    </div>
+                  </section>
+
+                  <section class="task-config">
+                    <div class="task-config-head">
+                      <strong>2. ETF 日净值</strong>
+                      <span class="chip info no-dot">增量 / 日期范围</span>
+                    </div>
+                    <div class="mode-group" aria-label="ETF 日净值同步策略">
+                      <button class="mode selected" type="button">增量</button>
+                      <button class="mode" type="button">日期范围</button>
+                    </div>
+                  </section>
+
+                  <section class="task-config">
+                    <div class="task-config-head">
+                      <strong>3. 东方财富板块成分</strong>
+                      <span class="chip warning no-dot">仅观察日</span>
+                    </div>
+                    <div class="observation-row">
+                      <span>观察日</span><strong>2026-07-29</strong>
+                    </div>
+                  </section>
+
+                  <label class="confirm-row">
+                    <input class="checkbox" type="checkbox" checked />
+                    <span
+                      >确认按以上顺序创建 3
+                      个独立子任务；失败不会自动跳过审计记录。</span
+                    >
+                  </label>
+
+                  <div class="command-actions">
+                    <a class="button" href="?scene=assets">取消</a>
+                    <button class="button primary" type="button">
+                      提交同步意图（3）
+                    </button>
+                  </div>
+                </aside>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <aside class="drawer-preview" aria-label="数据集详情">
+      <header>
+        <div>
+          <h2>A 股未复权日线</h2>
+          <p>equity.bar.1d.raw</p>
+        </div>
+        <a class="icon-button" href="?scene=assets" aria-label="关闭详情">×</a>
+      </header>
+
+      <div class="status-line">
+        <span class="chip running">运行中</span>
+        <span class="chip success">健康 98 分</span>
+      </div>
+
+      <section class="detail-section">
+        <h3>当前来源血缘</h3>
+        <dl class="detail-grid">
+          <dt>供应商</dt>
+          <dd>AKShare</dd>
+          <dt>适配器</dt>
+          <dd>akshare-tencent</dd>
+          <dt>上游来源</dt>
+          <dd>腾讯</dd>
+          <dt>上游能力</dt>
+          <dd>stock_zh_a_hist_tx</dd>
+        </dl>
+      </section>
+
+      <section class="detail-section">
+        <h3>新鲜度与发布</h3>
+        <dl class="detail-grid">
+          <dt>观测状态</dt>
+          <dd>有数据</dd>
+          <dt>数据截至</dt>
+          <dd>交易日 2026-07-28</dd>
+          <dt>新鲜度</dt>
+          <dd>FRESH · 落后 0 交易日</dd>
+          <dt>最近尝试开始</dt>
+          <dd>今天 10:38</dd>
+          <dt>最近尝试结束</dt>
+          <dd>尚未结束</dd>
+          <dt>最近成功</dt>
+          <dd>今天 09:31 · SUCCEEDED</dd>
+          <dt>最近发布</dt>
+          <dd>今天 09:34</dd>
+        </dl>
+      </section>
+
+      <section class="detail-section">
+        <h3>最近失败</h3>
+        <div class="alert warning">
+          2026-07-27 18:12 · provider-timeout · 自动重试后成功。
+        </div>
+      </section>
+
+      <section class="detail-section">
+        <h3>自动计划</h3>
+        <dl class="detail-grid">
+          <dt>频率</dt>
+          <dd>交易日 18:10</dd>
+          <dt>策略</dt>
+          <dd>增量</dd>
+          <dt>时区</dt>
+          <dd>Asia/Shanghai</dd>
+          <dt>下次运行</dt>
+          <dd>今天 18:10</dd>
+        </dl>
+      </section>
+
+      <a class="button primary" href="?scene=states" style="width: 100%"
+        >下发此数据集同步</a
+      >
+    </aside>
+
+    <script>
+      const requestedScene =
+        new URLSearchParams(window.location.search).get("scene") ?? "assets";
+      const allowedScenes = new Set([
+        "assets",
+        "detail",
+        "queue",
+        "health",
+        "schedules",
+        "audit",
+        "states",
+      ]);
+      const activeScene = allowedScenes.has(requestedScene)
+        ? requestedScene
+        : "assets";
+      const activeTab = activeScene === "detail" ? "assets" : activeScene;
+      document.body.dataset.scene = activeScene;
+
+      for (const tabLink of document.querySelectorAll("[data-scene-link]")) {
+        if (tabLink.dataset.sceneLink === activeTab) {
+          tabLink.setAttribute("aria-current", "page");
+        } else {
+          tabLink.removeAttribute("aria-current");
+        }
+      }
+    </script>
+  </body>
+</html>

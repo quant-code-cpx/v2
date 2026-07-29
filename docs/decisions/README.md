@@ -42,3 +42,8 @@ NNNN-short-title.md
 - [0017：同步服务采用 SQLAlchemy Declarative ORM 作为持久化模型](0017-service-data-sync-declarative-orm.md) — Implemented（当前 44 张逻辑表已纳入统一模型 registry）
 - [0018：service-api 入站路由仅允许 POST](0018-service-api-post-only-http-method.md) — Implemented
 - [0019：账户安全、审计读取与平台工作台边界](0019-account-security-audit-and-workspace-boundary.md) — Implemented
+- [0020：高价值市场数据的跨服务访问方式](0020-data-sync-market-data-access.md) — Proposed
+- [0021：同步来源载荷仅在失败时留存](0021-failure-only-source-payload-retention.md) — Accepted
+- [0022：空观测是可发布状态，不是跨服务阻断](0022-empty-observation-and-consumer-contract.md) — Accepted
+- [0023：个人市场数据通用查询网关](0023-personal-market-data-query-gateway.md) — Accepted
+- [0024：数据运维控制面与全局串行同步](0024-data-operations-control-plane.md) — Proposed

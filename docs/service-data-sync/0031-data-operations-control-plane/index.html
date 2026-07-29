@@ -1,0 +1,3797 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="为 service-data-sync 设计统一的数据集目录、串行同步队列、健康检查、动态计划、失败诊断与运维审计控制面。"
+    />
+    <title>0031｜数据运维控制面｜service-data-sync 技术方案</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #172033;
+        --muted: #667085;
+        --line: #dfe4ec;
+        --surface: #f6f8fb;
+        --paper: #ffffff;
+        --accent: #155f52;
+        --accent-soft: #e9f4f1;
+        --success: #176b4d;
+        --warning: #8a4b08;
+        --danger: #a3262d;
+        --info: #3157d5;
+        --radius: 14px;
+        --shadow: 0 12px 30px rgb(23 32 51 / 7%);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        min-width: 1180px;
+        color: var(--ink);
+        background: var(--paper);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        font-size: 15px;
+        line-height: 1.68;
+      }
+
+      a {
+        color: var(--info);
+        text-underline-offset: 0.2em;
+      }
+
+      a:focus-visible,
+      summary:focus-visible {
+        outline: 3px solid rgb(49 87 213 / 28%);
+        outline-offset: 3px;
+        border-radius: 4px;
+      }
+
+      code {
+        padding: 0.08em 0.34em;
+        border-radius: 4px;
+        background: #edf2f4;
+        color: #173a35;
+        font:
+          0.91em/1.55 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+      }
+
+      .shell {
+        width: min(1120px, calc(100% - 40px));
+        margin: 0 auto;
+      }
+
+      header {
+        padding: 44px 0 30px;
+        border-bottom: 1px solid var(--line);
+        background: linear-gradient(180deg, var(--surface), #fff);
+      }
+
+      .eyebrow {
+        margin: 0 0 8px;
+        color: var(--accent);
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        line-height: 1.28;
+        letter-spacing: -0.015em;
+      }
+
+      h1 {
+        max-width: 900px;
+        margin: 0;
+        font-size: 2.65rem;
+      }
+
+      h2 {
+        margin: 0 0 18px;
+        font-size: 1.8rem;
+      }
+
+      h3 {
+        margin: 22px 0 10px;
+        font-size: 1.14rem;
+      }
+
+      h4 {
+        margin: 15px 0 6px;
+        font-size: 1rem;
+      }
+
+      p {
+        max-width: 82ch;
+      }
+
+      .lede {
+        max-width: 860px;
+        margin: 14px 0 0;
+        color: var(--muted);
+        font-size: 1.05rem;
+      }
+
+      .meta {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin: 24px 0 0;
+      }
+
+      .meta div {
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgb(255 255 255 / 85%);
+      }
+
+      .meta dt {
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      .meta dd {
+        margin: 3px 0 0;
+        font-weight: 700;
+      }
+
+      nav {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        overflow-x: auto;
+        border-bottom: 1px solid var(--line);
+        background: rgb(255 255 255 / 96%);
+        backdrop-filter: blur(12px);
+      }
+
+      nav ul {
+        display: flex;
+        gap: 20px;
+        width: max-content;
+        margin: 0;
+        padding: 12px 0;
+        list-style: none;
+      }
+
+      nav a {
+        color: var(--muted);
+        font-size: 0.88rem;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      nav a:hover {
+        color: var(--accent);
+      }
+
+      main {
+        padding: 14px 0 72px;
+      }
+
+      section {
+        padding: 42px 0;
+        border-bottom: 1px solid var(--line);
+        scroll-margin-top: 56px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .card {
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+        box-shadow: var(--shadow);
+      }
+
+      .card h3 {
+        margin-top: 0;
+      }
+
+      .card p:last-child,
+      .card ul:last-child {
+        margin-bottom: 0;
+      }
+
+      .label,
+      .tag {
+        display: inline-block;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 800;
+        letter-spacing: 0.035em;
+      }
+
+      .label {
+        margin-bottom: 8px;
+        color: var(--accent);
+      }
+
+      .tag {
+        padding: 2px 8px;
+        border: 1px solid var(--line);
+        white-space: nowrap;
+      }
+
+      .fact {
+        color: #294e8f;
+        background: #eef4ff;
+      }
+
+      .decision {
+        color: var(--success);
+        background: #edf8f3;
+      }
+
+      .assumption {
+        color: var(--warning);
+        background: #fff7e8;
+      }
+
+      .open {
+        color: var(--danger);
+        background: #fff0f1;
+      }
+
+      .status {
+        color: var(--success);
+      }
+
+      .risk {
+        color: var(--warning);
+      }
+
+      .danger {
+        color: var(--danger);
+      }
+
+      .callout {
+        margin: 16px 0;
+        padding: 17px 20px;
+        border-left: 4px solid var(--accent);
+        border-radius: 0 var(--radius) var(--radius) 0;
+        background: var(--accent-soft);
+      }
+
+      .callout.warning {
+        border-left-color: var(--warning);
+        background: #fff8ea;
+      }
+
+      .callout.danger {
+        border-left-color: var(--danger);
+        background: #fff1f2;
+        color: var(--ink);
+      }
+
+      .callout strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .flow,
+      pre {
+        overflow-x: auto;
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #111827;
+        color: #e5e7eb;
+        font:
+          0.88rem/1.62 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+        margin: 14px 0;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+      }
+
+      table {
+        width: 100%;
+        min-width: 760px;
+        border-collapse: collapse;
+        background: #fff;
+      }
+
+      table.wide {
+        min-width: 1080px;
+      }
+
+      th,
+      td {
+        padding: 11px 13px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: var(--surface);
+        font-size: 0.82rem;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      ul,
+      ol {
+        padding-left: 1.3rem;
+      }
+
+      li + li {
+        margin-top: 5px;
+      }
+
+      .compact li + li {
+        margin-top: 2px;
+      }
+
+      details {
+        margin: 14px 0;
+        padding: 0 16px 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+      }
+
+      summary {
+        padding: 13px 0;
+        cursor: pointer;
+        color: var(--accent);
+        font-weight: 800;
+      }
+
+      .inventory {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .inventory div {
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      .inventory strong {
+        display: block;
+        margin-bottom: 5px;
+      }
+
+      .inventory code {
+        background: #fff;
+      }
+
+      .footnote {
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+
+      footer {
+        padding: 28px 0 48px;
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+
+      @media print {
+        body {
+          min-width: 0;
+          font-size: 11pt;
+        }
+
+        nav {
+          display: none;
+        }
+
+        header,
+        main,
+        section {
+          padding-top: 18px;
+        }
+
+        .shell {
+          width: 100%;
+        }
+
+        .card {
+          box-shadow: none;
+          break-inside: avoid;
+        }
+
+        .table-wrap {
+          overflow: visible;
+        }
+
+        table,
+        table.wide {
+          min-width: 0;
+          font-size: 8.7pt;
+        }
+
+        th,
+        td {
+          padding: 6px;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+
+        a {
+          color: inherit;
+          text-decoration: none;
+        }
+
+        details {
+          break-inside: avoid;
+        }
+
+        details > summary {
+          list-style: none;
+        }
+
+        details:not([open]) > :not(summary) {
+          display: block !important;
+        }
+
+        pre,
+        .flow {
+          overflow-wrap: anywhere;
+          white-space: pre-wrap;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="shell">
+        <p class="eyebrow">SERVICE-DATA-SYNC · TECHNICAL SOLUTION 0031</p>
+        <h1>数据运维控制面</h1>
+        <p class="lede">
+          在不改变 provider-neutral adapter 与 canonical 发布边界的前提下，以
+          <strong>service-data-sync PostgreSQL</strong>
+          建立数据集目录、全局串行队列、运行账本、健康评估、
+          动态计划和运维事件权威；Celery 只负责唤醒投递。所有
+          CLI、自动计划和内部 API 最终进入同一 dispatcher，
+          保证整个同步服务任一时刻最多一个同步运行。
+        </p>
+
+        <dl class="meta">
+          <div>
+            <dt>状态</dt>
+            <dd class="status">Proposed</dd>
+          </div>
+          <div>
+            <dt>负责人</dt>
+            <dd>数据平台 / service-data-sync</dd>
+          </div>
+          <div>
+            <dt>最后修改</dt>
+            <dd>2026-07-29</dd>
+          </div>
+          <div>
+            <dt>关联决策</dt>
+            <dd>
+              <a href="../../decisions/0024-data-operations-control-plane.md"
+                >ADR-0024</a
+              >
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </header>
+
+    <nav aria-label="页面目录">
+      <div class="shell">
+        <ul>
+          <li><a href="#summary">摘要</a></li>
+          <li><a href="#scope">目标与边界</a></li>
+          <li><a href="#current">现状盘点</a></li>
+          <li><a href="#architecture">目标架构</a></li>
+          <li><a href="#model">数据与接口</a></li>
+          <li><a href="#execution">串行执行</a></li>
+          <li><a href="#health">健康与口径</a></li>
+          <li><a href="#operations">安全与观测</a></li>
+          <li><a href="#delivery">实施与验收</a></li>
+        </ul>
+      </div>
+    </nav>
+
+    <main class="shell">
+      <section id="summary">
+        <h2>1. 摘要</h2>
+        <div class="grid">
+          <article class="card">
+            <span class="label">问题</span>
+            <h3>数据存在，运维真相分散</h3>
+            <p>
+              当前有 138 张登记逻辑表、17 个具体 adapter、25 个 console script
+              和 17 个 Celery task， 但运行、checkpoint、质量、publication
+              与计划按领域分散。无法可靠回答“有哪些数据、最近是否成功、
+              为什么失败、谁触发了什么”。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label">决策</span>
+            <h3>PostgreSQL 权威控制面</h3>
+            <p>
+              新增显式数据集注册表、command/run/attempt、全局租约与
+              fencing、schedule、health 和 append-only operational
+              event。Redis/Celery 不保存权威状态，不承担锁和排序。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label">主要风险</span>
+            <h3 class="risk">旧入口绕过 fencing</h3>
+            <p>
+              只给新任务加锁不能满足全局串行。启用主动操作前，全部 legacy
+              CLI/Celery、publication 和 checkpoint 写入必须进入统一
+              dispatcher，并在同一数据库事务校验当前 fence token。
+            </p>
+          </article>
+        </div>
+
+        <div class="callout">
+          <strong>选择理由</strong>
+          现有 canonical 数据与 adapter 无需搬迁；PostgreSQL
+          已是运行、来源和发布账本所在地，能用事务、行锁、 条件唯一索引和单调
+          token 同时解决幂等、队列、跨 worker 互斥和恢复。Celery
+          继续提供可靠投递， 但消息重复、worker 扩容或 scheduler
+          重启都不能改变数据库权威结果。
+        </div>
+
+        <div class="callout warning">
+          <strong>事实边界</strong>
+          本文盘点的是仓库在 2026-07-29 的 schema、adapter
+          与入口能力，不代表任一部署已经有对应数据行。
+          默认配置关闭所有外部来源；实际记录数、数据覆盖、最近成功和当前开关必须由运行环境数据库读取。
+          0002—0010 的 AKShare 调研和本文中的来源识别均不等于生产批准。
+        </div>
+
+        <p>
+          跨服务总览见
+          <a
+            href="../../architecture/0002-data-operations-control-plane/index.html"
+            >架构方案 0002</a
+          >； 机器可读边界见
+          <a
+            href="../../contracts/0022-data-sync-operations-internal.openapi.yaml"
+            >内部 OpenAPI 0022</a
+          >。
+        </p>
+      </section>
+
+      <section id="scope">
+        <h2>2. 目标、非目标与任务契约</h2>
+        <div class="grid">
+          <article class="card">
+            <h3>目标</h3>
+            <ul>
+              <li>
+                展示数据集、canonical
+                表、来源供应商、真实上游、方法学与可执行状态。
+              </li>
+              <li>
+                分别展示最近尝试起止、最近严格成功、最近
+                publication、数据截至日、服务端 freshness、 观测状态与失败诊断。
+              </li>
+              <li>
+                支持单个或批量的
+                <code>FULL</code
+                >、<code>INCREMENTAL</code>、<code>DATE_RANGE</code>；
+                当前快照数据另用
+                <code>OBSERVATION_DATE</code>，不伪装成历史范围。
+              </li>
+              <li>
+                人工与自动计划分别声明支持模式；v1 自动计划禁止
+                <code>DATE_RANGE</code>。
+              </li>
+              <li>手工、自动、重试和恢复共享一个全局串行队列。</li>
+              <li>支持版本化健康检查、动态计划、取消、重试和完整审计回执。</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>非目标</h3>
+            <ul>
+              <li>
+                不让 service-api 或 service-web 直连同步数据库、Redis、S3
+                或数据供应商。
+              </li>
+              <li>不在本方案批准 Tushare、AKShare 或任一上游成为生产来源。</li>
+              <li>不统一不同供应商的派生指标口径，不设计静默 fallback。</li>
+              <li>
+                不把 Celery result backend、消息队列顺序或 Redis
+                锁变成业务真相。
+              </li>
+              <li>不恢复成功批次原始载荷长期归档；继续遵守失败才留证。</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>硬约束</h3>
+            <ul>
+              <li>
+                全服务同时最多一条同步 run 处于有效执行态（<code>RUNNING</code>
+                或 <code>CANCEL_REQUESTED</code>）。
+              </li>
+              <li>
+                所有 canonical publication/checkpoint 必须验证当前 fence token。
+              </li>
+              <li>
+                时间使用 IANA 时区；A 股日频默认
+                <code>Asia/Shanghai</code> 和权威交易日历。
+              </li>
+              <li>adapter 不写 canonical DB；应用层不导入供应商 SDK。</li>
+              <li>
+                首版 ADMIN、SUPER_ADMIN 可读；所有主动动作仅 SUPER_ADMIN。
+              </li>
+            </ul>
+          </article>
+        </div>
+
+        <h3>任务定义卡</h3>
+        <div class="table-wrap">
+          <table>
+            <tbody>
+              <tr>
+                <th>业务目的 / 消费者</th>
+                <td>
+                  让管理员经 service-web → service-api
+                  查看并操作数据；service-api
+                  只做身份、公开授权、可靠提交与公开审计。 写入本地 submission
+                  后固定先返回 PENDING，不能把同步调用结果伪装成初始响应。
+                </td>
+              </tr>
+              <tr>
+                <th>数据能力</th>
+                <td>
+                  覆盖当前已运行、影子研究和仅建模数据域；每项能力由注册表声明来源、粒度、模式、范围和
+                  publication 语义。
+                </td>
+              </tr>
+              <tr>
+                <th>市场与时间</th>
+                <td>
+                  A
+                  股、ETF、指数、两融、港通、公司/交易事件和衍生品；具体市场、时区、交易日历、粒度与
+                  finality 按数据集声明，禁止全局猜测。
+                </td>
+              </tr>
+              <tr>
+                <th>历史与修订</th>
+                <td>
+                  <code>FULL</code>
+                  是“来源已验证可提供的完整范围”，可能是全历史，也可能只是当前完整快照；增量含数据集定义的修订重叠窗。
+                </td>
+              </tr>
+              <tr>
+                <th>容量假设</th>
+                <td>
+                  <span class="tag assumption">合同上限</span> 首版批量最多 100
+                  个数据集；日期范围的保守平台上限暂定 3660
+                  天，每数据集可声明更小
+                  <code>maxRangeDays</code>，最终值需压测校准。
+                </td>
+              </tr>
+              <tr>
+                <th>来源权利</th>
+                <td>
+                  研究、内部、可再分发状态单独留痕；只有带可验证权利证据且能力门禁通过的来源可进入自动
+                  production schedule。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="current">
+        <h2>3. 现状精确盘点</h2>
+
+        <div class="grid">
+          <article class="card">
+            <span class="tag fact">事实</span>
+            <h3>持久化面</h3>
+            <p>
+              <code>models/registry.py</code> 当前显式登记
+              <strong>138</strong> 张逻辑表。存在共享
+              <code>sync_run</code
+              >/<code>sync_partition</code>，但只被资金流、板块成分、板块 EOD、
+              财务派生及部分 source-batch 兼容路径使用，不能代表所有同步运行。
+            </p>
+          </article>
+          <article class="card">
+            <span class="tag fact">事实</span>
+            <h3>执行面</h3>
+            <p>
+              25 个 console script 中 21 个属于同步或恢复操作；17 个 Celery task
+              分散注册。 worker 未固定并发为
+              1，也没有跨进程、跨数据集全局锁。CLI
+              可直接调用应用服务，绕过队列与统一账本。
+            </p>
+          </article>
+          <article class="card">
+            <span class="tag fact">事实</span>
+            <h3>调度与观测</h3>
+            <p>
+              Celery beat 最多生成 9 个静态条目：个股 6 项、申万 1 项、板块 EOD
+              dispatch 与 reaper 2 项。 时间写死在代码，只有布尔开关；无动态
+              schedule CRUD、统一健康度、操作者身份或监控平台。
+            </p>
+          </article>
+        </div>
+
+        <h3>3.1 当前数据集与可执行阶段</h3>
+        <div class="table-wrap">
+          <table class="wide">
+            <thead>
+              <tr>
+                <th>数据域</th>
+                <th>canonical dataset / capability</th>
+                <th>当前来源与上游</th>
+                <th>当前入口</th>
+                <th>事实状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>A 股身份与生命周期</td>
+                <td>
+                  <code>equity.master.catalog</code
+                  >、<code>equity.master.cn-a</code>；<code
+                    >equity.lifecycle.explicit</code
+                  >
+                </td>
+                <td>
+                  AKShare → 东财当前目录；AKShare →
+                  上交所/深交所终止上市、北交所在册
+                </td>
+                <td>目录 CLI；生命周期 CLI/Celery</td>
+                <td>
+                  <span class="tag decision">已实现</span>
+                  当前快照与显式事实；历史当前快照请求会拒绝。
+                </td>
+              </tr>
+              <tr>
+                <td>个股行情</td>
+                <td>
+                  <code>equity.bar.1d.raw</code
+                  >、<code>equity.bar.1w.raw</code>、<code
+                    >equity.bar.1mo.raw</code
+                  >
+                </td>
+                <td>AKShare → 腾讯日线；AKShare → 东财原生周/月线</td>
+                <td>CLI；6 项静态 equity beat 中含三周期</td>
+                <td>
+                  <span class="tag decision">已实现</span>
+                  日/周/月独立发布，不由日线聚合周月。
+                </td>
+              </tr>
+              <tr>
+                <td>个股参考数据</td>
+                <td>
+                  <code>equity.adjustment_factor</code
+                  >、<code>equity.corporate_action</code>、<code
+                    >equity.profile</code
+                  >
+                </td>
+                <td>AKShare → 新浪后复权因子、东财分红送转、巨潮公司概况</td>
+                <td>CLI；3 项静态 equity beat</td>
+                <td>
+                  <span class="tag decision">已实现</span> 三项独立
+                  checkpoint/publication。
+                </td>
+              </tr>
+              <tr>
+                <td>东财板块</td>
+                <td>
+                  <code>sector.catalog.raw</code
+                  >、<code>sector.bar.1d.raw</code>、<code>sector.bar.1w.raw</code>、<code
+                    >sector.bar.1mo.raw</code
+                  >
+                </td>
+                <td>AKShare → 东财行业/概念目录与原生三周期</td>
+                <td>目录 CLI、行情 CLI</td>
+                <td>
+                  <span class="tag decision">已实现</span> 无动态自动计划。
+                </td>
+              </tr>
+              <tr>
+                <td>板块成分</td>
+                <td>
+                  <code>sector.membership.release</code>；来源能力
+                  <code>sector.membership.snapshot.raw</code>
+                </td>
+                <td>AKShare → 东财板块成分当前观察</td>
+                <td>CLI</td>
+                <td>
+                  <span class="tag decision">已实现</span>
+                  当前观察区间，不伪造实际调入调出日。
+                </td>
+              </tr>
+              <tr>
+                <td>板块 EOD</td>
+                <td>
+                  <code>sector.quote.eod.snapshot</code>；来源能力
+                  <code>sector.quote.eod.snapshot.raw</code>
+                </td>
+                <td>AKShare → 东财板块 name 横截面</td>
+                <td>CLI、Celery shadow、lease reaper、rollback</td>
+                <td>
+                  <span class="tag assumption">影子</span> 仅 2026
+                  日历，默认不推进 production publication。
+                </td>
+              </tr>
+              <tr>
+                <td>申万行业与估值</td>
+                <td>
+                  <code>sector.sw.snapshot.raw</code>，分别形成
+                  taxonomy/valuation publication
+                </td>
+                <td>AKShare → 乐咕申万一/二/三级 overview</td>
+                <td>CLI、当天 Celery、18:30 静态 beat、replay</td>
+                <td>
+                  <span class="tag decision">已实现</span> 来源只支持当天快照。
+                </td>
+              </tr>
+              <tr>
+                <td>财务与估值</td>
+                <td>
+                  <code>financial.statement.raw</code
+                  >、<code>financial.metric.raw</code>、<code
+                    >financial.valuation.raw</code
+                  >
+                </td>
+                <td>AKShare → 东财财务宽表、报告期指标、历史估值</td>
+                <td>单证券 CLI/Celery；无 beat</td>
+                <td>
+                  <span class="tag decision">已实现</span> dark launch；明确
+                  source policy 才注册。
+                </td>
+              </tr>
+              <tr>
+                <td>平台派生财务</td>
+                <td><code>financial.derived-metric</code></td>
+                <td>平台公式 → 已发布财务输入；无外部 provider</td>
+                <td>CLI/Celery</td>
+                <td>
+                  <span class="tag decision">已实现</span> 独立公式版本与输入
+                  publication。
+                </td>
+              </tr>
+              <tr>
+                <td>日频资金流</td>
+                <td>
+                  <code>money_flow.daily</code
+                  >、<code>money_flow.ranking</code>、<code>money_flow.methodology</code>；8
+                  个来源 capability
+                </td>
+                <td>
+                  AKShare → 东财 order-size 日序列/排行；AKShare → 同花顺
+                  trade-direction 排行
+                </td>
+                <td>CLI/Celery；无 beat</td>
+                <td>
+                  <span class="tag assumption">受控发布</span>
+                  方法学未通过门禁时保持 research、读取 fail-closed。
+                </td>
+              </tr>
+              <tr>
+                <td>指数目录/成分/权重</td>
+                <td>
+                  <code>index.catalog.snapshot</code
+                  >、<code>index.constituent.snapshot</code>、<code
+                    >index.weight.snapshot</code
+                  >
+                </td>
+                <td>AKShare → 中证；AKShare → 国证</td>
+                <td>shadow CLI</td>
+                <td>
+                  <span class="tag assumption">研究观察</span> 只写
+                  observation，不创建 PIT/publication。
+                </td>
+              </tr>
+              <tr>
+                <td>ETF</td>
+                <td>
+                  <code>fund.etf.profile.reported</code
+                  >、<code>fund.etf.trading_state.reported</code>、<code>fund.etf.bar.1d.reported</code>、<code
+                    >fund.etf.nav.1d.reported</code
+                  >
+                </td>
+                <td>AKShare → 同花顺 ETF 目录；东财净值、状态与 K 线</td>
+                <td>分 operation CLI</td>
+                <td>
+                  <span class="tag assumption">P0/研究</span>
+                  技术链路可运行；方案仍 Proposed，默认个人内部研究权利。
+                </td>
+              </tr>
+              <tr>
+                <td>融资融券</td>
+                <td>
+                  <code>market.margin.market.1d.reported</code
+                  >、<code>market.margin.security.1d.reported</code>、<code
+                    >market.margin.eligibility.reported</code
+                  >
+                </td>
+                <td>
+                  AKShare → 上交所/深交所两融；资格仅深交所，沪市能力安全空集
+                </td>
+                <td>分 operation CLI</td>
+                <td>
+                  <span class="tag assumption">P0/研究</span> 无自动计划。
+                </td>
+              </tr>
+              <tr>
+                <td>沪深港通</td>
+                <td>
+                  <code>market.stock_connect.market_stat.reported</code>、<code
+                    >market.stock_connect.active_security.snapshot</code
+                  >
+                </td>
+                <td>
+                  AKShare → 东财通道统计；活跃证券无等价接口，当前安全空集
+                </td>
+                <td>分 operation CLI</td>
+                <td>
+                  <span class="tag assumption">P0/研究</span>
+                  不把持股/估算排行冒充成交活跃名单。
+                </td>
+              </tr>
+              <tr>
+                <td>公司披露事件</td>
+                <td><code>equity.corporate_event.earnings.reported</code></td>
+                <td>AKShare → 东财业绩预告/快报聚合页</td>
+                <td>日期范围 CLI</td>
+                <td>
+                  <span class="tag assumption">P0/研究</span> 只覆盖当前
+                  earnings P0。
+                </td>
+              </tr>
+              <tr>
+                <td>龙虎榜 / 大宗交易</td>
+                <td>
+                  <code>equity.dragon_tiger.disclosure.reported</code>、<code
+                    >equity.block_trade.execution.reported</code
+                  >
+                </td>
+                <td>AKShare → 东财龙虎榜与大宗交易</td>
+                <td>日期范围 CLI</td>
+                <td>
+                  <span class="tag assumption">P0/研究</span> 无自动计划。
+                </td>
+              </tr>
+              <tr>
+                <td>衍生品真实合约日线</td>
+                <td><code>derivative.bar.1d.reported</code></td>
+                <td>AKShare → 东财期货历史</td>
+                <td>合约 + 日期范围 CLI</td>
+                <td>
+                  <span class="tag assumption">P0/研究</span>
+                  目录、来源批准、连续探针仍是门禁。
+                </td>
+              </tr>
+              <tr>
+                <td>仅建模能力</td>
+                <td>
+                  主营构成、ETF tracking/share/action/premium、margin risk、港通
+                  holding、更多公司行动等
+                </td>
+                <td>未绑定可运行且获准来源</td>
+                <td>无统一同步入口</td>
+                <td>
+                  <span class="tag open">仅有表 ≠ 已有数据</span> 内部登记为
+                  <code>MODEL_ONLY</code>； 合同投影为
+                  <code>RESEARCH + DISABLED + manualEnabled=false</code
+                  >，详情明确“仅建模”，不得显示最近同步成功。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>3.2 adapter 供应商与进一步上游</h3>
+        <p>
+          当前 Python 依赖只有 <code>akshare==1.18.78</code>；不存在 Tushare
+          依赖、adapter 或 <code>provider_id</code>。表中的“AKShare →
+          上游”来自当前 adapter 函数和
+          <code>ProviderBatch.upstream_source</code>，不是来源批准。
+        </p>
+        <div class="table-wrap">
+          <table class="wide">
+            <thead>
+              <tr>
+                <th>当前 provider_id</th>
+                <th>访问供应商</th>
+                <th>进一步上游 / 方法来源</th>
+                <th>能力</th>
+                <th>缺口</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>akshare</code></td>
+                <td>AKShare</td>
+                <td>
+                  按 capability
+                  固定为同花顺、东财、沪深交易所或安全空能力；见下表
+                </td>
+                <td>ETF、两融、港通、披露、特殊交易、衍生品 P0</td>
+                <td>
+                  一个 provider_id 承载多上游，必须按
+                  batch/注册项展示，不能只显示“AKShare”。
+                </td>
+              </tr>
+              <tr>
+                <td><code>akshare-tencent</code></td>
+                <td>AKShare</td>
+                <td>腾讯 A 股日线</td>
+                <td><code>equity.bar.1d.raw</code></td>
+                <td class="danger">
+                  代码可识别腾讯，但当前 batch 未写
+                  <code>upstream_source</code>、adapter version、fingerprint。
+                </td>
+              </tr>
+              <tr>
+                <td><code>akshare-eastmoney-equity-catalog</code></td>
+                <td>AKShare</td>
+                <td><code>eastmoney</code></td>
+                <td>A 股当前目录</td>
+                <td>只支持上海时区当天。</td>
+              </tr>
+              <tr>
+                <td><code>akshare-official-exchange-equity-lifecycle</code></td>
+                <td>AKShare</td>
+                <td>
+                  <code>sse.terminated-listing</code
+                  >、<code>szse.terminated-listing</code>、<code
+                    >bse.listed-company</code
+                  >
+                </td>
+                <td>显式上市生命周期</td>
+                <td>不同交易所必须保留独立 upstream_source。</td>
+              </tr>
+              <tr>
+                <td><code>akshare-eastmoney-equity-period</code></td>
+                <td>AKShare</td>
+                <td><code>eastmoney-stock-kline</code></td>
+                <td>个股原生周/月线</td>
+                <td>不得从腾讯日线聚合或静默替换。</td>
+              </tr>
+              <tr>
+                <td><code>akshare-sina-adjustment-factor</code></td>
+                <td>AKShare</td>
+                <td><code>sina-hfq-factor</code></td>
+                <td>累计后复权因子</td>
+                <td>稀疏因子，不能与其他复权口径混用。</td>
+              </tr>
+              <tr>
+                <td><code>akshare-eastmoney-corporate-action</code></td>
+                <td>AKShare</td>
+                <td><code>eastmoney-share-bonus</code></td>
+                <td>分红送转</td>
+                <td>不覆盖全部公司行动类型。</td>
+              </tr>
+              <tr>
+                <td><code>akshare-cninfo-company-profile</code></td>
+                <td>AKShare</td>
+                <td><code>cninfo-company-profile</code>（巨潮）</td>
+                <td>公司概况</td>
+                <td>当前资料，不是任意历史时点。</td>
+              </tr>
+              <tr>
+                <td><code>akshare-eastmoney-financial</code></td>
+                <td>AKShare</td>
+                <td><code>eastmoney.financial</code></td>
+                <td>三表、指标、估值</td>
+                <td>只有具名 source policy 才注册。</td>
+              </tr>
+              <tr>
+                <td><code>akshare-eastmoney-money-flow</code></td>
+                <td>AKShare</td>
+                <td><code>eastmoney.money-flow</code></td>
+                <td>order-size 日序列与排行</td>
+                <td>供应商派生方法学，排行完整性未验证。</td>
+              </tr>
+              <tr>
+                <td><code>akshare-ths-money-flow</code></td>
+                <td>AKShare</td>
+                <td><code>10jqka.money-flow</code>（同花顺）</td>
+                <td>trade-direction 排行</td>
+                <td>与东财方法学不同，禁止合并/fallback。</td>
+              </tr>
+              <tr>
+                <td><code>akshare-csindex-index-snapshot</code></td>
+                <td>AKShare</td>
+                <td><code>csindex</code>（中证）</td>
+                <td>目录、成分、权重影子观察</td>
+                <td>当前成分无历史日期，保持 research。</td>
+              </tr>
+              <tr>
+                <td><code>akshare-cnindex-index-snapshot</code></td>
+                <td>AKShare</td>
+                <td><code>cnindex</code>（国证）</td>
+                <td>目录、样本、权重影子观察</td>
+                <td>样本详情交易所字段不足，保持 research。</td>
+              </tr>
+              <tr>
+                <td><code>akshare-eastmoney-sector</code></td>
+                <td>AKShare</td>
+                <td>东财行业/概念目录和 K 线</td>
+                <td>目录、日/周/月线</td>
+                <td class="danger">
+                  代码可识别东财，但当前 batch 未写
+                  <code>upstream_source</code>、adapter version、fingerprint。
+                </td>
+              </tr>
+              <tr>
+                <td><code>akshare-eastmoney-sector-eod</code></td>
+                <td>AKShare</td>
+                <td><code>eastmoney.board.name</code></td>
+                <td>板块 EOD 横截面</td>
+                <td>只声明 post-close observation，不宣称官方终态。</td>
+              </tr>
+              <tr>
+                <td><code>akshare-eastmoney-sector-membership</code></td>
+                <td>AKShare</td>
+                <td><code>eastmoney</code></td>
+                <td>板块成分当前观察</td>
+                <td>历史修复不能向上游伪造日期。</td>
+              </tr>
+              <tr>
+                <td><code>akshare-legulegu-sw-industry</code></td>
+                <td>AKShare</td>
+                <td><code>legulegu.sw-industry-overview</code>（乐咕）</td>
+                <td>申万三级 taxonomy/估值</td>
+                <td>由专用 bootstrap 组装，当前不在通用 source registry。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h4><code>provider_id=akshare</code> 的 capability 级真实上游</h4>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>capability</th>
+                <th>固定 upstream_source</th>
+                <th>来源边界</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>fund.etf.master</code></td>
+                <td><code>ths.etf-category</code></td>
+                <td>同花顺当前 ETF 目录；历史目录请求安全空。</td>
+              </tr>
+              <tr>
+                <td><code>fund.etf.trading_state</code></td>
+                <td><code>eastmoney.etf.nav</code></td>
+                <td>由东财净值记录中的申购/赎回状态得到。</td>
+              </tr>
+              <tr>
+                <td><code>fund.etf.bar.1d.raw</code></td>
+                <td><code>eastmoney.etf.kline</code></td>
+                <td>东财未复权 ETF 日线。</td>
+              </tr>
+              <tr>
+                <td><code>fund.etf.nav.1d.reported</code></td>
+                <td><code>eastmoney.etf.nav</code></td>
+                <td>单位/累计净值，finality 未知。</td>
+              </tr>
+              <tr>
+                <td><code>market.margin.market.1d.reported</code></td>
+                <td><code>sse-szse.margin</code></td>
+                <td>沪深交易所两融汇总。</td>
+              </tr>
+              <tr>
+                <td><code>market.margin.security.1d.reported</code></td>
+                <td><code>sse-szse.margin</code></td>
+                <td>沪深两融证券明细。</td>
+              </tr>
+              <tr>
+                <td><code>market.margin.eligibility.reported</code></td>
+                <td><code>szse.margin-underlying</code></td>
+                <td>只有深交所等价接口；沪市返回带原因空集。</td>
+              </tr>
+              <tr>
+                <td><code>market.stock_connect.market_stat.reported</code></td>
+                <td><code>eastmoney.stock-connect</code></td>
+                <td>四种通道/方向独立。</td>
+              </tr>
+              <tr>
+                <td>
+                  <code>market.stock_connect.active_security.snapshot</code>
+                </td>
+                <td><code>akshare.unsupported-stock-connect-active</code></td>
+                <td>明确无等价接口，合法空集，不伪造。</td>
+              </tr>
+              <tr>
+                <td><code>corporate.disclosure.earnings.p0</code></td>
+                <td><code>eastmoney.earnings</code></td>
+                <td>业绩预告/快报聚合披露。</td>
+              </tr>
+              <tr>
+                <td><code>market.dragon_tiger.disclosure.1d</code></td>
+                <td><code>eastmoney.dragon-tiger</code></td>
+                <td>龙虎榜事件与席位。</td>
+              </tr>
+              <tr>
+                <td><code>market.block_trade.execution.1d</code></td>
+                <td><code>eastmoney.block-trade</code></td>
+                <td>大宗交易逐笔。</td>
+              </tr>
+              <tr>
+                <td><code>derivative.bar.1d.reported</code></td>
+                <td><code>eastmoney.futures</code></td>
+                <td>真实合约日线；来源无结算列时保持空。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>3.3 当前 CLI、Celery、计划、checkpoint、质量与 publication 缺口</h3>
+        <div class="table-wrap">
+          <table class="wide">
+            <thead>
+              <tr>
+                <th>能力</th>
+                <th>已有事实</th>
+                <th>控制面缺口</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>CLI</td>
+                <td>
+                  个股、板块、财务、资金流、指数、ETF、两融、港通、事件、衍生品均有领域
+                  CLI；部分支持日期范围或 full-history。
+                </td>
+                <td>
+                  输入模型不统一；没有
+                  commandId、actor、批量事务、统一状态；可直接执行并绕过队列。
+                </td>
+              </tr>
+              <tr>
+                <td>Celery</td>
+                <td>
+                  17 个具名 task；<code>acks_late</code>、worker lost
+                  重投；来源瞬时错误在部分任务指数退避。
+                </td>
+                <td>
+                  任务可并行；没有全局 guard；不同领域
+                  retry、timeout、queue、运行记录不一致；task event/result
+                  backend 均关闭。
+                </td>
+              </tr>
+              <tr>
+                <td>schedule</td>
+                <td>
+                  上海时区静态 beat：个股 6 项、申万 18:30、板块 EOD 16:20，另有
+                  5 分钟 reaper。
+                </td>
+                <td>
+                  只能改代码/环境开关；无版本、动态频率、下一次触发、misfire、操作者与变更历史。
+                </td>
+              </tr>
+              <tr>
+                <td>run / lease</td>
+                <td>
+                  <code>sync_run</code>/<code>sync_partition</code> 已有
+                  queued/running/succeeded/partial/failed/cancelled；板块 EOD 有
+                  lease token。
+                </td>
+                <td>
+                  <code>sync_run</code> 无
+                  requested_by、请求参数、统一错误；只有部分链路写入。EOD token
+                  只保护自身分区，不是全局 fencing。
+                </td>
+              </tr>
+              <tr>
+                <td>checkpoint / recovery</td>
+                <td>
+                  通用、个股、生命周期、财务、申万、EOD 等多类
+                  checkpoint；部分支持 replay/reaper/rollback。
+                </td>
+                <td>
+                  语义和入口分散；成功载荷零归档后，不能假设所有 checkpoint 都可
+                  raw replay；恢复能力未向统一目录声明。
+                </td>
+              </tr>
+              <tr>
+                <td>quality / health</td>
+                <td>
+                  共享 quality 表及
+                  financial、money-flow、sector-membership/EOD、SW
+                  专用质量表；adapter 有 schema、单位和范围校验。
+                </td>
+                <td>
+                  无统一健康 policy/evaluation；无法汇总
+                  freshness、缺口、错误、UNKNOWN 原因，也没有主动评估入口。
+                </td>
+              </tr>
+              <tr>
+                <td>publication</td>
+                <td>
+                  <code>dataset_publication</code>、<code>dataset_release</code>
+                  和领域 publication 并存；版本与质量可追溯。
+                </td>
+                <td>
+                  所有 publication 路径没有统一 fence
+                  检查；最新同步时间、最新成功和数据截至日不能由一个字段正确回答。
+                </td>
+              </tr>
+              <tr>
+                <td>audit / observability</td>
+                <td>
+                  结构化日志有部分 run/batch/partition/provider
+                  关联；diagnostics 检查 PostgreSQL、Redis、S3。
+                </td>
+                <td>
+                  无操作者审计表、command
+                  回执、统一失败分类、业务指标与告警；仓库未选择监控后端。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <details>
+          <summary>全部 25 个 console script</summary>
+          <p>
+            4 个运行/诊断入口：
+            <code>data-sync-diagnostics</code>、<code>data-sync-worker</code>、
+            <code>data-sync-scheduler</code
+            >、<code>data-sync-internal-api</code>。
+          </p>
+          <p>
+            21 个数据或恢复入口：
+            <code>data-sync-equity-bars</code
+            >、<code>data-sync-equity-catalog</code>、
+            <code>data-sync-equity-lifecycle</code
+            >、<code>data-sync-equity-reference</code>、
+            <code>data-sync-financial</code
+            >、<code>data-sync-financial-derived</code>、
+            <code>data-sync-money-flow</code
+            >、<code>data-sync-index-shadow</code>、
+            <code>data-sync-derivative-bars</code>、<code>data-sync-etf</code>、
+            <code>data-sync-margin</code
+            >、<code>data-sync-stock-connect</code>、
+            <code>data-sync-corporate-events</code
+            >、<code>data-sync-trading-events</code>、
+            <code>data-sync-sector-bars</code
+            >、<code>data-sync-sector-catalog</code>、
+            <code>data-sync-sector-membership</code
+            >、<code>data-sync-sector-eod</code>、
+            <code>data-sync-sector-eod-reaper</code
+            >、<code>data-sync-sector-eod-rollback</code>、
+            <code>data-sync-sw-sector</code>。
+          </p>
+          <p class="footnote">
+            这些入口的参数、状态和执行方式不统一；迁移后数据入口只提交
+            command，worker/scheduler/diagnostics/internal API
+            保持进程职责。保留的 CLI
+            只允许“提交并可选等待”，不得直接调用领域同步用例。
+          </p>
+        </details>
+
+        <details>
+          <summary>全部 17 个 Celery task（按注册名）</summary>
+          <div class="inventory">
+            <div>
+              <strong>证券生命周期（3）</strong>
+              <code>service_data_sync.equity_lifecycle.probe</code>、
+              <code>service_data_sync.equity_lifecycle.sync_exchange</code>、
+              <code>service_data_sync.equity_lifecycle.replay_exchange</code>
+            </div>
+            <div>
+              <strong>个股行情与参考（3）</strong>
+              <code>service_data_sync.equity_market.dispatch</code>、
+              <code>service_data_sync.equity_market.sync_bar</code>、
+              <code>service_data_sync.equity_market.sync_reference</code>
+            </div>
+            <div>
+              <strong>财务（3）</strong>
+              <code>service_data_sync.financial.probe</code>、
+              <code>service_data_sync.financial.sync_security</code>、
+              <code>service_data_sync.financial.derive_security</code>
+            </div>
+            <div>
+              <strong>资金流（2）</strong>
+              <code>service_data_sync.money_flow.probe</code>、
+              <code>service_data_sync.money_flow.sync_partition</code>
+            </div>
+            <div>
+              <strong>板块 EOD（3）</strong>
+              <code>service_data_sync.sector_eod.dispatch_shadow</code>、
+              <code>service_data_sync.sector_eod.run</code>、
+              <code>service_data_sync.sector_eod.reap</code>
+            </div>
+            <div>
+              <strong>申万（3）</strong>
+              <code>service_data_sync.sw_sector.probe</code>、
+              <code>service_data_sync.sw_sector.sync_current</code>、
+              <code>service_data_sync.sw_sector.replay_snapshot</code>
+            </div>
+          </div>
+          <p class="footnote">
+            当前 task event 与 result backend
+            均关闭；晚确认/重投只提供交付语义，不能代替 command/run 权威账本。
+          </p>
+        </details>
+
+        <h4>当前最多 9 个静态 beat 条目</h4>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>条目</th>
+                <th>Asia/Shanghai 触发</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>个股日线</td>
+                <td>每日 16:10</td>
+                <td>独立环境开关；不是交易日结构化计划。</td>
+              </tr>
+              <tr>
+                <td>个股周线</td>
+                <td>每周五 18:00</td>
+                <td>原生周线，不由日线聚合。</td>
+              </tr>
+              <tr>
+                <td>个股月线</td>
+                <td>每月 1 日 08:00</td>
+                <td>原生月线。</td>
+              </tr>
+              <tr>
+                <td>复权因子</td>
+                <td>每周六 08:30</td>
+                <td>新浪累计后复权因子。</td>
+              </tr>
+              <tr>
+                <td>公司行动</td>
+                <td>每日 19:00</td>
+                <td>东财分红送转。</td>
+              </tr>
+              <tr>
+                <td>公司资料</td>
+                <td>每月 1 日 07:00</td>
+                <td>巨潮当前公司概况。</td>
+              </tr>
+              <tr>
+                <td>申万同步</td>
+                <td>每日 18:30</td>
+                <td>来源只支持当天快照。</td>
+              </tr>
+              <tr>
+                <td>板块 EOD dispatch</td>
+                <td>每日 16:20</td>
+                <td>shadow 调度，默认不推进 production。</td>
+              </tr>
+              <tr>
+                <td>板块 EOD reaper</td>
+                <td>每 5 分钟</td>
+                <td>回收领域 lease，不是数据抓取计划。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="footnote">
+          上述条目都由配置开关决定是否生成；仓库默认配置关闭外部来源，不能据此推断目标环境已启用或最近执行。
+        </p>
+
+        <details>
+          <summary>全部 138 张已登记逻辑表（按 registry 业务域）</summary>
+          <p class="footnote">
+            这是 ORM registry
+            清单，不是运行环境行数清单。物理日期分区不作为独立业务表重复计数。
+          </p>
+          <div class="inventory">
+            <div>
+              <strong>共享 canonical 生命周期（13）</strong>
+              <code>canonical_dataset</code
+              >、<code>data_source</code>、<code>source_dataset</code>、
+              <code>methodology_version</code
+              >、<code>raw_payload_manifest</code>、
+              <code>normalization_run</code
+              >、<code>normalized_record_manifest</code>、
+              <code>quality_evaluation</code>、<code>quality_result</code>、
+              <code>quarantine_record</code>、<code>dataset_release</code>、
+              <code>canonical_checkpoint</code>、<code
+                >canonical_record_lineage</code
+              >
+            </div>
+            <div>
+              <strong>指数观察（5）</strong>
+              <code>index_definition</code
+              >、<code>index_catalog_observation</code>、
+              <code>index_catalog_observation_item</code
+              >、<code>index_observed_snapshot</code>、
+              <code>index_observed_snapshot_item</code>
+            </div>
+            <div>
+              <strong>市场身份与资产根（13）</strong>
+              <code>trading_venue</code
+              >、<code>market_entity</code>、<code>market_instrument</code>、
+              <code>instrument_identifier_version</code
+              >、<code>instrument_lifecycle_version</code>、
+              <code>market_entity_relation_version</code
+              >、<code>market_calendar_day</code>、
+              <code>market_session_version</code
+              >、<code>fund_legal_entity</code>、
+              <code>fund_share_class</code>、<code>etf_listing</code>、
+              <code>derivative_product</code>、<code>derivative_contract</code>
+            </div>
+            <div>
+              <strong>衍生品 revision（2）</strong>
+              <code>derivative_contract_revision</code>、<code
+                >derivative_daily_bar_revision</code
+              >
+            </div>
+            <div>
+              <strong>披露、主营与公司事件（12）</strong>
+              <code>disclosure_document</code
+              >、<code>disclosure_document_relation</code>、
+              <code>business_composition_report_revision</code
+              >、<code>business_composition_line</code>、
+              <code>business_composition_label_version</code
+              >、<code>corporate_event</code>、
+              <code>corporate_event_revision</code
+              >、<code>corporate_earnings_value</code>、
+              <code>restricted_unlock_lot</code
+              >、<code>share_capital_component</code>、
+              <code>shareholder_holding_action</code>、<code
+                >trading_disclosure_reason_map_version</code
+              >
+            </div>
+            <div>
+              <strong>特殊交易（3）</strong>
+              <code>dragon_tiger_event_revision</code
+              >、<code>dragon_tiger_seat_item</code>、
+              <code>block_trade_execution_revision</code>
+            </div>
+            <div>
+              <strong>两融与港通（9）</strong>
+              <code>margin_market_daily_revision</code
+              >、<code>margin_security_daily_revision</code>、
+              <code>margin_eligibility_revision</code
+              >、<code>margin_system_risk_daily_revision</code>、
+              <code>stock_connect_disclosure_regime</code
+              >、<code>stock_connect_channel_daily_revision</code>、
+              <code>stock_connect_active_security_revision</code
+              >、<code>stock_connect_holding_snapshot</code>、
+              <code>stock_connect_holding_item</code>
+            </div>
+            <div>
+              <strong>来源、执行与发布（7）</strong>
+              <code>source_batch</code
+              >、<code>sync_run</code>、<code>sync_partition</code>、
+              <code>dataset_publication</code
+              >、<code>dataset_availability_observation</code>、
+              <code>dataset_publication_component</code>、<code
+                >data_quality_issue</code
+              >
+            </div>
+            <div>
+              <strong>A 股身份（10）</strong>
+              <code>equity_instrument</code
+              >、<code>equity_identifier_version</code>、
+              <code>equity_name_version</code
+              >、<code>equity_listing_status_version</code>、
+              <code>equity_master_snapshot</code
+              >、<code>equity_master_snapshot_member</code>、
+              <code>equity_presence_anomaly</code
+              >、<code>equity_identity_quarantine</code>、
+              <code>equity_lifecycle_checkpoint</code>、<code
+                >equity_profile_version</code
+              >
+            </div>
+            <div>
+              <strong>A 股行情（6）</strong>
+              <code>equity_daily_bar</code>、<code>equity_weekly_bar</code>、
+              <code>equity_monthly_bar</code
+              >、<code>equity_adjustment_factor</code>、
+              <code>equity_corporate_action_version</code>、<code
+                >equity_sync_checkpoint</code
+              >
+            </div>
+            <div>
+              <strong>ETF revision（8）</strong>
+              <code>etf_profile_version</code
+              >、<code>etf_tracking_relation_version</code>、
+              <code>etf_daily_bar_revision</code
+              >、<code>etf_nav_revision</code>、
+              <code>etf_share_revision</code
+              >、<code>etf_status_revision</code>、
+              <code>etf_action_version</code>、<code>etf_premium_revision</code>
+            </div>
+            <div>
+              <strong>财务与估值（13）</strong>
+              <code>financial_methodology</code
+              >、<code>financial_metric_definition</code>、
+              <code>financial_report</code
+              >、<code>financial_report_revision</code>、
+              <code>financial_statement_fact</code
+              >、<code>provider_financial_metric_revision</code>、
+              <code>derived_financial_metric_revision</code
+              >、<code>valuation_observation_revision</code>、
+              <code>financial_field_quarantine</code
+              >、<code>financial_quality_result</code>、
+              <code>financial_publication</code
+              >、<code>financial_change_checkpoint</code>、
+              <code>financial_derivation_input</code>
+            </div>
+            <div>
+              <strong>资金流（13）</strong>
+              <code>money_flow_methodology</code
+              >、<code>money_flow_methodology_version</code>、
+              <code>money_flow_methodology_scope</code
+              >、<code>money_flow_methodology_window</code>、
+              <code>money_flow_bucket_definition</code
+              >、<code>money_flow_universe_version</code>、
+              <code>money_flow_series</code
+              >、<code>money_flow_daily_observation</code>、
+              <code>money_flow_ranking_snapshot</code
+              >、<code>money_flow_ranking_item</code>、
+              <code>money_flow_ranking_metric</code
+              >、<code>money_flow_ranking_manifest</code>、
+              <code>money_flow_quality_result</code>
+            </div>
+            <div>
+              <strong>板块目录与行情（5）</strong>
+              <code>sector_scheme</code
+              >、<code>sector_entity</code>、<code>sector_daily_bar</code>、
+              <code>sector_weekly_bar</code>、<code>sector_monthly_bar</code>
+            </div>
+            <div>
+              <strong>板块成分（8）</strong>
+              <code>sector_membership_snapshot</code
+              >、<code>sector_membership_item</code>、
+              <code>sector_membership_pending</code
+              >、<code>sector_membership_quarantine</code>、
+              <code>sector_membership_quality_result</code
+              >、<code>sector_membership_interval</code>、
+              <code>sector_membership_release</code>、<code
+                >sector_membership_release_sector</code
+              >
+            </div>
+            <div>
+              <strong>板块 EOD（4）</strong>
+              <code>sector_eod_sync_partition</code
+              >、<code>sector_eod_snapshot</code>、
+              <code>sector_eod_quote</code>、<code
+                >sector_eod_quality_result</code
+              >
+            </div>
+            <div>
+              <strong>申万（7）</strong>
+              <code>sw_sector_methodology</code
+              >、<code>sw_sector_node_revision</code>、
+              <code>sw_sector_closure</code
+              >、<code>sw_sector_valuation_revision</code>、
+              <code>sw_sector_quality_result</code
+              >、<code>sw_sector_publication</code>、
+              <code>sw_sector_sync_checkpoint</code>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <section id="architecture">
+        <h2>4. 目标架构与功能划分</h2>
+
+        <pre class="flow" aria-label="数据运维控制面跨服务流程">
+service-web 数据运维页
+        │ 公开 POST：查看 / 提交 / 取消 / 重试 / 健康 / 计划
+        ▼
+service-api
+  ├─ 同事务：submission + command outbox + 公开 audit
+  ├─ 固定初始响应：202 delivery=PENDING，queuePosition=null
+  └─ 独立 outbox dispatcher
+        │ 内部 Bearer + Idempotency-Key + submissionId/preflightId/requestHash + actorContext
+        ▼
+service-data-sync internal API
+  command / catalog / run / health / schedule / event 权威（PostgreSQL）
+        │                         │
+        │ 写入 queued run        └─ 查询只读投影
+        ▼
+DB dispatcher ── Celery 只发送 wake-up ──▶ worker
+        │                                      │
+        ├─ 全局 lease + 单调 fence token       ├─ provider-neutral application service
+        ├─ FIFO 选择唯一 run                    ├─ adapter → AKShare → 真实上游
+        └─ attempt / event / heartbeat          └─ quality → canonical → publication/checkpoint
+                                                   （同事务校验 fence token）
+
+PostgreSQL：权威状态与事实   Redis：仅 broker   私有 S3：仅失败证据   监控后端：待决</pre
+        >
+
+        <div class="grid">
+          <article class="card">
+            <span class="label">目录与来源</span>
+            <h3>Dataset Registry</h3>
+            <p>
+              <strong>职责：</strong
+              >登记数据集、capability、表、模式、粒度、日历、来源、方法学、权利与运行资格。
+            </p>
+            <p>
+              <strong>输入 / 输出：</strong>版本化代码 manifest
+              与迁移；输出可分页 catalog 和模式约束。
+            </p>
+            <p>
+              <strong>状态：</strong>对外 lifecycle 为
+              RESEARCH/CANDIDATE/PRODUCTION/RETIRED， availability 为
+              ENABLED/DISABLED/SOURCE_UNAVAILABLE/UNKNOWN；内部另保留
+              MODEL_ONLY，来源 approval 独立。
+            </p>
+            <p>
+              <strong>失败边界：</strong>manifest/DB
+              漂移时拒绝新命令，不影响既有消费者 publication。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label">命令与队列</span>
+            <h3>Command Gateway + Dispatcher</h3>
+            <p>
+              <strong>职责：</strong>幂等接收单/批命令，校验权限和模式，展开有序
+              child runs， 提供 parent 聚合详情，并按 DB 顺序串行领取。
+            </p>
+            <p>
+              <strong>输入 / 输出：</strong
+              >Idempotency-Key、submissionId、preflightId/requestHash、actorContext；
+              data-sync 分配 commandId，输出新命令首个 child 的
+              queuePosition、有序 child runId 和 outcome。
+            </p>
+            <p>
+              <strong>状态：</strong
+              >command、item、run、attempt、partition、global lease。
+            </p>
+            <p>
+              <strong>失败边界：</strong>Celery 重复或丢失只影响唤醒延迟，不改变
+              DB 中的队列和终态。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label">执行适配</span>
+            <h3>Unified Run Executor</h3>
+            <p>
+              <strong>职责：</strong
+              >把注册表中的中立请求翻译到既有应用服务，不把 provider
+              参数放进控制面。
+            </p>
+            <p>
+              <strong>输入 / 输出：</strong>归一 run spec + fence；输出
+              publication/checkpoint/失败分类。
+            </p>
+            <p>
+              <strong>状态：</strong>只通过 repository 修改
+              canonical；自身仅写阶段和 attempt。
+            </p>
+            <p>
+              <strong>失败边界：</strong>adapter、质量或持久化失败局限于当前
+              run；旧 publication 保持可读。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label">动态计划</span>
+            <h3>Schedule Coordinator</h3>
+            <p>
+              <strong>职责：</strong>从 PostgreSQL
+              计算到期触发，以确定性幂等键生成 command，并唤醒 dispatcher。
+            </p>
+            <p>
+              <strong>输入 / 输出：</strong
+              >TRADING_DAY/DAILY/WEEKLY/MONTHLY/INTERVAL、IANA 时区、 dataset
+              spec、人工/计划模式矩阵、scheduleTargetPolicyOptions、targetPolicy、expectedVersion；输出
+              schedule fire。
+            </p>
+            <p>
+              <strong>状态：</strong>next/last fire、version、enabled、misfire。
+            </p>
+            <p>
+              <strong>失败边界：</strong>多实例用 DB
+              行锁协调；重启不会重复创建同一计划时刻的 run。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label">质量与健康</span>
+            <h3>Health Evaluator</h3>
+            <p>
+              <strong>职责：</strong>对冻结 publication 执行
+              freshness、完整性、正确性、连续性和血缘检查。
+            </p>
+            <p>
+              <strong>输入 / 输出：</strong>policyVersion +
+              dataVersion；规则范围由该 policyVersion 冻结，输出状态、0—100
+              score、不可变规则结果，以及带 issueProjectionAsOf
+              的当前开放问题安全投影。
+            </p>
+            <p>
+              <strong>状态：</strong>evaluation、issue、脱敏聚合 sampleSummary
+              和证据引用。
+            </p>
+            <p>
+              <strong>失败边界：</strong>未知日历/方法学得到
+              UNKNOWN；post-publication CRITICAL 不撤销既有 publication。
+            </p>
+          </article>
+          <article class="card">
+            <span class="label">审计与诊断</span>
+            <h3>Operational Event Ledger</h3>
+            <p>
+              <strong>职责：</strong
+              >追加记录命令、权限判断、运行转移、计划变更、健康操作和结果。
+            </p>
+            <p>
+              <strong>输入 / 输出：</strong
+              >actorRef/requestId/commandId/runId；输出稳定事件序列和脱敏诊断。
+            </p>
+            <p>
+              <strong>状态：</strong>append-only event；失败证据仅保存私有引用。
+            </p>
+            <p>
+              <strong>失败边界：</strong
+              >事件与状态变更同事务；日志/指标后端失败不丢业务审计。
+            </p>
+          </article>
+        </div>
+
+        <div class="callout">
+          <strong>服务边界</strong>
+          service-api 不设置同步锁、不计算 queuePosition、不维护 run
+          终态。它保存“谁可靠提交了什么”的公开证据；
+          本地提交事务成功后一律先返回 <code>PENDING</code>，不能同步调用
+          data-sync 后改写初始响应。 service-data-sync
+          保存“命令如何执行并得到什么结果”的权威事实。两侧以
+          actorRef、requestId、submissionId、commandId 关联；系统命令没有 API
+          submission， submissionId=null，仅通过固定 SYSTEM actorRef、commandId
+          和事件追溯， 任何一侧都不直连另一侧数据库。
+        </div>
+      </section>
+
+      <section id="model">
+        <h2>5. 控制面数据模型与内部契约</h2>
+
+        <h3>5.1 新增或扩展表</h3>
+        <div class="table-wrap">
+          <table class="wide">
+            <thead>
+              <tr>
+                <th>表 / 视图</th>
+                <th>关键字段与约束</th>
+                <th>职责与事务边界</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>sync_dataset_registration</code></td>
+                <td>
+                  dataset_key
+                  PK/FK、display_name、capability、domain、implementation_stage、lifecycle_status、
+                  availability、grain、market/timezone/calendar、data_as_of_kind/label、freshness_policy、
+                  manual_supported_modes/schedule_supported_modes/schedule_target_policy_options/
+                  parameter_shape、full_scope、
+                  max_range_days、correction_lookback_days、
+                  partition_policy、timeout/retry_budget、manual_enabled、schedule_eligible、manifest_hash、version
+                </td>
+                <td>
+                  控制面可执行目录；dataset_key 同时是
+                  <code>canonical_dataset</code> 的 PK/FK，保持一对一稳定身份。
+                  代码 manifest 通过迁移写入，
+                  运行时不静默造数据集；manual_enabled=false
+                  时人工模式数组必须为空， schedule_eligible=false
+                  时计划模式和目标策略数组都必须为空；v1 计划模式不含
+                  DATE_RANGE。 schedule_eligible=true 时，目标策略数组最多 6
+                  项，每个计划模式必须至少有一个允许策略
+                  且恰有一个默认项。MODEL_ONLY 的 freshness_policy 必须为
+                  null，目录投影
+                  freshness_status=NOT_APPLICABLE；其他可观测数据集必须有
+                  policy。
+                </td>
+              </tr>
+              <tr>
+                <td><code>sync_dataset_storage_binding</code></td>
+                <td>
+                  dataset_key + registered_table_key
+                  PK；schema/table、role(PRIMARY/COMPONENT/QUALITY/LINEAGE)、effective
+                </td>
+                <td>
+                  把用户可见数据集映射到 ORM registry
+                  中的业务表；目录显示稳定业务表名，不把物理日期分区重复当成新数据集。
+                  registry 漂移阻断新命令，不据表存在推断已有数据。
+                </td>
+              </tr>
+              <tr>
+                <td><code>sync_dataset_source</code></td>
+                <td>
+                  dataset_key + source_key
+                  PK；access_provider/provider_id、adapter_id、upstream_source、
+                  source_dataset、methodology_code/version、
+                  approval_status(RESEARCH/CANDIDATE/APPROVED/SUSPENDED/UNSUPPORTED)、
+                  rights_evidence_ref、role(PRIMARY/FALLBACK/SHADOW)、effective
+                </td>
+                <td>
+                  区分 AKShare/Tushare
+                  等访问供应商与东财/同花顺/交易所等真实上游；不保存凭据。
+                  对外严格投影 0022 SourceBinding；跨方法学来源不设自动
+                  fallback。每个数据集最多投影 10 条当前
+                  sourceBindings；manifest 超限时阻断， 不在响应中静默截断。
+                </td>
+              </tr>
+              <tr>
+                <td><code>data_operation_idempotency</code></td>
+                <td>
+                  caller_service + idempotency_key_hash
+                  PK、operation、request_hash、resource_type/id、
+                  receipt_ref、receipt_snapshot(target/target_status/command_status/child_run_ids/
+                  queue_position/accepted_at)、status、created/expires_at
+                </td>
+                <td>
+                  覆盖 sync submit/cancel/retry、health submit、schedule
+                  upsert/set-enabled； 首次业务变更与幂等记录同事务。相同 key
+                  异请求 409，未知结果只读/重试原记录。
+                  服务端先查幂等记录：已有同请求直接返回原 receipt，即使其
+                  preflight 后来过期；不可按已经变化的 command/run 状态重算旧
+                  receipt。
+                </td>
+              </tr>
+              <tr>
+                <td><code>data_operation_preflight</code></td>
+                <td>
+                  preflight_id
+                  PK、request_hash、normalized_targets、resolved_ranges/estimates/
+                  warnings(max 20 per target)、expires_at、created_at
+                </td>
+                <td>
+                  保存无副作用预检快照；首次 submit 必须带未过期 preflightId
+                  和相同 requestHash，并再次校验运行开关、
+                  来源资格与范围。preflight 不是资源预留，也不影响已有幂等
+                  receipt 的重放。每个 target 最多返回 20 条有序稳定
+                  warning，超限在生成端合并为摘要。
+                </td>
+              </tr>
+              <tr>
+                <td><code>data_operation_command</code></td>
+                <td>
+                  command_id PK、submission_id nullable
+                  UK、idempotency_key_hash、request_hash、type、actor_ref、
+                  role_at_request、reason、request_id、aggregate_status、requested/started/finished_at、
+                  outcome_code/error
+                </td>
+                <td>
+                  同调用方 + 同内部 Idempotency-Key + 同 requestHash 返回原
+                  receipt；同 key 异 hash 返回 409。 data-sync 首次受理时分配
+                  commandId；聚合状态由有序 child runs 权威计算，
+                  权限判断和拒绝事件同事务落库。API 用户命令必须有
+                  submission_id； schedule/legacy/recovery 系统命令为
+                  null，并使用固定 SYSTEM actorRef。 数据库约束绑定 command
+                  type、submission_id、role 与 actor_ref，禁止伪造系统身份。
+                </td>
+              </tr>
+              <tr>
+                <td><code>data_operation_command_item</code></td>
+                <td>
+                  command_id + sequence_no
+                  PK；dataset_key、mode、target_json、range、run_id、status；
+                  UNIQUE(command_id, dataset_key)
+                </td>
+                <td>
+                  批量先全量校验、再一次事务写入；sequence_no
+                  冻结提交顺序，commands/detail 始终按该顺序返回 childRuns，Web
+                  不从分页 run 列表重建批次。只有在创建 child 前即 REJECTED
+                  的命令允许零项； 其余已受理命令必须至少一项。v1 同一请求内
+                  datasetCode 必须唯一， preflight 与 submit 发现重复目标均返回
+                  422。
+                </td>
+              </tr>
+              <tr>
+                <td><code>sync_run</code>（扩展）</td>
+                <td>
+                  command_id、dataset_key、trigger_kind、sync_mode、requested_by、role_at_request、request_id、
+                  normalized_spec、source_binding_snapshot、registration/source/methodology/policy
+                  versions、 queue_priority/sequence、
+                  status、completed/total_partitions、processed_records/estimated_records、
+                  latest_error、timestamps
+                </td>
+                <td>
+                  保留旧 run_id；受理时冻结 1—10 条完整
+                  SourceBinding（Provider、真实上游、sourceDataset、
+                  adapter、方法学版本、资格与角色）和执行
+                  policy，排队期间注册表变化不静默改写任务。 RunDetail 的
+                  sourceSnapshot 只读此快照，绝不回查当前来源覆盖历史事实。 现有
+                  <code>mode</code> 在兼容期映射为
+                  trigger_kind，避免把手工/计划和 full/incremental
+                  继续混为一列。
+                </td>
+              </tr>
+              <tr>
+                <td><code>sync_run_attempt</code></td>
+                <td>
+                  run_id + attempt_no PK；fence_token UK、worker_id、lease
+                  timestamps、outcome、error_category/code、evidence_ref
+                </td>
+                <td>
+                  一次 lease claim 对应一次 attempt；自动 lease 恢复复用
+                  run，新建 attempt，不改写旧诊断。
+                </td>
+              </tr>
+              <tr>
+                <td><code>sync_global_lease</code></td>
+                <td>
+                  singleton_key=<code>global-sync</code>
+                  PK、state(IDLE/RUNNING/RECOVERING)、active_run_id、owner、fence_token
+                  bigint、lease_until、heartbeat_at
+                </td>
+                <td>
+                  领取、run → RUNNING、token + 1 在一个
+                  <code>SELECT … FOR UPDATE</code> 事务完成；Redis
+                  不参与。数据库约束 IDLE 时
+                  active_run_id/owner/lease_until/heartbeat_at 全为空，
+                  RUNNING/RECOVERING 时全非空；对外 ExecutionSlot.datasetCode 由
+                  active run 稳定联结，和 runId/leaseUntil/heartbeatAt
+                  一起遵守同一 <code>oneOf</code>。
+                </td>
+              </tr>
+              <tr>
+                <td><code>sync_partition</code>（扩展）</td>
+                <td>
+                  现有 partition/checkpoint/error +
+                  current_fence_token、stage、record
+                  counts、checkpoint_summary(kind/position_hash/updated_at)
+                </td>
+                <td>
+                  首版分区串行执行；成功分区可在重试时跳过。checkpoint 仍不是
+                  publication。按 run_id + 稳定 partition
+                  顺序建立游标索引，支持详情独立分页。 内部 RunDetail 只投影有界
+                  CheckpointSummary；Provider cursor、token、raw payload
+                  永不进入该摘要，公开 0023 RunDetail 连摘要也不暴露。
+                </td>
+              </tr>
+              <tr>
+                <td><code>sync_run_quality_gate</code>（投影/规范化记录）</td>
+                <td>
+                  run_id
+                  PK、disposition、policy_code/version、affected_count、error_code/stage
+                </td>
+                <td>
+                  将领域质量表统一投影为
+                  NOT_EVALUATED/PASSED/WARNED/BLOCKED；RunDetail 单列
+                  qualityGate。 BLOCKED 只阻止当前候选 publication，不得被普通
+                  run error 或 post-publication health 混淆。
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>sync_schedule</code> /
+                  <code>sync_schedule_revision</code>
+                </td>
+                <td>
+                  schedule_id、dataset_key UK、dataset
+                  spec、mode、target_policy_version/date_resolution、
+                  frequency_kind、local_time、day_of_week/day_of_month、
+                  interval_minutes、timezone、calendar_code、enabled、version、revision_id、
+                  next/last_fire_at、misfire_policy、coalesce
+                </td>
+                <td>
+                  只接受结构化
+                  TRADING_DAY/DAILY/WEEKLY/MONTHLY/INTERVAL，不接收任意调度表达式。
+                  current 行使用 expectedVersion 乐观并发，每次变更追加不可变
+                  revision；禁用优先于删除， 数据集和模式必须仍可执行。每个
+                  revision 冻结完整 targetPolicy 及其 policyVersion。创建时
+                  scheduleId/expectedVersion 同为 null；更新时两者同为非 null
+                  且版本必须匹配， 半空组合返回 422。v1 每个 dataset_key
+                  最多一个计划；重复创建返回 409， 更新时 dataset_key 不可改绑。
+                </td>
+              </tr>
+              <tr>
+                <td><code>sync_schedule_fire</code></td>
+                <td>
+                  schedule_id + scheduled_for + schedule_version
+                  UK、target_policy_version、
+                  resolved_observation_date、command_id、outcome、coalesced_count
+                </td>
+                <td>
+                  确定性生成幂等键并复用原 command receipt；scheduler
+                  重启或双实例不会重复入队。 触发快照和生成的 normalized run
+                  spec 都保存 targetPolicy 版本与解析后的目标日期。
+                </td>
+              </tr>
+              <tr>
+                <td><code>data_health_policy</code></td>
+                <td>
+                  dataset_key +
+                  policy_version、rule_code、severity、parameters、active_from
+                </td>
+                <td>
+                  版本化规则，不原地改变旧 evaluation
+                  解释；方法学和日历依赖显式声明。单个数据集详情最多返回 200 条
+                  healthRules， policy 激活前校验上限，不能静默截断。
+                </td>
+              </tr>
+              <tr>
+                <td><code>data_health_check</code></td>
+                <td>
+                  health_check_id PK、submission_id nullable
+                  UK、actor_ref/role/reason、status、
+                  requested_targets[{sequence_no,dataset_key,
+                  requested_data_version|null}]、bound_data_versions、
+                  target_results[{sequence_no,status,evaluation_id,error}]、
+                  accepted/started/completed_at
+                </td>
+                <td>
+                  主动健康命令账本；每个 target 独立选择版本，null
+                  在受理时逐数据集冻结到最新 production publication，禁止用一个
+                  dataVersion 指代多个数据集。 独立资源队列默认并发 1，不占用
+                  global-sync 槽，也不读取变化中的 candidate。HealthCheckDetail
+                  始终按 sequence_no 返回原 target 与结果，供 API reconciler
+                  轮询对账。 v1 在写入前校验同一批次 datasetCode
+                  唯一，重复目标返回 422。
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>data_health_evaluation</code> /
+                  <code>data_health_issue</code>
+                </td>
+                <td>
+                  evaluation_id、health_check_id(nullable)、dataset_key/data_version/release_id/
+                  policy_code/policy_version、 status、score(0—100|null)、
+                  warning/critical/affected counts、evaluated_at；rule
+                  results（最多 500 项） severity/status/expected/observed/
+                  affected_count/safe_sample_summary；issue_id/rule/dimension/severity/
+                  lifecycle_status/first/last_detected_at/affected_count/safe_evidence_summary
+                </td>
+                <td>
+                  绑定冻结
+                  publication；结果不可变，样例只允许脱敏聚合摘要，不返回原始记录。
+                  post-publication CRITICAL
+                  标记既有版本严重异常，但不撤销或阻断该
+                  publication。HealthEvaluation 不保存当前问题字段； search
+                  只投影带 currentOpenIssueCount + issueProjectionAsOf 的
+                  HealthEvaluationSummary，不读取 results。HealthDetail
+                  组合不可变 evaluation， 并用独立游标投影
+                  currentOpenIssues/currentOpenIssuesNextCursor； RESOLVED
+                  仍保留在内部历史与事件中。issue
+                  生命周期变化只更新当前问题投影和追加事件， 不改写不可变
+                  evaluation rule results。主动检查生成的 evaluation 反向关联
+                  health_check_id；同步发布后的自动评估为 null。
+                </td>
+              </tr>
+              <tr>
+                <td><code>data_operation_event</code></td>
+                <td>
+                  event_id、sequence、event_type、actor_ref/role、request/command/run/schedule/evaluation
+                  IDs、target、outcome、before/after hash、occurred_at
+                </td>
+                <td>
+                  append-only；与对应状态变更同事务。敏感
+                  raw、token、堆栈不进入可查询 payload。按 resource + sequence
+                  建立稳定时间线游标， RunDetail 不一次加载全部事件。
+                </td>
+              </tr>
+              <tr>
+                <td><code>dataset_operation_summary</code>（视图/投影）</td>
+                <td>
+                  availability/reason、observation_state/reason、
+                  last_attempt_started/finished_at/status、last_success_at、last_published_at、data_as_of、coverage_from/to、
+                  data_as_of_kind(TRADING_DATE/REPORT_PERIOD/OBSERVATION_DATE/SNAPSHOT_DATE/EVENT_DATE/NOT_APPLICABLE)、
+                  data_as_of_label、freshness_status/lag_value/lag_unit/reason/evaluated_at、
+                  latest_row_count、latest_run、queue_position、last_error、
+                  health(status/score/warning/critical/open_issue/affected
+                  counts)、next_run_at
+                </td>
+                <td>
+                  目录列表读取模型。last_success_at 只取
+                  SUCCEEDED.finishedAt，PARTIAL 不算成功； freshness 由
+                  data-sync 按版本化 policy 计算，Web 不从日期或日历自行推断。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout">
+          <strong>能力矩阵不能由 UI 推断</strong>
+          <code>DatasetCapability.supportedModes</code>
+          只表示人工命令能力，可为空数组；
+          <code>manualEnabled=false</code> 时必须为空，true 时至少一项。
+          <code>scheduleSupportedModes</code>
+          是独立的自动计划能力，同样可为空数组；<code
+            >scheduleEligible=false</code
+          >
+          时它和 <code>scheduleTargetPolicyOptions</code> 都必须为空，true
+          时都至少一项。 options 全数组最多 6 项；每个 scheduleSupportedModes
+          模式在 options 中至少有一项
+          <code
+            >{ mode, policy: { policyVersion, dateResolution }, isDefault
+            }</code
+          >， 且同一模式恰有一个 isDefault=true，options
+          不得出现计划模式数组之外的 mode。首版计划仅允许
+          FULL、INCREMENTAL、OBSERVATION_DATE，不允许自动 DATE_RANGE。Web
+          必须按服务端 options
+          展示默认值和允许值，不能把人工能力复制成计划能力或自行拼装
+          targetPolicy。
+        </div>
+
+        <h3>5.2 数据观测与时间口径</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>DatasetObservationState</th>
+                <th>权威含义</th>
+                <th>不得混淆</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>PRESENT</td>
+                <td>
+                  已有可识别的观测数据，通常最新 publication rowCount &gt; 0。
+                </td>
+                <td>不代表 freshness 或 health 一定正常。</td>
+              </tr>
+              <tr>
+                <td>EMPTY_VALID</td>
+                <td>
+                  数据集 policy 明确允许该 scope 为空，且成功结果带稳定原因码。
+                </td>
+                <td>不是来源失败，也不是“没有跑过”。</td>
+              </tr>
+              <tr>
+                <td>EMPTY_UNEXPECTED</td>
+                <td>预期应有数据却得到空集，或合法空证据不足。</td>
+                <td>不能显示为成功空数据；应关联 quality/error。</td>
+              </tr>
+              <tr>
+                <td>NOT_YET_SYNCED</td>
+                <td>从未形成该数据集的受理运行或 publication。</td>
+                <td>不能根据表存在显示“已有数据”。</td>
+              </tr>
+              <tr>
+                <td>UNKNOWN</td>
+                <td>legacy 回填或证据不足，暂时无法判定。</td>
+                <td>不能等价为 EMPTY_VALID、失败或健康。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <ul>
+          <li>
+            availability、observationState、last run 与 health
+            是四条独立轴；来源不可用、异常空集、失败、UNKNOWN 不合并为“无数据”。
+          </li>
+          <li>
+            lastAttemptStartedAt 取最近尝试 startedAt；lastAttemptFinishedAt
+            仅在终态存在，QUEUED/RUNNING 时为 null。
+          </li>
+          <li>
+            lastSuccessAt 只取最近 SUCCEEDED 的 finishedAt；PARTIAL
+            即使发布了部分分区也不计作“最近成功”。
+          </li>
+          <li>
+            freshnessStatus 为
+            FRESH/WARNING/STALE/UNKNOWN/NOT_APPLICABLE，并返回 lag value、
+            MINUTES/CALENDAR_DAYS/TRADING_DAYS/REPORTING_PERIODS 或 null 的 lag
+            unit、稳定 freshnessReasonCode 与 freshnessEvaluatedAt； 全部由
+            data-sync 按版本化 policy 计算，Web 只展示。
+          </li>
+          <li>
+            仅内部 implementationStage=MODEL_ONLY 的数据集允许
+            DatasetDetail.freshnessPolicy=null， 且
+            DatasetTiming.freshnessStatus 必须为 NOT_APPLICABLE；合同 oneOf
+            机器保证
+            <code>freshnessPolicy=null ⇔ freshnessStatus=NOT_APPLICABLE</code
+            >，禁止半匹配组合。 Web 显示“不适用”，不能当作 UNKNOWN、STALE
+            或缺失配置。其他数据集缺 freshness policy 属于注册表漂移并阻断命令。
+          </li>
+        </ul>
+
+        <h3>5.3 运行与命令状态</h3>
+        <pre class="flow" aria-label="命令与运行状态机">
+PARENT COMMAND
+QUEUED ──首个 child 开始──▶ RUNNING ──聚合──▶ SUCCEEDED | PARTIAL | FAILED
+  │                            │
+  ├─整批取消──▶ CANCEL_REQUESTED ──全部 child 终止──▶ CANCELLED
+  └─受理期权威拒绝──▶ REJECTED
+
+CHILD RUN
+QUEUED ──领取 lease/fence──▶ RUNNING ──▶ SUCCEEDED | PARTIAL | FAILED
+  │                             │
+  ├─排队取消──▶ CANCELLED       ├─取消请求──▶ CANCEL_REQUESTED ──安全点──▶ CANCELLED
+  ├─计划合并/目标失效──▶ SKIPPED
+  │                             └─lease 过期──▶ INTERRUPTED ──▶ QUEUED | FAILED
+      └─人工 retry：旧 run 不变，创建 retry_of_run_id 指向的新 QUEUED run</pre
+        >
+
+        <ul>
+          <li>
+            commands/detail 暴露完整
+            CommandStatus：QUEUED/RUNNING/CANCEL_REQUESTED/SUCCEEDED/PARTIAL/
+            FAILED/CANCELLED/REJECTED，并按原 target 顺序返回 childRuns；创建
+            child 前即 REJECTED 时允许 childRuns=[]，其余已受理命令必须有 1—100
+            项。它是批量聚合权威。
+          </li>
+          <li>
+            API 用户命令的 CommandDetail 带
+            submissionId；schedule、legacy、recovery 系统命令固定
+            submissionId=null，actorRef 分别为
+            <code>system:schedule/{scheduleId}</code>、
+            <code>system:legacy</code
+            >、<code>system:recovery</code>。service-api 显示“系统计划”、
+            “遗留任务”、“系统恢复”，交付状态显示
+            NOT_APPLICABLE，不得落入“已删除用户”兜底。
+          </li>
+          <li>
+            CommandReceipt 必返 target 与 targetStatus，status 使用上述完整
+            CommandStatus。 submit 返回
+            <code>target={COMMAND, new commandId}</code> 且
+            targetStatus=status。 cancel/retry 的 target 原样回显请求中的
+            COMMAND 或 RUN：cancel 的 commandId/status 描述 目标 COMMAND
+            本身或目标 RUN 的所属 parent command，targetStatus
+            是接受取消后的目标状态； retry 的 commandId/status
+            描述新建重试命令，targetStatus 保留原目标终态。targetStatus 使用
+            QUEUED/RUNNING/CANCEL_REQUESTED/SUCCEEDED/PARTIAL/FAILED/CANCELLED/
+            INTERRUPTED/SKIPPED/REJECTED；合同 oneOf 强制
+            target.resourceType=COMMAND 时 targetStatus 必须属于
+            CommandStatus，resourceType=RUN 时必须属于 RunStatus。 因此
+            INTERRUPTED/SKIPPED 只用于 RUN，REJECTED 只用于
+            COMMAND，不把子运行状态伪装成 parent status。 后续进展查询
+            commands/detail。
+          </li>
+          <li>
+            run 的 PARTIAL 表示至少一个分区已发布且至少一个分区未成功；command
+            的 PARTIAL 是 childRuns 终态聚合。两者都不得用于掩盖
+            qualityGate=BLOCKED。
+          </li>
+          <li>
+            自动恢复属于同一 run 的新 attempt；INTERRUPTED 进入事件/attempt
+            历史，再按预算回到 QUEUED 或 FAILED。
+          </li>
+          <li>
+            管理员 retry 创建新 command/run 并关联原失败 run，保留完整事故历史。
+          </li>
+          <li>
+            队列取消原子变为 CANCELLED；运行取消是协作式，不强杀阻塞中的 SDK
+            线程。
+          </li>
+          <li>
+            若 publication 已提交，取消不能倒退数据版本；返回
+            <code>cancel_too_late</code> 事件 result=FAILED，并携带
+            ErrorSummary(stage=CANCEL, code=cancel_too_late)；目标 run 保留真实
+            SUCCEEDED。 取消动作只有在目标进入 CANCELLED
+            时才算达成，CANCEL_REQUESTED 只表示已受理。
+          </li>
+        </ul>
+
+        <h3>5.4 内部 POST 契约</h3>
+        <p>
+          权威 schema 归属
+          <a
+            href="../../contracts/0022-data-sync-operations-internal.openapi.yaml"
+            >0022 OpenAPI</a
+          >。 v1 共 18 个内部 POST，固定前缀
+          <code>/internal/v1/data-operations</code>，所有请求继续使用服务
+          Bearer； service-api 注入受信 actorContext，浏览器字段不能直接成为
+          actor。
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>能力组</th>
+                <th>内部 POST</th>
+                <th>关键语义</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>总览</td>
+                <td><code>/overview/query</code></td>
+                <td>
+                  返回数据集数、健康汇总、唯一执行槽、排队数与 24 小时失败数。
+                </td>
+              </tr>
+              <tr>
+                <td>目录</td>
+                <td>
+                  <code>/datasets/search</code>、<code>/datasets/detail</code>
+                </td>
+                <td>
+                  支持 provider/upstreamSources
+                  过滤；返回来源两层身份、能力、四种时间口径及
+                  dataAsOfKind/Label、最新运行/发布、健康和计划。
+                </td>
+              </tr>
+              <tr>
+                <td>命令</td>
+                <td>
+                  <code>/commands/preflight</code
+                  >、<code>/commands/submit</code>、<code>/commands/detail</code>、<code>/commands/cancel</code>、<code
+                    >/commands/retry</code
+                  >
+                </td>
+                <td>
+                  无副作用预检；同内部 Idempotency-Key/requestHash 幂等；detail
+                  返回聚合态与有序 childRuns，mutation receipt 必返
+                  target/targetStatus。
+                </td>
+              </tr>
+              <tr>
+                <td>运行</td>
+                <td><code>/runs/search</code>、<code>/runs/detail</code></td>
+                <td>
+                  分区/记录进度、attempt、失败、单列
+                  qualityGate、fence、事件时间线，以及受理时冻结且必返的
+                  sourceSnapshot。detail 的 partitions 与 timeline 使用独立
+                  cursor/limit， 默认 100、最大 200，并返回各自总数和
+                  nextCursor。
+                </td>
+              </tr>
+              <tr>
+                <td>健康</td>
+                <td>
+                  <code>/health/evaluations/search</code
+                  >、<code>/health/evaluations/detail</code>、<code>/health/checks/submit</code>、<code
+                    >/health/checks/detail</code
+                  >
+                </td>
+                <td>
+                  search 返回带 currentOpenIssueCount + issueProjectionAsOf、无
+                  results 的 HealthEvaluationSummary；detail 返回最多 500 条完整
+                  rule results，以及独立游标分页的 currentOpenIssues。 主动检查
+                  targets 逐数据集携带 dataVersion|null，null 在受理时绑定最新
+                  production publication；checks/detail 按原 target
+                  顺序返回批次结果，供 API reconciler 轮询。v1 同一批次
+                  datasetCode 唯一，重复目标返回 422。
+                </td>
+              </tr>
+              <tr>
+                <td>计划</td>
+                <td>
+                  <code>/schedules/search</code
+                  >、<code>/schedules/upsert</code>、<code
+                    >/schedules/set-enabled</code
+                  >
+                </td>
+                <td>
+                  结构化 frequency + targetPolicy + expectedVersion；返回
+                  nextRunAt、未来五次触发和冲突；创建时 targetPolicy
+                  必须匹配数据集 scheduleTargetPolicyOptions
+                  的当前允许项。scheduleId 与 expectedVersion 必须按
+                  create/update 成对为空或非空；v1 同一 datasetCode
+                  最多一个计划。
+                </td>
+              </tr>
+              <tr>
+                <td>审计</td>
+                <td><code>/events/search</code></td>
+                <td>
+                  按 actorRef、resource、action、时间过滤；只返回脱敏
+                  operational event。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h4>共用命令字段</h4>
+        <ul class="compact">
+          <li>
+            <code>actor = { actorRef, role, reason }</code>；首版写操作只接受
+            <code>SUPER_ADMIN</code>，跨服务请求 ID 使用
+            <code>X-Request-Id</code>。
+          </li>
+          <li>
+            浏览器公开 <code>Idempotency-Key</code> 由 service-api 按 actorId
+            分域保存，不能原样转发； service-api 以
+            <code>submissionId</code> 确定性派生并稳定复用独立的内部
+            <code>Idempotency-Key</code>。
+          </li>
+          <li>
+            data-sync 按
+            <code>caller_service + idempotency_key_hash</code>
+            去重，首次受理后返回
+            <code>commandId</code>；未知内部提交结果只能复用原内部 key。
+          </li>
+          <li>
+            submit 带未过期 <code>preflightId</code> 与规范化 JSON 的
+            <code>requestHash</code>；未知结果不得换 key 重试。
+          </li>
+          <li>
+            同步项含 <code>datasetCode</code>、<code>mode</code>、可选
+            <code>dateFrom/dateTo</code> 或 <code>observationDate</code>；v1
+            同一 preflight/submit 请求内 datasetCode 必须唯一，重复目标返回
+            422。
+          </li>
+          <li>
+            cancel/retry 必须带
+            <code>target={resourceType: COMMAND|RUN, resourceId}</code>：
+            COMMAND 作用整批，RUN 只作用单个 child，禁止由服务端猜测作用域。
+          </li>
+          <li>
+            data-sync 内部 receipt 含 完整
+            CommandStatus、target、targetStatus、1—100 个
+            childRunIds、queuePosition 和 acceptedAt； target=COMMAND 时
+            targetStatus 是命令状态，target=RUN 时是子运行状态，不能用 command
+            status 代替。submit/retry 的 queuePosition 只表示新命令首个 child
+            run 在受理事务快照中的位置；cancel 固定为 null，其余 child 位置从
+            CommandDetail.childRuns 读取。 公开初始响应仍固定 PENDING 且
+            queuePosition=null， 后续才对账 ACCEPTED/REJECTED/DEAD_LETTER。
+          </li>
+        </ul>
+
+        <h4>详情体积边界</h4>
+        <ul class="compact">
+          <li>
+            RunDetailRequest 除 runId 外可带 partitionsCursor/partitionsLimit 与
+            timelineCursor/timelineLimit；两组 limit 默认 100、最大
+            200，可独立或同时续页。
+          </li>
+          <li>
+            RunDetail 必返 partitionCount、partitions、partitionsNextCursor、
+            timelineEventCount、timeline、timelineNextCursor；partitions 与
+            timeline 每页各最多 200 项，刷新其中一组不得改变另一组游标。
+          </li>
+          <li>
+            内部 RunDetail.partition.checkpoint 只能是 null 或
+            <code>CheckpointSummary={kind, positionHash, updatedAt}</code
+            >；positionHash 为 SHA-256， kind 最长 40 字符。不得返回 raw
+            checkpoint、Provider cursor、token 或 payload； 公开 0023 RunDetail
+            partition 不含 checkpoint 字段。
+          </li>
+          <li>
+            DatasetSummary.sourceBindings 最多 10 项，DatasetDetail.healthRules
+            最多 200 项， 每个 preflight target 的 warnings 最多 20
+            项；HealthEvaluation detail 的 results 最多 500 项，search 不返回
+            results。
+          </li>
+          <li>
+            HealthDetailRequest 可带 issuesCursor/issuesLimit，limit
+            默认且最大均为 100； HealthDetail 必返
+            evaluation、currentOpenIssueCount、currentOpenIssues、
+            currentOpenIssuesNextCursor、issueProjectionAsOf。currentOpenIssues
+            每页最多 100 项， 只含 OPEN/ACKNOWLEDGED
+            的脱敏安全摘要；问题续页不改变仍最多 500 项的 immutable rule
+            results。 首次查询在同一读取快照计算 count/list/asOf，后续 opaque
+            cursor 固定该 issueProjectionAsOf， 防止 ACK/RESOLVE
+            并发导致翻页重排。
+          </li>
+          <li>
+            HealthCheckDetail 以 1—100 个原提交 targets 的 sequence_no
+            排序，逐项返回
+            resolvedDataVersion、status、evaluationId、error。SUCCEEDED 必有
+            resolvedDataVersion + evaluationId 且 error=null；FAILED 必须
+            evaluationId=null 且有 error；REJECTED 还要求
+            resolvedDataVersion=null。RUNNING 必有 resolvedDataVersion 且
+            evaluationId/error 为 null； QUEUED 与 CANCELLED 的
+            evaluationId/error 也必须为 null，resolvedDataVersion
+            只在已经成功绑定目标版本后有值。API reconciler 可按 healthCheckId
+            轮询到批次终态；主动检查产生的 HealthEvaluation.healthCheckId
+            反向关联该批次，自动发布后评估则为 null。v1 同一批次 datasetCode
+            必须唯一，重复目标在创建批次前返回 422。
+          </li>
+          <li>
+            上述边界和游标必须在 repository
+            查询层生效，禁止先把全部明细载入内存再截断， 以降低触发跨服务 2 MiB
+            响应体限制的风险，并避免大 run 拖垮控制面。
+          </li>
+        </ul>
+      </section>
+
+      <section id="execution">
+        <h2>6. 全局串行、模式、批量、恢复与计划</h2>
+
+        <h3>6.1 全局 singleton lease 与 fencing</h3>
+        <ol>
+          <li>
+            dispatcher 仅从 PostgreSQL 按受信
+            <code>queue_priority + queue_sequence</code> 选择首个可运行的 QUEUED
+            run；首版所有业务命令固定同一优先级，实际行为为 FIFO，用户不能提交
+            priority。
+          </li>
+          <li>
+            事务锁定
+            <code>sync_global_lease(global-sync)</code>；无有效持有者时，将
+            token 单调加一，同时把 run 置为 RUNNING 并创建 attempt。
+          </li>
+          <li>
+            OperationsOverview.executionSlot 严格执行合同
+            <code>oneOf</code>：IDLE 时 runId/datasetCode/leaseUntil/heartbeatAt
+            全为 null；RUNNING 或 RECOVERING 时四者全为非空。repository
+            在同一读取快照联结 active run， 禁止返回半空槽状态。
+          </li>
+          <li>
+            worker 每 15 秒 heartbeat，默认 60 秒
+            lease；具体值由环境配置和故障注入校准，不由 UI 改动。
+          </li>
+          <li>
+            每个 canonical publication、checkpoint、release、可见 availability
+            以及 run/attempt 终态写入事务， 先锁定 guard 行并校验 run、token
+            和未过期 lease。
+          </li>
+          <li>
+            lease 过期时 reaper 在锁内把槽标为 RECOVERING，将 attempt 置
+            INTERRUPTED，再让 run 回到 QUEUED 或 FAILED；新 attempt 获得更大
+            token。旧 worker 即使恢复也因 token 失效无法提交。
+          </li>
+          <li>
+            数据库增加“最多一条 RUNNING/CANCEL_REQUESTED”的条件唯一约束，作为
+            lease 逻辑之外的第二道防线。
+          </li>
+        </ol>
+
+        <div class="callout danger">
+          <strong>不可省略的实现范围</strong>
+          worker <code>--concurrency=1</code> 只能作为防御性配置，不能代替数据库
+          guard；单机进程锁、Redis 锁和 Celery queue concurrency 都无法覆盖多个
+          worker、副本、CLI 和 scheduler。任何旧 publication 仓储未接入
+          <code>assert_current_fence()</code> 时，主动同步功能必须保持关闭。
+        </div>
+        <p>
+          run 冻结受理时的来源与 policy 版本用于复现，但领取和首次 Provider
+          fetch 前仍须重查 dataset 总开关、 当前 approval 与紧急
+          suspension。更严格的新状态立即以稳定错误终止旧队列项；不得静默换来源或改写原
+          spec。
+        </p>
+
+        <h3>6.2 FULL、INCREMENTAL、DATE_RANGE、OBSERVATION_DATE</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>模式</th>
+                <th>统一语义</th>
+                <th>数据集约束</th>
+                <th>幂等 / checkpoint</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>FULL</code></td>
+                <td>覆盖该来源已经验证的完整可获取范围。</td>
+                <td>
+                  <code>full_scope</code> 必须声明
+                  <code>ALL_AVAILABLE_HISTORY</code> 或
+                  <code>CURRENT_COMPLETE_SNAPSHOT</code
+                  >；不能把当前快照宣传为历史全量。
+                </td>
+                <td>
+                  按稳定分区重建候选并比较内容；不变不创建新
+                  revision/publication。
+                </td>
+              </tr>
+              <tr>
+                <td><code>INCREMENTAL</code></td>
+                <td>
+                  从最后成功 publication checkpoint
+                  开始，并重拉注册表声明的修订重叠窗。
+                </td>
+                <td>
+                  没有可靠 watermark 时必须声明 bootstrap 策略；不得自行降级为
+                  full。
+                </td>
+                <td>
+                  只有 publication 成功后推进跨 run checkpoint；失败保留旧水位。
+                </td>
+              </tr>
+              <tr>
+                <td><code>DATE_RANGE</code></td>
+                <td>
+                  同步包含端 start/end；按交易日历或来源粒度切分稳定分区。
+                </td>
+                <td>
+                  当前快照
+                  adapter、无历史参数的指数/目录/成分能力禁用；全局上限假设 3660
+                  天，数据集可更小。
+                </td>
+                <td>
+                  规范化 request key 包含
+                  dataset、target、范围、模式、方法学版本。
+                </td>
+              </tr>
+              <tr>
+                <td><code>OBSERVATION_DATE</code></td>
+                <td>
+                  对只提供当前横截面的来源记录一次具名观察日，不声称获得该日期的历史版本。
+                </td>
+                <td>
+                  adapter 必须校验 observationDate
+                  与来源实际可观察时点；只支持“今天”的来源拒绝过去或未来日期，
+                  合法空集必须带原因。
+                </td>
+                <td>
+                  request key 包含
+                  dataset、observationDate、来源与方法学版本；重复观察内容不新建
+                  publication。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          日期缺失不能自动解释为休市；只有注册表绑定且已覆盖目标年份的权威日历才允许完整性判断。
+          对
+          listing、suspension、no-trade、公司行动和复权口径，继续使用各数据集既有语义，不在
+          dispatcher 中统一猜测。
+        </p>
+
+        <h3>6.3 批量与队列</h3>
+        <ul>
+          <li>
+            单 command 按 0022 合同最多 100 项；先验证全部
+            dataset/mode/target/range/权限，再一次事务写 command items 和 child
+            runs。v1 同一请求内 datasetCode 必须唯一；preflight 与 submit
+            均在写入前拒绝重复项并返回 422，数据库
+            <code>UNIQUE(command_id, dataset_key)</code> 作为末级防线。
+          </li>
+          <li>
+            child run 按请求顺序获得连续 queue sequence，但每条 run 独立终态；父
+            command 聚合 SUCCEEDED/PARTIAL/FAILED。
+          </li>
+          <li>
+            首版同优先级严格 FIFO，不给手工任务静默插队。自动重试若处于
+            backoff，后续已就绪 run 可执行。
+          </li>
+          <li>
+            CommandReceipt.queuePosition 是受理事务中的精确快照：submit/retry
+            只返回新命令首个 child 的位置，cancel 为 null；其余 child 位置读取
+            CommandDetail.childRuns。 任一位置都不承诺等待秒数；同时展示
+            oldestQueuedAt 和 active run 供运维判断。
+          </li>
+          <li>
+            一个 run 内的 partitions 首版顺序执行，避免“只有一个 run
+            但内部并行几十个证券”违背产品预期和供应商限额。
+          </li>
+          <li>
+            RunSummary.progress 同时返回 completed/totalPartitions 与
+            processedRecords/estimatedRecords； Provider 不能可靠估算时
+            estimatedRecords=null，UI 不显示虚假百分比。
+          </li>
+        </ul>
+
+        <h3>6.4 取消、重试、幂等与恢复</h3>
+        <div class="grid two">
+          <article class="card">
+            <h3>取消与 retry</h3>
+            <ul>
+              <li>
+                target=RUN：只操作 resourceId 指定 child；QUEUED 原子变
+                CANCELLED，RUNNING 进入 CANCEL_REQUESTED，不得连带同 command
+                的其他 runs。
+              </li>
+              <li>
+                target=COMMAND 取消：未开始 child 原子变 CANCELLED；唯一活跃
+                child 进入 CANCEL_REQUESTED；既有终态不改写。
+              </li>
+              <li>
+                RUNNING：在 Provider 请求前后、分页/分区间、quality gate 和
+                publication 前检查取消。
+              </li>
+              <li>
+                SDK 阻塞调用只受既有 timeout 约束；不在线程中注入强制异常。
+              </li>
+              <li>
+                若 CANCEL_REQUESTED 后 lease 过期，reaper 记录 INTERRUPTED
+                attempt 后终结为 CANCELLED，不得重新排队。
+              </li>
+              <li>
+                target=COMMAND 重试只复制可重试的 FAILED、PARTIAL、INTERRUPTED
+                child； target=RUN 只复制指定且可重试的 child。两者均重新
+                preflight，创建新 command/run 并记录 retry_of。
+              </li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>崩溃与恢复</h3>
+            <ul>
+              <li>Celery 重投只唤醒 DB dispatcher；重复消息不创建重复 run。</li>
+              <li>成功分区与 publication 保持，恢复只处理未成功分区。</li>
+              <li>
+                成功 payload 按 ADR-0021 不保留，恢复不得假设 raw replay 可用。
+              </li>
+              <li>
+                失败 evidence 可在保留期内重放；否则重新抓取或明确标记不可恢复。
+              </li>
+            </ul>
+          </article>
+        </div>
+
+        <h3>6.5 动态 schedule</h3>
+        <ul>
+          <li>
+            只支持结构化
+            <code>TRADING_DAY</code>、<code>DAILY</code>、<code>WEEKLY</code>、
+            <code>MONTHLY</code>、<code>INTERVAL</code>；字段为
+            localTime/dayOfWeek/dayOfMonth/intervalMinutes、 IANA timezone
+            和可选 calendarCode，禁止用户输入任意调度表达式。
+          </li>
+          <li>
+            TRADING_DAY 必须有 calendarCode/localTime；DAILY 必须有
+            localTime；WEEKLY/MONTHLY 再分别要求 1—7 的 dayOfWeek / 1—31 的
+            dayOfMonth；INTERVAL 仅接受 5—43200 分钟且
+            localTime/dayOfWeek/dayOfMonth/calendarCode 全为 null。其余 kind
+            的无关 day/interval 字段也必须为 null， 服务端按 IANA timezone
+            计算未来五次触发。
+          </li>
+          <li>
+            自动计划只接受数据集 <code>scheduleSupportedModes</code> 中的
+            FULL、INCREMENTAL、OBSERVATION_DATE； 它与人工
+            <code>supportedModes</code> 独立，首版禁止自动 DATE_RANGE。
+          </li>
+          <li>
+            数据集同时返回
+            <code>scheduleTargetPolicyOptions</code
+            >。每个支持的计划模式至少有一个
+            <code>{mode, policy, isDefault}</code>
+            允许项且恰有一个默认项，重复项或没有/多个默认项 均阻断 manifest
+            seed。默认值只供 Web 预选，不表示服务端可省略 targetPolicy。
+            schedule upsert 必须逐字段匹配所选数据集和 mode
+            的一个当前允许项，data-sync 真正受理时再次校验， 不能只信任 Web 或
+            service-api 的旧目录快照。
+          </li>
+          <li>
+            <code>targetPolicy.policyVersion</code> 必须 ≥ 1，并随 schedule
+            revision、fire 和生成的 run spec 冻结。 FULL/INCREMENTAL 必须使用
+            <code>dateResolution=NONE</code>；OBSERVATION_DATE 必须选择
+            <code>SCHEDULED_LOCAL_DATE</code> 或
+            <code>LATEST_COMPLETED_TRADING_DATE</code>。
+          </li>
+          <li>
+            SCHEDULED_LOCAL_DATE 取 <code>scheduledFor</code> 转换到计划
+            timezone 后的本地日期； LATEST_COMPLETED_TRADING_DATE
+            按触发时刻和注册表绑定的权威 calendarCode 解析最近已完成交易日。
+            缺日历、日历未覆盖或无法证明“已完成”时，fire
+            以稳定原因拒绝/跳过，不能猜测成自然日。 解析后的 observationDate
+            写入 fire、command item、normalized run spec 和幂等请求摘要。
+          </li>
+          <li>
+            固定 scheduler tick 轮询 PostgreSQL 并解析到期计划，使用
+            <code>FOR UPDATE SKIP LOCKED</code>； Celery 只接收 dispatcher
+            wake-up，计划表达式不是 Celery beat 配置。
+          </li>
+          <li>
+            计划触发 Idempotency-Key = UUIDv5(scheduleId, scheduledFor,
+            scheduleVersion)，重复 tick 复用同一 command receipt。
+          </li>
+          <li>
+            <code>misfirePolicy</code> 只允许 SKIP 或 RUN_ONCE；<code
+              >coalesce=true</code
+            >
+            时合并漏跑并记录 coalesced fire，避免恢复风暴。
+          </li>
+          <li>
+            schedule create 要求 scheduleId/expectedVersion 同为 null；update
+            要求两者同为非 null， expectedVersion 必须等于当前版本。半空组合返回
+            422，不能借 create 语义覆盖现有计划或绕过乐观锁。 set-enabled
+            也必须携带匹配当前版本的 expectedVersion。成功 upsert
+            与启停都生成不可变 revision， 写 before/after hash 与
+            actorRef；首版以禁用代替删除。
+          </li>
+          <li>
+            v1 以 datasetCode 为计划唯一键，数据库
+            <code>UNIQUE(dataset_key)</code> 覆盖启用和禁用计划。 同数据集重复
+            create 返回 409；update 必须保持原 datasetCode，禁止把既有
+            scheduleId 改绑到另一数据集。需要替换时只能更新同一记录及其
+            revision。
+          </li>
+          <li>
+            迁移时按现有静态时间建立禁用计划；核对 nextRunAt
+            和未来五次触发后再关闭旧 beat、启用新 coordinator，不能双投。
+          </li>
+        </ul>
+      </section>
+
+      <section id="health">
+        <h2>7. 数据健康、质量门与派生方法学</h2>
+
+        <h3>7.1 健康维度</h3>
+        <p>
+          数据集
+          availability（ENABLED/DISABLED/SOURCE_UNAVAILABLE/UNKNOWN）属于目录可用性，不和健康结论混成一个枚举。
+          0022 合同只导出下列八个 health
+          dimension；可用性与合法空集作为规则证据和 UNKNOWN 原因展示。
+        </p>
+        <div class="table-wrap">
+          <table class="wide">
+            <thead>
+              <tr>
+                <th>维度</th>
+                <th>示例规则</th>
+                <th>证据与阈值</th>
+                <th>处置</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>FRESHNESS</td>
+                <td>lastPublishedAt、dataAsOf 落后预期 cadence</td>
+                <td>
+                  freshness policy + dataAsOfKind/Label +
+                  时区/日历；不用抓取时间替代业务日期
+                </td>
+                <td>超 warn/critical 阈值产生 issue</td>
+              </tr>
+              <tr>
+                <td>COMPLETENESS</td>
+                <td>缺交易日、缺证券、横截面覆盖不足、分页缺失</td>
+                <td>
+                  权威日历、上市生命周期、预期 universe/release；未知即 UNKNOWN
+                </td>
+                <td>blocking 规则阻止 publication；事后检查只告警</td>
+              </tr>
+              <tr>
+                <td>VALIDITY</td>
+                <td>OHLC、金额/成交量单位、空值、范围、net 恒等</td>
+                <td>类型与业务不变量；只验证来源明确提供的恒等式</td>
+                <td>reject / quarantine / warn / publish</td>
+              </tr>
+              <tr>
+                <td>UNIQUENESS</td>
+                <td>业务键、source identity 或同 dataVersion 重复</td>
+                <td>canonical grain、唯一约束与去重证据</td>
+                <td>关键键重复为 CRITICAL</td>
+              </tr>
+              <tr>
+                <td>CONSISTENCY</td>
+                <td>父子闭包、发布行数漂移、checkpoint 超前、fence 不匹配</td>
+                <td>同事务 FK、release/publication/checkpoint 不变量</td>
+                <td>发布不一致为 CRITICAL；修复必须显式受审计</td>
+              </tr>
+              <tr>
+                <td>IDENTITY</td>
+                <td>证券代码映射、板块成员、来源与真实 upstream 缺失</td>
+                <td>有效证券集合、source registry 与 canonical lineage</td>
+                <td>身份不明隔离；无法判断时 UNKNOWN</td>
+              </tr>
+              <tr>
+                <td>SCHEMA</td>
+                <td>
+                  fingerprint 漂移、字段/类型/单位或 adapter/methodology 改版
+                </td>
+                <td>source batch、contract fingerprint、methodology version</td>
+                <td>不兼容 schema drift 默认 blocker</td>
+              </tr>
+              <tr>
+                <td>TEMPORAL</td>
+                <td>
+                  异常跳变、旧日被删除、revision/window 冲突、PIT 可见时间错误
+                </td>
+                <td>同来源、同方法学、同 finality 历史；保留 content hash</td>
+                <td>异常样本与来源 batch 关联</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          健康评估绑定 <code>dataVersion + policyVersion</code>，规则范围由该
+          policyVersion 冻结。同步过程内的 pre-publication quality gate 在
+          RunDetail 的 <code>qualityGate</code> 中独立呈现
+          NOT_EVALUATED/PASSED/WARNED/BLOCKED； 只有 BLOCKED 能阻止当前候选
+          publication。控制面的 post-publication health 绑定既有不可变版本，
+          即使结果为 CRITICAL 也只标记该版本严重异常，不撤销、不阻断已经存在的
+          publication， 也不自动静默回滚。人工确认、重新同步或 publication
+          rollback 都是独立受审计操作。
+        </p>
+        <ul>
+          <li>
+            health/evaluations/search 只返回
+            HealthEvaluationSummary：身份、policy、聚合状态、score、
+            healthCheckId、warningCount、criticalCount、currentOpenIssueCount、affectedRecordCount、
+            evaluatedAt 和 issueProjectionAsOf，不包含 results。目录里的
+            HealthSummary 仍返回
+            openIssueCount，避免把仍待处理的问题藏在总体健康状态后。
+          </li>
+          <li>
+            HealthEvaluation 是不可变事实，主动检查生成时 healthCheckId
+            反向指向批次，自动评估时为 null。 HealthDetail 将该 evaluation
+            与查询时问题投影组合：按 issuesCursor/issuesLimit 返回最多 100 条
+            currentOpenIssues、currentOpenIssuesNextCursor、currentOpenIssueCount
+            和 issueProjectionAsOf。 currentOpenIssues 只含
+            OPEN/ACKNOWLEDGED，evidenceSummary 仅为脱敏聚合证据； immutable
+            results 仍最多 500 项，列表页禁止预取规则或问题样例。
+          </li>
+          <li>
+            evaluation 与 summary 返回 0—100 的 score；UNKNOWN
+            且证据不足以评分时为 null，不能伪造 0 分或 100 分。
+          </li>
+          <li>
+            每条规则分别返回 INFO/WARN/CRITICAL severity，以及
+            PASSED/WARNED/FAILED/UNKNOWN/SKIPPED 的规则
+            status、expected/observed、affectedCount 与
+            message；聚合状态不能替代规则明细。
+          </li>
+          <li>
+            <code>sampleSummary</code> 最长 500
+            字符，只允许脱敏、聚合后的安全摘要；不得返回原始行情、账号、凭据或可反推敏感记录的逐行样本。
+          </li>
+        </ul>
+
+        <h3>7.2 派生市场数据比较准入</h3>
+        <div class="callout warning">
+          <strong>资金流和供应商估算不得做普通跨源对账</strong>
+          东财 order-size 与同花顺 trade-direction
+          属于不同语义族和方法学。健康规则只能分别检查各自范围、单位、
+          恒等、完整性和新鲜度；没有语义族、方法学版本、universe、窗口、截点、分桶、分母、单位和
+          finality 全部一致的证据，不得要求两者数值相等、拼接补洞或自动切换。
+        </div>
+        <ul>
+          <li>
+            canonical 身份必须保留 adapter provider、真实 upstream、source
+            dataset、semantic family、methodology ID/version/status。
+          </li>
+          <li>
+            供应商报告值、盘中快照、EOD、滚动排行和平台日频派生值使用不同
+            dataset/指标身份。
+          </li>
+          <li>
+            财务派生指标继续独立保存公式版本、输入
+            publication、覆盖率和计算时间，不覆盖来源报告值。
+          </li>
+          <li>
+            切换主来源属于数据定义变更：另建/更新
+            ADR、双跑重叠窗口、量化偏差、标记断点并决定回补。
+          </li>
+          <li>
+            来源权限或方法学未知时可完成研究采集，但 production
+            schedule/publication 保持关闭。
+          </li>
+        </ul>
+
+        <h3>7.3 健康状态</h3>
+        <div class="grid">
+          <article class="card">
+            <h3 class="status">HEALTHY</h3>
+            <p>
+              所有适用 blocking/error 规则通过，warn
+              数为零；证据、日历和方法学完整。
+            </p>
+          </article>
+          <article class="card">
+            <h3 class="risk">WARN / CRITICAL</h3>
+            <p>
+              WARN 有非阻断缺口；CRITICAL 有 blocking error、publication
+              不一致、关键键重复或严重过期。
+            </p>
+          </article>
+          <article class="card">
+            <h3 class="danger">UNKNOWN</h3>
+            <p>
+              无 publication、日历/来源/方法学不明或检查不可执行。UNKNOWN 不是
+              HEALTHY，也不自动当作市场休市。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="operations">
+        <h2>8. 权限、审计、失败诊断与可观测性</h2>
+
+        <h3>8.1 权限与信任边界</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>角色</th>
+                <th>目录 / run / health / schedule / event 读取</th>
+                <th>同步、主动 health、计划、取消、重试</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>ADMIN</td>
+                <td>允许</td>
+                <td>首版拒绝</td>
+              </tr>
+              <tr>
+                <td>SUPER_ADMIN</td>
+                <td>允许</td>
+                <td>允许，仍受 dataset 模式、范围、来源与技术门禁约束</td>
+              </tr>
+              <tr>
+                <td>SYSTEM</td>
+                <td>无用户直读入口</td>
+                <td>
+                  只允许 coordinator 代表已启用且版本匹配的 schedule 提交已冻结
+                  spec；不能修改计划或冒充管理员
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <ul>
+          <li>
+            service-api 做公开鉴权；service-data-sync 用受信 actorContext
+            二次校验，不能以 API 预读代替授权。
+          </li>
+          <li>
+            内部 Bearer 只证明调用服务；actorRef/role/requestId
+            证明代表谁操作。未来可升级为签名 service assertion，具体机制由
+            ADR/合同冻结。
+          </li>
+          <li>
+            command 中不能提交 provider URL、SDK 函数、凭据、rights_status
+            或任意 JSON 参数；只接受注册表白名单。
+          </li>
+          <li>
+            S3 failure evidence、内部数据库 ID、堆栈、token
+            和供应商原始字段不返回 service-web。
+          </li>
+          <li>
+            内部 RunDetail.timeline 可携带受信 actorRef；公开 0023
+            RunDetail.timeline 必须投影为 OperationEventView.actor:
+            ActorDisplay，响应中不得出现 actorRef。USER 显示名由 service-api
+            用户边界解析，SYSTEM 映射固定系统标签；HealthCheckDetailView
+            同样只返回 requestedBy。
+          </li>
+        </ul>
+
+        <h3>8.2 审计事件</h3>
+        <p>至少记录以下事件，并与状态变更同事务：</p>
+        <ul class="compact">
+          <li>
+            命令 received/accepted/rejected、批量展开、幂等重放、hash conflict；
+          </li>
+          <li>
+            run
+            queued/claimed/heartbeat/lease-lost/requeued/cancel-requested/terminal；
+          </li>
+          <li>
+            source fetch、schema drift、quality
+            disposition、publication/checkpoint 结果；
+          </li>
+          <li>schedule create/update/enable/disable/delete/fire/coalesce；</li>
+          <li>
+            health requested/completed、issue opened/acknowledged/resolved；
+          </li>
+          <li>权限拒绝、fence 拒绝和管理员 retry/cancel。</li>
+        </ul>
+        <p>
+          OperationEvent.result 固定为
+          ACCEPTED/QUEUED/STARTED/CANCEL_REQUESTED/SUCCEEDED/PARTIAL/
+          FAILED/CANCELLED/INTERRUPTED/SKIPPED/REJECTED，表达“这次动作”的结论，不冒充资源终态。
+          因此取消请求可先产生 CANCEL_REQUESTED；只有目标状态为 CANCELLED
+          才算取消达成。 cancel_too_late 必须记录 FAILED + stage=CANCEL + 稳定
+          code，目标仍可真实 SUCCEEDED。
+        </p>
+        <p>
+          actorRef 是稳定用户引用，roleAtRequest 是操作时角色快照；显示名称由
+          service-api 自己的用户边界解析。自动计划、迁移期
+          legacy、内部恢复命令的 submissionId 均为 null，actorRef 分别使用
+          <code>system:schedule/{scheduleId}</code
+          >、<code>system:legacy</code>、
+          <code>system:recovery</code>，不得伪造具体用户。
+        </p>
+        <p>
+          运维事件保留期尚待治理批准：建议 365 天在线后受控归档；在归档、检索和
+          legal hold 流程落地前， 安全默认是不自动删除。用户删除后仍只保留不透明
+          actorRef，显示层回退为“已删除用户”。固定 SYSTEM actorRef
+          则分别显示“系统计划”、 “遗留任务”、“系统恢复”，不得使用该用户兜底。
+        </p>
+
+        <h3>8.3 失败分类与安全回执</h3>
+        <p>
+          下表 failure category 与 ErrorSummary.stage 正交；stage 固定为
+          PREFLIGHT/QUEUE/DELIVERY/PROVIDER_FETCH/NORMALIZE/QUALITY_GATE/HEALTH_EVALUATION/
+          PERSIST/PUBLISH/CHECKPOINT/SCHEDULE/CANCEL/RECOVERY。新增 DELIVERY
+          用于跨服务投递， HEALTH_EVALUATION 用于发布后规则执行，SCHEDULE
+          用于计划校验、解析或触发； 不得继续把三者笼统归入 QUEUE、QUALITY_GATE
+          或 INTERNAL。
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>category</th>
+                <th>典型 code</th>
+                <th>默认 retry</th>
+                <th>对管理员展示</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>VALIDATION / AUTHORIZATION</td>
+                <td>
+                  unsupported_mode、invalid_range、source_not_approved、forbidden
+                </td>
+                <td>否</td>
+                <td>稳定说明 + 约束字段</td>
+              </tr>
+              <tr>
+                <td>SOURCE</td>
+                <td>unavailable、rate_limited、authentication、timeout</td>
+                <td>按 adapter retryable 与预算</td>
+                <td>provider/upstream、stage、attempt、下次重试</td>
+              </tr>
+              <tr>
+                <td>SCHEMA / METHODOLOGY</td>
+                <td>schema_drift、unit_unknown、methodology_mismatch</td>
+                <td>否</td>
+                <td>指纹/版本摘要，不展示 raw</td>
+              </tr>
+              <tr>
+                <td>QUALITY</td>
+                <td>completeness_blocked、invariant_failed、quarantined</td>
+                <td>通常否</td>
+                <td>规则、阈值、计数、脱敏样本</td>
+              </tr>
+              <tr>
+                <td>PERSISTENCE / PUBLICATION</td>
+                <td>
+                  database_unavailable、write_conflict、publication_failed
+                </td>
+                <td>受限</td>
+                <td>事务阶段、是否已发布、恢复建议</td>
+              </tr>
+              <tr>
+                <td>EXECUTION</td>
+                <td>
+                  lease_lost、fence_rejected、cancelled、timeout_budget_exhausted
+                </td>
+                <td>自动恢复或人工</td>
+                <td>attempt 与安全终态</td>
+              </tr>
+              <tr>
+                <td>INTERNAL</td>
+                <td>unexpected_error</td>
+                <td>预算内</td>
+                <td>correlation ID；堆栈只进私有日志</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>8.4 日志、指标、追踪与告警</h3>
+        <ul>
+          <li>
+            所有日志关联
+            <code>request_id</code
+            >、<code>command_id</code>、<code>run_id</code>、attempt、fence、dataset、partition、provider、upstream。
+          </li>
+          <li>runId 等高基数字段只用于日志/trace，不作为指标 label。</li>
+          <li>
+            核心指标：queue depth/oldest age、active run、lease remaining/fence
+            rejects、run outcome/duration、source error/latency、publication
+            age、health status/issues、schedule lag/misfire。
+          </li>
+          <li>
+            告警建议：active run &gt; 1 立即 P0；oldest queue、lease
+            连续丢失、publication 过期、CRITICAL、schedule lag 按数据集 policy。
+          </li>
+          <li>
+            <span class="tag open">待决</span> 指标与 trace
+            exporter/告警平台尚未选择。实现先定义稳定埋点和结构化事件，不把平台选择写成已决事实。
+          </li>
+        </ul>
+      </section>
+
+      <section id="delivery">
+        <h2>9. 方案取舍、实施、门禁与验收</h2>
+
+        <h3>9.1 方案取舍</h3>
+        <div class="table-wrap">
+          <table class="wide">
+            <thead>
+              <tr>
+                <th>候选</th>
+                <th>优势</th>
+                <th>成本 / 风险</th>
+                <th>结论</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>PostgreSQL 队列 + global lease/fencing</td>
+                <td>
+                  与 run/publication 同事务；跨 worker/CLI；可审计、可恢复。
+                </td>
+                <td>所有写仓储必须接 fence；需要迁移旧入口。</td>
+                <td>
+                  <strong>采用</strong>：唯一能覆盖用户要求的全局串行和 stale
+                  worker。
+                </td>
+              </tr>
+              <tr>
+                <td>Celery concurrency=1</td>
+                <td>配置简单。</td>
+                <td>多 worker、副本、队列和 CLI 会绕过；不能 fencing。</td>
+                <td>仅防御性配置，不作为正确性方案。</td>
+              </tr>
+              <tr>
+                <td>Redis 分布式锁</td>
+                <td>领取速度快。</td>
+                <td>
+                  锁与 PostgreSQL publication 非原子；故障切换可能双执行；Redis
+                  不应成为权威。
+                </td>
+                <td>不采用。</td>
+              </tr>
+              <tr>
+                <td>继续 Celery beat 静态计划</td>
+                <td>现状改动小。</td>
+                <td>无法在线调整、版本化、审计或可靠处理 misfire。</td>
+                <td>迁移为 DB schedule；beat 只可保留固定 tick/wake-up。</td>
+              </tr>
+              <tr>
+                <td>直接复用 canonical_dataset 作为运维目录</td>
+                <td>少一张表。</td>
+                <td>
+                  无法表达 research shadow、MODEL_ONLY、执行模式、CLI
+                  能力和来源路由；现有 legacy dataset 也未全部登记。
+                </td>
+                <td>
+                  不采用；新增一对一 operational registration，以
+                  canonical_dataset 作为稳定 PK/FK。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>9.2 实施与迁移</h3>
+        <ol>
+          <li>
+            <strong>阶段 A｜只读基线：</strong>增加 registration/source
+            manifest、补齐腾讯与板块 batch 血缘、 新增 catalog/run/health
+            只读投影；用现表回填“已知/未知”，不推断实际数据存在。
+          </li>
+          <li>
+            <strong>阶段 B｜控制面账本：</strong>迁移
+            command/item/run-attempt/event/schedule/health/global-lease； 旧
+            <code>sync_run</code> 回填
+            <code>LEGACY</code> actor/trigger，缺失字段保持 unknown。
+          </li>
+          <li>
+            <strong>阶段 C｜Shadow 对账：</strong>旧 CLI/Celery/beat
+            在原路径执行，同时写不可领取的 SHADOW
+            command/run/event；逐数据集核对来源、状态、时间和失败映射，禁止
+            shadow dispatcher 真正抓取或发布。
+          </li>
+          <li>
+            <strong>阶段 D｜统一执行：</strong>为所有
+            publication/checkpoint/终态增加 fence 校验；CLI/Celery 改为提交
+            command； architecture test 禁止 entrypoint/messaging 直接调用领域
+            sync service。
+          </li>
+          <li>
+            <strong>阶段 E｜计划切换：</strong>先关闭旧 beat 开关并等待
+            in-flight 完成；按原时间创建禁用 DB schedule， 对比 nextRunAt
+            与未来五次触发；再启用新 coordinator。不得同时运行两套计划。
+          </li>
+          <li>
+            <strong>阶段 F｜主动操作：</strong>双 worker
+            故障注入、幂等、安全与质量验收通过后， 才向 SUPER_ADMIN 开启
+            sync/health/schedule/cancel/retry。
+          </li>
+        </ol>
+
+        <h3>9.3 Compose 与部署影响</h3>
+        <ul>
+          <li>
+            不新增基础设施：PostgreSQL 保存控制面；Redis 仍只作 Celery
+            broker；MinIO/S3 仍只保存失败证据。
+          </li>
+          <li>
+            <code>data-sync-api</code> 增加内部 operations
+            POST；仍只在内部网络监听并使用 Bearer。
+          </li>
+          <li>
+            <code>data-sync-worker</code> 接受 dispatcher wake-up；建议
+            concurrency=1，但数据库 guard 允许未来多副本安全竞争。
+          </li>
+          <li>
+            <code>data-sync-scheduler</code> 改为 PostgreSQL schedule
+            coordinator；多实例用行锁/确定性 fire 去重。
+          </li>
+          <li>
+            <code>data-sync-migrate</code> 先执行 additive migration 和 manifest
+            seed；生产 image 仍使用 immutable digest。
+          </li>
+          <li>
+            凭据继续由环境/secret 注入；新增 lease/heartbeat/poll 参数进入
+            <code>.env.example</code>，schedule 业务值不放环境变量。
+          </li>
+        </ul>
+
+        <h3>9.4 回滚</h3>
+        <div class="grid">
+          <article class="card">
+            <h3>启用前</h3>
+            <p>
+              关闭 operations write feature 和 DB
+              schedules，保留只读目录；schema/event 为 additive，无需删表。
+            </p>
+          </article>
+          <article class="card">
+            <h3>fence 强制前</h3>
+            <p>
+              可在确认无 queued/running command 后重新启用旧静态
+              beat；必须避免两套 scheduler 并存。
+            </p>
+          </article>
+          <article class="card">
+            <h3>fence 强制后</h3>
+            <p class="danger">
+              旧 binary 不携带 token，不能安全回滚。只允许 roll-forward
+              修复或关闭新写入；canonical 数据与旧 publication 不删除。
+            </p>
+          </article>
+        </div>
+
+        <h3>9.5 技术硬门禁</h3>
+        <div class="table-wrap">
+          <table class="wide">
+            <thead>
+              <tr>
+                <th>门禁</th>
+                <th>可测进入条件</th>
+                <th>证据 / 验证者</th>
+                <th>退出条件</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>全局串行与 fencing</td>
+                <td>全部可见写路径接收 runId/fence</td>
+                <td>两 worker + lease 过期故障注入；架构测试；数据平台</td>
+                <td>
+                  任意时刻有效执行态≤1，旧 worker 100% 无法
+                  publication/checkpoint
+                </td>
+              </tr>
+              <tr>
+                <td>入口收口</td>
+                <td>全部 legacy CLI/Celery 经 dispatcher</td>
+                <td>依赖边界测试与 task/CLI 集成测试</td>
+                <td>不存在绕过 command/run/global lease 的执行入口</td>
+              </tr>
+              <tr>
+                <td>注册表完整</td>
+                <td>
+                  所有可运行 capability 有 mode、范围、时区、日历、表、来源
+                </td>
+                <td>manifest ↔ adapter capabilities ↔ ORM registry parity</td>
+                <td>无未解释漂移；生产能力不含 unknown upstream</td>
+              </tr>
+              <tr>
+                <td>命令幂等与权限</td>
+                <td>合同、DB 约束和双侧授权完成</td>
+                <td>同 ID 同/异 payload、并发提交、角色矩阵测试</td>
+                <td>
+                  同 payload 原结果；异 payload 409；非 SUPER_ADMIN
+                  写入拒绝且有事件
+                </td>
+              </tr>
+              <tr>
+                <td>恢复与取消</td>
+                <td>每阶段有安全点和 checkpoint 语义</td>
+                <td>
+                  provider timeout、worker kill、DB failure、cancel race 测试
+                </td>
+                <td>无重复事实/静默缺口；cancel-too-late 真实回执</td>
+              </tr>
+              <tr>
+                <td>健康可信</td>
+                <td>policy 绑定数据版本、日历、universe、方法学</td>
+                <td>缺日历、停牌、同名异口径、盘中/EOD fixture</td>
+                <td>不确定结果为 UNKNOWN；无跨方法学静默混算</td>
+              </tr>
+              <tr>
+                <td>来源/合规</td>
+                <td>
+                  production schedule 的来源有权利证据和 capability 技术门禁
+                </td>
+                <td>source registry 记录与私有证据引用；数据负责人</td>
+                <td>research 来源不能进入 production 自动发布</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>9.6 非技术风险与跟进</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>事项</th>
+                <th>性质</th>
+                <th>负责人 / 时点</th>
+                <th>安全 fallback</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>监控与告警平台选择</td>
+                <td>待决，不是实现硬门禁</td>
+                <td>平台团队 / 上线告警前</td>
+                <td>结构化事件、日志与内部 summary 先可用</td>
+              </tr>
+              <tr>
+                <td>数据集中文名称、分组与默认筛选</td>
+                <td>产品文案</td>
+                <td>产品 + 数据团队 / UI 验收前</td>
+                <td>使用 registry 稳定 key 与技术名称</td>
+              </tr>
+              <tr>
+                <td>on-call 和健康 issue 响应人</td>
+                <td>运营安排</td>
+                <td>数据负责人 / production schedule 启用前</td>
+                <td>默认不自动执行破坏性修复，只告警并保留旧 publication</td>
+              </tr>
+              <tr>
+                <td>批量/范围/保留期最终上限</td>
+                <td>容量校准</td>
+                <td>数据平台 / 压测后</td>
+                <td>合同上限 100 项；日期保守上限 3660 天，数据集可更小</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>9.7 验收标准</h3>
+        <ul>
+          <li>
+            目录能逐项回答：数据集、业务表、是否真实有
+            publication、AKShare/Tushare
+            等访问供应商、进一步上游、方法学与来源资格。
+          </li>
+          <li>
+            每项清楚区分
+            availability、observationState/reason、lastAttemptStartedAt/FinishedAt/status、
+            lastSuccessAt、lastPublishedAt、dataAsOf、dataAsOfKind/dataAsOfLabel、latestRun、latestError
+            和 health； lastSuccessAt 只认 SUCCEEDED，Web
+            不自行猜测业务日期、新鲜度或空集语义。合同 oneOf 验证
+            freshnessPolicy=null ⇔ freshnessStatus=NOT_APPLICABLE，仅 MODEL_ONLY
+            使用该组合。
+          </li>
+          <li>
+            目录检索可同时按访问 Provider 与 upstreamSources 过滤，并保留
+            adapterId/sourceDataset/methodology/approval。
+          </li>
+          <li>
+            DatasetCapability 分别返回可为空的人工 supportedModes 与计划
+            scheduleSupportedModes；
+            单/批四种人工模式只在人工矩阵内可提交，计划仅允许
+            FULL/INCREMENTAL/OBSERVATION_DATE， v1 自动 DATE_RANGE 必须拒绝。
+            scheduleTargetPolicyOptions 覆盖每个计划模式且各有唯一默认项，upsert
+            只接受逐字段匹配的当前允许策略。
+          </li>
+          <li>
+            schedule frequency 严格执行 oneOf
+            字段条件；targetPolicy.policyVersion 随 revision/fire/run 冻结，
+            FULL/INCREMENTAL 只用 NONE，OBSERVATION_DATE
+            按计划本地日期或最近已完成交易日解析并冻结目标日期。create 的
+            scheduleId/expectedVersion 同为 null，update 同为非 null
+            且版本匹配； 半空组合稳定返回 422。数据库保证每个 datasetCode
+            最多一个计划； 重复创建返回 409，更新不可改绑 datasetCode。
+          </li>
+          <li>
+            service-api 本地 submission/outbox/audit 事务成功后固定返回 202
+            delivery=PENDING、queuePosition=null； dispatcher 后续才对账
+            ACCEPTED/REJECTED/DEAD_LETTER，初始响应不受同步调用结果影响。接受后
+            submit/retry 的 queuePosition 只表示新命令首 child
+            的受理事务快照位置，cancel 为 null， 其余 child 从 CommandDetail
+            读取。
+          </li>
+          <li>
+            commands/detail 返回完整聚合状态与按提交顺序排列的
+            childRuns；只有创建 child 前 REJECTED 可返回空数组，其余至少一项。
+            CommandReceipt 必返完整 status、target/targetStatus；submit/retry
+            的新命令与 cancel 所属命令语义清楚，oneOf 强制 COMMAND
+            targetStatus=CommandStatus、 RUN targetStatus=RunStatus，批次和单
+            child 作用域无歧义。
+          </li>
+          <li>
+            schedule/legacy/recovery 的 CommandDetail 均为
+            submissionId=null，并分别携带
+            system:schedule/{id}/system:legacy/system:recovery；API
+            显示系统计划/遗留任务/系统恢复， 不显示成已删除用户。
+          </li>
+          <li>
+            RunSummary 同时返回分区与 processed/estimated records
+            进度，无法估算时 estimatedRecords=null； RunDetail 必返受理时冻结的
+            sourceSnapshot，来源配置更新后历史 run 仍显示当时
+            Provider、真实上游、 adapter 和方法学版本。RunDetail 的
+            partition/timeline 分别使用默认 100、最大 200
+            的独立游标，并必返两组总数和 nextCursor。 内部 checkpoint 仅返回
+            CheckpointSummary，公开 0023 不返回 checkpoint； raw/provider
+            cursor/token/payload 均不得外泄。
+          </li>
+          <li>
+            手工、计划、retry、legacy
+            迁移入口并发触发时，数据库中最多一个有效执行态；过期 worker
+            不能写任何 publication/checkpoint。ExecutionSlot 通过 oneOf 保证
+            IDLE 的 runId/datasetCode/leaseUntil/heartbeatAt 全空，
+            RUNNING/RECOVERING 时全非空，禁止半空状态。
+          </li>
+          <li>
+            v1 同步 preflight/submit 和主动健康检查的同一请求内 datasetCode
+            必须唯一；重复目标在创建 command、run 或 health check 前稳定返回
+            422， 不产生部分批次。
+          </li>
+          <li>
+            同一内部 Idempotency-Key + requestHash 重复投递返回原 receipt
+            且不重复运行；同 key 异 payload 返回 409；schedule 重启不重复 fire。
+          </li>
+          <li>
+            取消、自动恢复、人工 retry、provider timeout、schema
+            drift、质量阻断和 DB
+            失败均有稳定状态、原因与审计事件。ErrorSummary.stage 覆盖
+            DELIVERY/HEALTH_EVALUATION/SCHEDULE；OperationEvent.result 覆盖
+            CANCEL_REQUESTED/INTERRUPTED/SKIPPED。取消仅在目标 CANCELLED
+            时达成； cancel_too_late 记录 FAILED + stage=CANCEL，目标可保持
+            SUCCEEDED。
+          </li>
+          <li>
+            RunDetail 的 qualityGate 独立显示
+            BLOCKED；健康检查能识别缺失、重复、错误、过期和血缘缺口， 返回
+            score/severity/affectedCount/脱敏安全摘要。post-publication CRITICAL
+            不撤销或阻断既有 publication； 未知日历/方法学返回 UNKNOWN。
+            HealthSummary 必返 openIssueCount；HealthEvaluationSummary 必返
+            currentOpenIssueCount + issueProjectionAsOf。HealthEvaluation
+            是不可变事实； HealthDetail 组合最多 500 条 results 与最多 100 条
+            OPEN/ACKNOWLEDGED currentOpenIssues，并返回
+            currentOpenIssuesNextCursor 和 issueProjectionAsOf。
+          </li>
+          <li>
+            health/checks/detail 返回按原 target 顺序排列的 1—100
+            个批次结果，API reconciler 可轮询到终态；SUCCEEDED
+            必有版本/evaluation 且无 error，FAILED/REJECTED 必有 error，
+            queued/running/cancelled 组合通过 oneOf 校验。主动
+            HealthEvaluation.healthCheckId 反向关联批次，自动评估为 null；批次内
+            datasetCode 唯一。
+          </li>
+          <li>
+            合同体积边界生效：sourceBindings≤10、healthRules≤200、每个 preflight
+            target warnings≤20、currentOpenIssues 每页≤100；超限由
+            manifest/policy/preflight/query 阶段显式处理，不能在响应层静默丢失。
+          </li>
+          <li>
+            公开 RunDetail.timeline 和 HealthCheckDetailView 不出现
+            actorRef，只返回 ActorDisplay/requestedBy；SYSTEM 映射固定标签，USER
+            删除后才使用“已删除用户”。
+          </li>
+          <li>
+            ADMIN/SUPER_ADMIN 读权限正确；所有主动动作只有
+            SUPER_ADMIN，data-sync 二次校验。
+          </li>
+        </ul>
+
+        <h3>9.8 计划执行的 Docker-only 验证</h3>
+        <pre>
+docker build --target test --tag quant-v2/service-data-sync:test service-data-sync
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff format --check .
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test ruff check .
+docker run --rm quant-v2/service-data-sync:test pyright
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test pytest -m "not integration"
+docker run --rm --read-only --tmpfs /tmp quant-v2/service-data-sync:test pytest tests/architecture --no-cov
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example --profile data-sync-infra up -d
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra --profile data-sync-test run --rm data-sync-test
+docker build --tag quant-v2/service-data-sync:local service-data-sync
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
+  --profile data-sync-infra --profile data-sync-worker run --rm --no-deps \
+  data-sync-worker data-sync-diagnostics --format json</pre
+        >
+        <p class="footnote">
+          本次只产出方案，未改实现，以上实现验收命令计划在对应阶段执行。文档本身需验证
+          HTML、链接、 1440×900、最低 1280×720、打印和页面级横向溢出。
+        </p>
+
+        <h3>9.9 待决问题</h3>
+        <ul>
+          <li>
+            <span class="tag open">待决</span> actorContext 采用内部签名
+            assertion 还是现有 Bearer 信任链内的受控字段；由 ADR-0024 与 0022
+            合同冻结。
+          </li>
+          <li>
+            <span class="tag open">待决</span> PostgreSQL scheduler
+            轮询间隔、lease/heartbeat 精确值与队列等待告警阈值；由双 worker
+            压测和故障注入校准。
+          </li>
+          <li>
+            <span class="tag open">待决</span> 哪些 P0/研究来源取得 production
+            权利和连续探针证据；未决期间注册为
+            SHADOW/DISABLED，不阻断只读控制面。
+          </li>
+          <li>
+            <span class="tag open">待决</span> 健康 issue 是否首版支持
+            ACK/RESOLVE 操作；最低安全版本只提供评估、查询和重新同步。
+          </li>
+        </ul>
+
+        <h3>9.10 依据</h3>
+        <ul>
+          <li>
+            <a href="../../../service-data-sync/README.md"
+              >service-data-sync README</a
+            >
+          </li>
+          <li>
+            <a href="../0017-daily-money-flow/index.html">0017 日频资金流向</a>
+          </li>
+          <li>
+            <a href="../0018-sqlalchemy-orm-persistence-models/index.html"
+              >0018 SQLAlchemy ORM 全量迁移</a
+            >
+          </li>
+          <li>
+            <a href="../0027-canonical-data-model/index.html"
+              >0027 Canonical Model 与 PostgreSQL</a
+            >
+          </li>
+          <li>
+            <a href="../0030-failure-only-source-payload-retention/index.html"
+              >0030 失败留证与成功载荷零归档</a
+            >
+          </li>
+          <li>
+            <a
+              href="../../contracts/0022-data-sync-operations-internal.openapi.yaml"
+              >0022 数据同步运维内部 API 契约</a
+            >
+          </li>
+          <li>
+            <a
+              href="../../contracts/0023-service-api-data-operations.openapi.yaml"
+              >0023 数据运维公开 API 契约</a
+            >
+          </li>
+          <li>
+            <a
+              href="../../decisions/0021-failure-only-source-payload-retention.md"
+              >ADR-0021 失败留证策略</a
+            >
+          </li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      <div class="shell">
+        0031 数据运维控制面 · Proposed · 变更摘要：首次建立 service-data-sync
+        现状盘点与可实施控制面详细设计。
+      </div>
+    </footer>
+  </body>
+</html>
