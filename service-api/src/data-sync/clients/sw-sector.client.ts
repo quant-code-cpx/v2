@@ -17,13 +17,15 @@ type FetchLike = typeof fetch;
 /** 描述下游条件读取未修改响应。 */
 type NotModified = {
   status: 304;
-  etag: string | undefined;
+  etag: string;
+  dataVersion: string;
 };
 
 /** 描述通过 Zod 合同校验的下游成功响应。 */
 type UpstreamSuccess<T> = {
   status: 200;
-  etag: string | undefined;
+  etag: string;
+  dataVersion: string;
   body: T;
 };
 
@@ -101,6 +103,7 @@ export class SwSectorClient {
     requestId: string,
     schema: ZodType<T>,
   ): Promise<SwUpstreamResponse<T>> {
+    if (!validRequestId(requestId)) throw dependencyUnavailable();
     const headers: Record<string, string> = {
       Accept: 'application/json',
       Authorization: `Bearer ${this.config.dataSyncInternalBearerToken}`,
@@ -117,11 +120,24 @@ export class SwSectorClient {
     } catch {
       throw dependencyUnavailable();
     }
-    const etag = response.headers.get('etag') ?? undefined;
-    if (response.status === 304) return { status: 304, etag };
+    const etag = response.headers.get('etag');
+    const dataVersion = response.headers.get('x-data-version');
+    if (response.headers.get('x-request-id') !== requestId) {
+      await response.body?.cancel();
+      throw dependencyUnavailable();
+    }
+    if (response.status === 304) {
+      if (!validEtag(etag) || !validDataVersion(dataVersion)) throw dependencyUnavailable();
+      return { status: 304, etag, dataVersion };
+    }
     if (!response.ok) throw upstreamProblem(response.status, response.headers.get('retry-after'));
     try {
-      return { status: 200, etag, body: schema.parse(await response.json()) };
+      const body = schema.parse(await response.json());
+      const bodyDataVersion = swBodyDataVersion(body);
+      if (!validEtag(etag) || !validDataVersion(dataVersion) || bodyDataVersion !== dataVersion) {
+        throw dependencyUnavailable();
+      }
+      return { status: 200, etag, dataVersion, body };
     } catch {
       throw dependencyUnavailable();
     }
@@ -142,6 +158,40 @@ function swParameters(input: {
   if (input.parentCode !== undefined) parameters.set('parentCode', input.parentCode);
   if (input.cursor !== undefined) parameters.set('cursor', input.cursor);
   return parameters;
+}
+
+/** 从申万 taxonomy、详情或估值响应共有的 release 读取数据版本。 */
+function swBodyDataVersion(value: unknown): string | undefined {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('release' in value) ||
+    typeof value.release !== 'object' ||
+    value.release === null ||
+    !('dataVersion' in value.release) ||
+    typeof value.release.dataVersion !== 'string'
+  ) {
+    return undefined;
+  }
+  return value.release.dataVersion;
+}
+
+/** 校验内部申万读端返回不含换行的强 ETag。 */
+function validEtag(value: string | null): value is string {
+  return value !== null && /^"[^"\r\n]{1,252}"$/.test(value);
+}
+
+/** 校验内部申万读端 publication 使用 UUID。 */
+function validDataVersion(value: string | null): value is string {
+  return (
+    value !== null &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  );
+}
+
+/** 校验关联标识采用 UUID 或受限稳定字符集，禁止换行和空白进入服务间请求头。 */
+function validRequestId(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(value);
 }
 
 /** 将依赖网络、认证或合同漂移统一映射为公开 503。 */

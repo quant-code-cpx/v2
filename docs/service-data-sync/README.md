@@ -27,7 +27,9 @@
 - [0019：指数成分与权重数据接入技术方案](0019-index-constituents/index.html) — Proposed
 - [0020：ETF 市场数据接入技术方案](0020-etf-market-data/index.html) — Proposed
 - [0021：融资融券数据接入技术方案](0021-margin-trading/index.html) — Proposed
-- [0022：沪深港通数据接入技术方案](0022-stock-connect/index.html) — Proposed
+- [0022：沪深港通数据接入技术方案](0022-stock-connect/index.html) — Superseded；
+  当前产品边界、官方来源、原子 publication 与三服务实施方案已收敛到
+  [0010：沪深港通与跨境互联互通中心](../service-web/0010-stock-connect-center/index.html)。
 - [0023：上市公司主营构成数据接入技术方案](0023-business-composition/index.html) — Proposed
 - [0024：公司事件数据接入技术方案](0024-corporate-events/index.html) — Proposed
 - [0025：龙虎榜与大宗交易数据接入技术方案](0025-trading-events/index.html) — Proposed
@@ -37,6 +39,11 @@
 - [0029：高价值市场数据扩展路线图](0029-market-data-expansion-roadmap/index.html) — Proposed
 - [0030：同步来源载荷仅失败留存方案](0030-failure-only-source-payload-retention/index.html) — Implemented
 - [0031：数据运维控制面与全局串行同步方案](0031-data-operations-control-plane/index.html) — Proposed
+
+沪深港通当前机器契约为
+[0024 data-sync 内部 OpenAPI](../contracts/0024-data-sync-stock-connect-internal.openapi.yaml) 与
+[0025 service-api 公开 OpenAPI](../contracts/0025-service-api-stock-connect.openapi.yaml)；来源与 bundle
+边界由 [ADR-0025](../decisions/0025-stock-connect-official-source-and-bundle-boundary.md) 冻结。
 
 从 0011 开始，方案状态与实施完成度只由技术证据决定：AKShare 接口签名和返回事实、连续探针与 fixture、
 同步幂等和恢复、Declarative 模型与 migration、数据质量、内部读取以及 `service-api` 的 POST 公开契约。

@@ -11,6 +11,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import re
 from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal
@@ -19,6 +20,10 @@ from uuid import UUID
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from service_data_sync.application.etf.query_contract import (
+    ETF_V2_DATASETS,
+    assert_etf_v2_query_contract,
+)
 from service_data_sync.application.ports.market_data_access import (
     MarketDataAccessRepository,
     MarketDataAccessUnavailable,
@@ -145,7 +150,7 @@ def register_market_data_routes(
                 code="dataset-contract-violation",
                 detail="Market data request violates the dataset contract",
             ) from error
-        except MarketDataAccessUnavailable:
+        except MarketDataAccessUnavailable as error:
             # 已注册 dataset 尚无 publication 是个人研究环境的正常首态；消费者必须可显示空页。
             request_id = _request_id(request)
             return _json_response(
@@ -153,7 +158,10 @@ def register_market_data_routes(
                 payload=_unavailable_query_payload(
                     request_id=request_id,
                     request=normalized,
-                    reason_code="PUBLICATION_NOT_AVAILABLE",
+                    availability=error.availability,
+                    reason_code=error.reason_code,
+                    observed_at=error.observed_at,
+                    warnings=error.warnings,
                 ),
             )
         if cursor_payload is not None and cursor_payload["dataVersion"] != str(page.data_version):
@@ -235,9 +243,16 @@ def _query_or_problem(body: dict[str, object]) -> MarketDataQuery:
     time = _time_or_problem(body.get("time"))
     visibility = _visibility_or_problem(body.get("visibility"))
     selection = _selection_or_problem(body.get("selection"))
+    page = _mapping(body.get("page"))
+    limit = _page_limit(page)
     filters = _filters_or_problem(body.get("filters"))
     sort = _sort_or_problem(body.get("sort"))
-    page = _mapping(body.get("page"))
+    if (
+        code in ETF_V2_DATASETS
+        and schema_version == 2
+        and ("page" not in body or "limit" not in page)
+    ):
+        raise _validation_problem("ETF v2 page.limit is required")
     request_body = {
         "dataset": {"code": code, "schemaVersion": schema_version},
         "businessScope": business_scope,
@@ -251,12 +266,12 @@ def _query_or_problem(body: dict[str, object]) -> MarketDataQuery:
             for item in filters
         ],
         "sort": sort,
-        "page": {"limit": _page_limit(page)},
+        "page": {"limit": limit},
     }
     fingerprint = hashlib.sha256(
         json.dumps(request_body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
-    return MarketDataQuery(
+    query = MarketDataQuery(
         dataset_code=code,
         schema_version=schema_version,
         business_scope=business_scope,
@@ -267,9 +282,14 @@ def _query_or_problem(body: dict[str, object]) -> MarketDataQuery:
         fields=fields,
         filters=filters,
         sort=sort,
-        limit=_page_limit(page),
+        limit=limit,
         request_fingerprint=fingerprint,
     )
+    try:
+        assert_etf_v2_query_contract(query)
+    except MarketDataRequestValidationError as error:
+        raise _validation_problem(str(error)) from error
+    return query
 
 
 def _query_payload(
@@ -314,24 +334,35 @@ def _query_payload(
 
 
 def _unavailable_query_payload(
-    *, request_id: str, request: MarketDataQuery, reason_code: str
+    *,
+    request_id: str,
+    request: MarketDataQuery,
+    availability: str,
+    reason_code: str,
+    observed_at: datetime | None,
+    warnings: tuple[str, ...],
 ) -> dict[str, object]:
-    """构造无 publication 时的成功空页，避免把来源缺失误报为消费者服务故障。"""
+    """构造无 publication、合法空集、来源不可用或暂不支持的成功空页。"""
     return {
         "meta": {
             "requestId": request_id,
             "contractVersion": _CONTRACT_VERSION,
             "dataset": {"code": request.dataset_code, "schemaVersion": request.schema_version},
-            "availability": "SOURCE_UNAVAILABLE",
+            "availability": availability,
             "release": {
-                "state": "SOURCE_UNAVAILABLE",
-                "observedAt": None,
+                "state": availability,
+                "observedAt": _timestamp(observed_at),
                 "reasonCode": reason_code,
             },
             "visibility": dict(request.visibility),
             "page": {"limit": request.limit, "hasMore": False, "nextCursor": None},
-            "coverage": {"from": None, "to": None, "pitCoverage": "UNKNOWN", "gaps": []},
-            "warnings": ["publication_unavailable"],
+            "coverage": {
+                "from": request.time.get("from"),
+                "to": request.time.get("to"),
+                "pitCoverage": "EMPTY" if availability == "EMPTY" else "UNKNOWN",
+                "gaps": [],
+            },
+            "warnings": list(warnings),
             "disclaimers": [],
         },
         "records": [],
@@ -513,7 +544,9 @@ def _filters_or_problem(value: object) -> tuple[MarketDataFilter, ...]:
             raise _validation_problem("filter is invalid")
         field = _optional_text(item.get("field"), maximum=64)
         operator = _enum_or_problem(
-            item.get("operator"), {"EQ", "IN", "GTE", "LTE", "RANGE"}, "filter operator is invalid"
+            item.get("operator"),
+            {"EQ", "IN", "GTE", "LTE", "RANGE", "PREFIX", "CONTAINS"},
+            "filter operator is invalid",
         )
         values = item.get("values")
         if not isinstance(values, list) or not 1 <= len(values) <= 500:
@@ -784,7 +817,7 @@ def _required_cursor_text(payload: dict[str, str], key: str) -> str:
 def _request_id(request: Request) -> str:
     """优先复用调用方合法 request ID，缺失或非法时生成新的 UUID。"""
     value = request.headers.get("X-Request-Id")
-    if value is not None and 1 <= len(value) <= 128 and value.isascii():
+    if value is not None and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", value):
         return value
     from uuid import uuid4
 

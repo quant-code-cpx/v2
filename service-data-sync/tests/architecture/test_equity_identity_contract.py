@@ -45,12 +45,17 @@ def test_fact_writers_do_not_resolve_identity_from_anchor_projection() -> None:
         assert "EquityInstrument.symbol ==" not in source, file_name
 
 
-def test_financial_reader_uses_publication_time_identity_projection() -> None:
-    """财务读取按 publication 有效/知识时点还原代码，禁止读取身份锚当前投影。"""
+def test_financial_reader_locks_request_time_identity_before_publication() -> None:
+    """财务读取先按请求双时间锁定永久键，报告期不能被误解为当时已上市。"""
     source = _source("financial_read_repository.py")
 
     assert "EquityIdentifierVersion" in source
+    assert "_selected_security_id" in source
     assert "FinancialPublication.effective_as_of" in source
     assert "FinancialPublication.knowledge_cutoff" in source
+    assert (
+        "EquityIdentifierVersion.effective_range.op(\"@>\")(\n"
+        "                    FinancialPublication.effective_as_of"
+    ) not in source
     assert "EquityInstrument.exchange ==" not in source
     assert "EquityInstrument.symbol ==" not in source

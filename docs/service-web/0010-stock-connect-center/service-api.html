@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>service-api｜沪深港通业务 API 技术方案</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17202a;
+        --muted: #637083;
+        --line: #dfe5ec;
+        --soft: #f6f8fb;
+        --blue: #155eef;
+        --green: #16845b;
+        --amber: #9a6700;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #eef2f6;
+        color: var(--ink);
+        font:
+          14px/1.72 Inter,
+          "PingFang SC",
+          "Microsoft YaHei",
+          sans-serif;
+      }
+      main {
+        width: 1180px;
+        margin: 32px auto 72px;
+        padding: 52px 64px;
+        background: #fff;
+        border: 1px solid var(--line);
+        box-shadow: 0 8px 28px rgba(20, 34, 52, 0.08);
+      }
+      h1 {
+        margin: 8px 0 12px;
+        font-size: 34px;
+        line-height: 1.25;
+      }
+      h2 {
+        margin: 42px 0 14px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+        font-size: 23px;
+      }
+      h3 {
+        margin: 24px 0 8px;
+        font-size: 17px;
+      }
+      p {
+        margin: 8px 0 14px;
+      }
+      a {
+        color: var(--blue);
+      }
+      code {
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: #edf2f7;
+        font-family: ui-monospace, monospace;
+      }
+      pre {
+        overflow: auto;
+        padding: 16px;
+        background: #111827;
+        color: #e5eef9;
+        border-radius: 8px;
+        line-height: 1.55;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 14px 0 24px;
+        font-size: 13px;
+      }
+      th,
+      td {
+        padding: 10px 11px;
+        border: 1px solid var(--line);
+        vertical-align: top;
+        text-align: left;
+      }
+      th {
+        background: #f0f4f8;
+        font-weight: 700;
+      }
+      ul,
+      ol {
+        padding-left: 22px;
+      }
+      li {
+        margin: 5px 0;
+      }
+      .eyebrow {
+        color: var(--blue);
+        font-weight: 800;
+        letter-spacing: 0.08em;
+      }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 18px 0 28px;
+      }
+      .tag {
+        padding: 5px 10px;
+        border: 1px solid #cad6e4;
+        border-radius: 999px;
+        background: var(--soft);
+      }
+      .callout {
+        margin: 18px 0;
+        padding: 14px 16px;
+        border-left: 4px solid var(--blue);
+        background: #f3f7ff;
+      }
+      .ok {
+        border-left-color: var(--green);
+        background: #f0faf6;
+      }
+      .warn {
+        border-left-color: var(--amber);
+        background: #fff9e8;
+      }
+      .flow {
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        background: var(--soft);
+        font-family: ui-monospace, monospace;
+      }
+      .check td:first-child {
+        width: 28px;
+        color: var(--green);
+        font-weight: 800;
+      }
+      @media print {
+        body {
+          background: #fff;
+        }
+        main {
+          width: auto;
+          margin: 0;
+          padding: 20mm 16mm;
+          border: 0;
+          box-shadow: none;
+        }
+        a {
+          color: inherit;
+          text-decoration: none;
+        }
+        h2 {
+          break-after: avoid;
+        }
+        table,
+        pre,
+        .callout {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">SERVICE-API · POST-ONLY · IMPLEMENTATION READY</div>
+      <h1>沪深港通业务 API 技术方案</h1>
+      <p>
+        新增独立 <code>StockConnectModule</code>，把 service-data-sync 的已批准
+        bundle 转换为面向 Web 的稳定业务合同。 API
+        不自行抓取、不计算未知净额、不混合币种、不访问同步库，也不缓存或制造业务事实。
+      </p>
+      <div class="meta">
+        <span class="tag">状态：Proposed · 可实施</span>
+        <span class="tag">应用路由：全部 POST</span>
+        <span class="tag">鉴权：ACTIVE 用户</span>
+        <span class="tag">协议：OpenAPI 3.1</span>
+        <span class="tag">无新增业务数据库表</span>
+      </div>
+      <div class="callout ok">
+        <strong>无卡点设计：</strong
+        >模块、端点、DTO、超时、重试、错误映射、缓存语义、响应预算和上线顺序均已冻结。
+        数据未发布时返回可观察错误或官方不可用状态，不会回退到旧 generic
+        query、浏览器拼接或模拟响应。
+      </div>
+
+      <h2>1. 模块边界与依赖方向</h2>
+      <div class="flow">
+          service-web<br>
+          → POST /api/v1/market/stock-connect/*/query<br>
+          → StockConnectController → StockConnectService → StockConnectClient<br>
+          → POST /internal/v1/stock-connect/*/query<br>
+        → service-data-sync approved bundle publication 或独立 persisted readiness snapshot
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>组件</th>
+            <th>职责</th>
+            <th>禁止事项</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>StockConnectModule</code></td>
+            <td>
+              导入 Auth 与 DataSyncModule；注册 controller、service 与限流服务。
+            </td>
+            <td>不导入 data-sync 源码，不连接 data-sync PostgreSQL。</td>
+          </tr>
+          <tr>
+            <td><code>StockConnectController</code></td>
+            <td>POST-only 路由、DTO 校验、当前主体、request id、响应头。</td>
+            <td>不写业务逻辑，不暴露内部来源路径。</td>
+          </tr>
+          <tr>
+            <td><code>StockConnectService</code></td>
+            <td>日期语义、权限、响应预算、可用性透传、ETag 判断。</td>
+            <td>不从 turnover 推导 net，不跨币种聚合。</td>
+          </tr>
+          <tr>
+            <td><code>StockConnectClient</code></td>
+            <td>调用内部版本化合同；超时、有限重试、熔断、Zod 响应校验。</td>
+            <td>不以 generic market-data query 代替专用合同。</td>
+          </tr>
+          <tr>
+            <td><code>stock-connect.contract</code></td>
+            <td>
+              严格解析请求与响应，保留
+              amount/currency/unit/availability/lineage，以及
+              <code>sourcePublicationAvailability</code>、
+              nullable <code>sourcePublicationAt</code> 与独立
+              <code>sourceObservedAt</code>。
+            </td>
+            <td>
+              不把 null 改成 0，不把 observedAt 改成 tradeDate，也不把
+              SFTP mtime 或接收时间冒充来源 publication。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>2. 公开合同</h2>
+      <p>
+        机器可读合同：
+          <a href="../../contracts/0025-service-api-stock-connect.openapi.yaml"
+            ><code>docs/contracts/0025-service-api-stock-connect.openapi.yaml</code></a
+        >； 下游内部合同：
+          <a href="../../contracts/0024-data-sync-stock-connect-internal.openapi.yaml"
+            ><code
+              >docs/contracts/0024-data-sync-stock-connect-internal.openapi.yaml</code
+            ></a
+        >。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>POST 路由</th>
+            <th>输入</th>
+            <th>输出</th>
+            <th>上限</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>/api/v1/market/stock-connect/readiness/query</code></td>
+            <td>date、1–4 channels</td>
+            <td>
+              官方日历、交付、执行和发布证据；candidateTradeDate、readyTradeDate
+              与逐通道状态/reasonCode
+            </td>
+            <td>64 KiB；通道 1–4</td>
+          </tr>
+          <tr>
+            <td><code>/api/v1/market/stock-connect/overview/query</code></td>
+            <td>date、1–4 channels、trendTradingDays</td>
+            <td>共同交易日、四通道统计/状态、按原币事实、趋势、publication</td>
+            <td>2 MiB；每通道趋势 ≤ 250 点，总览最多 4×250 点</td>
+          </tr>
+          <tr>
+            <td><code>/api/v1/market/stock-connect/channels/query</code></td>
+            <td>date、单 channel、trendTradingDays</td>
+            <td>单通道统计、额度、状态、趋势、publication</td>
+            <td>1 MiB；趋势 ≤ 250 点</td>
+          </tr>
+          <tr>
+            <td>
+              <code>/api/v1/market/stock-connect/active-securities/query</code>
+            </td>
+            <td>
+              date、channel、ranking、parentPublicationDataVersion、cursor、limit
+            </td>
+            <td>官方活跃榜，或仅在榜内且数据可用时的净额排序</td>
+            <td>512 KiB；默认 20、最大 100；cursor ≤ 1024</td>
+          </tr>
+          <tr>
+            <td>
+              <code>/api/v1/market/stock-connect/securities/context/query</code>
+            </td>
+            <td>entityRef、date、可选 channel、historyTradingDays</td>
+            <td>稳定身份与互联互通范围内历史表现</td>
+            <td>1 MiB；历史 ≤ 250 交易日</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        公开与内部 DTO 的业务形状保持同构，减少错误映射；service-api
+        的内部合同本身不含路径、凭证或原始上游响应，API
+        在严格解析后原样转发业务正文并补充公开错误、授权和缓存头。 金额统一为
+        <code>{ amount: decimal-string, currency: CNY|HKD, unit: BASE }</code>。
+      </p>
+
+      <h3>2.1 日期解析</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>请求</th>
+            <th>解析</th>
+            <th>无对应 publication</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>readiness <code>LATEST</code></td>
+            <td>
+              candidate 为所选通道有持久化证据的最近共同官方 OPEN
+              日；仅全部 READY 时才给出 readyTradeDate。
+            </td>
+            <td>无持久化快照返回 409 <code>READINESS_NOT_OBSERVED</code>。</td>
+          </tr>
+          <tr>
+            <td>readiness <code>EXACT</code></td>
+            <td>
+              仅有该日日历记录时回显 candidate；休市、待交付、失败和来源缺失分别返回证据状态。
+            </td>
+            <td>不从业务 409 或服务器当前日期猜测原因。</td>
+          </tr>
+          <tr>
+            <td>总览 <code>LATEST</code></td>
+            <td>所选通道最后一个全部完成并已发布的共同交易日。</td>
+            <td>409 <code>PUBLICATION_NOT_READY</code>，不拼接不同日期。</td>
+          </tr>
+          <tr>
+            <td>通道 <code>LATEST</code></td>
+            <td>该通道最后一个完成且已发布交易日。</td>
+            <td>409 <code>PUBLICATION_NOT_READY</code>。</td>
+          </tr>
+          <tr>
+            <td><code>EXACT + YYYY-MM-DD</code></td>
+            <td>只读取该日期 publication。</td>
+            <td>409 <code>EXACT_DATE_NOT_PUBLISHED</code>，不回退前一日。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>2.2 可用性与排名</h3>
+      <ul>
+        <li>
+          <code>REPORTED</code
+          >：官方源直接报告；<code>DERIVED</code>：可追溯公式与输入 release
+          齐备。
+        </li>
+        <li>
+          <code>NOT_DISCLOSED_BY_REGIME</code>：制度性不披露，HTTP
+          200；前端展示“— 未披露（制度）”。
+        </li>
+        <li>
+          <code>SOURCE_MISSING</code>：component 非强制展示事实缺失，HTTP 200
+          并带 publication quality；整体 bundle 未发布则 409。
+        </li>
+        <li>
+          <code>rankingScope</code> 恒为
+          <code>SOURCE_ACTIVE_SECURITIES_ONLY</code>；API
+          名称与文案不得出现“全市场净流入排行”。
+        </li>
+        <li>
+          请求北向新制度日的 NET_BUY/NET_SELL 时返回 200、空 items 和
+          <code>rankingAvailability=NOT_DISCLOSED_BY_REGIME</code>。
+        </li>
+      </ul>
+
+      <h2>3. 鉴权、授权与输入防护</h2>
+      <ul>
+        <li>
+          复用现有 JWT session guard；主体必须存在且状态为
+          <code>ACTIVE</code>。不新增 Prisma permission 或 Redis 安全状态。
+        </li>
+        <li>
+          所有 DTO 使用全局 validation
+          pipe：whitelist、forbidNonWhitelisted、transform；日期、枚举、数组大小、cursor
+          长度严格校验。
+        </li>
+        <li>
+          entityRef 是不透明稳定引用，只允许合同长度和字符集；绝不接受
+          SQL、provider、文件路径或任意 dataset code。
+        </li>
+        <li>
+          单用户限流：readiness/overview/channel 60 req/min，active/context
+          120 req/min；超限返回 429 与 Retry-After。
+        </li>
+        <li>
+          日志脱敏：记录 actor id、operation id、channel、date mode、resolved
+          date、data version、latency；不记录 access token 和源路径。
+        </li>
+      </ul>
+
+      <h2>4. 下游可靠性与一致性</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>机制</th>
+            <th>冻结值</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>调用超时</td>
+                  <td>含一次安全重试在内的端到端总预算 3 秒</td>
+            <td>超时返回 503 <code>UPSTREAM_UNAVAILABLE</code>。</td>
+          </tr>
+          <tr>
+            <td>重试</td>
+            <td>最多 1 次；仅网络中断、502、503；100–250ms jitter</td>
+            <td>
+              只读 POST 携带同 request id；不重试 4xx、schema 错误或超出总预算。
+            </td>
+          </tr>
+          <tr>
+            <td>熔断</td>
+            <td>30 秒内连续 5 次失败后打开 30 秒；半开 1 个探测</td>
+            <td>不返回过期伪成功；Web 保留自身上一成功视图并显示失联状态。</td>
+          </tr>
+          <tr>
+            <td>版本校验</td>
+            <td>
+              业务响应 publication.dataVersion 必须等于
+              <code>X-Data-Version</code>；readiness 删除顶层 dataVersion
+              后按合同规范序列化并重算 SHA-256，正文与响应头必须三者一致
+            </td>
+            <td>不一致视为协议错误，503 并报警。</td>
+          </tr>
+          <tr>
+            <td>响应 schema</td>
+            <td>Zod 严格解析，未知枚举或非法 money 拒绝</td>
+            <td>防止源系统漂移污染公开合同。</td>
+          </tr>
+          <tr>
+            <td>缓存</td>
+            <td>
+              不使用 Redis 保存业务数据；客户端
+              <code>If-None-Match</code> 命中返回 204
+            </td>
+            <td>
+              <code>Cache-Control: private, no-cache</code>，避免跨用户共享。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout warn">
+        service-api 不做“多请求后在内存求共同日期”的临时拼装。overview
+        必须由同一个 bundle publication 返回，
+        否则无法证明四通道属于同一数据版本。
+      </div>
+
+      <h2>5. 错误合同</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>HTTP</th>
+            <th>code</th>
+            <th>用户语义</th>
+            <th>重试</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>400</td>
+            <td><code>VALIDATION_FAILED</code></td>
+            <td>URL/请求状态非法。</td>
+            <td>修正请求后再试。</td>
+          </tr>
+          <tr>
+            <td>401</td>
+            <td><code>AUTHENTICATION_FAILED</code></td>
+            <td>会话失效。</td>
+            <td>重新登录。</td>
+          </tr>
+          <tr>
+            <td>403</td>
+            <td><code>AUTHORIZATION_FAILED</code></td>
+            <td>账号不可用。</td>
+            <td>不自动重试。</td>
+          </tr>
+          <tr>
+            <td>404</td>
+            <td><code>SECURITY_CONTEXT_NOT_FOUND</code></td>
+            <td>稳定证券引用不存在或无互联互通事实。</td>
+            <td>返回榜单页。</td>
+          </tr>
+          <tr>
+            <td>409</td>
+            <td><code>EXACT_DATE_NOT_PUBLISHED</code></td>
+            <td>指定日期非有效交易日或 publication 尚不存在。</td>
+            <td>用户选择已发布日期。</td>
+          </tr>
+          <tr>
+            <td>409</td>
+            <td><code>PUBLICATION_NOT_READY</code></td>
+            <td>latest 尚无完整 bundle。</td>
+            <td>按 Retry-After 重新查询。</td>
+          </tr>
+          <tr>
+            <td>409</td>
+            <td><code>READINESS_NOT_OBSERVED</code></td>
+            <td>尚无可核验的日历、交付、运行或 publication 就绪快照。</td>
+            <td>等待同步侧产生持久化证据；API 不推测状态。</td>
+          </tr>
+          <tr>
+            <td>409</td>
+            <td><code>PARENT_PUBLICATION_MISMATCH</code></td>
+            <td>活跃榜请求绑定的总览或通道 publication 已变化或不属于该日期/通道。</td>
+            <td>整体重取一次父查询；不得拼接新旧版本。</td>
+          </tr>
+          <tr>
+            <td>429</td>
+            <td><code>RATE_LIMITED</code></td>
+            <td>请求过密。</td>
+            <td>指数退避。</td>
+          </tr>
+          <tr>
+            <td>503</td>
+            <td><code>UPSTREAM_UNAVAILABLE</code></td>
+            <td>同步服务不可达或合同校验失败。</td>
+            <td>有限重试；不清空 Web 上一成功值。</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        Problem Details 不包含堆栈、内部
+        URL、源文件名、账号、凭证、原始下游响应。
+      </p>
+
+      <h2>6. 性能与容量</h2>
+      <ul>
+        <li>
+          controller
+          在读取下游和序列化公开响应时分别检查字节；overview 2 MiB、channel/context
+          1 MiB、active 512 KiB、readiness 64 KiB。预算覆盖合同允许的 4×250 个总览趋势点，超预算视为
+          服务错误并报警，避免正常一年窗口被误拒绝，也防止大响应拖垮 Node 进程。
+        </li>
+        <li>
+          不允许无限时间区间。趋势和证券历史最多 250
+          个交易日；活跃榜数据本身受官方榜单规模约束。
+        </li>
+        <li>
+          游标编码
+          <code
+            >dataVersion + tradeDate + channel + ranking + sortKey +
+            stableTieBreaker</code
+          >
+          并签名；版本变化后旧游标返回 409。
+        </li>
+        <li>
+          活跃证券 POST 还携带 <code>parentPublicationDataVersion</code>。同步服务按父
+          overview 的组成 bundle 或单通道 bundle 精确读取；找不到或不匹配时返回
+          <code>PARENT_PUBLICATION_MISMATCH</code>，不再解析当前 latest。
+        </li>
+        <li>
+          每次内部读取共享 3 秒总预算并使用 <code>AbortSignal.timeout</code>；
+          只对网络中断、502、503 有界重试一次，不启动后台工作。
+        </li>
+        <li>
+          通过现有 HTTP 与依赖监控采集各 operation p50/p95/p99、downstream
+          latency、timeout/retry/circuit、409 分类、response bytes、schema
+          failures。
+        </li>
+      </ul>
+
+      <h2>7. 实现文件与测试归属</h2>
+      <pre>
+service-api/src/apps/stock-connect/
+  stock-connect.module.ts
+  stock-connect.controller.ts
+  stock-connect.service.ts
+  stock-connect-rate-limit.service.ts
+  dto/stock-connect-query.dto.ts
+  test/stock-connect.dto.spec.ts
+  test/stock-connect-rate-limit.service.spec.ts
+  test/stock-connect.controller.spec.ts
+  test/stock-connect.service.spec.ts
+
+service-api/src/data-sync/
+  clients/stock-connect.client.ts
+  contracts/stock-connect.contract.ts
+  test/stock-connect.client.spec.ts
+  test/stock-connect.client.scope.spec.ts
+  test/stock-connect.contract.spec.ts
+  test/stock-connect.test-data.ts</pre>
+      <p>
+        所有类、函数、回调、DTO
+        和业务类型按仓库规则补中文定义级注释；金额、币种、日期、availability 和
+        source lineage 字段就近说明。
+      </p>
+
+      <h2>8. 发布、回滚与真实链路验收</h2>
+      <ol>
+        <li>
+          先发布向后兼容的 data-sync 内部合同和真实 bundle；内部端点保持暗上线。
+        </li>
+        <li>
+          部署 service-api
+          模块，<code>STOCK_CONNECT_API_ENABLED=false</code>；运行合同、故障和真实数据对账。
+        </li>
+        <li>
+          部署始终可访问且失败关闭的 Web 路由，执行浏览器端到端真实链路；全部通过并已有
+          approved publication 后才开启 API 运行时开关。
+        </li>
+        <li>
+          回滚只关闭 API 运行时开关并停用同步计划；Web 保留明确不可用状态和可分享 URL，
+          内部旧 bundle 仍可审计，已有其他 market-data 路由不受影响。
+        </li>
+      </ol>
+      <table class="check">
+        <tbody>
+          <tr>
+            <td>✓</td>
+            <td>
+              OpenAPI lint、DTO 生成/类型检查、controller POST-only
+              架构测试全部通过。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              用真实 bundle 和 persisted readiness snapshot 对五公开端点做 contract
+              test；业务响应的 X-Data-Version 与 publication 完全一致，readiness
+              的正文、重算摘要和响应头完全一致。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              逐字段对账：交易日、channel、rank、source
+              code、金额字符串、币种、availability、来源 publication
+              可用性与独立接收时间不发生语义变换。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              北向新制度日期响应无 buy/sell/net 数值；南向 net 仅透传带 lineage
+              的 derived 值。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              验证超时、一次重试、熔断、409、429、非法游标、非法
+              entityRef、版本不一致和超大响应。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              端到端网络记录中不存在样本接口、mock worker、AKShare/Eastmoney
+              或浏览器直连 data-sync。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>9. 配置</h2>
+      <pre>
+STOCK_CONNECT_API_ENABLED=false
+DATA_SYNC_STOCK_CONNECT_BASE_URL=http://data-sync-api:8000
+DATA_SYNC_STOCK_CONNECT_API_BEARER_TOKEN=
+DATA_SYNC_STOCK_CONNECT_TIMEOUT_MS=3000
+DATA_SYNC_STOCK_CONNECT_CIRCUIT_FAILURES=5
+DATA_SYNC_STOCK_CONNECT_CIRCUIT_WINDOW_MS=30000
+DATA_SYNC_STOCK_CONNECT_CIRCUIT_OPEN_MS=30000</pre>
+      <p>
+        部署把 secret reference
+        解析为内存中的服务凭证；日志和配置响应只保留引用名。开关默认关闭，不提供假数据兜底。
+      </p>
+    </main>
+  </body>
+</html>

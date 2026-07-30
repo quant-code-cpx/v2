@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=1440, initial-scale=1">
+    <title>沪深港通与跨境互联互通中心｜可编辑 PC 原型</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f6f8;
+        --paper: #ffffff;
+        --ink: #182230;
+        --muted: #637083;
+        --line: #e2e8f0;
+        --soft: #f8fafc;
+        --blue: #1677ff;
+        --blue-soft: #eaf3ff;
+        --red: #cf2e2e;
+        --red-soft: #fff1f0;
+        --green: #16845b;
+        --green-soft: #edf9f3;
+        --amber: #9a6700;
+        --amber-soft: #fff8e6;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 1440px;
+        height: 900px;
+        margin: 0;
+        overflow: hidden;
+      }
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          14px/1.45 Inter,
+          "PingFang SC",
+          "Microsoft YaHei",
+          sans-serif;
+      }
+      button {
+        font: inherit;
+      }
+      .shell {
+        display: grid;
+        grid-template-columns: 300px 1fr;
+        width: 1440px;
+        height: 900px;
+      }
+      .sidebar {
+        padding: 24px 20px;
+        background: #fff;
+        border-right: 1px solid var(--line);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        height: 42px;
+        margin: 0 10px 26px;
+        font-size: 18px;
+        font-weight: 800;
+      }
+      .brand-mark {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 9px;
+        background: #172b4d;
+        color: #fff;
+        font-size: 13px;
+      }
+      .nav-label {
+        margin: 18px 14px 7px;
+        color: #9aa5b1;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 44px;
+        margin: 3px 0;
+        padding: 0 14px;
+        border-radius: 9px;
+        color: #566477;
+        font-weight: 600;
+      }
+      .nav-item.active {
+        background: var(--blue-soft);
+        color: #0c61d8;
+      }
+      .nav-icon {
+        display: grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 7px;
+        background: #f0f3f7;
+        color: #506175;
+        font-size: 12px;
+      }
+      .nav-item.active .nav-icon {
+        background: #d8eaff;
+        color: #0c61d8;
+      }
+      .main {
+        min-width: 0;
+      }
+      .appbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 72px;
+        padding: 0 30px;
+        background: #fff;
+        border-bottom: 1px solid var(--line);
+      }
+      .search {
+        width: 350px;
+        padding: 10px 14px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        color: #8b98a8;
+        background: #fbfcfd;
+      }
+      .appbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        color: #617084;
+      }
+      .avatar {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: #e9eef5;
+        color: #344457;
+        font-weight: 800;
+      }
+      .view-switch {
+        display: flex;
+        padding: 3px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: #f7f9fb;
+      }
+      .view-switch button {
+        padding: 6px 10px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: #68778a;
+        cursor: pointer;
+      }
+      .view-switch button.active {
+        background: #fff;
+        color: #155eef;
+        box-shadow: 0 1px 3px rgba(27, 39, 51, 0.12);
+      }
+      .content {
+        height: 828px;
+        padding: 26px 30px 24px;
+        overflow: hidden;
+      }
+      .page {
+        display: none;
+        height: 100%;
+      }
+      .page.active {
+        display: block;
+      }
+      .page-heading {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 16px;
+      }
+      .eyebrow {
+        margin-bottom: 4px;
+        color: #1677ff;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 25px;
+        line-height: 1.25;
+      }
+      h2 {
+        margin: 0;
+        font-size: 16px;
+      }
+      h3 {
+        margin: 0 0 7px;
+        font-size: 15px;
+      }
+      p {
+        margin: 0;
+      }
+      .subtitle {
+        color: var(--muted);
+      }
+      .heading-meta {
+        display: flex;
+        gap: 8px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        padding: 4px 9px;
+        border-radius: 999px;
+        background: #eef2f6;
+        color: #58677a;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .chip.ok {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+      .chip.warn {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+      .chip.info {
+        background: var(--blue-soft);
+        color: #0c61d8;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 46px;
+        margin-bottom: 12px;
+      }
+      .toolbar-group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .segmented {
+        display: flex;
+        padding: 3px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+      }
+      .segment {
+        min-width: 66px;
+        padding: 7px 12px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: #657487;
+      }
+      .segment.active {
+        background: #edf5ff;
+        color: #0c61d8;
+        font-weight: 700;
+      }
+      .control {
+        padding: 9px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: #344457;
+      }
+      .scope-note {
+        color: #7a8798;
+        font-size: 12px;
+      }
+      .truth-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 38px;
+        margin-bottom: 14px;
+        padding: 8px 12px;
+        border: 1px solid #cfe0f7;
+        border-radius: 8px;
+        background: #f3f8ff;
+        color: #34506f;
+        font-size: 12px;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        background: #fff;
+        box-shadow: 0 2px 6px rgba(28, 42, 59, 0.035);
+      }
+      .channel-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+      }
+      .channel-card {
+        min-height: 160px;
+        padding: 16px;
+      }
+      .channel-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .channel-name {
+        font-size: 16px;
+        font-weight: 800;
+      }
+      .channel-direction {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .turnover-label {
+        margin-top: 21px;
+        color: #718095;
+        font-size: 12px;
+      }
+      .data-slot {
+        margin-top: 5px;
+        color: #334155;
+        font-size: 16px;
+        font-weight: 750;
+      }
+      .data-slot.small {
+        font-size: 13px;
+      }
+      .flow-format {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid #edf0f4;
+        font-size: 12px;
+      }
+      .positive {
+        color: var(--red);
+        font-weight: 800;
+      }
+      .negative {
+        color: var(--green);
+        font-weight: 800;
+      }
+      .unavailable {
+        color: #7b8795;
+        font-weight: 700;
+      }
+      .overview-lower {
+        display: grid;
+        grid-template-columns: 1.45fr 1fr;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .panel {
+        min-height: 270px;
+        padding: 16px;
+      }
+      .panel-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 12px;
+      }
+      .panel-caption {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .chart-empty {
+        display: grid;
+        place-items: center;
+        height: 180px;
+        border: 1px dashed #cfd8e3;
+        border-radius: 8px;
+        background: #fbfcfe;
+        color: #718095;
+        text-align: center;
+      }
+      .chart-grid {
+        width: 80%;
+      }
+      .chart-grid i {
+        display: block;
+        height: 1px;
+        margin: 22px 0;
+        background: #e8edf3;
+      }
+      .empty-copy {
+        margin-top: -90px;
+        line-height: 1.7;
+      }
+      .active-list {
+        border: 1px solid #edf0f4;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .active-row {
+        display: grid;
+        grid-template-columns: 36px 1fr 96px;
+        align-items: center;
+        min-height: 40px;
+        padding: 7px 10px;
+        border-bottom: 1px solid #edf0f4;
+      }
+      .active-row:last-child {
+        border-bottom: 0;
+      }
+      .rank {
+        color: #8a97a7;
+        font-variant-numeric: tabular-nums;
+      }
+      .slot-line {
+        height: 8px;
+        border-radius: 5px;
+        background: #eef2f6;
+      }
+      .slot-line.short {
+        width: 65%;
+        margin-top: 6px;
+      }
+      .slot-state {
+        color: #718095;
+        font-size: 11px;
+        text-align: right;
+      }
+      .breadcrumb {
+        margin-bottom: 9px;
+        color: #758397;
+        font-size: 12px;
+      }
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 12px;
+      }
+      .metric {
+        min-height: 126px;
+        padding: 15px;
+      }
+      .metric-label {
+        display: flex;
+        justify-content: space-between;
+        color: #718095;
+        font-size: 12px;
+      }
+      .metric-value {
+        margin-top: 17px;
+        color: #334155;
+        font-size: 15px;
+        font-weight: 800;
+      }
+      .metric-foot {
+        margin-top: 9px;
+        color: #7c8999;
+        font-size: 11px;
+      }
+      .detail-grid {
+        display: grid;
+        grid-template-columns: 0.92fr 1.28fr;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .inline-alert {
+        margin-bottom: 10px;
+        padding: 9px 10px;
+        border-radius: 7px;
+        background: var(--amber-soft);
+        color: #795b13;
+        font-size: 12px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      th {
+        padding: 8px 7px;
+        border-bottom: 1px solid var(--line);
+        background: #f8fafc;
+        color: #667589;
+        text-align: left;
+      }
+      td {
+        padding: 9px 7px;
+        border-bottom: 1px solid #edf0f4;
+      }
+      .table-empty td {
+        height: 118px;
+        color: #758397;
+        text-align: center;
+      }
+      .state-intro {
+        margin-bottom: 16px;
+        padding: 12px 14px;
+        border: 1px solid #cfe0f7;
+        border-radius: 9px;
+        background: #f3f8ff;
+        color: #405974;
+      }
+      .state-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 13px;
+      }
+      .state-card {
+        min-height: 200px;
+        padding: 18px;
+      }
+      .state-icon {
+        display: grid;
+        place-items: center;
+        width: 36px;
+        height: 36px;
+        margin-bottom: 14px;
+        border-radius: 9px;
+        background: #eef4fb;
+        color: #315b83;
+        font-size: 13px;
+        font-weight: 800;
+      }
+      .state-card p {
+        min-height: 61px;
+        color: #667589;
+        font-size: 12px;
+        line-height: 1.65;
+      }
+      .state-detail {
+        margin-top: 15px;
+        padding-top: 11px;
+        border-top: 1px solid #edf0f4;
+        color: #8090a3;
+        font-size: 11px;
+      }
+      .state-action {
+        margin-top: 3px;
+        padding: 6px 10px;
+        border: 1px solid #bbd5f5;
+        border-radius: 7px;
+        background: #fff;
+        color: #1465c7;
+      }
+      .prototype-notice {
+        position: fixed;
+        right: 16px;
+        bottom: 12px;
+        padding: 6px 10px;
+        border-radius: 6px;
+        background: rgba(28, 39, 53, 0.82);
+        color: #fff;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand"><span class="brand-mark">QV2</span>QUANT V2</div>
+        <nav>
+          <div class="nav-label">工作台</div>
+          <div class="nav-item"><span class="nav-icon">概</span>市场概览</div>
+          <div class="nav-item"><span class="nav-icon">股</span>股票市场</div>
+          <div class="nav-item"><span class="nav-icon">基</span>基金与 ETF</div>
+          <div class="nav-item active">
+            <span class="nav-icon">联</span>互联互通
+          </div>
+          <div class="nav-item"><span class="nav-icon">证</span>证券资料</div>
+          <div class="nav-label">数据治理</div>
+          <div class="nav-item"><span class="nav-icon">源</span>数据源管理</div>
+          <div class="nav-item"><span class="nav-icon">运</span>数据运维</div>
+        </nav>
+      </aside>
+
+      <main class="main">
+        <header class="appbar">
+          <div class="search">⌕&nbsp;&nbsp;搜索证券、通道或功能</div>
+          <div class="appbar-actions">
+            <div class="view-switch" role="group" aria-label="原型页面切换">
+              <button type="button" data-view="overview">总览</button>
+              <button type="button" data-view="detail">通道详情</button>
+              <button type="button" data-view="states">复杂状态</button>
+            </div>
+            <span>数据帮助</span>
+            <div class="avatar">陈</div>
+          </div>
+        </header>
+
+        <div class="content">
+          <section id="overview" class="page">
+            <div class="page-heading">
+              <div>
+                <div class="eyebrow">市场数据 / 互联互通</div>
+                <h1>沪深港通与跨境互联互通</h1>
+                <p class="subtitle">
+                  四条通道日终披露与来源活跃证券；CNY、HKD 分开呈现。
+                </p>
+              </div>
+              <div class="heading-meta">
+                <span class="chip info">latest · 由 publication 解析</span>
+                <span class="chip ok">正式数据链</span>
+              </div>
+            </div>
+
+            <div class="toolbar">
+              <div class="toolbar-group">
+                <div class="segmented" role="group" aria-label="业务方向">
+                  <button class="segment active" type="button">全部方向</button>
+                  <button class="segment" type="button">北向</button>
+                  <button class="segment" type="button">南向</button>
+                </div>
+                <button class="control" type="button">
+                  交易日&nbsp; latest⌄
+                </button>
+                <button class="control" type="button">通道&nbsp; 全部⌄</button>
+              </div>
+              <div class="scope-note">
+                交易日、来源时间、平台 publication 与 dataVersion 均由真实 API
+                返回
+              </div>
+            </div>
+
+            <div class="truth-banner">
+              <span
+                >本原型不内置证券、日期或金额；生产页面只渲染已批准的真实
+                publication。</span
+              >
+              <span>共同交易日 · 同一 bundle</span>
+            </div>
+
+            <div class="channel-grid">
+              <article class="card channel-card">
+                <div class="channel-head">
+                  <div>
+                    <div class="channel-name">沪股通</div>
+                    <div class="channel-direction">北向 · SSE · CNY</div>
+                  </div>
+                  <span class="chip warn">制度披露</span>
+                </div>
+                <div class="turnover-label">成交总额</div>
+                <div class="data-slot">由真实 API 返回</div>
+                <div class="flow-format">
+                  <span class="unavailable">— 未披露（制度）</span
+                  ><span>净额</span>
+                </div>
+              </article>
+              <article class="card channel-card">
+                <div class="channel-head">
+                  <div>
+                    <div class="channel-name">深股通</div>
+                    <div class="channel-direction">北向 · SZSE · CNY</div>
+                  </div>
+                  <span class="chip warn">制度披露</span>
+                </div>
+                <div class="turnover-label">成交总额</div>
+                <div class="data-slot">由真实 API 返回</div>
+                <div class="flow-format">
+                  <span class="unavailable">— 未披露（制度）</span
+                  ><span>净额</span>
+                </div>
+              </article>
+              <article class="card channel-card">
+                <div class="channel-head">
+                  <div>
+                    <div class="channel-name">港股通（沪）</div>
+                    <div class="channel-direction">南向 · HKEX · HKD</div>
+                  </div>
+                  <span class="chip ok">可披露时展示</span>
+                </div>
+                <div class="turnover-label">成交总额</div>
+                <div class="data-slot">由真实 API 返回</div>
+                <div class="flow-format">
+                  <span class="positive">+ · 净买入</span
+                  ><span class="negative">− · 净卖出</span>
+                </div>
+              </article>
+              <article class="card channel-card">
+                <div class="channel-head">
+                  <div>
+                    <div class="channel-name">港股通（深）</div>
+                    <div class="channel-direction">南向 · HKEX · HKD</div>
+                  </div>
+                  <span class="chip ok">可披露时展示</span>
+                </div>
+                <div class="turnover-label">成交总额</div>
+                <div class="data-slot">由真实 API 返回</div>
+                <div class="flow-format">
+                  <span class="positive">+ · 净买入</span
+                  ><span class="negative">− · 净卖出</span>
+                </div>
+              </article>
+            </div>
+
+            <div class="overview-lower">
+              <article class="card panel">
+                <div class="panel-head">
+                  <div>
+                    <h2>通道成交额趋势</h2>
+                    <div class="panel-caption">
+                      按原币与方向分别绘制；成交额不标为资金流
+                    </div>
+                  </div>
+                  <span class="chip info">真实日终序列</span>
+                </div>
+                <div class="chart-empty">
+                  <div class="chart-grid"><i></i><i></i><i></i></div>
+                  <div class="empty-copy">
+                    <strong>等待真实 publication</strong
+                        ><br>有完整序列后绘制，不使用示意折线
+                  </div>
+                </div>
+              </article>
+
+              <article class="card panel">
+                <div class="panel-head">
+                  <div>
+                    <h2>来源活跃证券</h2>
+                    <div class="panel-caption">
+                      官方 Top 10 · 非全市场排行 · 按来源名次
+                    </div>
+                  </div>
+                  <button class="control" type="button">查看通道</button>
+                </div>
+                <div
+                  class="active-list"
+                  role="group"
+                  aria-label="真实 API 数据装载位置"
+                >
+                  <div class="active-row">
+                    <span class="rank">—</span>
+                    <div>
+                      <div class="slot-line"></div>
+                      <div class="slot-line short"></div>
+                    </div>
+                    <span class="slot-state">真实 API</span>
+                  </div>
+                  <div class="active-row">
+                    <span class="rank">—</span>
+                    <div>
+                      <div class="slot-line"></div>
+                      <div class="slot-line short"></div>
+                    </div>
+                    <span class="slot-state">真实 API</span>
+                  </div>
+                  <div class="active-row">
+                    <span class="rank">—</span>
+                    <div>
+                      <div class="slot-line"></div>
+                      <div class="slot-line short"></div>
+                    </div>
+                    <span class="slot-state">真实 API</span>
+                  </div>
+                  <div class="active-row">
+                    <span class="rank">—</span>
+                    <div>
+                      <div class="slot-line"></div>
+                      <div class="slot-line short"></div>
+                    </div>
+                    <span class="slot-state">真实 API</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section id="detail" class="page">
+            <div class="breadcrumb">市场数据 / 互联互通 / 港股通（沪）</div>
+            <div class="page-heading">
+              <div>
+                <div class="eyebrow">南向 · SH_SOUTHBOUND · HKEX</div>
+                <h1>港股通（沪）</h1>
+                <p class="subtitle">
+                  精确交易日与状态由 publication 返回 · 成交币种 HKD · 额度币种
+                  CNY · 仅日终
+                </p>
+              </div>
+              <div class="heading-meta">
+                <span class="chip info">状态由 EOD publication 返回</span>
+                <span class="chip ok">真实数据链</span>
+              </div>
+            </div>
+
+            <div class="toolbar">
+              <div class="toolbar-group">
+                <button class="control" type="button">
+                  交易日&nbsp; latest⌄
+                </button>
+                <div class="segmented">
+                  <button class="segment active" type="button">日终概览</button>
+                  <button class="segment" type="button">来源活跃证券</button>
+                </div>
+              </div>
+              <div class="scope-note">
+                来源 publication、平台 publication 与 dataVersion
+                不以内置文本代替
+              </div>
+            </div>
+
+            <div class="truth-banner">
+              <span
+                >买入、卖出、成交额分别透传；净额只在输入齐备时按版本化公式发布。</span
+              >
+              <span>无 publication 时展示明确空状态</span>
+            </div>
+
+            <div class="metric-grid">
+              <article class="card metric">
+                <div class="metric-label">
+                  <span>买入金额</span><span>HKD</span>
+                </div>
+                <div class="metric-value">由真实 API 返回</div>
+                <div class="metric-foot">availability · lineage</div>
+              </article>
+              <article class="card metric">
+                <div class="metric-label">
+                  <span>卖出金额</span><span>HKD</span>
+                </div>
+                <div class="metric-value">由真实 API 返回</div>
+                <div class="metric-foot">availability · lineage</div>
+              </article>
+              <article class="card metric">
+                <div class="metric-label">
+                  <span>成交总额</span><span>HKD</span>
+                </div>
+                <div class="metric-value">由真实 API 返回</div>
+                <div class="metric-foot">中性展示 · 非资金流</div>
+              </article>
+              <article class="card metric">
+                <div class="metric-label">
+                  <span>净额</span><span>方向</span>
+                </div>
+                <div class="metric-value">
+                  <span class="positive">+ 净买入</span> /
+                  <span class="negative">− 净卖出</span>
+                </div>
+                <div class="metric-foot">符号 + 文字 + 中国市场红绿</div>
+              </article>
+              <article class="card metric">
+                <div class="metric-label">
+                  <span>额度状态</span><span>CNY · 日终</span>
+                </div>
+                <div class="metric-value">由真实 API 返回</div>
+                <div class="metric-foot">阈值语义不填 0</div>
+              </article>
+            </div>
+
+            <div class="detail-grid">
+              <article class="card panel">
+                <div class="panel-head">
+                  <div>
+                    <h2>通道交易日趋势</h2>
+                    <div class="panel-caption">休市日断点，不向前填充</div>
+                  </div>
+                  <span class="chip info">原币</span>
+                </div>
+                <div class="chart-empty">
+                  <div class="chart-grid"><i></i><i></i><i></i></div>
+                  <div class="empty-copy">
+                    <strong>等待真实日终序列</strong
+                      ><br>不使用示意值或示意折线
+                  </div>
+                </div>
+              </article>
+
+              <article class="card panel">
+                <div class="panel-head">
+                  <div>
+                    <h2>来源活跃证券</h2>
+                    <div class="panel-caption">
+                      官方活跃名单；净额排序仅限榜内且字段可用
+                    </div>
+                  </div>
+                  <span class="chip ok">身份可追溯</span>
+                </div>
+                <div class="inline-alert">
+                  北向制度未披露时禁用榜内净额 tabs；绝不从成交总额推导净买入。
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">来源名次</th>
+                      <th scope="col">证券身份</th>
+                      <th scope="col">买入</th>
+                      <th scope="col">卖出</th>
+                      <th scope="col">成交总额</th>
+                    </tr>
+                  </thead>
+                  <tbody class="table-empty">
+                    <tr>
+                      <td colspan="5">
+                        生产数据接入后由真实 API
+                        填充；身份缺失时只显示源代码/名称且不生成链接。
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </article>
+            </div>
+          </section>
+
+          <section id="states" class="page">
+            <div class="page-heading">
+              <div>
+                <div class="eyebrow">交互规格 / 复杂状态</div>
+                <h1>互联互通数据状态</h1>
+                <p class="subtitle">
+                  按通道、交易日、publication、披露制度与身份映射独立判断。
+                </p>
+              </div>
+              <div class="heading-meta">
+                <span class="chip info">确定性状态</span>
+              </div>
+            </div>
+            <div class="state-intro">
+              总览只展示完整共同 bundle。单通道可保留上一明确
+              dataVersion；页面不跨版本拼接、不跨币种汇总，也不使用抓取时间替代交易日。
+            </div>
+            <div class="state-grid">
+              <article class="card state-card">
+                <div class="state-icon">休</div>
+                <h3>官方日历确认休市</h3>
+                <p>
+                  精确日期无成交，且官方互联互通日历确认该通道不交易。保留用户选择，不自动漂移。
+                </p>
+                <span class="chip ok">日历证据可用</span>
+                <div class="state-detail">
+                  提供“返回 latest”，不伪造零成交。
+                </div>
+              </article>
+              <article class="card state-card">
+                <div class="state-icon">制</div>
+                <h3>制度未披露</h3>
+                <p>
+                  北向买入、卖出或净额按当前制度不公开。成交额仍按官方值展示，净额不反推。
+                </p>
+                <span class="chip warn">NOT_DISCLOSED_BY_REGIME</span>
+                <div class="state-detail">字段显示“— 未披露（制度）”。</div>
+              </article>
+              <article class="card state-card">
+                <div class="state-icon">源</div>
+                <h3>无 publication</h3>
+                <p>
+                  真实来源尚未形成已批准 bundle。页面显示来源状态、requestId
+                  与重试，不加载本地业务值。
+                </p>
+                <button class="state-action" type="button">查看数据说明</button>
+                <div class="state-detail">
+                  PUBLICATION_NOT_READY · 无 dataVersion。
+                </div>
+              </article>
+              <article class="card state-card">
+                <div class="state-icon">分</div>
+                <h3>部分通道失败</h3>
+                <p>
+                  总览不把成功通道和失败通道跨日期拼接；单通道页面可保留上一明确版本。
+                </p>
+                <span class="chip warn">共同 bundle 未完成</span>
+                <div class="state-detail">成功事实不补位，失败事实不填零。</div>
+              </article>
+              <article class="card state-card">
+                <div class="state-icon">证</div>
+                <h3>来源身份未解析</h3>
+                <p>
+                  保留来源代码和名称，展示身份质量警告；没有稳定 entityRef
+                  时不生成错误深链接。
+                </p>
+                <span class="chip warn">SOURCE_UNRESOLVED</span>
+                <div class="state-detail">不阻塞其他已解析事实的阅读。</div>
+              </article>
+              <article class="card state-card">
+                <div class="state-icon">↻</div>
+                <h3>分页快照失效</h3>
+                <p>
+                  游标绑定旧 dataVersion。清除游标并从第一页读取当前
+                  publication，保留其他 URL 筛选。
+                </p>
+                <button class="state-action" type="button">回到第一页</button>
+                <div class="state-detail">409 · 版本变化不复用旧游标。</div>
+              </article>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div class="prototype-notice">
+      可编辑 HTML 原型 · 1440 × 900 PC 桌面 · 无内置业务数据
+    </div>
+
+    <script>
+      const pages = Array.from(document.querySelectorAll(".page"));
+      const switchButtons = Array.from(
+        document.querySelectorAll("[data-view]"),
+      );
+
+      /**
+       * 切换评审原型页面，并把当前视图写入查询参数，便于截图与分享。
+       * @param {string} view 目标视图标识。
+       */
+      function showView(view) {
+        const safeView = pages.some((page) => page.id === view)
+          ? view
+          : "overview";
+        pages.forEach((page) =>
+          page.classList.toggle("active", page.id === safeView),
+        );
+        switchButtons.forEach((button) =>
+          button.classList.toggle("active", button.dataset.view === safeView),
+        );
+        const url = new URL(window.location.href);
+        url.searchParams.set("view", safeView);
+        window.history.replaceState({}, "", url);
+      }
+
+      switchButtons.forEach((button) => {
+        /**
+         * 响应原型视图按钮点击，并保留可直接访问的视图地址。
+         */
+        button.addEventListener("click", () => showView(button.dataset.view));
+      });
+
+      showView(
+        new URLSearchParams(window.location.search).get("view") || "overview",
+      );
+    </script>
+  </body>
+</html>

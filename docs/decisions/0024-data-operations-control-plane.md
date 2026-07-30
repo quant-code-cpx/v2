@@ -94,6 +94,12 @@
    - `incremental` 从成功 publication checkpoint 和版本化修订回看窗口计算；
    - `date_range` 使用包含端日期并按数据集日历、最大跨度和来源历史验证；
    - snapshot 数据只接受观察日，不能伪装为日期范围。
+   每个同步 target 还必须携带严格的业务 `selector`。它以 `GLOBAL`、`INSTRUMENT`、`SECTOR`、
+   `SCHEME`、`EXCHANGE`、`CONTRACT`、`ETF`、`MARGIN`、`STOCK_CONNECT`、`TRADING_EVENT` 或
+   `INDEX` 的判别联合表达既有 CLI/Celery 所需的业务范围；具体数据集允许哪些 selector 由
+   `DatasetCapability.selectorKinds` 声明。selector 不接受 Provider 参数、URI、凭据或任意 JSON，
+   并在 preflight、submit 和 run 快照中冻结。此前仅有 `datasetCode + mode + 日期` 的合同无法无损
+   表达既有按证券、板块、交易所和合约运行的生产入口，因此以此最小扩展消除绕过 command 的理由。
 5. 提交前执行无副作用 preflight，返回支持模式、解析后的分区数、预计 Provider 调用量、日期/日历风险、
    当前队列和冲突；preflight 不是锁定、批准或执行成功保证。
 6. parent command 提供权威详情查询，返回聚合状态和按提交顺序排列的 child runs。取消与重试必须显式指定
@@ -139,6 +145,8 @@
 3. 数据集分别声明人工与计划支持模式。v1 自动计划禁止 `date_range`；`full/incremental` 使用
    `dateResolution=NONE`，`observation_date` 必须冻结为“计划本地日期”或“最近已完成交易日”解析策略。
    capability 必须按 mode 返回允许的版本化 target policy 及唯一默认项，Web 只从这些选项构造新计划。
+   计划同时冻结一个受该数据集 `selectorKinds` 约束的 selector；每个 `datasetCode` 仍至多一个计划，
+   因而 v1 不允许同一数据集以多个 selector 并行或多计划运行。
 4. 固定 scheduler tick 查找到期计划，并以稳定 idempotency key 向同一 command queue 投递。
    计划碰撞只会排队，不会并行。
 5. 计划修改保存不可变 revision；禁用优先于删除。创建时 `scheduleId/expectedVersion` 必须同时为 null，

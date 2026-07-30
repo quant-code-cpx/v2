@@ -77,7 +77,11 @@ class CanonicalQualityDecision:
 
 @dataclass(frozen=True, slots=True)
 class CanonicalReleaseCandidate:
-    """描述一个已写入强类型事实、等待原子对消费者可见的固定内容集合。"""
+    """描述一个已写入强类型事实、等待原子对消费者可见的固定内容集合。
+
+    `publication_effective_as_of` 仅在消费者可用生效日期不同于事实日期时填写；它不能替代
+    `fact_min`/`fact_max`，后两者仍冻结 release 内事实覆盖范围。
+    """
 
     dataset_id: UUID
     dataset_code: str
@@ -92,9 +96,10 @@ class CanonicalReleaseCandidate:
     checkpoint_position: dict[str, object]
     expected_fencing_token: int
     created_at: datetime
+    publication_effective_as_of: date | None = None
 
     def __post_init__(self) -> None:
-        """校验发布分区、事实日期和 CAS 前提，禁止模糊或倒退式提交。"""
+        """校验发布分区、事实日期、生效日期和 CAS 前提，禁止模糊或倒退式提交。"""
         if not self.dataset_code.strip() or not self.partition_key.strip():
             raise ValueError("canonical dataset code and partition key must not be blank")
         if not self.checkpoint_kind.strip() or not self.checkpoint_position:
@@ -105,6 +110,10 @@ class CanonicalReleaseCandidate:
             raise ValueError("canonical release created_at must include a timezone")
         if self.fact_max is not None and (self.fact_min is None or self.fact_max < self.fact_min):
             raise ValueError("canonical fact date range is invalid")
+        if self.publication_effective_as_of is not None and not isinstance(
+            self.publication_effective_as_of, date
+        ):
+            raise ValueError("canonical publication effective date is invalid")
         if len({record.record_key_hash for record in self.records}) != len(self.records):
             raise ValueError("canonical release record keys must be unique")
 

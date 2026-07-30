@@ -1293,7 +1293,9 @@ src/views/DataOperationsView/
           <li>
             <strong>配置：</strong
             >每个子任务独立展示能力；混合批次不能用一个通用日期范围覆盖全部数据集。
-            不支持的模式不渲染；Web 保持原顺序并先按
+            不支持的模式或 <code>selectorKinds</code> 不渲染；selector 只能由服务端
+            capability 给出的严格 GLOBAL、证券、板块、交易所、合约或专项结构构造，绝不输入
+            Provider 参数、URI 或凭据。Web 保持原顺序并先按
             <code>datasetCode</code> 去重，服务端重复目标返回 422。
           </li>
           <li>

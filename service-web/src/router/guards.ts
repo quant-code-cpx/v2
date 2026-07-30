@@ -53,6 +53,23 @@ export function requirePermission(permission: Permission) {
   };
 }
 
+/** 构造仅允许 ADMIN 与 SUPER_ADMIN 读取数据运维控制面的路由 loader。 */
+export async function requireDataOperationsAccess(
+  arguments_: LoaderFunctionArgs,
+): Promise<CurrentUser | Response> {
+  const userOrRedirect = await requireSession(arguments_);
+
+  if (userOrRedirect instanceof Response) {
+    return userOrRedirect;
+  }
+
+  if (userOrRedirect.role !== "ADMIN" && userOrRedirect.role !== "SUPER_ADMIN") {
+    throw new Response("无权访问此功能。", { status: 403, statusText: "Forbidden" });
+  }
+
+  return userOrRedirect;
+}
+
 /** 将已认证访问者从唯一匿名登录路由重定向出去。 */
 export async function redirectAuthenticatedLogin({
   request,

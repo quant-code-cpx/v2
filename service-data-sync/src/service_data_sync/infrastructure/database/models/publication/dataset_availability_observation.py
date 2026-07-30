@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, Index, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, Date, DateTime, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,8 +23,21 @@ class DatasetAvailabilityObservation(Base):
     __tablename__ = "dataset_availability_observation"
     __table_args__ = (
         CheckConstraint(
-            "availability IN ('empty', 'source_unavailable')",
+            "availability IN ('empty', 'source_unavailable', 'currently_unsupported')",
             name="ck_dataset_availability_observation_state",
+        ),
+        CheckConstraint(
+            """
+            (entity_partition IS NULL AND coverage_from IS NULL AND coverage_to IS NULL)
+            OR
+            (
+              entity_partition IS NOT NULL
+              AND coverage_from IS NOT NULL
+              AND coverage_to IS NOT NULL
+              AND coverage_from <= coverage_to
+            )
+            """,
+            name="ck_dataset_availability_observation_coverage",
         ),
         UniqueConstraint(
             "dataset",
@@ -39,6 +52,15 @@ class DatasetAvailabilityObservation(Base):
             unique=True,
             postgresql_where="superseded_at IS NULL",
         ),
+        Index(
+            "ix_dataset_availability_observation_entity_coverage",
+            "dataset",
+            "entity_partition",
+            "coverage_to",
+            "coverage_from",
+            "observed_at",
+            postgresql_where="superseded_at IS NULL AND entity_partition IS NOT NULL",
+        ),
         {"comment": "空集与来源不可用的可审计观测；不代表 canonical 事实发布。"},
     )
 
@@ -51,8 +73,21 @@ class DatasetAvailabilityObservation(Base):
     partition_key: Mapped[str] = mapped_column(
         String(240), nullable=False, comment="请求身份与时间窗口构成的稳定观测分区。"
     )
+    entity_partition: Mapped[str | None] = mapped_column(
+        String(160),
+        nullable=True,
+        comment="可用于窗口相交读取的受控实体分区；旧观测未回填时为空。",
+    )
+    coverage_from: Mapped[date | None] = mapped_column(
+        Date, nullable=True, comment="本次空态或失败观察覆盖的包含式起始业务日期。"
+    )
+    coverage_to: Mapped[date | None] = mapped_column(
+        Date, nullable=True, comment="本次空态或失败观察覆盖的包含式结束业务日期。"
+    )
     availability: Mapped[str] = mapped_column(
-        String(32), nullable=False, comment="empty 或 source_unavailable。"
+        String(32),
+        nullable=False,
+        comment="empty、source_unavailable 或 currently_unsupported。",
     )
     reason_code: Mapped[str] = mapped_column(
         String(80), nullable=False, comment="稳定诊断码；不保存上游异常原文。"

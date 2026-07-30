@@ -85,6 +85,41 @@ services:
       - ./service-api/prisma.config.ts:/app/prisma.config.ts:ro
       - ./service-api/tsconfig.json:/app/tsconfig.json:ro
 
+  service-api-data-operations-dispatcher:
+    image: quant-v2/service-api:dev
+    build:
+      context: ./service-api
+      dockerfile: Dockerfile
+      target: development
+    command:
+      [
+        "/bin/sh",
+        "-ec",
+        "rm -rf /app/.tmp/dist && ./node_modules/.bin/tsc -p tsconfig.json --outDir /app/.tmp/dist && exec node /app/.tmp/dist/scripts/dispatch-data-operations.js",
+      ]
+    environment:
+      NODE_ENV: development
+      COOKIE_SECURE: "false"
+      CORS_ORIGIN: ${SERVICE_API_DEV_CORS_ORIGIN:-http://127.0.0.1:15173}
+      TRUST_PROXY: "false"
+      HOME: /tmp
+    volumes:
+      - ./service-api/src/app.module.ts:/app/src/app.module.ts:ro
+      - ./service-api/src/apps:/app/src/apps:ro
+      - ./service-api/src/bootstrap:/app/src/bootstrap:ro
+      - ./service-api/src/common:/app/src/common:ro
+      - ./service-api/src/config:/app/src/config:ro
+      - ./service-api/src/data-sync:/app/src/data-sync:ro
+      - ./service-api/src/lifecycle:/app/src/lifecycle:ro
+      - ./service-api/src/scripts:/app/src/scripts:ro
+      - ./service-api/src/shared:/app/src/shared:ro
+      - ./service-api/src/types:/app/src/types:ro
+      - ./service-api/prisma:/app/prisma:ro
+      - ./service-api/prisma.config.ts:/app/prisma.config.ts:ro
+      - ./service-api/tsconfig.json:/app/tsconfig.json:ro
+    tmpfs:
+      - /app/.tmp:uid=1000,gid=1000,mode=1777
+
   data-sync-postgres:
     ports:
       - "127.0.0.1:${DATA_SYNC_POSTGRES_PORT:-15432}:5432"
@@ -184,6 +219,8 @@ services:
       DATA_SYNC_SECTOR_EOD_SCHEDULER_ENABLED: ${DATA_SYNC_SECTOR_EOD_SCHEDULER_ENABLED:-false}
       DATA_SYNC_TRADING_CALENDAR_ENABLED: ${DATA_SYNC_TRADING_CALENDAR_ENABLED:-false}
       DATA_SYNC_INTERNAL_API_BEARER_TOKEN: ${DATA_SYNC_INTERNAL_API_BEARER_TOKEN:?set DATA_SYNC_INTERNAL_API_BEARER_TOKEN}
+      DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN: ${DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN:?set DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN}
+      DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN: ${DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN:?set DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN}
       DATA_SYNC_AKSHARE_REQUEST_TIMEOUT_SECONDS: ${DATA_SYNC_AKSHARE_REQUEST_TIMEOUT_SECONDS:-30}
     networks:
       - data-sync-internal

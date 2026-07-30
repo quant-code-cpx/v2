@@ -9,6 +9,7 @@ import type {
   EquityCorporateActionPage,
 } from '../../data-sync/contracts/equity-market-data.contract.js';
 import type { EquityPathDto } from './dto/equity-path.dto.js';
+import type { EquityVersionedAsOfQueryDto } from './dto/equity-temporal-query.dto.js';
 import type { ListAdjustmentFactorsQueryDto } from './dto/list-adjustment-factors-query.dto.js';
 import type { ListCorporateActionsQueryDto } from './dto/list-corporate-actions-query.dto.js';
 import type { ListEquityBarsQueryDto } from './dto/list-equity-bars-query.dto.js';
@@ -31,9 +32,17 @@ export class EquityMarketDataService {
     if (query.adjust === 'none' && query.adjustAsOf !== undefined) {
       throw new BadRequestException('adjustAsOf requires qfq or hfq');
     }
+    if (query.adjust === 'none' && query.factorDataVersion !== undefined) {
+      throw new BadRequestException('factorDataVersion requires qfq or hfq');
+    }
+    if (query.adjust !== 'none' && query.factorDataVersion === undefined) {
+      throw new BadRequestException('qfq and hfq require factorDataVersion');
+    }
     return this.client.listBars({
       exchange: path.exchange,
       symbol: path.symbol,
+      dataVersion: query.dataVersion,
+      factorDataVersion: query.factorDataVersion,
       period: query.period,
       start: query.start,
       end: query.end,
@@ -58,6 +67,7 @@ export class EquityMarketDataService {
     return this.client.listAdjustmentFactors({
       exchange: path.exchange,
       symbol: path.symbol,
+      dataVersion: query.dataVersion,
       start: query.start,
       end: query.end,
       cursor: query.cursor,
@@ -81,6 +91,7 @@ export class EquityMarketDataService {
     return this.client.listCorporateActions({
       exchange: path.exchange,
       symbol: path.symbol,
+      dataVersion: query.dataVersion,
       start: query.start,
       end: query.end,
       cursor: query.cursor,
@@ -93,6 +104,7 @@ export class EquityMarketDataService {
   /** 读取当前公司概况。 */
   public getCompanyProfile(
     path: EquityPathDto,
+    query: EquityVersionedAsOfQueryDto,
     ifNoneMatch: string | undefined,
     requestId: string,
   ): Promise<ConditionalRead<EquityCompanyProfile>> {
@@ -100,6 +112,8 @@ export class EquityMarketDataService {
     return this.client.getCompanyProfile({
       exchange: path.exchange,
       symbol: path.symbol,
+      dataVersion: query.dataVersion,
+      asOf: query.asOf,
       ifNoneMatch,
       requestId,
     });

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from service_data_sync.bootstrap.errors import DependencyUnavailable
 from service_data_sync.bootstrap.settings import Settings
+from service_data_sync.infrastructure.database.fenced_execution import current_fenced_execution
 
 
 @dataclass
@@ -88,11 +89,43 @@ class DatabaseClient:
         `yield` 之前开始事务；调用方代码无异常返回时 `session.begin()` 提交全部变更，
         包括事实、来源血缘、质量结果和 publication。任何异常则由 SQLAlchemy 回滚，避免
         半完成发布或已推进但未落库的 checkpoint；随后外层上下文关闭会话。该方法不吞掉异常，
-        以便任务层决定重试、隔离或终止。
+        以便任务层决定重试、隔离或终止。异常边界覆盖事务提交本身；若 fenced 终态已在
+        提交前写入内存但数据库提交失败，必须同步撤销该内存标记。
         """
         with self.session() as session:
-            with session.begin():
-                yield session
+            execution = current_fenced_execution()
+            terminal_written_before = (
+                execution is not None
+                and execution.database is self
+                and execution.terminal_written
+            )
+            try:
+                # `try` 必须包住整个事务上下文，才能同时捕获业务体、finalizer 和 commit 失败。
+                with session.begin():
+                    if (
+                        execution is not None
+                        and execution.database is self
+                        and not execution.terminal_written
+                    ):
+                        # canonical 写入前锁住 ExecutionSlot，旧 worker 不能跨过此门。
+                        execution.assert_current(session)
+                    yield session
+                    if (
+                        execution is not None
+                        and execution.database is self
+                        and not execution.terminal_written
+                    ):
+                        # 被执行器显式武装时，run 终态与 canonical 写入共用这一提交事务。
+                        execution.finalize_if_armed(session)
+            except BaseException:
+                if (
+                    execution is not None
+                    and execution.database is self
+                    and not terminal_written_before
+                ):
+                    # SQL 已回滚，提交前写入的 armed/written 内存状态也必须回滚。
+                    execution.rollback_terminal_write()
+                raise
 
     def close(self) -> None:
         """在进程退出时释放连接池；已借出的会话应先由其调用方结束。"""

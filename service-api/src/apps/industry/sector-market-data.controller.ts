@@ -1,8 +1,19 @@
-import { Controller, Headers, HttpCode, HttpStatus, Param, Post, Query, Res } from '@nestjs/common';
+import {
+  Controller,
+  Headers,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 import type { Response } from 'express';
 
+import type { AuthenticatedRequest } from '../../common/models/auth-context.js';
 import { ListSectorBarsQueryDto } from './dto/list-sector-bars-query.dto.js';
 import { GetSectorEodSnapshotQueryDto } from './dto/get-sector-eod-snapshot-query.dto.js';
 import { ListSectorEodSnapshotsQueryDto } from './dto/list-sector-eod-snapshots-query.dto.js';
@@ -10,6 +21,9 @@ import { ListSectorMembershipQueryDto } from './dto/list-sector-membership-query
 import { ListSectorsQueryDto } from './dto/list-sectors-query.dto.js';
 import { SectorPathDto } from './dto/sector-path.dto.js';
 import { SectorMarketDataService } from './sector-market-data.service.js';
+
+/** 表示已经过全局关联标识中间件的认证请求。 */
+type CorrelatedAuthenticatedRequest = AuthenticatedRequest & { requestId: string };
 
 /** 暴露给已认证用户的板块目录与独立物理周期 K 线读取路由。 */
 @ApiTags('market-sectors')
@@ -25,9 +39,10 @@ export class SectorMarketDataController {
   public async listEodSnapshots(
     @Query() query: ListSectorEodSnapshotsQueryDto,
     @Headers('if-none-match') ifNoneMatch: string | undefined,
+    @Req() request: CorrelatedAuthenticatedRequest,
     @Res({ passthrough: true }) response: Response,
   ): Promise<unknown> {
-    const result = await this.sectors.listEodSnapshots(query, ifNoneMatch);
+    const result = await this.sectors.listEodSnapshots(query, ifNoneMatch, request.requestId);
     return writeConditionalResponse(response, result);
   }
 
@@ -37,9 +52,10 @@ export class SectorMarketDataController {
   public async list(
     @Query() query: ListSectorsQueryDto,
     @Headers('if-none-match') ifNoneMatch: string | undefined,
+    @Req() request: CorrelatedAuthenticatedRequest,
     @Res({ passthrough: true }) response: Response,
   ): Promise<unknown> {
-    const result = await this.sectors.listSectors(query, ifNoneMatch);
+    const result = await this.sectors.listSectors(query, ifNoneMatch, request.requestId);
     return writeConditionalResponse(response, result);
   }
 
@@ -50,9 +66,10 @@ export class SectorMarketDataController {
     @Param() path: SectorPathDto,
     @Query() query: ListSectorBarsQueryDto,
     @Headers('if-none-match') ifNoneMatch: string | undefined,
+    @Req() request: CorrelatedAuthenticatedRequest,
     @Res({ passthrough: true }) response: Response,
   ): Promise<unknown> {
-    const result = await this.sectors.listBars(path, query, ifNoneMatch);
+    const result = await this.sectors.listBars(path, query, ifNoneMatch, request.requestId);
     return writeConditionalResponse(response, result);
   }
 
@@ -63,9 +80,10 @@ export class SectorMarketDataController {
     @Param() path: SectorPathDto,
     @Query() query: GetSectorEodSnapshotQueryDto,
     @Headers('if-none-match') ifNoneMatch: string | undefined,
+    @Req() request: CorrelatedAuthenticatedRequest,
     @Res({ passthrough: true }) response: Response,
   ): Promise<unknown> {
-    const result = await this.sectors.getEodSnapshot(path, query, ifNoneMatch);
+    const result = await this.sectors.getEodSnapshot(path, query, ifNoneMatch, request.requestId);
     return writeConditionalResponse(response, result);
   }
 
@@ -76,9 +94,10 @@ export class SectorMarketDataController {
     @Param() path: SectorPathDto,
     @Query() query: ListSectorMembershipQueryDto,
     @Headers('if-none-match') ifNoneMatch: string | undefined,
+    @Req() request: CorrelatedAuthenticatedRequest,
     @Res({ passthrough: true }) response: Response,
   ): Promise<unknown> {
-    const result = await this.sectors.listConstituents(path, query, ifNoneMatch);
+    const result = await this.sectors.listConstituents(path, query, ifNoneMatch, request.requestId);
     return writeConditionalResponse(response, result);
   }
 }
@@ -87,10 +106,11 @@ export class SectorMarketDataController {
 function writeConditionalResponse(
   response: Response,
   result:
-    | { status: 304; etag: string | undefined }
-    | { status: 200; etag: string | undefined; body: unknown },
+    | { status: 304; etag: string; dataVersion: string }
+    | { status: 200; etag: string; dataVersion: string; body: unknown },
 ): unknown {
-  if (result.etag !== undefined) response.setHeader('ETag', result.etag);
+  response.setHeader('ETag', result.etag);
+  response.setHeader('X-Data-Version', result.dataVersion);
   response.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
   if (result.status === 304) {
     response.status(204).send();

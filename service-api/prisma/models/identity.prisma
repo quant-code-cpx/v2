@@ -32,6 +32,7 @@ model User {
   credential        Credential?
   sessions          Session[]
   auditLogs         AuditLog[]  @relation("actor_audit_logs")
+  dataOperationSubmissions DataOperationSubmission[] @relation("actor_data_operation_submissions")
 
   @@index([status, role, createdAt, id])
   @@index([role, status, lastLoginAt])

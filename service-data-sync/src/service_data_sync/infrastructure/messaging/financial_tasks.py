@@ -7,26 +7,17 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import structlog
 from celery import Celery
 
-from service_data_sync.application.financial.sync import FinancialSyncService
 from service_data_sync.application.source_registry import SourceRegistry
-from service_data_sync.bootstrap.container import build_source_registry
+from service_data_sync.bootstrap.container import build_container, build_source_registry
 from service_data_sync.bootstrap.settings import Settings
-from service_data_sync.domain.equity import Exchange
-from service_data_sync.infrastructure.database.connection import DatabaseClient
-from service_data_sync.infrastructure.object_storage.client import ObjectStorageClient
-from service_data_sync.infrastructure.object_storage.raw_payload_store import (
-    FailureEvidenceDataSource,
-    S3RawPayloadStore,
-    retain_failure_evidence,
+from service_data_sync.infrastructure.data_operations.control_plane import (
+    DataOperationsControlPlane,
+    build_catalog,
 )
-from service_data_sync.infrastructure.persistence.financial_sync_repository import (
-    SqlAlchemyFinancialSyncRepository,
-)
+from service_data_sync.infrastructure.data_operations.legacy_submission import submit_system_command
 
 _PROBE_TASK = "service_data_sync.financial.probe"
 _SYNC_TASK = "service_data_sync.financial.sync_security"
@@ -76,38 +67,35 @@ def register_financial_tasks(app: Celery, *, settings: Settings) -> None:
         return
 
     @app.task(name=_SYNC_TASK, shared=False)
-    def sync_security(exchange: str, symbol: str) -> dict[str, str | int]:
-        """同步一个明确证券；没有 beat 触发器，调用方必须显式提供交易所和六位代码。"""
+    def sync_security(exchange: str, symbol: str) -> dict[str, object]:
+        """将明确证券参数转换为 command，禁止 Celery 任务直接同步财务 canonical 数据。"""
         if not settings.financial_enabled:
             raise RuntimeError("financial sync is disabled")
-        registry = build_source_registry(settings)
-        # 三种财务能力须属于同一获准来源；任务层不以“有任意一个”降级混合来源。
-        providers = registry.for_capability("financial.statement.raw")
-        if len(providers) != 1:
-            raise RuntimeError("exactly one financial provider must be enabled")
-        database = DatabaseClient.from_settings(settings)
-        object_storage = ObjectStorageClient.from_settings(settings)
+        if exchange not in {"SSE", "SZSE", "BSE"} or not symbol.strip():
+            raise ValueError("financial security selector is invalid")
+        container = build_container(settings)
         try:
-            raw_payload_store = S3RawPayloadStore(object_storage)
-            result = retain_failure_evidence(
-                raw_payload_store,
-                # 任务失败时才把来源响应写入 S3，成功时释放暂存字节。
-                lambda: asyncio.run(
-                    FinancialSyncService(
-                        source=FailureEvidenceDataSource(providers[0], raw_payload_store),
-                        repository=SqlAlchemyFinancialSyncRepository(database),
-                        raw_payload_store=raw_payload_store,
-                    ).sync_security(exchange=Exchange(exchange), symbol=symbol)
-                ),
+            control_plane = DataOperationsControlPlane(
+                database=container.database,
+                catalog=build_catalog(settings, container.source_registry),
+                source_registry=container.source_registry,
+                trading_calendar=container.trading_calendar,
+            )
+            return submit_system_command(
+                control_plane,
+                target={
+                    "datasetCode": "financial.report",
+                    "mode": "INCREMENTAL",
+                    "selector": {"kind": "INSTRUMENT", "exchange": exchange, "symbol": symbol},
+                    "dateFrom": None,
+                    "dateTo": None,
+                    "observationDate": None,
+                },
+                reason="兼容财务 Celery 提交",
+                request_prefix="legacy-financial-task",
             )
         finally:
-            object_storage.close()
-            database.close()
-        return {
-            "reportInserted": result.reports.inserted_count,
-            "metricInserted": result.provider_metrics.inserted_count,
-            "valuationInserted": result.valuations.inserted_count,
-        }
+            container.close()
 
 
 def _financial_adapter_summary(registry: SourceRegistry) -> tuple[int, int]:

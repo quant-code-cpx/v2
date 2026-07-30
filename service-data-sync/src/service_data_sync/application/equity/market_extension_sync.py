@@ -55,6 +55,9 @@ class EquityExtensionSyncResult:
     data_version: UUID
     inserted_count: int
     unchanged_count: int
+    coverage_version: UUID | None = None
+    source_batch_id: UUID | None = None
+    publication_kind: str | None = None
     availability: str = "available"
 
 
@@ -103,7 +106,8 @@ class EquityPeriodBarSyncService:
             period=period,
             bars=bars,
             source=source,
-            window_end=end,
+            start=start,
+            end=end,
         )
         return _result(identifier, period.capability, publication)
 
@@ -193,7 +197,8 @@ class EquityCorporateActionSyncService:
             identifier=identifier,
             actions=actions,
             source=source,
-            window_end=end,
+            start=start,
+            end=end,
         )
         return _result(identifier, _ACTION_CAPABILITY, publication)
 
@@ -241,7 +246,7 @@ def decode_period_bar_batch(
     if decoded.get("period") != period.value:
         raise _schema_error("equity period-bar period mismatch")
     rows = decoded.get("bars")
-    if not isinstance(rows, list) or not rows:
+    if not isinstance(rows, list):
         raise _schema_error("equity period-bar payload has no bars")
     try:
         bars = tuple(_period_bar(row, period=period) for row in rows)
@@ -342,28 +347,60 @@ async def _fetch(
 
 
 def _archive(batch: ProviderBatch, raw_payload_store: RawPayloadStore) -> EquitySourceObservation:
-    """先归档不可变原始证据，再返回 canonical 写入所需的来源链接。"""
+    """归档真实 raw 与标准化对象，再返回 coverage 可复验的完整来源观察。"""
     raw_payload = batch.raw_payload if batch.raw_payload is not None else batch.payload
     raw_content_type = batch.raw_content_type or batch.content_type
-    digest = hashlib.sha256(raw_payload).hexdigest()
+    raw_digest = hashlib.sha256(raw_payload).hexdigest()
     raw_uri = raw_payload_store.put(
         RawPayload(
             object_key=(
                 f"raw/{batch.capability}/{batch.provider_id}/{batch.observed_at:%Y/%m/%d}/"
-                f"{digest}.json"
+                f"{raw_digest}.json"
             ),
-            content_sha256=digest,
+            content_sha256=raw_digest,
             content_type=raw_content_type,
             payload=raw_payload,
+        )
+    )
+    normalized_digest = hashlib.sha256(batch.payload).hexdigest()
+    normalized_uri = raw_payload_store.put(
+        RawPayload(
+            object_key=(
+                f"normalized/{batch.capability}/{batch.provider_id}/"
+                f"{batch.observed_at:%Y/%m/%d}/{normalized_digest}.json"
+            ),
+            content_sha256=normalized_digest,
+            content_type=batch.content_type,
+            payload=batch.payload,
         )
     )
     return EquitySourceObservation(
         provider_id=batch.provider_id,
         capability=batch.capability,
-        source_payload_sha256=digest,
+        raw_payload_sha256=raw_digest,
         raw_uri=raw_uri,
+        raw_content_type=raw_content_type,
+        raw_byte_size=len(raw_payload),
+        normalized_payload_sha256=normalized_digest,
+        normalized_uri=normalized_uri,
+        normalized_content_type=batch.content_type,
+        normalized_byte_size=len(batch.payload),
         observed_at=batch.observed_at,
+        upstream_source=batch.upstream_source or batch.provider_id,
+        adapter_version=batch.adapter_version,
+        schema_fingerprint=(
+            batch.schema_fingerprint or _normalized_schema_fingerprint(batch.payload)
+        ),
     )
+
+
+def _normalized_schema_fingerprint(payload: bytes) -> str:
+    """从已验证标准载荷的 schema 标识生成稳定指纹，缺失时失败而非伪造版本。"""
+    decoded = json.loads(payload)
+    schema = decoded.get("schema") if isinstance(decoded, dict) else None
+    if not isinstance(schema, str) or not schema.strip():
+        raise ValueError("normalized equity extension payload has no schema identity")
+    return hashlib.sha256(schema.encode()).hexdigest()
 
 
 def _payload(
@@ -464,4 +501,7 @@ def _result(
         data_version=publication.data_version,
         inserted_count=publication.inserted_count,
         unchanged_count=publication.unchanged_count,
+        coverage_version=publication.coverage_version,
+        source_batch_id=publication.source_batch_id,
+        publication_kind=publication.publication_kind,
     )

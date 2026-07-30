@@ -4,6 +4,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Matches,
   Max,
@@ -14,6 +15,10 @@ import { DATE_ONLY_PATTERN } from './temporal-patterns.js';
 
 /** 约束公司行动报告期窗口与页上限。 */
 export class ListCorporateActionsQueryDto {
+  /** 绑定 data-status 返回的精确公司行动 publication。 */
+  @IsUUID()
+  public readonly dataVersion!: string;
+
   /** 可选包含端报告期起始日期。 */
   @IsOptional()
   @Matches(DATE_ONLY_PATTERN)

@@ -134,6 +134,7 @@ class TypedP0SourceApproval:
     source_kind: str
     rights_status: str
     license_scope: str
+    rights_evidence_ref: str | None = None
 
     def __post_init__(self) -> None:
         """拒绝任何缺失的权利归属或许可范围，技术适配器不能替代数据源准入。"""
@@ -149,20 +150,35 @@ class TypedP0SourceApproval:
             )
         ):
             raise ValueError("typed P0 source approval is incomplete")
+        if self.rights_evidence_ref is not None and not self.rights_evidence_ref.strip():
+            raise ValueError("typed P0 rights evidence reference must not be blank")
 
 
-def ensure_dataset(session: Session, *, code: str, domain: str, grain: str, now: datetime) -> UUID:
-    """幂等登记一个 `schema v1 canonical dataset`，状态保持候选直到独立门禁提升。
+def ensure_dataset(
+    session: Session,
+    *,
+    code: str,
+    domain: str,
+    grain: str,
+    now: datetime,
+    schema_version: int = 1,
+) -> UUID:
+    """幂等登记指定 schema 的 canonical dataset，状态保持候选直到独立门禁提升。
 
     数据集 UUID 由代码和版本确定，相同部署或重试永远复用同一业务身份。
     """
-    dataset_id = uuid5(NAMESPACE_URL, f"quant-v2:canonical-dataset:{code}:1")
+    if schema_version < 1:
+        raise ValueError("canonical dataset schema version is invalid")
+    dataset_id = uuid5(
+        NAMESPACE_URL,
+        f"quant-v2:canonical-dataset:{code}:{schema_version}",
+    )
     session.execute(
         pg_insert(CanonicalDataset)
         .values(
             dataset_id=dataset_id,
             code=code,
-            schema_version=1,
+            schema_version=schema_version,
             domain=domain,
             grain=grain,
             status="candidate",
@@ -174,7 +190,10 @@ def ensure_dataset(session: Session, *, code: str, domain: str, grain: str, now:
     return UUID(
         str(
             session.execute(
-                select(CanonicalDataset.dataset_id).where(CanonicalDataset.code == code)
+                select(CanonicalDataset.dataset_id).where(
+                    CanonicalDataset.code == code,
+                    CanonicalDataset.schema_version == schema_version,
+                )
             ).scalar_one()
         )
     )
@@ -237,10 +256,24 @@ def ensure_source_dataset(
             source_kind=approval.source_kind,
             timezone="Asia/Shanghai",
             rights_status=approval.rights_status,
-            rights_evidence_ref=None,
+            rights_evidence_ref=approval.rights_evidence_ref,
         )
         .on_conflict_do_nothing(index_elements=("code",))
     )
+    registered_source = session.execute(
+        select(DataSource).where(DataSource.code == approval.source_code)
+    ).scalar_one()
+    if (
+        registered_source.legal_name != approval.legal_name
+        or registered_source.source_kind != approval.source_kind
+        or registered_source.rights_status != approval.rights_status
+    ):
+        raise ValueError("typed P0 source approval conflicts with registered source")
+    if approval.rights_evidence_ref is not None:
+        if registered_source.rights_evidence_ref is None:
+            registered_source.rights_evidence_ref = approval.rights_evidence_ref
+        elif registered_source.rights_evidence_ref != approval.rights_evidence_ref:
+            raise ValueError("typed P0 rights evidence reference conflicts with registered source")
     session.execute(
         pg_insert(SourceDataset)
         .values(

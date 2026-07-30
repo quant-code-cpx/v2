@@ -33,6 +33,10 @@
 - [0021：service-api 申万行业公开 OpenAPI](0021-service-api-sw-sector.openapi.yaml) — Implemented
 - [0022：service-data-sync 数据运维控制面内部 OpenAPI](0022-data-sync-operations-internal.openapi.yaml) — Proposed
 - [0023：service-api 数据运维公开 POST OpenAPI](0023-service-api-data-operations.openapi.yaml) — Proposed
+- [0024：service-data-sync 沪深港通内部 OpenAPI](0024-data-sync-stock-connect-internal.openapi.yaml) — Accepted
+- [0025：service-api 沪深港通公开 POST OpenAPI](0025-service-api-stock-connect.openapi.yaml) — Accepted
+- [0026：service-data-sync 市场概览与行业板块内部 OpenAPI](0026-data-sync-market-overview-internal.openapi.yaml) — Implemented
+- [0027：service-api 市场概览与行业板块公开 POST OpenAPI](0027-service-api-market-overview.openapi.yaml) — Implemented
 
 0007/0008、0011/0012、0015/0016 是对应既有市场数据契约的增量能力。0009/0010 对
 0003/0004 中证券目录、详情和上市状态相关路径具有局部权威性；0013/0014 取代其中基于
@@ -42,3 +46,13 @@
 0022/0023 共同定义数据目录、同步命令、运行、健康评估、自动计划和运维记录。0022 的
 `service-data-sync` 命令/run 是执行权威；0023 的 `service-api` submission/outbox 只表示授权与交付意图。
 公开写操作返回 `202 delivery=PENDING` 时，不得解释为同步服务已经受理。
+
+0024/0025 共同定义沪股通、深股通、港股通（沪）、港股通（深）的共同 bundle、通道统计、
+官方活跃证券榜、证券上下文和独立持久化 readiness 证据。0024 的已批准 publication
+是业务事实权威，readiness 以官方日历、交付、执行和发布证据的规范快照为权威；
+0025 只做认证、严格校验和版本化转发，禁止由成交额推导净买入、跨币种求和或用查询时钟猜测就绪状态。
+
+0026/0027 共同定义市场概览、主要指数、全市场股票横截面、资金流、东财板块和申万行业能力。
+0026 的完整、已批准原子 publication 是事实权威；0027 只负责公开认证、严格合同校验、版本与
+缓存头透传。任一必需组件缺失或质量检查失败时不得拼接跨版本数据，也不得用板块 EOD、指数成分或
+供应商资金流标签补造其他市场事实。

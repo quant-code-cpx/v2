@@ -153,6 +153,28 @@ class MarketDataQueryPage:
 class MarketDataAccessUnavailable(RuntimeError):
     """表示 dataset 尚无可消费的合格 publication，调用方必须 fail-closed。"""
 
+    def __init__(
+        self,
+        detail: str,
+        *,
+        availability: str = "SOURCE_UNAVAILABLE",
+        reason_code: str = "PUBLICATION_NOT_AVAILABLE",
+        observed_at: datetime | None = None,
+        warnings: tuple[str, ...] = ("publication_unavailable",),
+    ) -> None:
+        """保存可公开的空态类别和稳定原因，不携带上游异常原文或内部定位。"""
+        if availability not in {"EMPTY", "SOURCE_UNAVAILABLE", "CURRENTLY_UNSUPPORTED"}:
+            raise ValueError("market data unavailable state is invalid")
+        if not reason_code.strip() or any(not warning.strip() for warning in warnings):
+            raise ValueError("market data unavailable reason is invalid")
+        if observed_at is not None and observed_at.tzinfo is None:
+            raise ValueError("market data unavailable observation must include a timezone")
+        super().__init__(detail)
+        self.availability = availability
+        self.reason_code = reason_code
+        self.observed_at = observed_at
+        self.warnings = warnings
+
 
 class MarketDataDatasetNotFound(LookupError):
     """表示代码或 schema version 不在运行时目录，不能用 503 隐藏调用错误。"""

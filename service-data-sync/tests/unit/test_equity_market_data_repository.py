@@ -12,6 +12,7 @@ from unittest.mock import Mock
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import select
 
 from service_data_sync.application.ports.market_data import (
     EquityIdentityReadConflictError,
@@ -31,14 +32,24 @@ from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.database.models.equity.market_data.equity_weekly_bar import (
     EquityWeeklyBar,
 )
+from service_data_sync.infrastructure.persistence import (
+    equity_market_data_repository as equity_market_repository,
+)
+from service_data_sync.infrastructure.persistence.bar_window_coverage import (
+    BarWindowIdentity,
+    PublishedBarWindowCoverage,
+)
 from service_data_sync.infrastructure.persistence.equity_market_data_repository import (
     PossibleCodeReuseError,
     SqlAlchemyEquityMarketDataRepository,
     _action_content_hash,
-    _bar_content_hash,
+    _at_knowledge_time,
     _factor_content_hash,
     _period_bar_content_hash,
     _security_partition_key,
+)
+from service_data_sync.infrastructure.persistence.event_window_coverage import (
+    EventCoverageIdentity,
 )
 
 
@@ -80,6 +91,20 @@ class FakeResult:
         """为有界目录和日线查询返回排队行列表。"""
         assert isinstance(self._value, list)
         return self._value
+
+
+def test_revision_visibility_can_be_pinned_to_publication_cutoff() -> None:
+    """leaf 查询必须按 publication 截止点重放 revision，避免发布切换竞态。"""
+    statement = _at_knowledge_time(
+        select(EquityWeeklyBar),
+        model=EquityWeeklyBar,
+        known_at=datetime(2026, 7, 28, 8, tzinfo=UTC),
+    )
+    sql = str(statement)
+
+    assert "equity_weekly_bar.valid_from <=" in sql
+    assert "equity_weekly_bar.valid_to IS NULL" in sql
+    assert "equity_weekly_bar.valid_to >" in sql
 
 
 class FakeConnection:
@@ -138,132 +163,193 @@ class FakeDatabase:
             yield connection
 
 
-def test_repository_appends_changed_bar_and_advances_publication() -> None:
-    """在一个事务中创建首个修订、来源血缘和当前发布。"""
+def test_repository_appends_changed_bar_and_advances_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """非空日线在同一事务中写事实、DATA publication 和窗口覆盖。"""
     instrument_id = uuid4()
     source_batch_id = uuid4()
-    engine = FakeEngine(
-        [
-            {"source_batch_id": source_batch_id},
-            [{"security_id": 1, "identity_state": "CONFIRMED"}],
-            None,
-            _instrument_row(instrument_id),
-            None,
-            None,
-            None,
-        ]
+    data_version = uuid4()
+    coverage_version = uuid4()
+    instrument = StoredEquityInstrument(
+        security_id=1,
+        instrument_id=instrument_id,
+        identifier=EquityIdentifier.parse("SSE.600519"),
+        name="贵州茅台",
+        listing_status="LISTED",
     )
-    repository = _repository(engine)
+    identity = _bar_identity(
+        instrument.identifier,
+        start=date(2026, 6, 1),
+        end=date(2026, 6, 30),
+    )
+    repository = _repository(FakeEngine([]))
+    record_source = Mock(return_value=source_batch_id)
+    write_revisions = Mock(return_value=(1, 0))
+    publish = Mock(return_value=data_version)
+    clear = Mock()
+    publish_coverage = Mock(
+        return_value=PublishedBarWindowCoverage(
+            data_version=data_version,
+            coverage_version=coverage_version,
+            source_batch_id=source_batch_id,
+            publication_kind="DATA",
+            record_count=1,
+        )
+    )
+    monkeypatch.setattr(repository, "_record_source_batch", record_source)
+    monkeypatch.setattr(
+        equity_market_repository,
+        "resolve_bar_window_identity",
+        Mock(return_value=identity),
+    )
+    monkeypatch.setattr(
+        repository,
+        "_bar_window_instrument_on_connection",
+        Mock(return_value=instrument),
+    )
+    monkeypatch.setattr(repository, "_write_revisions", write_revisions)
+    monkeypatch.setattr(repository, "_publish", publish)
+    monkeypatch.setattr(repository, "_clear_daily_bar_availability_on_connection", clear)
+    monkeypatch.setattr(
+        equity_market_repository,
+        "publish_bar_window_coverage",
+        publish_coverage,
+    )
 
     publication = repository.publish_daily_bars(
-        identifier=EquityIdentifier.parse("SSE.600519"),
+        identifier=instrument.identifier,
         bars=(_bar(),),
-        provider_id="test-provider",
-        source_payload_sha256="a" * 64,
-        raw_uri="s3://test/raw.json",
-        observed_at=datetime(2026, 7, 1, tzinfo=UTC),
+        source=_source("equity.bar.1d.raw"),
+        start=date(2026, 6, 1),
+        end=date(2026, 6, 30),
     )
 
     assert publication.instrument.instrument_id == instrument_id
+    assert publication.data_version == data_version
+    assert publication.coverage_version == coverage_version
+    assert publication.source_batch_id == source_batch_id
+    assert publication.publication_kind == "DATA"
     assert publication.inserted_count == 1
     assert publication.unchanged_count == 0
-    assert len(engine.connection.statements) == 8
-    assert (
-        "ON CONFLICT (provider_id, capability, payload_sha256)"
-        not in engine.connection.statements[0]
+    assert record_source.call_args.kwargs["upstream_source"] == "test-upstream"
+    assert publish_coverage.call_args.kwargs["record_count"] == 1
+    assert publish_coverage.call_args.kwargs["data_publication_version"] == data_version
+    clear.assert_called_once()
+
+
+def test_repository_keeps_current_publication_when_all_bars_are_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """重复事实仍关联复用的 DATA publication，并形成精确窗口 coverage。"""
+    identifier = EquityIdentifier.parse("SSE.600519")
+    instrument = StoredEquityInstrument(
+        security_id=1,
+        instrument_id=uuid4(),
+        identifier=identifier,
+        name="贵州茅台",
+        listing_status="LISTED",
     )
-    publication_parameters = cast(Any, engine.connection.statement_objects[-1]).compile().params
-    assert "security:1" in publication_parameters.values()
-    assert "SSE.600519" not in publication_parameters.values()
-
-
-def test_repository_keeps_current_publication_when_all_bars_are_unchanged() -> None:
-    """标准日线业务字段完全相同时，跳过修订和发布变更。"""
-    bar = _bar()
-    instrument_id = uuid4()
+    source_batch_id = uuid4()
     data_version = uuid4()
-    engine = FakeEngine(
-        [
-            {"source_batch_id": uuid4()},
-            [{"security_id": 1, "identity_state": "CONFIRMED"}],
-            None,
-            _instrument_row(instrument_id),
-            {"revision": 1, "content_sha256": _bar_content_hash(bar)},
-            {"data_version": data_version},
-        ]
+    repository = _repository(FakeEngine([]))
+    monkeypatch.setattr(repository, "_record_source_batch", Mock(return_value=source_batch_id))
+    monkeypatch.setattr(
+        equity_market_repository,
+        "resolve_bar_window_identity",
+        Mock(
+            return_value=_bar_identity(
+                identifier,
+                start=date(2026, 6, 1),
+                end=date(2026, 6, 30),
+            )
+        ),
     )
-    repository = _repository(engine)
+    monkeypatch.setattr(
+        repository,
+        "_bar_window_instrument_on_connection",
+        Mock(return_value=instrument),
+    )
+    monkeypatch.setattr(repository, "_write_revisions", Mock(return_value=(0, 1)))
+    monkeypatch.setattr(repository, "_publish", Mock(return_value=data_version))
+    monkeypatch.setattr(repository, "_clear_daily_bar_availability_on_connection", Mock())
+    monkeypatch.setattr(
+        equity_market_repository,
+        "publish_bar_window_coverage",
+        Mock(
+            return_value=PublishedBarWindowCoverage(
+                data_version=data_version,
+                coverage_version=uuid4(),
+                source_batch_id=source_batch_id,
+                publication_kind="DATA",
+                record_count=1,
+            )
+        ),
+    )
 
     publication = repository.publish_daily_bars(
-        identifier=EquityIdentifier.parse("SSE.600519"),
-        bars=(bar,),
-        provider_id="test-provider",
-        source_payload_sha256="b" * 64,
-        raw_uri="s3://test/raw.json",
-        observed_at=datetime(2026, 7, 1, tzinfo=UTC),
+        identifier=identifier,
+        bars=(_bar(),),
+        source=_source("equity.bar.1d.raw"),
+        start=date(2026, 6, 1),
+        end=date(2026, 6, 30),
     )
 
     assert publication.data_version == data_version
     assert publication.inserted_count == 0
     assert publication.unchanged_count == 1
-    assert len(engine.connection.statements) == 6
 
 
-def test_repository_creates_pending_identity_version_for_unknown_daily_bar() -> None:
-    """日线先到时，仓储必须以该来源批次创建不可公开的 PENDING 标识版本。"""
-    engine = FakeEngine(
-        [
-            {"source_batch_id": uuid4()},
-            [],
-            None,
-            {"security_id": 8},
-            None,
-            None,
-            None,
-            None,
-        ]
+def test_repository_rejects_daily_window_without_confirmed_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """未确认或不能完整覆盖闭区间的代码不得创建 PENDING 行情成功结果。"""
+    repository = _repository(FakeEngine([]))
+    write_revisions = Mock()
+    monkeypatch.setattr(repository, "_record_source_batch", Mock(return_value=uuid4()))
+    monkeypatch.setattr(
+        equity_market_repository,
+        "resolve_bar_window_identity",
+        Mock(side_effect=ValueError("confirmed identity required")),
     )
-    repository = _repository(engine)
+    monkeypatch.setattr(repository, "_write_revisions", write_revisions)
 
-    publication = repository.publish_daily_bars(
-        identifier=EquityIdentifier.parse("SZSE.000001"),
-        bars=(_bar(),),
-        provider_id="test-provider",
-        source_payload_sha256="d" * 64,
-        raw_uri="s3://test/raw.json",
-        observed_at=datetime(2026, 7, 1, tzinfo=UTC),
-    )
+    with pytest.raises(ValueError, match="confirmed identity"):
+        repository.publish_daily_bars(
+            identifier=EquityIdentifier.parse("SZSE.000001"),
+            bars=(_bar(),),
+            source=_source("equity.bar.1d.raw"),
+            start=date(2026, 6, 1),
+            end=date(2026, 6, 30),
+        )
 
-    assert publication.instrument.listing_status == "PENDING"
-    assert "identity_state" in engine.connection.statements[4]
-    assert "effective_date_precision" in engine.connection.statements[4]
-    assert len(engine.connection.statements) == 9
+    write_revisions.assert_not_called()
 
 
-def test_repository_rejects_possible_code_reuse_after_explicit_delisting() -> None:
+def test_repository_rejects_possible_code_reuse_after_explicit_delisting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """退市后同代码行情不得误绑旧证券或自行创建未经确认的新证券。"""
-    engine = FakeEngine(
-        [
-            {"source_batch_id": uuid4()},
-            [{"security_id": 8, "identity_state": "CONFIRMED"}],
-            {"exists": 1},
-        ]
+    repository = _repository(FakeEngine([]))
+    write_revisions = Mock()
+    monkeypatch.setattr(repository, "_record_source_batch", Mock(return_value=uuid4()))
+    monkeypatch.setattr(
+        equity_market_repository,
+        "resolve_bar_window_identity",
+        Mock(side_effect=PossibleCodeReuseError("possible code reuse after delisting")),
     )
-    repository = _repository(engine)
+    monkeypatch.setattr(repository, "_write_revisions", write_revisions)
 
     with pytest.raises(PossibleCodeReuseError, match="possible code reuse"):
         repository.publish_daily_bars(
             identifier=EquityIdentifier.parse("SSE.600519"),
             bars=(_bar(),),
-            provider_id="test-provider",
-            source_payload_sha256="e" * 64,
-            raw_uri="s3://test/raw.json",
-            observed_at=datetime(2026, 7, 1, tzinfo=UTC),
+            source=_source("equity.bar.1d.raw"),
+            start=date(2026, 6, 1),
+            end=date(2026, 6, 30),
         )
 
-    joined = "\n".join(engine.connection.statements)
-    assert "INSERT INTO equity_daily_bar" not in joined
-    assert "INSERT INTO equity_instrument" not in joined
+    write_revisions.assert_not_called()
 
 
 def test_repository_reads_instrument_catalog_and_current_daily_bars() -> None:
@@ -410,6 +496,26 @@ def test_repository_orchestrates_all_equity_extension_publications(monkeypatch) 
     write_profile = Mock(return_value=(1, 0))
     publish = Mock(return_value=data_version)
     advance = Mock()
+    event_coverage_identity = EventCoverageIdentity(
+        security_id=instrument.security_id,
+        identifier_version_id=uuid4(),
+        exchange=instrument.identifier.exchange.value,
+        symbol=instrument.identifier.symbol,
+        coverage_from=date(2026, 1, 1),
+        coverage_to=date(2026, 7, 28),
+    )
+    bar_coverage_identity = _bar_identity(instrument.identifier)
+    bar_source_batch_id = uuid4()
+    publish_event_coverage = Mock()
+    publish_bar_coverage = Mock(
+        return_value=PublishedBarWindowCoverage(
+            data_version=data_version,
+            coverage_version=uuid4(),
+            source_batch_id=bar_source_batch_id,
+            publication_kind="DATA",
+            record_count=1,
+        )
+    )
     monkeypatch.setattr(repository, "_record_source_batch", record_source)
     monkeypatch.setattr(repository, "_ensure_instrument", ensure_instrument)
     monkeypatch.setattr(repository, "_confirmed_instrument_on_connection", confirmed_instrument)
@@ -419,15 +525,47 @@ def test_repository_orchestrates_all_equity_extension_publications(monkeypatch) 
     monkeypatch.setattr(repository, "_write_profile_revision", write_profile)
     monkeypatch.setattr(repository, "_publish", publish)
     monkeypatch.setattr(repository, "_advance_checkpoint", advance)
+    monkeypatch.setattr(
+        repository,
+        "_bar_window_instrument_on_connection",
+        Mock(return_value=instrument),
+    )
+    monkeypatch.setattr(
+        equity_market_repository,
+        "resolve_bar_window_identity",
+        Mock(return_value=bar_coverage_identity),
+    )
+    monkeypatch.setattr(
+        equity_market_repository,
+        "publish_bar_window_coverage",
+        publish_bar_coverage,
+    )
+    monkeypatch.setattr(
+        equity_market_repository,
+        "resolve_event_coverage_identities",
+        Mock(return_value=((event_coverage_identity,), "INSTRUMENT", "b" * 64)),
+    )
+    monkeypatch.setattr(
+        equity_market_repository,
+        "_release_bridge_context",
+        Mock(return_value=(uuid4(), uuid4())),
+    )
+    monkeypatch.setattr(
+        equity_market_repository,
+        "publish_event_window_coverages",
+        publish_event_coverage,
+    )
     source = _source()
+    weekly_source = _source("equity.bar.1w.raw")
     identifier = instrument.identifier
 
     weekly = repository.publish_period_bars(
         identifier=identifier,
         period=EquityBarPeriod.WEEK_1,
         bars=(_period_bar(EquityBarPeriod.WEEK_1, date(2026, 7, 24)),),
-        source=source,
-        window_end=date(2026, 7, 28),
+        source=weekly_source,
+        start=date(2026, 1, 1),
+        end=date(2026, 7, 28),
     )
     factors = repository.publish_adjustment_factors(
         identifier=identifier,
@@ -444,7 +582,8 @@ def test_repository_orchestrates_all_equity_extension_publications(monkeypatch) 
         identifier=identifier,
         actions=(_action(),),
         source=source,
-        window_end=date(2026, 7, 28),
+        start=date(2026, 1, 1),
+        end=date(2026, 7, 28),
     )
     profile = repository.publish_company_profile(
         identifier=identifier,
@@ -460,21 +599,25 @@ def test_repository_orchestrates_all_equity_extension_publications(monkeypatch) 
     } == {data_version}
     assert record_source.call_count == 4
     assert advance.call_count == 4
+    publish_event_coverage.assert_called_once()
+    publish_bar_coverage.assert_called_once()
     with pytest.raises(ValueError, match="weekly or monthly"):
         repository.publish_period_bars(
             identifier=identifier,
             period=EquityBarPeriod.DAY_1,
             bars=(),
-            source=source,
-            window_end=date(2026, 7, 28),
+            source=_source("equity.bar.1d.raw"),
+            start=date(2026, 1, 1),
+            end=date(2026, 7, 28),
         )
     with pytest.raises(ValueError, match="match requested"):
         repository.publish_period_bars(
             identifier=identifier,
             period=EquityBarPeriod.MONTH_1,
             bars=(_period_bar(EquityBarPeriod.WEEK_1, date(2026, 7, 24)),),
-            source=source,
-            window_end=date(2026, 7, 28),
+            source=_source("equity.bar.1mo.raw"),
+            start=date(2026, 1, 1),
+            end=date(2026, 7, 28),
         )
     with pytest.raises(ValueError, match="factors must not be empty"):
         repository.publish_adjustment_factors(
@@ -776,14 +919,42 @@ def _period_bar(period: EquityBarPeriod, period_end: date) -> EquityPeriodBar:
     )
 
 
-def _source() -> EquitySourceObservation:
+def _source(capability: str = "equity.test") -> EquitySourceObservation:
     """构造扩展同步使用的已归档来源观测。"""
     return EquitySourceObservation(
         provider_id="test-provider",
-        capability="equity.test",
-        source_payload_sha256="a" * 64,
+        capability=capability,
+        raw_payload_sha256="a" * 64,
         raw_uri="s3://test/raw.json",
+        raw_content_type="application/json",
+        raw_byte_size=2,
+        normalized_payload_sha256="b" * 64,
+        normalized_uri="s3://test/normalized.json",
+        normalized_content_type="application/json",
+        normalized_byte_size=2,
         observed_at=datetime(2026, 7, 28, tzinfo=UTC),
+        upstream_source="test-upstream",
+        adapter_version="test-v1",
+        schema_fingerprint="c" * 64,
+    )
+
+
+def _bar_identity(
+    identifier: EquityIdentifier,
+    *,
+    start: date = date(2026, 1, 1),
+    end: date = date(2026, 7, 28),
+) -> BarWindowIdentity:
+    """构造完整覆盖 2026 年测试窗口的已确认行情身份。"""
+    return BarWindowIdentity(
+        security_id=1,
+        identifier_version_id=uuid4(),
+        exchange=identifier.exchange.value,
+        symbol=identifier.symbol,
+        coverage_from=start,
+        coverage_to=end,
+        identity_hash="d" * 64,
+        universe_hash="e" * 64,
     )
 
 

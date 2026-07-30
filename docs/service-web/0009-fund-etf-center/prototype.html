@@ -1,0 +1,1254 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440, initial-scale=1" />
+    <title>基金与 ETF 中心桌面原型</title>
+    <script src="../../../service-web/node_modules/klinecharts/dist/umd/klinecharts.min.js"></script>
+    <script src="../../../service-web/node_modules/echarts/dist/echarts.min.js"></script>
+    <style>
+      :root {
+        color-scheme: light;
+        --paper: #ffffff;
+        --canvas: #f4f6f8;
+        --text: #1c252e;
+        --muted: #637381;
+        --subtle: #919eab;
+        --divider: #dfe3e8;
+        --primary: #6d5ce7;
+        --primary-soft: #f0eeff;
+        --info: #2d7ff9;
+        --info-soft: #eaf2ff;
+        --success: #118d57;
+        --success-soft: #e8f5ee;
+        --warning: #b76e00;
+        --warning-soft: #fff5d6;
+        --danger: #b42318;
+        --danger-soft: #ffebe9;
+        --up: #ff5630;
+        --down: #22c55e;
+        --shadow: 0 10px 28px rgba(28, 37, 46, 0.08);
+        --radius-card: 16px;
+        --radius-control: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1440px;
+        height: 900px;
+        margin: 0;
+        overflow: hidden;
+        background: var(--canvas);
+        color: var(--text);
+        font-family:
+          Inter,
+          "PingFang SC",
+          "Microsoft YaHei",
+          system-ui,
+          -apple-system,
+          sans-serif;
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      a:focus-visible {
+        outline: 3px solid rgba(109, 92, 231, 0.3);
+        outline-offset: 2px;
+      }
+
+      .app {
+        display: grid;
+        grid-template-columns: 300px 1fr;
+        width: 1440px;
+        height: 900px;
+        background: var(--canvas);
+      }
+
+      .sidebar {
+        display: flex;
+        flex-direction: column;
+        height: 900px;
+        padding: 24px 20px;
+        border-right: 1px solid #eef0f2;
+        background: var(--paper);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 44px;
+        margin: 0 8px 32px;
+        font-size: 18px;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 36px;
+        height: 36px;
+        place-items: center;
+        border-radius: 11px;
+        background: var(--primary);
+        color: white;
+        font-size: 14px;
+      }
+
+      .nav-label {
+        margin: 0 12px 8px;
+        color: var(--subtle);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+      }
+
+      .nav-list {
+        display: grid;
+        gap: 6px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 46px;
+        padding: 0 14px;
+        border-radius: 10px;
+        color: var(--muted);
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .nav-item.active {
+        background: var(--primary-soft);
+        color: #4d3cc8;
+      }
+
+      .nav-icon {
+        width: 20px;
+        text-align: center;
+        font-size: 16px;
+      }
+
+      .sidebar-note {
+        margin-top: auto;
+        padding: 16px;
+        border: 1px solid var(--divider);
+        border-radius: 14px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      .main {
+        min-width: 0;
+        height: 900px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 72px;
+        padding: 0 28px;
+        border-bottom: 1px solid #e9edf1;
+        background: rgba(255, 255, 255, 0.96);
+      }
+
+      .workspace {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .workspace strong {
+        color: var(--text);
+        font-size: 14px;
+      }
+
+      .user {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 13px;
+      }
+
+      .avatar {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border-radius: 50%;
+        background: #dfe8ff;
+        color: #3154a5;
+        font-weight: 800;
+      }
+
+      .content {
+        height: 828px;
+        overflow: hidden;
+        padding: 24px 28px 28px;
+      }
+
+      .page-head {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        min-height: 58px;
+        margin-bottom: 16px;
+      }
+
+      .eyebrow {
+        margin: 0 0 6px;
+        color: var(--primary);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 28px;
+        line-height: 1.2;
+        letter-spacing: -0.02em;
+      }
+
+      .subtitle {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .review-chip {
+        padding: 7px 10px;
+        border: 1px solid #c9c1ff;
+        border-radius: 999px;
+        background: var(--primary-soft);
+        color: #4d3cc8;
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .empty-table {
+        height: 320px;
+        padding: 28px;
+        text-align: center;
+      }
+
+      .empty-table strong {
+        display: block;
+        margin: 12px 0 6px;
+        color: var(--text);
+        font-size: 15px;
+      }
+
+      .empty-table span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .empty-symbol {
+        display: grid;
+        width: 48px;
+        height: 48px;
+        margin: 0 auto;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--warning-soft);
+        color: var(--warning);
+        font-size: 20px;
+        font-weight: 850;
+      }
+
+      .control:disabled,
+      .primary-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.58;
+      }
+
+      .chart-empty {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        display: grid;
+        place-items: center;
+        background: rgba(255, 255, 255, 0.98);
+        pointer-events: none;
+      }
+
+      .chart-empty div {
+        padding: 12px 16px;
+        border: 1px solid var(--divider);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.94);
+        color: var(--muted);
+        font-size: 11px;
+        text-align: center;
+      }
+
+      .chart-empty strong {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--text);
+        font-size: 12px;
+      }
+
+      .notice {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 44px;
+        margin-bottom: 14px;
+        padding: 9px 14px;
+        border: 1px solid #f1d28b;
+        border-radius: 10px;
+        background: var(--warning-soft);
+        color: #7a4b00;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .notice strong {
+        font-weight: 800;
+      }
+
+      .filters {
+        display: grid;
+        grid-template-columns: minmax(320px, 1fr) 190px 190px auto;
+        gap: 10px;
+        margin-bottom: 14px;
+        padding: 14px;
+        border: 1px solid #edf0f2;
+        border-radius: var(--radius-card);
+        background: var(--paper);
+        box-shadow: var(--shadow);
+      }
+
+      .control {
+        min-width: 0;
+        height: 40px;
+        padding: 0 12px;
+        border: 1px solid var(--divider);
+        border-radius: var(--radius-control);
+        background: white;
+        color: var(--text);
+        font-size: 13px;
+      }
+
+      .primary-button {
+        height: 40px;
+        padding: 0 18px;
+        border: 0;
+        border-radius: var(--radius-control);
+        background: var(--primary);
+        color: white;
+        font-size: 13px;
+        font-weight: 750;
+        cursor: pointer;
+      }
+
+      .card {
+        border: 1px solid #edf0f2;
+        border-radius: var(--radius-card);
+        background: var(--paper);
+        box-shadow: var(--shadow);
+      }
+
+      .table-card {
+        overflow: hidden;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+
+      th {
+        height: 44px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--divider);
+        background: #fafbfc;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 750;
+        text-align: left;
+      }
+
+      td {
+        height: 67px;
+        padding: 0 16px;
+        border-bottom: 1px solid #eef1f3;
+        color: #34404b;
+        font-size: 13px;
+        vertical-align: middle;
+      }
+
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+
+      tbody tr {
+        cursor: pointer;
+      }
+
+      tbody tr:hover {
+        background: #faf9ff;
+      }
+
+      .instrument {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+      }
+
+      .instrument-mark {
+        display: grid;
+        width: 36px;
+        height: 36px;
+        flex: 0 0 auto;
+        place-items: center;
+        border-radius: 10px;
+        background: var(--primary-soft);
+        color: #5544ca;
+        font-size: 11px;
+        font-weight: 850;
+      }
+
+      .instrument strong {
+        display: block;
+        overflow: hidden;
+        color: var(--text);
+        font-size: 13px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .instrument small,
+      .cell-note {
+        display: block;
+        margin-top: 4px;
+        color: var(--subtle);
+        font-size: 11px;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 750;
+      }
+
+      .status.success {
+        background: var(--success-soft);
+        color: var(--success);
+      }
+
+      .status.neutral {
+        background: #eef1f4;
+        color: #56616b;
+      }
+
+      .status.warning {
+        background: var(--warning-soft);
+        color: #8a5500;
+      }
+
+      .table-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 52px;
+        padding: 0 16px;
+        border-top: 1px solid var(--divider);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .pager {
+        display: flex;
+        gap: 7px;
+      }
+
+      .pager button {
+        width: 30px;
+        height: 30px;
+        border: 1px solid var(--divider);
+        border-radius: 7px;
+        background: white;
+        color: var(--muted);
+      }
+
+      .pager button.current {
+        border-color: var(--primary);
+        background: var(--primary);
+        color: white;
+      }
+
+      .breadcrumb {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-bottom: 10px;
+        color: var(--subtle);
+        font-size: 12px;
+      }
+
+      .detail-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+
+      .identity-line {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .identity-line h1 {
+        font-size: 25px;
+      }
+
+      .identity-code {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .state-chips {
+        display: flex;
+        gap: 8px;
+      }
+
+      .publication-strip {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1px;
+        margin-bottom: 12px;
+        overflow: hidden;
+        border: 1px solid var(--divider);
+        border-radius: 10px;
+        background: var(--divider);
+      }
+
+      .publication-cell {
+        min-height: 47px;
+        padding: 8px 12px;
+        background: white;
+      }
+
+      .publication-cell span {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--subtle);
+        font-size: 10px;
+        font-weight: 750;
+        letter-spacing: 0.06em;
+      }
+
+      .publication-cell strong {
+        display: block;
+        overflow: hidden;
+        color: #45505a;
+        font-size: 11px;
+        font-weight: 700;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .detail-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.75fr) minmax(300px, 0.85fr);
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .chart-card,
+      .profile-card,
+      .compare-card {
+        overflow: hidden;
+      }
+
+      .card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 46px;
+        padding: 0 16px;
+        border-bottom: 1px solid #eef1f3;
+      }
+
+      .card-head h2 {
+        margin: 0;
+        font-size: 14px;
+      }
+
+      .card-head span {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .chart-wrap {
+        position: relative;
+        height: 340px;
+      }
+
+      #kline-chart {
+        width: 100%;
+        height: 340px;
+      }
+
+      .engine-label {
+        position: absolute;
+        right: 12px;
+        bottom: 10px;
+        z-index: 3;
+        padding: 5px 8px;
+        border: 1px solid #c9c1ff;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.94);
+        color: #4d3cc8;
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      .profile-list {
+        margin: 0;
+        padding: 6px 16px;
+      }
+
+      .profile-row {
+        display: grid;
+        grid-template-columns: 90px 1fr;
+        gap: 10px;
+        min-height: 43px;
+        padding: 10px 0;
+        border-bottom: 1px solid #eef1f3;
+        font-size: 12px;
+      }
+
+      .profile-row:last-child {
+        border-bottom: 0;
+      }
+
+      .profile-row dt {
+        color: var(--muted);
+      }
+
+      .profile-row dd {
+        margin: 0;
+        color: var(--text);
+        font-weight: 650;
+        text-align: right;
+      }
+
+      .profile-row dd.missing {
+        color: var(--warning);
+        font-weight: 700;
+      }
+
+      .profile-note {
+        margin: 0 16px 14px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: var(--info-soft);
+        color: #315d9d;
+        font-size: 11px;
+        line-height: 1.45;
+      }
+
+      .compare-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 265px;
+        height: 203px;
+      }
+
+      #compare-chart {
+        width: 100%;
+        height: 203px;
+      }
+
+      .compare-rule {
+        padding: 15px 16px;
+        border-left: 1px solid #eef1f3;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.55;
+      }
+
+      .compare-rule strong {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--text);
+        font-size: 12px;
+      }
+
+      .states-head {
+        margin-bottom: 18px;
+      }
+
+      .states-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+      }
+
+      .state-card {
+        min-height: 205px;
+        padding: 16px;
+        border: 1px solid #e7ebef;
+        border-radius: var(--radius-card);
+        background: white;
+        box-shadow: var(--shadow);
+      }
+
+      .state-card h2 {
+        margin: 0 0 6px;
+        font-size: 14px;
+      }
+
+      .state-card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.55;
+      }
+
+      .state-visual {
+        display: grid;
+        min-height: 108px;
+        margin-top: 14px;
+        place-items: center;
+        border: 1px dashed #d8dde3;
+        border-radius: 10px;
+        background: #fafbfc;
+        text-align: center;
+      }
+
+      .state-visual strong {
+        display: block;
+        margin-bottom: 5px;
+        font-size: 12px;
+      }
+
+      .state-visual span {
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.5;
+      }
+
+      .skeletons {
+        width: 82%;
+      }
+
+      .skeleton {
+        height: 9px;
+        margin: 9px 0;
+        border-radius: 6px;
+        background: #e8ebef;
+      }
+
+      .skeleton.short {
+        width: 62%;
+      }
+
+      .state-icon {
+        display: grid;
+        width: 40px;
+        height: 40px;
+        margin: 0 auto 8px;
+        place-items: center;
+        border-radius: 50%;
+        background: #eef1f4;
+        color: var(--muted);
+        font-size: 18px;
+        font-weight: 800;
+      }
+
+      .state-icon.warn {
+        background: var(--warning-soft);
+        color: var(--warning);
+      }
+
+      .state-icon.error {
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+
+      .partial {
+        width: 84%;
+        text-align: left;
+      }
+
+      .partial-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin: 7px 0;
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--success);
+      }
+
+      .dot.warn {
+        background: var(--warning);
+      }
+
+      .dot.error {
+        background: var(--danger);
+      }
+
+      .view-switch {
+        position: fixed;
+        right: 18px;
+        bottom: 16px;
+        z-index: 20;
+        display: flex;
+        gap: 4px;
+        padding: 4px;
+        border: 1px solid var(--divider);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: var(--shadow);
+      }
+
+      .view-switch a {
+        padding: 6px 9px;
+        border-radius: 7px;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .view-switch a.active {
+        background: var(--primary-soft);
+        color: #4d3cc8;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          transition: none !important;
+          animation: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" aria-live="polite"></div>
+    <nav class="view-switch" aria-label="原型视图切换">
+      <a data-view-link="list" href="?view=list">列表</a>
+      <a data-view-link="detail" href="?view=detail">详情</a>
+      <a data-view-link="states" href="?view=states">状态</a>
+    </nav>
+    <script>
+      /** 生成与现有桌面壳层一致的左侧导航。 */
+      function sidebar(activeLabel) {
+        const items = [
+          ["⌂", "工作台"],
+          ["◫", "市场概览"],
+          ["◆", "基金与 ETF"],
+          ["▦", "数据运维"],
+          ["◎", "账户中心"],
+        ];
+        return `
+          <aside class="sidebar">
+            <div class="brand"><span class="brand-mark">Q</span><span>QUANT V2</span></div>
+            <div class="nav-label">研究工作区</div>
+            <ul class="nav-list">
+              ${items
+                .map(
+                  /** 将单个导航配置渲染为桌面导航项。 */
+                  ([icon, label]) =>
+                    `<li class="nav-item ${label === activeLabel ? "active" : ""}">
+                      <span class="nav-icon">${icon}</span><span>${label}</span>
+                    </li>`,
+                )
+                .join("")}
+            </ul>
+            <div class="sidebar-note">
+              <strong>数据语义优先</strong><br />
+              页面按 dataset publication 独立呈现，不把缺席、空结果或来源失败解释为业务事实。
+            </div>
+          </aside>`;
+      }
+
+      /** 生成固定 72px 的桌面顶栏。 */
+      function topbar(section) {
+        return `
+          <header class="topbar">
+            <div class="workspace"><span>研究工作区</span><span>/</span><strong>${section}</strong></div>
+            <div class="user"><span>数据时间按 publication 独立展示</span><span class="avatar">研</span></div>
+          </header>`;
+      }
+
+      /** 生成 ETF 目录无发布视图；没有真实 publication 时不渲染产品行。 */
+      function listView() {
+        return `
+          <div class="app">
+            ${sidebar("基金与 ETF")}
+            <main class="main">
+              ${topbar("ETF 中心")}
+              <section class="content">
+                <div class="page-head">
+                  <div>
+                    <p class="eyebrow">MARKET / ETF</p>
+                    <h1>ETF 中心</h1>
+                    <p class="subtitle">一期仅覆盖沪深交易所上市 ETF；LOF、REITs、场外基金及其他交易所基金尚未接入。</p>
+                  </div>
+                  <span class="review-chip">真实空态 · 不使用静态产品数据</span>
+                </div>
+                <div class="notice" role="status">
+                  <span>ⓘ</span>
+                  <span><strong>当前没有可公开读取的 profile publication</strong>　只有 service-api 返回 AVAILABLE publication 后才填充目录；目录缺席不解释为退市。</span>
+                </div>
+                <form class="filters" aria-label="ETF 列表筛选">
+                  <input class="control" aria-label="搜索代码或名称" placeholder="搜索代码或名称" disabled />
+                  <select class="control" aria-label="交易所" disabled><option>上交所（当前视图）</option><option>深交所</option></select>
+                  <select class="control" aria-label="排序" disabled><option>代码升序</option></select>
+                  <button class="primary-button" type="button" disabled>应用</button>
+                </form>
+                <section class="card table-card" aria-label="ETF 产品目录">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style="width: 34%">ETF</th>
+                        <th style="width: 17%">交易所</th>
+                        <th style="width: 18%">目录状态</th>
+                        <th style="width: 24%">publication / 证据</th>
+                        <th style="width: 7%">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td class="empty-table" colspan="5">
+                          <div class="empty-symbol">!</div>
+                          <strong>ETF 产品目录尚未发布</strong>
+                          <span>PUBLICATION_NOT_AVAILABLE · 不显示代码、名称、状态或数量</span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <footer class="table-footer">
+                    <span>无 publication · 无 cursor · 默认上限 50 条/页</span>
+                    <span>来源可用后启用筛选与分页</span>
+                  </footer>
+                </section>
+              </section>
+            </main>
+          </div>`;
+      }
+
+      /** 生成 ETF 详情无发布视图；四类数据保持独立发布和失败边界。 */
+      function detailView() {
+        return `
+          <div class="app">
+            ${sidebar("基金与 ETF")}
+            <main class="main">
+              ${topbar("ETF 详情")}
+              <section class="content">
+                <div class="breadcrumb"><span>基金与 ETF</span><span>›</span><span>ETF 中心</span><span>›</span><strong>尚无可读取标的</strong></div>
+                <div class="detail-head">
+                  <div class="identity-line">
+                    <span class="instrument-mark">ETF</span>
+                    <div><h1>ETF 详情</h1><div class="identity-code">等待真实 profile publication 返回 exchange、symbol 与名称</div></div>
+                  </div>
+                  <div class="state-chips" aria-label="ETF 状态">
+                    <span class="status neutral">交易：未发布</span>
+                    <span class="status neutral">申购：未发布</span>
+                    <span class="status neutral">赎回：未发布</span>
+                  </div>
+                </div>
+                <div class="publication-strip" aria-label="各数据集发布时间">
+                  <div class="publication-cell"><span>PROFILE</span><strong>无 publication</strong></div>
+                  <div class="publication-cell"><span>BAR 1D</span><strong>无 publication</strong></div>
+                  <div class="publication-cell"><span>NAV 1D</span><strong>无 publication</strong></div>
+                  <div class="publication-cell"><span>TRADING STATE</span><strong>无 publication</strong></div>
+                </div>
+                <div class="detail-grid">
+                  <section class="card chart-card" aria-labelledby="kline-title">
+                    <div class="card-head"><h2 id="kline-title">未复权日 K 线</h2><span>固定查询最近 365 个日历日</span></div>
+                    <div class="chart-wrap">
+                      <div id="kline-chart" aria-label="KLineChart 空数据容器"></div>
+                      <div class="chart-empty"><div><strong>日线 publication 尚未发布</strong>KLineChart 已初始化空数据，不生成 K 线</div></div>
+                      <span class="engine-label">KLineChart · records=[]</span>
+                    </div>
+                  </section>
+                  <aside class="card profile-card" aria-labelledby="profile-title">
+                    <div class="card-head"><h2 id="profile-title">产品资料</h2><span>profile.reported</span></div>
+                    <dl class="profile-list">
+                      <div class="profile-row"><dt>产品代码</dt><dd class="missing">未发布</dd></div>
+                      <div class="profile-row"><dt>交易所</dt><dd class="missing">未发布</dd></div>
+                      <div class="profile-row"><dt>管理人</dt><dd class="missing">未发布</dd></div>
+                      <div class="profile-row"><dt>跟踪指数</dt><dd class="missing">未发布</dd></div>
+                      <div class="profile-row"><dt>NAV 类型</dt><dd class="missing">未发布</dd></div>
+                      <div class="profile-row"><dt>上市状态</dt><dd class="missing">未发布</dd></div>
+                    </dl>
+                    <p class="profile-note">跟踪指数缺失时不从基金名称推断；目录缺席也不解释为退市。</p>
+                  </aside>
+                </div>
+                <section class="card compare-card" aria-labelledby="compare-title">
+                  <div class="card-head">
+                    <h2 id="compare-title">收盘价与单位净值</h2>
+                    <span>等待 bar 与 NAV 各自 publication</span>
+                  </div>
+                  <div class="compare-layout">
+                    <div id="compare-chart" aria-label="ECharts 收盘价与单位净值空数据容器"></div>
+                    <div class="compare-rule">
+                      <strong>口径约束</strong>
+                      双轴仅并列展示来源直报值；不对齐未知日期、不跨空值连线、不计算折溢价。折溢价方法学冻结并有专属 publication 前，页面不展示该指标。
+                    </div>
+                  </div>
+                </section>
+              </section>
+            </main>
+          </div>`;
+      }
+
+      /** 生成复杂远程状态视图，覆盖空集、无发布、来源失败、延迟和部分成功。 */
+      function statesView() {
+        const cards = [
+          {
+            title: "加载中",
+            text: "每个 dataset 独立 skeleton，不阻塞已可展示区域。",
+            visual: `<div class="skeletons"><div class="skeleton short"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton short"></div></div>`,
+          },
+          {
+            title: "筛选为空",
+            text: "AVAILABLE publication 下 records=[]，只说明当前条件无匹配。",
+            visual: `<div><div class="state-icon">∅</div><strong>没有匹配的 ETF</strong><span>调整筛选；不能解释为退市</span></div>`,
+          },
+          {
+            title: "无 publication",
+            text: "SOURCE_UNAVAILABLE / PUBLICATION_NOT_AVAILABLE 使用成功空语义。",
+            visual: `<div><div class="state-icon warn">!</div><strong>该数据集尚未发布</strong><span>显示 reasonCode 与 observedAt</span></div>`,
+          },
+          {
+            title: "来源暂不可用",
+            text: "保留页面其他区域；单卡重试，遵循 Retry-After。",
+            visual: `<div><div class="state-icon error">×</div><strong>NAV 暂不可用</strong><span>行情和产品资料仍可浏览<br />重试此卡片</span></div>`,
+          },
+          {
+            title: "当前口径不支持",
+            text: "货币市场 ETF 收益型 NAV 不得冒充普通单位净值。",
+            visual: `<div><div class="state-icon warn">≠</div><strong>NAV 当前口径暂不支持</strong><span>CURRENTLY_UNSUPPORTED<br />价格和状态仍可浏览</span></div>`,
+          },
+          {
+            title: "publication 延迟 / 不一致",
+            text: "不把不同 dataVersion 拼成同一时点快照。",
+            visual: `<div><div class="state-icon warn">⌛</div><strong>NAV 与行情日期不一致</strong><span>分别显示真实日期、来源和 dataVersion</span></div>`,
+          },
+          {
+            title: "详情部分成功",
+            text: "NAV、价格、状态、资料各有独立查询和错误边界。",
+            visual: `<div class="partial">
+              <div class="partial-row"><span>产品资料</span><span class="dot"></span></div>
+              <div class="partial-row"><span>K 线行情</span><span class="dot"></span></div>
+              <div class="partial-row"><span>单位净值</span><span class="dot warn"></span></div>
+              <div class="partial-row"><span>交易状态</span><span class="dot error"></span></div>
+            </div>`,
+          },
+          {
+            title: "cursor 已失效",
+            text: "服务端 publication 变化后，不复用旧 cursor 或静默展示旧页。",
+            visual: `<div><div class="state-icon">↺</div><strong>目录已更新</strong><span>清除 cursor、保留筛选<br />返回第一页</span></div>`,
+          },
+        ];
+        return `
+          <div class="app">
+            ${sidebar("基金与 ETF")}
+            <main class="main">
+              ${topbar("ETF 复杂状态")}
+              <section class="content">
+                <div class="page-head states-head">
+                  <div>
+                    <p class="eyebrow">REMOTE STATE CONTRACT</p>
+                    <h1>ETF 数据状态与独立降级</h1>
+                    <p class="subtitle">空结果、无 publication、来源不可用和延迟均保留原始语义。</p>
+                  </div>
+                  <span class="review-chip">1440 × 900 状态合同</span>
+                </div>
+                <div class="states-grid">
+                  ${cards
+                    .map(
+                      /** 将一个远程状态定义渲染为状态卡片。 */
+                      (card) => `
+                        <article class="state-card">
+                          <h2>${card.title}</h2>
+                          <p>${card.text}</p>
+                          <div class="state-visual">${card.visual}</div>
+                        </article>`,
+                    )
+                    .join("")}
+                </div>
+              </section>
+            </main>
+          </div>`;
+      }
+
+      /** 使用仓库已安装的 KLineChart 初始化无 publication 的空数据容器。 */
+      function mountKlineChart() {
+        const container = document.getElementById("kline-chart");
+        if (!container || !window.klinecharts) return;
+        const chart = window.klinecharts.init(container, {
+          locale: "zh-CN",
+          timezone: "Asia/Shanghai",
+          styles: {
+            grid: {
+              horizontal: { color: "#EEF1F3" },
+              vertical: { color: "#EEF1F3" },
+            },
+            candle: {
+              bar: {
+                upColor: "#FF5630",
+                upBorderColor: "#FF5630",
+                upWickColor: "#FF5630",
+                downColor: "#22C55E",
+                downBorderColor: "#22C55E",
+                downWickColor: "#22C55E",
+                noChangeColor: "#637381",
+                noChangeBorderColor: "#637381",
+                noChangeWickColor: "#637381",
+              },
+            },
+          },
+        });
+        if (!chart) return;
+        chart.createIndicator("MA", true);
+        chart.createIndicator("VOL");
+      }
+
+      /** 使用 ECharts 初始化无 publication 的双轴空数据容器。 */
+      function mountCompareChart() {
+        const container = document.getElementById("compare-chart");
+        if (!container || !window.echarts) return;
+        const chart = window.echarts.init(container, null, {
+          renderer: "canvas",
+        });
+        chart.setOption({
+          animation: false,
+          color: ["#6D5CE7", "#2D7FF9"],
+          tooltip: { show: false },
+          legend: {
+            top: 12,
+            right: 18,
+            textStyle: { color: "#637381", fontSize: 11 },
+          },
+          grid: { left: 54, right: 54, top: 48, bottom: 32 },
+          xAxis: {
+            type: "category",
+            data: [],
+            boundaryGap: false,
+            axisLine: { lineStyle: { color: "#DFE3E8" } },
+            axisLabel: { color: "#919EAB", fontSize: 10 },
+          },
+          yAxis: [
+            {
+              type: "value",
+              splitLine: { lineStyle: { color: "#EEF1F3" } },
+              axisLabel: { color: "#919EAB", fontSize: 10 },
+            },
+            {
+              type: "value",
+              splitLine: { show: false },
+              axisLabel: { color: "#919EAB", fontSize: 10 },
+            },
+          ],
+          series: [
+            {
+              name: "单位净值（左轴）",
+              type: "line",
+              yAxisIndex: 0,
+              data: [],
+              connectNulls: false,
+              symbolSize: 5,
+              lineStyle: { width: 2 },
+            },
+            {
+              name: "收盘价（右轴）",
+              type: "line",
+              yAxisIndex: 1,
+              data: [],
+              symbolSize: 5,
+              lineStyle: { width: 2 },
+            },
+          ],
+          graphic: {
+            type: "text",
+            left: "center",
+            top: "middle",
+            style: {
+              text: "bar 与 NAV publication 尚未发布\nECharts 不生成业务图点",
+              fill: "#637381",
+              font: '12px "PingFang SC", sans-serif',
+              lineHeight: 20,
+              textAlign: "center",
+            },
+          },
+        });
+      }
+
+      /** 根据 URL 参数渲染可编辑的列表、详情或复杂状态画板。 */
+      function renderPrototype() {
+        const view =
+          new URLSearchParams(window.location.search).get("view") || "list";
+        const root = document.getElementById("root");
+        root.innerHTML =
+          view === "detail"
+            ? detailView()
+            : view === "states"
+              ? statesView()
+              : listView();
+        /** 标记当前画板对应的视图切换链接。 */
+        const markActiveLink = (link) => {
+          link.classList.toggle("active", link.dataset.viewLink === view);
+        };
+        document.querySelectorAll("[data-view-link]").forEach(markActiveLink);
+        if (view === "detail") {
+          /** 在详情 DOM 完成布局后初始化两个命令式图表引擎。 */
+          const mountDetailCharts = () => {
+            mountKlineChart();
+            mountCompareChart();
+          };
+          window.requestAnimationFrame(mountDetailCharts);
+        }
+      }
+
+      renderPrototype();
+    </script>
+  </body>
+</html>

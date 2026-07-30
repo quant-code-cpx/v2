@@ -8,7 +8,11 @@ from datetime import date
 
 import pytest
 
-from service_data_sync.application.ports.data_source import ProviderError, SourceRequest
+from service_data_sync.application.ports.data_source import (
+    ProviderError,
+    ProviderErrorCode,
+    SourceRequest,
+)
 from service_data_sync.infrastructure.providers.akshare import tencent_daily_bars
 from service_data_sync.infrastructure.providers.akshare.tencent_daily_bars import (
     AkshareTencentDailyBarsAdapter,
@@ -18,9 +22,15 @@ from service_data_sync.infrastructure.providers.akshare.tencent_daily_bars impor
 class FakeFrame:
     """提供适配器测试所需的最小 DataFrame 接口，不直接导入 pandas。"""
 
-    def __init__(self, records: list[dict[str, object]]) -> None:
-        """保存测试转换所需的确定性供应商形记录。"""
+    def __init__(
+        self,
+        records: list[dict[str, object]],
+        *,
+        columns: tuple[str, ...] = tencent_daily_bars._EXPECTED_COLUMNS,
+    ) -> None:
+        """保存测试转换所需的确定性供应商形记录与冻结列集合。"""
         self._records = records
+        self.columns = columns
 
     @property
     def empty(self) -> bool:
@@ -42,16 +52,23 @@ def test_adapter_corrects_lot_volume_only_when_vwap_proves_it(
             {
                 "date": date(2026, 6, 30),
                 "open": "10.00",
+                "close": "10.50",
                 "high": "11.00",
                 "low": "9.00",
-                "close": "10.50",
                 "volume": "10500",
+                "turnover": "0.02",
                 "amount": "11025000",
             }
         ]
     )
-    # 匿名回调固定返回“手”口径样本，验证适配器只在 VWAP 对账成立时换算。
-    monkeypatch.setattr(tencent_daily_bars.ak, "stock_zh_a_hist_tx", lambda **_: frame)
+    captured_kwargs: dict[str, object] = {}
+
+    def fetch_frame(**kwargs: object) -> FakeFrame:
+        """捕获 SDK 调用参数并返回“手”口径样本。"""
+        captured_kwargs.update(kwargs)
+        return frame
+
+    monkeypatch.setattr(tencent_daily_bars.ak, "stock_zh_a_hist_tx", fetch_frame)
 
     batch = asyncio.run(
         AkshareTencentDailyBarsAdapter(request_timeout_seconds=5).fetch(
@@ -69,7 +86,12 @@ def test_adapter_corrects_lot_volume_only_when_vwap_proves_it(
     payload = json.loads(batch.payload)
     assert payload["instrument"] == "SZSE.000001"
     assert payload["bars"][0]["volumeShares"] == "1050000"
+    assert payload["bars"][0]["turnoverRate"] == "0.02"
     assert batch.raw_payload is not None
+    assert batch.upstream_source == "tencent-stock-kline"
+    assert batch.adapter_version == "akshare-1.18.78-stock_zh_a_hist_tx-v2"
+    assert batch.schema_fingerprint == tencent_daily_bars._SCHEMA_FINGERPRINT
+    assert captured_kwargs["timeout"] == 5.0
 
 
 def test_adapter_rejects_a_response_with_unreconcilable_volume_unit(
@@ -81,10 +103,11 @@ def test_adapter_rejects_a_response_with_unreconcilable_volume_unit(
             {
                 "date": "2026-06-30",
                 "open": "10",
+                "close": "10",
                 "high": "11",
                 "low": "9",
-                "close": "10",
                 "volume": "100",
+                "turnover": "0.01",
                 "amount": "100000000",
             }
         ]
@@ -136,3 +159,62 @@ def test_adapter_returns_a_valid_empty_batch_when_akshare_has_no_daily_bars(
         "bars": [],
     }
     assert batch.raw_payload == b'{"instrument":"SSE.600519","records":[]}'
+    assert batch.schema_fingerprint == tencent_daily_bars._SCHEMA_FINGERPRINT
+
+
+def test_adapter_rejects_empty_frame_without_frozen_columns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """无冻结列集合的空响应不能证明合法空窗口，必须作为 schema 漂移失败。"""
+    frame = FakeFrame([], columns=())
+    # 匿名回调返回无列空响应，验证它不能伪装成 passed 零记录 coverage。
+    monkeypatch.setattr(tencent_daily_bars.ak, "stock_zh_a_hist_tx", lambda **_: frame)
+
+    with pytest.raises(ProviderError, match="schema changed") as error:
+        asyncio.run(
+            AkshareTencentDailyBarsAdapter(request_timeout_seconds=5).fetch(
+                SourceRequest(
+                    capability="equity.bar.1d.raw",
+                    parameters=(
+                        ("instrument", "SSE.600519"),
+                        ("start", "2026-07-01"),
+                        ("end", "2026-07-29"),
+                    ),
+                )
+            )
+        )
+
+    assert error.value.retryable is False
+
+
+def test_adapter_rejects_bse_before_calling_unsupported_tencent_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """北交所不在已验证来源范围内，不能把端点 KeyError 转成合法空窗口。"""
+
+    def unexpected_call(**_kwargs: object) -> None:
+        """若适配器错误访问未支持端点则立即暴露。"""
+        raise AssertionError("unsupported BSE endpoint must not be called")
+
+    monkeypatch.setattr(tencent_daily_bars.ak, "stock_zh_a_hist_tx", unexpected_call)
+    adapter = AkshareTencentDailyBarsAdapter(request_timeout_seconds=5)
+
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(
+            adapter.fetch(
+                SourceRequest(
+                    capability="equity.bar.1d.raw",
+                    parameters=(
+                        ("instrument", "BSE.835185"),
+                        ("start", "2026-07-01"),
+                        ("end", "2026-07-29"),
+                    ),
+                )
+            )
+        )
+
+    assert adapter.supported_exchanges == frozenset(
+        {tencent_daily_bars.Exchange.SSE, tencent_daily_bars.Exchange.SZSE}
+    )
+    assert captured.value.code is ProviderErrorCode.CURRENTLY_UNSUPPORTED
+    assert captured.value.retryable is False

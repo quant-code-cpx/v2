@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from uuid import UUID
@@ -85,22 +86,28 @@ class SectorMembershipSyncService:
         self._retry_delay_seconds = retry_delay_seconds
 
     async def sync_scheme(
-        self, *, scheme: SectorScheme, observation_date: date
+        self,
+        *,
+        scheme: SectorScheme,
+        observation_date: date,
+        sector_codes: Sequence[str] | None = None,
+        before_final_publication: Callable[[], None] | None = None,
     ) -> SectorMembershipSyncResult:
-        """顺序处理冻结 ACTIVE 集合并在阈值允许时发布或沿用固定 release 清单。"""
+        """顺序处理冻结分区，并在阈值允许时以同事务回调发布或沿用固定 release。"""
         if _CAPABILITY not in self._source.capabilities():
             raise ProviderError(
                 ProviderErrorCode.INVALID_REQUEST,
                 "unsupported capability",
                 retryable=False,
             )
-        sectors = tuple(self._repository.list_active_sectors(scheme=scheme))
-        if not sectors:
+        active_sectors = tuple(self._repository.list_active_sectors(scheme=scheme))
+        if not active_sectors:
             raise ProviderError(
                 ProviderErrorCode.INVALID_REQUEST,
                 "sector catalog has no active sectors",
                 retryable=False,
             )
+        sectors = _selected_sectors(active_sectors, sector_codes=sector_codes)
         run = self._repository.start_run(
             scheme=scheme,
             observation_date=observation_date,
@@ -141,7 +148,9 @@ class SectorMembershipSyncService:
                     )
                 )
             release = self._repository.publish_release(
-                scheme=scheme, observation_date=observation_date
+                scheme=scheme,
+                observation_date=observation_date,
+                before_final_publication=before_final_publication,
             )
         finally:
             status = _run_status(items=items, failures=failures, release=release)
@@ -216,6 +225,33 @@ class SectorMembershipSyncService:
                 raise
         await asyncio.sleep(self._retry_delay_seconds)
         return await self._source.fetch(request)
+
+
+def _selected_sectors(
+    active_sectors: tuple[StoredSector, ...],
+    *,
+    sector_codes: Sequence[str] | None,
+) -> tuple[StoredSector, ...]:
+    """从已冻结 ACTIVE 集合精确选择重试分区，并拒绝空集、重复或未知板块代码。"""
+    if sector_codes is None:
+        return active_sectors
+    requested = tuple(sector_codes)
+    if not requested or len(set(requested)) != len(requested):
+        raise ProviderError(
+            ProviderErrorCode.INVALID_REQUEST,
+            "sector membership selection is empty or duplicated",
+            retryable=False,
+        )
+    selected = tuple(
+        sector for sector in active_sectors if sector.identifier.code in set(requested)
+    )
+    if len(selected) != len(requested):
+        raise ProviderError(
+            ProviderErrorCode.INVALID_REQUEST,
+            "sector membership selection contains an inactive or unknown sector",
+            retryable=False,
+        )
+    return selected
 
 
 def decode_sector_membership_batch(

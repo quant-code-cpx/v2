@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -43,6 +44,8 @@ class EtfDailyBarSyncResult:
     inserted_count: int
     unchanged_count: int
     availability: str = "available"
+    reason_code: str | None = None
+    retryable: bool = False
 
 
 class EtfDailyBarSyncService:
@@ -62,7 +65,14 @@ class EtfDailyBarSyncService:
         self._raw_payload_store = raw_payload_store
         self._availability_repository = availability_repository
 
-    async def sync(self, *, etf: EtfIdentifier, start: date, end: date) -> EtfDailyBarSyncResult:
+    async def sync(
+        self,
+        *,
+        etf: EtfIdentifier,
+        start: date,
+        end: date,
+        before_final_publication: Callable[[], None] | None = None,
+    ) -> EtfDailyBarSyncResult:
         """抓取并发布包含边界的未复权窗口；来源不可用或空集可成功结束。"""
         if start > end:
             raise ValueError("start must not be after end")
@@ -102,6 +112,7 @@ class EtfDailyBarSyncService:
                 end=end,
                 availability="source_unavailable",
                 reason_code=error.code.value,
+                retryable=error.retryable,
                 provider_id=self._source.provider_id,
                 observed_at=datetime.now(UTC),
             )
@@ -116,6 +127,8 @@ class EtfDailyBarSyncService:
                 provider_id=batch.provider_id,
                 observed_at=batch.observed_at,
             )
+        if before_final_publication is not None:
+            before_final_publication()
         published = self._repository.publish_daily_bars(
             etf=etf,
             bars=bars,
@@ -142,6 +155,7 @@ class EtfDailyBarSyncService:
         end: date,
         availability: str,
         reason_code: str,
+        retryable: bool = False,
         provider_id: str | None,
         observed_at: datetime,
     ) -> EtfDailyBarSyncResult:
@@ -154,6 +168,9 @@ class EtfDailyBarSyncService:
                 reason_code=reason_code,
                 provider_id=provider_id,
                 observed_at=observed_at,
+                entity_partition=f"etf:{etf.qualified_key}",
+                coverage_from=start,
+                coverage_to=end,
             )
         return EtfDailyBarSyncResult(
             etf=etf,
@@ -161,6 +178,8 @@ class EtfDailyBarSyncService:
             inserted_count=0,
             unchanged_count=0,
             availability=availability,
+            reason_code=reason_code,
+            retryable=retryable,
         )
 
 

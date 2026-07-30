@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, insert, literal, select
 from sqlalchemy.orm import Session
 
+from service_data_sync.infrastructure.database.fenced_execution import current_fenced_execution
 from service_data_sync.infrastructure.database.models.execution.sync_partition import SyncPartition
 from service_data_sync.infrastructure.database.models.execution.sync_run import SyncRun
 from service_data_sync.infrastructure.database.models.provenance.source_batch import SourceBatch
@@ -55,7 +56,7 @@ def record_source_observation(
     )
     if run_id is not None and partition_key is not None:
         # 重试在同一分区增加观察序号，不覆盖前一次响应，便于定位来源随时间变化。
-        return _record_in_existing_partition(
+        recorded_id = _record_in_existing_partition(
             session,
             source_batch_id=source_batch_id,
             provider_id=provider_id,
@@ -71,6 +72,8 @@ def record_source_observation(
             run_id=run_id,
             partition_key=partition_key,
         )
+        _attach_to_fenced_execution(recorded_id)
+        return recorded_id
 
     manual_run_id = uuid4()
     manual_partition_key = f"manual:{capability}:{source_batch_id}"
@@ -144,7 +147,9 @@ def record_source_observation(
         )
         .returning(SourceBatch.source_batch_id)
     )
-    return UUID(str(session.execute(statement).scalar_one()))
+    recorded_id = UUID(str(session.execute(statement).scalar_one()))
+    _attach_to_fenced_execution(recorded_id)
+    return recorded_id
 
 
 def _record_in_existing_partition(
@@ -197,3 +202,10 @@ def _record_in_existing_partition(
         .returning(SourceBatch.source_batch_id)
     )
     return UUID(str(session.execute(statement).scalar_one()))
+
+
+def _attach_to_fenced_execution(source_batch_id: UUID) -> None:
+    """把刚登记的真实来源批次绑定到当前控制面 run；普通手工同步保持原语义。"""
+    execution = current_fenced_execution()
+    if execution is not None:
+        execution.record_source_batch(source_batch_id)

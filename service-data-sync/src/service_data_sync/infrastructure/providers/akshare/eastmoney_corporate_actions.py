@@ -129,17 +129,28 @@ def _request_values(request: SourceRequest) -> tuple[EquityIdentifier, date, dat
 
 
 def _record_intersects(record: dict[str, Any], *, start: date, end: date) -> bool:
-    """任一报告、公告、登记或除权日期命中窗口时保留事件。"""
-    values = (
-        record.get("报告期"),
-        record.get("业绩披露日期"),
-        record.get("预案公告日"),
-        record.get("股权登记日"),
-        record.get("除权除息日"),
-        record.get("最新公告日期"),
+    """按 canonical 事件日期命中窗口，和 coverage 及公开读取保持同一优先级。
+
+    公司行动优先采用除权日，其次登记日、最新或预案公告日，最后才是报告期。若一行
+    完全没有可解析日期，就无法证明它在请求窗口外，必须作为 schema 错误失败关闭。
+    """
+    fact_date = next(
+        (
+            parsed
+            for value in (
+                record.get("除权除息日"),
+                record.get("股权登记日"),
+                record.get("最新公告日期"),
+                record.get("预案公告日"),
+                record.get("报告期"),
+            )
+            if (parsed := _optional_date(value)) is not None
+        ),
+        None,
     )
-    dates = tuple(parsed for value in values if (parsed := _optional_date(value)) is not None)
-    return any(start <= value <= end for value in dates)
+    if fact_date is None:
+        raise ValueError("provider corporate-action candidate has no reconcilable date")
+    return start <= fact_date <= end
 
 
 def _normalize_record(record: dict[str, Any]) -> dict[str, str | None]:

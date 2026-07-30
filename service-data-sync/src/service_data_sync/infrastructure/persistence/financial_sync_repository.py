@@ -9,16 +9,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
-from datetime import UTC, date, datetime
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from service_data_sync.application.ports.canonical_release import CanonicalLineageRecord
 from service_data_sync.application.ports.financial_sync import (
     FinancialCapability,
     FinancialMetricInput,
@@ -30,6 +32,7 @@ from service_data_sync.application.ports.financial_sync import (
 )
 from service_data_sync.domain.equity import Exchange
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.fenced_execution import current_fenced_execution
 from service_data_sync.infrastructure.database.models.financial import (
     provider_financial_metric_revision,
     valuation_observation_revision,
@@ -58,14 +61,17 @@ from service_data_sync.infrastructure.database.models.financial.financial_report
 from service_data_sync.infrastructure.database.models.financial.financial_statement_fact import (
     FinancialStatementFact,
 )
-from service_data_sync.infrastructure.database.models.publication.dataset_publication import (
-    DatasetPublication,
-)
 from service_data_sync.infrastructure.database.partition_manager import (
     ensure_financial_year_partitions,
 )
+from service_data_sync.infrastructure.persistence.canonical_release_repository import (
+    SqlAlchemyCanonicalReleaseRepository,
+)
 from service_data_sync.infrastructure.persistence.equity_identity_resolver import (
     require_single_confirmed_identity_on_connection,
+)
+from service_data_sync.infrastructure.persistence.legacy_canonical_release_bridge import (
+    publish_legacy_snapshot,
 )
 from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 
@@ -79,6 +85,8 @@ _METHODOLOGY: dict[FinancialCapability, str] = {
 }
 _SOURCE_CODE = "akshare.eastmoney"
 _METHODOLOGY_VERSION = 1
+_RELEASE_MAPPING_VERSION = "financial-sync-release-bridge-v1"
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 class SqlAlchemyFinancialSyncRepository(FinancialSyncRepository):
@@ -87,6 +95,7 @@ class SqlAlchemyFinancialSyncRepository(FinancialSyncRepository):
     def __init__(self, database: DatabaseClient) -> None:
         """保存服务自有事务工厂，不向应用层暴露 `SQLAlchemy` 会话。"""
         self._database = database
+        self._release_repository = SqlAlchemyCanonicalReleaseRepository(database)
 
     def publish_reports(
         self,
@@ -135,10 +144,10 @@ class SqlAlchemyFinancialSyncRepository(FinancialSyncRepository):
                 security_id=security_id,
                 methodology_id=methodology_id,
                 effective_as_of=effective_as_of,
-                source=source,
                 changed_count=inserted_count,
                 row_count=row_count,
                 content_sha256=content_sha256,
+                source_batch_id=source_batch_id,
                 now=now,
             )
             self._checkpoint(connection, source=source, result=result, now=now)
@@ -198,10 +207,10 @@ class SqlAlchemyFinancialSyncRepository(FinancialSyncRepository):
                 security_id=security_id,
                 methodology_id=methodology_id,
                 effective_as_of=effective_as_of,
-                source=source,
                 changed_count=inserted_count,
                 row_count=row_count,
                 content_sha256=content_sha256,
+                source_batch_id=source_batch_id,
                 now=now,
             )
             self._checkpoint(connection, source=source, result=result, now=now)
@@ -261,10 +270,10 @@ class SqlAlchemyFinancialSyncRepository(FinancialSyncRepository):
                 security_id=security_id,
                 methodology_id=methodology_id,
                 effective_as_of=effective_as_of,
-                source=source,
                 changed_count=inserted_count,
                 row_count=row_count,
                 content_sha256=content_sha256,
+                source_batch_id=source_batch_id,
                 now=now,
             )
             self._checkpoint(connection, source=source, result=result, now=now)
@@ -418,12 +427,20 @@ class SqlAlchemyFinancialSyncRepository(FinancialSyncRepository):
         fact_dates: Sequence[date],
         known_at: datetime,
     ) -> int:
-        """按每个财务事实适用日解析永久键，拒绝未知身份和跨代码复用边界批次。"""
+        """按本次证券选择器的当前唯一身份解析永久键，报告期不等同于当时上市状态。
+
+        东财会为当前证券返回招股前公司历史；这些报告期可早于上市日，但来源仍明确归属于
+        本次 `exchange + symbol` 请求。用报告期解析代码会错误拒绝真实历史；这里在
+        `known_at` 的上海自然日锁定一次当前身份，双时态事实仍各自保留原报告期与来源批次。
+        """
+        if not fact_dates:
+            raise ValueError("financial facts must include at least one source period")
+        identity_as_of = known_at.astimezone(_SHANGHAI).date()
         return require_single_confirmed_identity_on_connection(
             connection,
             exchange=exchange,
             symbol=symbol,
-            fact_dates=fact_dates,
+            fact_dates=(identity_as_of,),
             known_at=known_at,
         )
 
@@ -692,6 +709,7 @@ class SqlAlchemyFinancialSyncRepository(FinancialSyncRepository):
                 currency=metric.currency,
                 currency_null_reason=metric.currency_null_reason,
                 effective_from=metric.report_period,
+                # 报告期已纳入双时态逻辑键，本 revision 从保守有效日起持续可见。
                 effective_to=None,
                 known_from=now,
                 known_to=None,
@@ -774,7 +792,8 @@ class SqlAlchemyFinancialSyncRepository(FinancialSyncRepository):
                 currency_null_reason=valuation.currency_null_reason,
                 finality="PROVIDER_OBSERVATION",
                 effective_from=valuation.observation_date,
-                effective_to=None,
+                # 日频估值只对观察日当天有效；开放区间会与下一交易日触发双时态排斥冲突。
+                effective_to=valuation.observation_date + timedelta(days=1),
                 known_from=now,
                 known_to=None,
                 knowledge_basis="OBSERVED_AT",
@@ -847,70 +866,58 @@ class SqlAlchemyFinancialSyncRepository(FinancialSyncRepository):
         security_id: int,
         methodology_id: UUID,
         effective_as_of: date,
-        source: FinancialSourceObservation,
         changed_count: int,
         row_count: int,
         content_sha256: str,
+        source_batch_id: UUID,
         now: datetime,
     ) -> FinancialPublicationResult:
-        """仅当前 canonical 视图变化时替换 dataset 指针，并写入不可变财务发布明细。"""
+        """通过统一 release 仓储切换消费者版本，并在变化时追加财务发布明细。"""
         partition_key = f"{security_id}:{methodology_id}"
-        current_data_version = connection.execute(
-            select(DatasetPublication.data_version).where(
-                DatasetPublication.dataset == capability,
-                DatasetPublication.partition_key == partition_key,
-                DatasetPublication.superseded_at.is_(None),
-            )
-        ).scalar_one_or_none()
-        if changed_count == 0 and current_data_version is not None:
-            return FinancialPublicationResult(
-                capability=capability,
-                data_version=UUID(str(current_data_version)),
-                inserted_count=0,
-                unchanged_count=row_count,
-            )
-        connection.execute(
-            update(DatasetPublication)
-            .where(
-                DatasetPublication.dataset == capability,
-                DatasetPublication.partition_key == partition_key,
-                DatasetPublication.superseded_at.is_(None),
-            )
-            .values(superseded_at=now)
-        )
-        data_version = uuid4()
-        connection.execute(
-            insert(DatasetPublication).values(
-                publication_id=uuid4(),
-                dataset=capability,
-                partition_key=partition_key,
-                data_version=data_version,
-                quality_status="passed",
-                published_at=now,
-                superseded_at=None,
-                effective_as_of=effective_as_of,
-                knowledge_cutoff=now,
-            )
-        )
-        connection.execute(
-            insert(FinancialPublication).values(
-                data_version=data_version,
-                capability=capability,
-                security_id=security_id,
-                methodology_id=methodology_id,
-                effective_as_of=effective_as_of,
-                knowledge_cutoff=now,
-                row_count=row_count,
-                content_sha256=content_sha256,
-                published_at=now,
-            )
-        )
-        return FinancialPublicationResult(
+        records, fact_min, fact_max = _current_release_records(
+            connection,
             capability=capability,
-            data_version=data_version,
+            security_id=security_id,
+            methodology_id=methodology_id,
+        )
+        published = publish_legacy_snapshot(
+            connection,
+            release_repository=self._release_repository,
+            dataset_code=capability,
+            partition_key=partition_key,
+            domain="financial",
+            grain="equity security + financial dataset-native current observation",
+            semantic_family="reported-financial-data",
+            mapping_version=f"{_RELEASE_MAPPING_VERSION}:{capability}",
+            source_batch_id=source_batch_id,
+            records=records,
+            fact_min=fact_min,
+            fact_max=fact_max,
+            now=now,
+            publication_effective_as_of=effective_as_of,
+        )
+        if not published.reused_publication:
+            connection.execute(
+                insert(FinancialPublication).values(
+                    data_version=published.data_version,
+                    capability=capability,
+                    security_id=security_id,
+                    methodology_id=methodology_id,
+                    effective_as_of=effective_as_of,
+                    knowledge_cutoff=now,
+                    row_count=row_count,
+                    content_sha256=content_sha256,
+                    published_at=now,
+                )
+            )
+        result = FinancialPublicationResult(
+            capability=capability,
+            data_version=published.data_version,
             inserted_count=changed_count,
             unchanged_count=row_count - changed_count,
         )
+        _record_fenced_publication_checkpoint(result)
+        return result
 
     def _checkpoint(
         self,
@@ -980,6 +987,179 @@ class SqlAlchemyFinancialSyncRepository(FinancialSyncRepository):
         )
 
 
+def _current_release_records(
+    connection: Session,
+    *,
+    capability: FinancialCapability,
+    security_id: int,
+    methodology_id: UUID,
+) -> tuple[tuple[CanonicalLineageRecord, ...], date, date]:
+    """读取一项财务能力完整当前快照，禁止只以本次增量建立 release。"""
+    if capability == "financial.report":
+        rows = (
+            connection.execute(
+                select(
+                    FinancialReport.financial_report_id,
+                    FinancialReport.report_ref,
+                    FinancialReport.statement_type,
+                    FinancialReport.report_period,
+                    FinancialReport.period_basis,
+                    FinancialReport.statement_scope,
+                    FinancialReportRevision.content_sha256,
+                    FinancialReportRevision.source_batch_id,
+                )
+                .select_from(FinancialReport)
+                .join(
+                    FinancialReportRevision,
+                    FinancialReportRevision.financial_report_id
+                    == FinancialReport.financial_report_id,
+                )
+                .where(
+                    FinancialReport.security_id == security_id,
+                    FinancialReport.methodology_id == methodology_id,
+                    FinancialReportRevision.known_to.is_(None),
+                    FinancialReportRevision.quality_status.in_(("passed", "warned")),
+                )
+                .order_by(
+                    FinancialReport.report_period,
+                    FinancialReport.statement_type,
+                    FinancialReport.report_ref,
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return _financial_release_records(
+            capability=capability,
+            security_id=security_id,
+            rows=rows,
+            key=lambda row: ":".join(
+                (
+                    str(row["financial_report_id"]),
+                    str(row["report_ref"]),
+                    str(row["statement_type"]),
+                    cast(date, row["report_period"]).isoformat(),
+                    str(row["period_basis"]),
+                    str(row["statement_scope"]),
+                )
+            ),
+            date_key="report_period",
+        )
+    if capability == "financial.provider-metric":
+        rows = (
+            connection.execute(
+                select(
+                    ProviderFinancialMetricRevision.report_period,
+                    ProviderFinancialMetricRevision.metric_id,
+                    ProviderFinancialMetricRevision.period_basis,
+                    ProviderFinancialMetricRevision.statement_scope,
+                    ProviderFinancialMetricRevision.content_sha256,
+                    ProviderFinancialMetricRevision.source_batch_id,
+                )
+                .where(
+                    ProviderFinancialMetricRevision.security_id == security_id,
+                    ProviderFinancialMetricRevision.methodology_id == methodology_id,
+                    ProviderFinancialMetricRevision.known_to.is_(None),
+                    ProviderFinancialMetricRevision.quality_status.in_(("passed", "warned")),
+                )
+                .order_by(
+                    ProviderFinancialMetricRevision.report_period,
+                    ProviderFinancialMetricRevision.metric_id,
+                    ProviderFinancialMetricRevision.period_basis,
+                    ProviderFinancialMetricRevision.statement_scope,
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return _financial_release_records(
+            capability=capability,
+            security_id=security_id,
+            rows=rows,
+            key=lambda row: ":".join(
+                (
+                    cast(date, row["report_period"]).isoformat(),
+                    str(row["metric_id"]),
+                    str(row["period_basis"]),
+                    str(row["statement_scope"]),
+                )
+            ),
+            date_key="report_period",
+        )
+    if capability == "financial.valuation":
+        rows = (
+            connection.execute(
+                select(
+                    ValuationObservationRevision.observation_date,
+                    ValuationObservationRevision.metric_id,
+                    ValuationObservationRevision.content_sha256,
+                    ValuationObservationRevision.source_batch_id,
+                )
+                .where(
+                    ValuationObservationRevision.security_id == security_id,
+                    ValuationObservationRevision.methodology_id == methodology_id,
+                    ValuationObservationRevision.known_to.is_(None),
+                    ValuationObservationRevision.quality_status.in_(("passed", "warned")),
+                )
+                .order_by(
+                    ValuationObservationRevision.observation_date,
+                    ValuationObservationRevision.metric_id,
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return _financial_release_records(
+            capability=capability,
+            security_id=security_id,
+            rows=rows,
+            key=lambda row: ":".join(
+                (
+                    cast(date, row["observation_date"]).isoformat(),
+                    str(row["metric_id"]),
+                )
+            ),
+            date_key="observation_date",
+        )
+    raise ValueError("financial capability is not supported by the canonical release bridge")
+
+
+def _financial_release_records(
+    *,
+    capability: FinancialCapability,
+    security_id: int,
+    rows: Sequence[Mapping[Any, Any]],
+    key: Callable[[Mapping[Any, Any]], str],
+    date_key: str,
+) -> tuple[tuple[CanonicalLineageRecord, ...], date, date]:
+    """把当前财务 revision 映射为逐记录血缘，并保持消费者快照事实日期范围。"""
+    if not rows:
+        raise ValueError("financial publication has no current revision for release binding")
+    dates = tuple(cast(date, row[date_key]) for row in rows)
+    records = tuple(
+        CanonicalLineageRecord(
+            record_key_hash=hashlib.sha256(
+                f"financial:{capability}:{security_id}:{key(row)}".encode()
+            ).hexdigest(),
+            content_hash=_canonical_content_hash(row["content_sha256"]),
+            source_batch_id=UUID(str(row["source_batch_id"])),
+            transform_hash=hashlib.sha256(
+                f"{_RELEASE_MAPPING_VERSION}:{capability}".encode()
+            ).hexdigest(),
+        )
+        for row in rows
+    )
+    return records, min(dates), max(dates)
+
+
+def _canonical_content_hash(value: object) -> str:
+    """校验财务 revision 已有内容摘要，拒绝为 release 血缘补造随机散列。"""
+    result = str(value)
+    if len(result) != 64 or any(character not in "0123456789abcdef" for character in result):
+        raise ValueError("financial revision content hash is invalid")
+    return result
+
+
 def _content_hash(value: object) -> str:
     """对 dataclass 或序列生成稳定 JSON 摘要，避免同内容重放产生伪 revision。"""
     return hashlib.sha256(
@@ -999,3 +1179,13 @@ def _json_default(value: object) -> object:
     if isinstance(slots, tuple):
         return {key: getattr(value, key) for key in slots}
     raise TypeError(f"unsupported canonical hash value: {type(value)!r}")
+
+
+def _record_fenced_publication_checkpoint(result: FinancialPublicationResult) -> None:
+    """把独立财务版本和真实行数记录到当前 fenced 控制面终态。"""
+    execution = current_fenced_execution()
+    if execution is not None:
+        execution.record_checkpoint(kind="data-version", position=str(result.data_version))
+        execution.record_publication_progress(
+            record_count=result.inserted_count + result.unchanged_count
+        )

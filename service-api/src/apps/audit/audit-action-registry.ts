@@ -236,6 +236,41 @@ export const AUDIT_ACTION_REGISTRY: Readonly<Record<string, AuditActionDefinitio
     targetType: 'USER',
     details: bootstrapDetails,
   },
+  'dataops.request.authorized': {
+    category: 'SYSTEM',
+    severity: 'INFO',
+    summary: '数据运维操作已授权',
+    targetType: 'SYSTEM',
+    details: emptyDetails,
+  },
+  'dataops.delivery.accepted': {
+    category: 'SYSTEM',
+    severity: 'INFO',
+    summary: '数据运维操作已由权威服务受理',
+    targetType: 'SYSTEM',
+    details: emptyDetails,
+  },
+  'dataops.delivery.rejected': {
+    category: 'SYSTEM',
+    severity: 'WARNING',
+    summary: '数据运维操作被权威服务拒绝',
+    targetType: 'SYSTEM',
+    details: emptyDetails,
+  },
+  'dataops.delivery.dead_lettered': {
+    category: 'SYSTEM',
+    severity: 'CRITICAL',
+    summary: '数据运维可靠投递进入死信',
+    targetType: 'SYSTEM',
+    details: emptyDetails,
+  },
+  'dataops.delivery.replayed': {
+    category: 'SYSTEM',
+    severity: 'WARNING',
+    summary: '数据运维死信投递已重放',
+    targetType: 'SYSTEM',
+    details: emptyDetails,
+  },
 };
 
 /** 返回指定分类当前注册的 action 集合，供数据库预过滤。 */

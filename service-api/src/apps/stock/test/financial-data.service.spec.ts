@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { FinancialDataClient } from '../../../data-sync/clients/financial-data.client.js';
 import { FinancialDataService } from '../financial-data.service.js';
 
+const dataVersion = '00000000-0000-4000-8000-000000000001';
+
 /** 覆盖财务公开服务的业务范围校验与防腐 client 委派。 */
 describe('FinancialDataService', () => {
   /** 验证报表和指标请求完整传递方法学、双时态、游标与关联标识。 */
@@ -15,6 +17,7 @@ describe('FinancialDataService', () => {
     await service.listReports(
       path,
       {
+        dataVersion,
         methodologyCode: 'eastmoney.statement',
         methodologyVersion: 1,
         statementType: ['INCOME_STATEMENT'],
@@ -29,6 +32,7 @@ describe('FinancialDataService', () => {
     await service.listMetrics(
       path,
       {
+        dataVersion,
         origin: 'PLATFORM_DERIVED',
         methodologyCode: 'platform.financial-derivation',
         methodologyVersion: 1,
@@ -44,6 +48,7 @@ describe('FinancialDataService', () => {
       expect.objectContaining({
         exchange: 'SSE',
         symbol: '600519',
+        dataVersion,
         methodologyCode: 'eastmoney.statement',
         requestId: 'req-reports',
       }),
@@ -51,6 +56,7 @@ describe('FinancialDataService', () => {
     expect(client.listMetrics).toHaveBeenCalledWith(
       expect.objectContaining({
         origin: 'PLATFORM_DERIVED',
+        dataVersion,
         metrics: ['platform.net_profit_parent.ttm'],
         requestId: 'req-metrics',
       }),
@@ -68,6 +74,7 @@ describe('FinancialDataService', () => {
       void service.listValuations(
         path,
         {
+          dataVersion,
           methodologyCode: 'eastmoney.valuation',
           methodologyVersion: 1,
           metric: ['pe_ttm'],
@@ -85,6 +92,7 @@ describe('FinancialDataService', () => {
       void service.listReports(
         path,
         {
+          dataVersion,
           methodologyCode: 'eastmoney.statement',
           methodologyVersion: 1,
           knownAt: '2999-01-01T00:00:00Z',
@@ -100,6 +108,7 @@ describe('FinancialDataService', () => {
       void service.listMetrics(
         path,
         {
+          dataVersion,
           origin: 'PROVIDER_REPORTED',
           methodologyCode: 'eastmoney.metric',
           methodologyVersion: 1,

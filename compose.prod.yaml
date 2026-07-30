@@ -55,6 +55,17 @@ services:
       - no-new-privileges:true
     cap_drop: [ALL]
 
+  service-api-data-operations-dispatcher:
+    image: ${SERVICE_API_IMAGE_REF:?set SERVICE_API_IMAGE_REF to an immutable digest}
+    environment:
+      NODE_ENV: production
+      COOKIE_SECURE: "true"
+      CORS_ORIGIN: ${SERVICE_API_PROD_CORS_ORIGIN:?set SERVICE_API_PROD_CORS_ORIGIN}
+      TRUST_PROXY: ${SERVICE_API_PROD_TRUST_PROXY:-false}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
   data-sync-migrate:
     image: ${DATA_SYNC_IMAGE_REF:?set DATA_SYNC_IMAGE_REF to an immutable digest}
     environment:
@@ -92,6 +103,15 @@ services:
     cap_drop: [ALL]
 
   data-sync-worker:
+    image: ${DATA_SYNC_IMAGE_REF:?set DATA_SYNC_IMAGE_REF to an immutable digest}
+    environment:
+      DATA_SYNC_ENV: production
+      DATA_SYNC_LOG_FORMAT: json
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  data-sync-scheduler:
     image: ${DATA_SYNC_IMAGE_REF:?set DATA_SYNC_IMAGE_REF to an immutable digest}
     environment:
       DATA_SYNC_ENV: production

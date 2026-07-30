@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
+import requests
 
 from service_data_sync.application.ports.data_source import (
     ProviderError,
@@ -38,6 +39,24 @@ class FakeFrame:
         """仅支持 adapter 使用的 records 导出模式。"""
         assert orient == "records"
         return self._records
+
+
+async def _no_sleep(delay: float) -> None:
+    """跳过真实等待，使重试分类单测不因退避墙钟变慢。"""
+    del delay
+
+
+def _midpoint_random() -> float:
+    """返回固定抖动分位点，使指数退避断言跨运行稳定。"""
+    return 0.5
+
+
+def _minimal_payload_pair(capability: str) -> tuple[dict[str, object], dict[str, object]]:
+    """构造只用于 adapter 传输边界的最小标准与原始对象。"""
+    return (
+        {"schema": "test", "capability": capability},
+        {"capability": capability, "columns": []},
+    )
 
 
 def test_statement_adapter_archives_provider_wide_tables_and_emits_neutral_facts(
@@ -196,18 +215,24 @@ def test_adapter_rejects_unsupported_or_incomplete_identity_requests() -> None:
 def test_adapter_maps_timeout_to_retryable_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AKShare 墙钟超时必须保留为可重试 unavailable，不能误判为 schema 漂移。"""
+    """AKShare 网络超时只重试三次，耗尽后保留为可重试 unavailable。"""
+    attempts = 0
 
     async def timeout(*arguments: object, **keywords: object) -> object:
         """模拟线程池中的 SDK 调用超过受控墙钟期限。"""
+        nonlocal attempts
         del arguments, keywords
+        attempts += 1
         raise TimeoutError
 
     monkeypatch.setattr(eastmoney_financial.asyncio, "to_thread", timeout)
 
     with pytest.raises(ProviderError) as captured:
         asyncio.run(
-            AkshareEastmoneyFinancialAdapter(request_timeout_seconds=5).fetch(
+            AkshareEastmoneyFinancialAdapter(
+                request_timeout_seconds=5,
+                sleeper=_no_sleep,
+            ).fetch(
                 SourceRequest(
                     capability="financial.statement.raw",
                     parameters=(("exchange", "SSE"), ("symbol", "600519")),
@@ -217,12 +242,13 @@ def test_adapter_maps_timeout_to_retryable_unavailable(
 
     assert captured.value.code is ProviderErrorCode.UNAVAILABLE
     assert captured.value.retryable is True
+    assert attempts == 3
 
 
 def test_adapter_maps_unknown_sdk_failure_but_preserves_provider_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """未知 SDK 异常可重试，已分类的 schema 错误则必须原样穿透。"""
+    """未知 SDK 异常不得猜成瞬态网络故障，已分类 schema 错误必须原样穿透。"""
 
     async def sdk_failure(*arguments: object, **keywords: object) -> object:
         """模拟 SDK 抛出尚未分类的运行时失败。"""
@@ -239,7 +265,7 @@ def test_adapter_maps_unknown_sdk_failure_but_preserves_provider_error(
     with pytest.raises(ProviderError) as captured:
         asyncio.run(adapter.fetch(request))
     assert captured.value.code is ProviderErrorCode.UNAVAILABLE
-    assert captured.value.retryable is True
+    assert captured.value.retryable is False
 
     expected = ProviderError(ProviderErrorCode.SCHEMA, "empty", retryable=False)
 
@@ -252,6 +278,182 @@ def test_adapter_maps_unknown_sdk_failure_but_preserves_provider_error(
     with pytest.raises(ProviderError) as preserved:
         asyncio.run(adapter.fetch(request))
     assert preserved.value is expected
+
+
+def test_adapter_retries_network_failures_with_bounded_exponential_jitter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """连接中断按 1/2 秒指数基线叠加抖动，第三次成功后不再产生额外 egress。"""
+    attempts = 0
+    waits: list[float] = []
+
+    async def flaky_thread(*arguments: object, **keywords: object) -> object:
+        """前两次模拟连接重置，第三次返回最小合法传输对象。"""
+        nonlocal attempts
+        del arguments
+        attempts += 1
+        if attempts < 3:
+            raise requests.exceptions.ConnectionError("reset")
+        capability = str(keywords["capability"])
+        return _minimal_payload_pair(capability)
+
+    async def record_sleep(delay: float) -> None:
+        """记录退避而不消耗测试墙钟。"""
+        waits.append(delay)
+
+    monkeypatch.setattr(eastmoney_financial.asyncio, "to_thread", flaky_thread)
+    batch = asyncio.run(
+        AkshareEastmoneyFinancialAdapter(
+            request_timeout_seconds=5,
+            sleeper=record_sleep,
+            random_source=_midpoint_random,
+        ).fetch(
+            SourceRequest(
+                capability="financial.metric.raw",
+                parameters=(("exchange", "SSE"), ("symbol", "600519")),
+            )
+        )
+    )
+
+    assert batch.capability == "financial.metric.raw"
+    assert attempts == 3
+    assert waits == [1.25, 2.25]
+
+
+def test_adapter_retries_http_5xx_but_never_retries_http_4xx(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """5xx 可做一次后继重试；认证、限流及其他 4xx 均应一次失败并保留稳定分类。"""
+    attempts = 0
+    server_response = requests.Response()
+    server_response.status_code = 503
+
+    async def server_then_success(*arguments: object, **keywords: object) -> object:
+        """首次返回 503，第二次返回最小合法传输对象。"""
+        nonlocal attempts
+        del arguments
+        attempts += 1
+        if attempts == 1:
+            raise requests.exceptions.HTTPError(response=server_response)
+        return _minimal_payload_pair(str(keywords["capability"]))
+
+    monkeypatch.setattr(eastmoney_financial.asyncio, "to_thread", server_then_success)
+    adapter = AkshareEastmoneyFinancialAdapter(
+        request_timeout_seconds=5,
+        sleeper=_no_sleep,
+    )
+    request = SourceRequest(
+        capability="financial.valuation.raw",
+        parameters=(("exchange", "SSE"), ("symbol", "600519")),
+    )
+    assert asyncio.run(adapter.fetch(request)).capability == request.capability
+    assert attempts == 2
+
+    for status, expected_code in (
+        (400, ProviderErrorCode.INVALID_REQUEST),
+        (401, ProviderErrorCode.AUTHENTICATION),
+        (403, ProviderErrorCode.AUTHENTICATION),
+        (429, ProviderErrorCode.RATE_LIMITED),
+    ):
+        response = requests.Response()
+        response.status_code = status
+        rejected_attempts = 0
+
+        async def rejected(
+            *arguments: object,
+            provider_response: requests.Response = response,
+            **keywords: object,
+        ) -> object:
+            """返回当前 4xx，证明 adapter 不会把客户端错误送入重试。"""
+            nonlocal rejected_attempts
+            del arguments, keywords
+            rejected_attempts += 1
+            raise requests.exceptions.HTTPError(response=provider_response)
+
+        monkeypatch.setattr(eastmoney_financial.asyncio, "to_thread", rejected)
+        with pytest.raises(ProviderError) as captured:
+            asyncio.run(adapter.fetch(request))
+        assert captured.value.code is expected_code
+        assert captured.value.retryable is False
+        assert rejected_attempts == 1
+
+
+def test_adapter_enforces_concurrency_rate_and_total_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同一 adapter 最多一个在途调用；RPM 等待若超出逻辑请求预算则不得发起下一次 egress。"""
+    active = 0
+    maximum_active = 0
+    calls = 0
+    current_time = 0.0
+
+    async def successful_thread(*arguments: object, **keywords: object) -> object:
+        """让两个并发请求主动让出事件循环，以暴露是否真正经过信号量串行化。"""
+        nonlocal active, calls, maximum_active
+        del arguments
+        active += 1
+        calls += 1
+        maximum_active = max(maximum_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return _minimal_payload_pair(str(keywords["capability"]))
+
+    def monotonic() -> float:
+        """返回测试控制的单调时间。"""
+        return current_time
+
+    async def forbidden_sleep(delay: float) -> None:
+        """总预算不足时不应真的进入 RPM 等待。"""
+        raise AssertionError(f"unexpected rate-limit sleep: {delay}")
+
+    async def run_concurrently() -> None:
+        """并发触发两个能力并验证信号量不会允许供应商调用重叠。"""
+        adapter = AkshareEastmoneyFinancialAdapter(
+            request_timeout_seconds=5,
+            max_concurrency=1,
+        )
+        await asyncio.gather(
+            adapter.fetch(
+                SourceRequest(
+                    capability="financial.metric.raw",
+                    parameters=(("exchange", "SSE"), ("symbol", "600519")),
+                )
+            ),
+            adapter.fetch(
+                SourceRequest(
+                    capability="financial.valuation.raw",
+                    parameters=(("exchange", "SSE"), ("symbol", "600519")),
+                )
+            ),
+        )
+
+    monkeypatch.setattr(eastmoney_financial.asyncio, "to_thread", successful_thread)
+    asyncio.run(run_concurrently())
+    assert maximum_active == 1
+
+    calls = 0
+    rate_limited = AkshareEastmoneyFinancialAdapter(
+        request_timeout_seconds=5,
+        max_concurrency=1,
+        requests_per_minute=6,
+        sleeper=forbidden_sleep,
+        monotonic=monotonic,
+    )
+    request = SourceRequest(
+        capability="financial.metric.raw",
+        parameters=(("exchange", "SSE"), ("symbol", "600519")),
+    )
+
+    async def exhaust_budget() -> None:
+        """先占用一个 RPM 槽，再证明五秒预算拒绝等待十秒的下一槽。"""
+        await rate_limited.fetch(request)
+        with pytest.raises(ProviderError) as captured:
+            await rate_limited.fetch(request)
+        assert captured.value.code is ProviderErrorCode.UNAVAILABLE
+        assert captured.value.retryable is True
+
+    asyncio.run(exhaust_budget())
+    assert calls == 1
 
 
 def test_each_capability_rejects_empty_provider_frame(

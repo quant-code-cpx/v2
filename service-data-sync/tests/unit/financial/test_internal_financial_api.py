@@ -25,13 +25,28 @@ from service_data_sync.bootstrap.settings import load_settings
 from service_data_sync.domain.equity import Exchange
 from service_data_sync.interfaces.internal_sector_api import create_app
 
+_REPORT_VERSION = UUID("10000000-0000-4000-8000-000000000016")
+_PROVIDER_METRIC_VERSION = UUID("10000000-0000-4000-8000-000000000017")
+_VALUATION_VERSION = UUID("10000000-0000-4000-8000-000000000018")
+_DERIVED_METRIC_VERSION = UUID("10000000-0000-4000-8000-000000000019")
+
 
 class RecordingFinancialRepository:
     """记录暗发布解析请求，并稳定模拟不存在生产发布。"""
 
     def __init__(self) -> None:
         """初始化空调用记录，不构造数据库或来源连接。"""
-        self.calls: list[tuple[Exchange, str, FinancialCapability, str, int]] = []
+        self.calls: list[
+            tuple[
+                Exchange,
+                str,
+                FinancialCapability,
+                str,
+                int,
+                date | None,
+                datetime | None,
+            ]
+        ] = []
 
     def get_current_publication(
         self,
@@ -41,9 +56,21 @@ class RecordingFinancialRepository:
         capability: FinancialCapability,
         methodology_code: str,
         methodology_version: int,
+        as_of: date | None = None,
+        known_at: datetime | None = None,
     ) -> FinancialPublicationSnapshot | None:
         """记录精确 `publication` 身份并返回空值，保持路由拒绝读取。"""
-        self.calls.append((exchange, symbol, capability, methodology_code, methodology_version))
+        self.calls.append(
+            (
+                exchange,
+                symbol,
+                capability,
+                methodology_code,
+                methodology_version,
+                as_of,
+                known_at,
+            )
+        )
         return None
 
 
@@ -78,8 +105,11 @@ class PublishedFinancialRepository:
         capability: FinancialCapability,
         methodology_code: str,
         methodology_version: int,
+        as_of: date | None = None,
+        known_at: datetime | None = None,
     ) -> FinancialPublicationSnapshot | None:
         """只接受测试声明的精确发布身份，模拟生产选择器的防猜测边界。"""
+        del as_of, known_at
         publications = {
             ("financial.report", "eastmoney.reported", 2): _publication(),
             (
@@ -144,8 +174,11 @@ class PublishedFinancialRepository:
         exchange: Exchange,
         symbol: str,
         report_ref: UUID,
+        as_of: date | None = None,
+        known_at: datetime | None = None,
     ) -> FinancialPublicationSnapshot | None:
         """按公开引用返回测试发布，模拟详情路由不接收方法学猜测参数。"""
+        del as_of, known_at
         if exchange is Exchange.SSE and symbol == "600519":
             if any(report.report_ref == report_ref for report in self._reports):
                 return _publication()
@@ -349,12 +382,16 @@ def financial_client(configured_environment: None) -> tuple[TestClient, dict[str
 @pytest.mark.parametrize(
     "path",
     [
-        "/internal/v1/equities/SSE/600519/financial-reports?methodologyCode=research.v1&methodologyVersion=1",
-        "/internal/v1/equities/SSE/600519/financial-reports/00000000-0000-4000-8000-000000000001",
+        "/internal/v1/equities/SSE/600519/financial-reports"
+        f"?methodologyCode=research.v1&methodologyVersion=1&dataVersion={_REPORT_VERSION}",
+        "/internal/v1/equities/SSE/600519/financial-reports/"
+        f"00000000-0000-4000-8000-000000000001?dataVersion={_REPORT_VERSION}",
         "/internal/v1/equities/SSE/600519/financial-metrics?origin=PROVIDER_REPORTED"
-        "&methodologyCode=research.v1&methodologyVersion=1&metric=net_income",
+        f"&methodologyCode=research.v1&methodologyVersion=1&metric=net_income"
+        f"&dataVersion={_PROVIDER_METRIC_VERSION}",
         "/internal/v1/equities/SSE/600519/valuations?methodologyCode=research.v1"
-        "&methodologyVersion=1&metric=pe_ttm&start=2026-01-01&end=2026-01-31",
+        f"&methodologyVersion=1&metric=pe_ttm&start=2026-01-01&end=2026-01-31"
+        f"&dataVersion={_VALUATION_VERSION}",
     ],
 )
 def test_financial_routes_fail_closed_without_publication(
@@ -396,17 +433,19 @@ def test_financial_routes_reject_invalid_contract_ranges_before_unavailable(
 
     bad_exchange = client.get(
         "/internal/v1/equities/US/600519/financial-reports?methodologyCode=research.v1"
-        "&methodologyVersion=1",
+        f"&methodologyVersion=1&dataVersion={_REPORT_VERSION}",
         headers=headers,
     )
     reversed_period = client.get(
         "/internal/v1/equities/SSE/600519/financial-reports?methodologyCode=research.v1"
-        "&methodologyVersion=1&reportPeriodFrom=2026-06-30&reportPeriodTo=2026-03-31",
+        f"&methodologyVersion=1&reportPeriodFrom=2026-06-30&reportPeriodTo=2026-03-31"
+        f"&dataVersion={_REPORT_VERSION}",
         headers=headers,
     )
     excessive_valuation = client.get(
         "/internal/v1/equities/SSE/600519/valuations?methodologyCode=research.v1"
-        "&methodologyVersion=1&metric=pe_ttm&start=2010-01-01&end=2026-01-01",
+        f"&methodologyVersion=1&metric=pe_ttm&start=2010-01-01&end=2026-01-01"
+        f"&dataVersion={_VALUATION_VERSION}",
         headers=headers,
     )
 
@@ -420,17 +459,19 @@ def test_financial_routes_reject_invalid_contract_ranges_before_unavailable(
     [
         (
             "/internal/v1/equities/SSE/600519/financial-reports?methodologyCode=research.v1"
-            "&methodologyVersion=1",
+            f"&methodologyVersion=1&dataVersion={_REPORT_VERSION}",
             "financial.report",
         ),
         (
             "/internal/v1/equities/SSE/600519/financial-metrics?origin=PLATFORM_DERIVED"
-            "&methodologyCode=research.v1&methodologyVersion=1&metric=roe",
+            f"&methodologyCode=research.v1&methodologyVersion=1&metric=roe"
+            f"&dataVersion={_DERIVED_METRIC_VERSION}",
             "financial.derived-metric",
         ),
         (
             "/internal/v1/equities/SSE/600519/valuations?methodologyCode=research.v1"
-            "&methodologyVersion=1&metric=pe_ttm&start=2026-01-01&end=2026-01-31",
+            f"&methodologyVersion=1&metric=pe_ttm&start=2026-01-01&end=2026-01-31"
+            f"&dataVersion={_VALUATION_VERSION}",
             "financial.valuation",
         ),
     ],
@@ -440,7 +481,7 @@ def test_financial_list_routes_resolve_exact_publication_before_fail_closed(
     path: str,
     capability: FinancialCapability,
 ) -> None:
-    """列表路由在返回 503 前必须传入完整身份，禁止按最新方法学或混合能力猜测。"""
+    """列表路由在返回版本冲突前必须传入完整身份，禁止按最新方法学猜测。"""
     settings = load_settings()
     repository = RecordingFinancialRepository()
     client = TestClient(
@@ -452,14 +493,25 @@ def test_financial_list_routes_resolve_exact_publication_before_fail_closed(
     )
 
     response = client.get(
-        path,
+        path + "&asOf=2026-01-15&knownAt=2026-07-28T08:00:00Z",
         headers={
             "Authorization": f"Bearer {settings.internal_api_bearer_token.get_secret_value()}"
         },
     )
 
-    assert response.status_code == 503
-    assert repository.calls == [(Exchange.SSE, "600519", capability, "research.v1", 1)]
+    assert response.status_code == 409
+    assert response.json()["code"] == "snapshot-expired"
+    assert repository.calls == [
+        (
+            Exchange.SSE,
+            "600519",
+            capability,
+            "research.v1",
+            1,
+            date(2026, 1, 15),
+            datetime(2026, 7, 28, 8, tzinfo=UTC),
+        )
+    ]
 
 
 def test_financial_report_list_returns_frozen_page_and_honors_conditional_get(
@@ -478,7 +530,7 @@ def test_financial_report_list_returns_frozen_page_and_honors_conditional_get(
     headers = {"Authorization": f"Bearer {settings.internal_api_bearer_token.get_secret_value()}"}
     path = (
         "/internal/v1/equities/SSE/600519/financial-reports?methodologyCode=eastmoney.reported"
-        "&methodologyVersion=2&limit=1"
+        f"&methodologyVersion=2&limit=1&dataVersion={_REPORT_VERSION}"
     )
 
     response = client.get(path, headers=headers)
@@ -502,6 +554,43 @@ def test_financial_report_list_returns_frozen_page_and_honors_conditional_get(
     assert not_modified.headers["x-data-version"] == response.headers["x-data-version"]
 
 
+def test_financial_routes_reject_status_version_drift_before_reading_rows(
+    configured_environment: None,
+) -> None:
+    """状态版本与当前 publication 不同必须返回 409，禁止默取最新财务事实。"""
+    settings = load_settings()
+    repository = PublishedFinancialRepository((_report("1"),))
+    client = TestClient(
+        create_app(
+            settings=settings,
+            repository=cast(SectorMarketDataRepository, object()),
+            financial_repository=repository,
+        )
+    )
+    headers = {"Authorization": f"Bearer {settings.internal_api_bearer_token.get_secret_value()}"}
+    wrong_version = UUID("10000000-0000-4000-8000-000000000099")
+
+    report_list = client.get(
+        "/internal/v1/equities/SSE/600519/financial-reports"
+        "?methodologyCode=eastmoney.reported&methodologyVersion=2"
+        f"&dataVersion={wrong_version}",
+        headers=headers,
+    )
+    report_detail = client.get(
+        "/internal/v1/equities/SSE/600519/financial-reports/"
+        "50000000-0000-4000-8000-000000000001"
+        f"?dataVersion={wrong_version}",
+        headers=headers,
+    )
+
+    assert report_list.status_code == 409
+    assert report_list.json()["code"] == "snapshot-expired"
+    assert report_detail.status_code == 409
+    assert report_detail.json()["code"] == "snapshot-expired"
+    assert repository.calls == []
+    assert repository.fact_calls == []
+
+
 def test_financial_report_list_cursor_rejects_changed_scope_and_reads_next_page(
     configured_environment: None,
 ) -> None:
@@ -518,7 +607,7 @@ def test_financial_report_list_cursor_rejects_changed_scope_and_reads_next_page(
     headers = {"Authorization": f"Bearer {settings.internal_api_bearer_token.get_secret_value()}"}
     path = (
         "/internal/v1/equities/SSE/600519/financial-reports?methodologyCode=eastmoney.reported"
-        "&methodologyVersion=2&limit=1"
+        f"&methodologyVersion=2&limit=1&dataVersion={_REPORT_VERSION}"
     )
     first = client.get(path, headers=headers)
     cursor = first.json()["nextCursor"]
@@ -555,7 +644,7 @@ def test_financial_report_detail_returns_frozen_facts_and_binds_cursor(
     headers = {"Authorization": f"Bearer {settings.internal_api_bearer_token.get_secret_value()}"}
     path = (
         "/internal/v1/equities/SSE/600519/financial-reports/"
-        "50000000-0000-4000-8000-000000000001?limit=1"
+        f"50000000-0000-4000-8000-000000000001?limit=1&dataVersion={_REPORT_VERSION}"
     )
 
     response = client.get(path, headers=headers)
@@ -605,7 +694,7 @@ def test_financial_metric_page_reads_frozen_provider_values_and_binds_cursor(
     path = (
         "/internal/v1/equities/SSE/600519/financial-metrics?origin=PROVIDER_REPORTED"
         "&methodologyCode=eastmoney.provider-metric&methodologyVersion=2"
-        "&metric=net_income&metric=roe&limit=1"
+        f"&metric=net_income&metric=roe&limit=1&dataVersion={_PROVIDER_METRIC_VERSION}"
     )
 
     first = client.get(path, headers=headers)
@@ -654,7 +743,8 @@ def test_financial_metric_page_reads_platform_derived_values_without_mixing_orig
     path = (
         "/internal/v1/equities/SSE/600519/financial-metrics?origin=PLATFORM_DERIVED"
         "&methodologyCode=platform.financial-derivation&methodologyVersion=1"
-        "&metric=platform.operating_revenue.ttm&basis=TTM"
+        f"&metric=platform.operating_revenue.ttm&basis=TTM"
+        f"&dataVersion={_DERIVED_METRIC_VERSION}"
     )
 
     response = client.get(path, headers=headers)
@@ -708,7 +798,7 @@ def test_valuation_page_reads_frozen_observations_and_binds_cursor(
     path = (
         "/internal/v1/equities/SSE/600519/valuations?methodologyCode=eastmoney.valuation"
         "&methodologyVersion=2&metric=pe_ttm&metric=pb"
-        "&start=2026-07-01&end=2026-07-31&limit=1"
+        f"&start=2026-07-01&end=2026-07-31&limit=1&dataVersion={_VALUATION_VERSION}"
     )
 
     first = client.get(path, headers=headers)
@@ -736,7 +826,7 @@ def test_valuation_page_reads_frozen_observations_and_binds_cursor(
 def _publication() -> FinancialPublicationSnapshot:
     """构造已验证的唯一测试发布快照，使响应可回链到固定 `data_version`。"""
     return FinancialPublicationSnapshot(
-        data_version=UUID("10000000-0000-4000-8000-000000000016"),
+        data_version=_REPORT_VERSION,
         security_id=8,
         instrument_id=UUID("30000000-0000-4000-8000-000000000016"),
         methodology_id=UUID("20000000-0000-4000-8000-000000000016"),
@@ -755,7 +845,7 @@ def _publication() -> FinancialPublicationSnapshot:
 def _metric_publication() -> FinancialPublicationSnapshot:
     """构造供应商直接指标的独立测试发布，不与三表 dataVersion 或方法学混用。"""
     return FinancialPublicationSnapshot(
-        data_version=UUID("10000000-0000-4000-8000-000000000017"),
+        data_version=_PROVIDER_METRIC_VERSION,
         security_id=8,
         instrument_id=UUID("30000000-0000-4000-8000-000000000016"),
         methodology_id=UUID("20000000-0000-4000-8000-000000000017"),
@@ -774,7 +864,7 @@ def _metric_publication() -> FinancialPublicationSnapshot:
 def _valuation_publication() -> FinancialPublicationSnapshot:
     """构造历史估值独立测试发布，确保估值读取不会误用指标的消费者版本。"""
     return FinancialPublicationSnapshot(
-        data_version=UUID("10000000-0000-4000-8000-000000000018"),
+        data_version=_VALUATION_VERSION,
         security_id=8,
         instrument_id=UUID("30000000-0000-4000-8000-000000000016"),
         methodology_id=UUID("20000000-0000-4000-8000-000000000018"),
@@ -793,7 +883,7 @@ def _valuation_publication() -> FinancialPublicationSnapshot:
 def _derived_metric_publication() -> FinancialPublicationSnapshot:
     """构造平台派生指标独立发布，固定方法学版本且不冒充外部来源口径。"""
     return FinancialPublicationSnapshot(
-        data_version=UUID("10000000-0000-4000-8000-000000000019"),
+        data_version=_DERIVED_METRIC_VERSION,
         security_id=8,
         instrument_id=UUID("30000000-0000-4000-8000-000000000016"),
         methodology_id=UUID("20000000-0000-4000-8000-000000000019"),

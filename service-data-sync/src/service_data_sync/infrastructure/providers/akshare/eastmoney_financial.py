@@ -11,13 +11,16 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from collections.abc import Callable
+import random
+import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from math import isnan
 from typing import Any
 
 import akshare as ak
+import requests
 
 from service_data_sync.application.ports.data_source import (
     ProviderBatch,
@@ -36,7 +39,10 @@ _SCHEMAS = {
     _METRIC_CAPABILITY: "quant-v2.financial-provider-metric.v1",
     _VALUATION_CAPABILITY: "quant-v2.financial-valuation.v1",
 }
-_ADAPTER_VERSION = "akshare-1.18.78-eastmoney-financial-v1"
+_ADAPTER_VERSION = "akshare-1.18.78-eastmoney-financial-v2"
+_MAX_ATTEMPTS = 3
+_BACKOFF_BASE_SECONDS = 1.0
+_BACKOFF_JITTER_SECONDS = 0.5
 _RECORD_METADATA = frozenset(
     {
         "SECUCODE",
@@ -63,6 +69,11 @@ _RECORD_METADATA = frozenset(
     }
 )
 
+# 这些可替换边界让退避与总预算可以确定性测试，生产默认仍使用真实单调时钟。
+Sleeper = Callable[[float], Awaitable[None]]
+MonotonicClock = Callable[[], float]
+RandomSource = Callable[[], float]
+
 
 class AkshareEastmoneyFinancialAdapter:
     """将东财宽表隔离成三类来源中立财务能力，保留原始表头与行记录。
@@ -72,9 +83,33 @@ class AkshareEastmoneyFinancialAdapter:
 
     provider_id = "akshare-eastmoney-financial"
 
-    def __init__(self, *, request_timeout_seconds: int) -> None:
-        """保存每个阻塞 AKShare 请求组可占用的最大墙钟时间。"""
+    def __init__(
+        self,
+        *,
+        request_timeout_seconds: int,
+        max_concurrency: int = 1,
+        requests_per_minute: int | None = None,
+        sleeper: Sleeper = asyncio.sleep,
+        monotonic: MonotonicClock = time.monotonic,
+        random_source: RandomSource = random.random,
+    ) -> None:
+        """保存总预算、进程内并发与速率边界，并注入可测试的时钟和退避依赖。"""
+        if request_timeout_seconds < 1:
+            raise ValueError("request_timeout_seconds must be positive")
+        if max_concurrency < 1:
+            raise ValueError("max_concurrency must be positive")
+        if requests_per_minute is not None and requests_per_minute < 1:
+            raise ValueError("requests_per_minute must be positive")
         self._request_timeout_seconds = request_timeout_seconds
+        self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._rate_lock = asyncio.Lock()
+        self._rate_interval_seconds = (
+            0.0 if requests_per_minute is None else 60.0 / requests_per_minute
+        )
+        self._next_request_at = 0.0
+        self._sleeper = sleeper
+        self._monotonic = monotonic
+        self._random_source = random_source
 
     def capabilities(self) -> frozenset[str]:
         """声明三大报表、供应商财务指标和历史估值能力。"""
@@ -87,27 +122,21 @@ class AkshareEastmoneyFinancialAdapter:
         """
         exchange, symbol = _request_identity(request)
         provider_symbol = _provider_symbol(exchange, symbol)
+        deadline = self._monotonic() + self._request_timeout_seconds
         try:
             async with asyncio.timeout(self._request_timeout_seconds):
-                payload_object, raw_object = await asyncio.to_thread(
-                    _fetch_payload,
-                    capability=request.capability,
-                    exchange=exchange,
-                    symbol=symbol,
-                    provider_symbol=provider_symbol,
-                )
+                async with self._semaphore:
+                    payload_object, raw_object = await self._fetch_with_retry(
+                        request=request,
+                        exchange=exchange,
+                        symbol=symbol,
+                        provider_symbol=provider_symbol,
+                        deadline=deadline,
+                    )
         except TimeoutError as error:
             raise ProviderError(
                 ProviderErrorCode.UNAVAILABLE,
-                "provider request timed out",
-                retryable=True,
-            ) from error
-        except ProviderError:
-            raise
-        except Exception as error:
-            raise ProviderError(
-                ProviderErrorCode.UNAVAILABLE,
-                "provider request failed",
+                "provider request budget exhausted",
                 retryable=True,
             ) from error
         payload = json.dumps(
@@ -134,6 +163,124 @@ class AkshareEastmoneyFinancialAdapter:
             adapter_version=_ADAPTER_VERSION,
             schema_fingerprint=_schema_fingerprint(raw_object),
         )
+
+    async def _fetch_with_retry(
+        self,
+        *,
+        request: SourceRequest,
+        exchange: Exchange,
+        symbol: str,
+        provider_symbol: str,
+        deadline: float,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        """只对网络、超时和 HTTP 5xx 做至多三次幂等抓取，并共享同一总预算。"""
+        for attempt in range(_MAX_ATTEMPTS):
+            await self._wait_for_rate_slot(deadline)
+            try:
+                return await asyncio.to_thread(
+                    _fetch_payload,
+                    capability=request.capability,
+                    exchange=exchange,
+                    symbol=symbol,
+                    provider_symbol=provider_symbol,
+                )
+            except Exception as error:
+                classified = _classify_upstream_error(error)
+            if not _should_retry(classified) or attempt == _MAX_ATTEMPTS - 1:
+                raise classified
+            await self._pause_before_retry(attempt=attempt, deadline=deadline)
+        raise _budget_exhausted_error()
+
+    async def _wait_for_rate_slot(self, deadline: float) -> None:
+        """在总预算内串行预留下一次供应商调用，避免重试绕过每分钟速率上限。"""
+        if self._rate_interval_seconds == 0:
+            return
+        async with self._rate_lock:
+            now = self._monotonic()
+            delay = max(0.0, self._next_request_at - now)
+            remaining = deadline - now
+            if remaining <= 0 or delay >= remaining:
+                raise _budget_exhausted_error()
+            if delay > 0:
+                await self._sleeper(delay)
+            request_started_at = self._monotonic()
+            self._next_request_at = max(self._next_request_at, request_started_at)
+            self._next_request_at += self._rate_interval_seconds
+
+    async def _pause_before_retry(self, *, attempt: int, deadline: float) -> None:
+        """按指数退避叠加抖动；等待时间不能吃穿当前逻辑请求的总预算。"""
+        exponential = _BACKOFF_BASE_SECONDS * (2**attempt)
+        jitter = _BACKOFF_JITTER_SECONDS * max(0.0, min(1.0, self._random_source()))
+        delay = exponential + jitter
+        remaining = deadline - self._monotonic()
+        if remaining <= 0 or delay >= remaining:
+            raise _budget_exhausted_error()
+        await self._sleeper(delay)
+
+
+def _classify_upstream_error(error: Exception) -> ProviderError:
+    """把 SDK/HTTP 异常收敛为稳定类别，未知运行时错误保持不可自动重试。"""
+    if isinstance(error, ProviderError):
+        return error
+    if isinstance(error, requests.exceptions.HTTPError):
+        status = error.response.status_code if error.response is not None else None
+        if status is not None and 500 <= status <= 599:
+            return ProviderError(
+                ProviderErrorCode.UNAVAILABLE,
+                "provider returned a server error",
+                retryable=True,
+            )
+        if status in {401, 403}:
+            return ProviderError(
+                ProviderErrorCode.AUTHENTICATION,
+                "provider rejected authentication",
+                retryable=False,
+            )
+        if status == 429:
+            return ProviderError(
+                ProviderErrorCode.RATE_LIMITED,
+                "provider rate limit reached",
+                retryable=False,
+            )
+        return ProviderError(
+            ProviderErrorCode.INVALID_REQUEST,
+            "provider rejected the request",
+            retryable=False,
+        )
+    if isinstance(
+        error,
+        (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+            ConnectionError,
+            TimeoutError,
+        ),
+    ):
+        return ProviderError(
+            ProviderErrorCode.UNAVAILABLE,
+            "provider network request failed",
+            retryable=True,
+        )
+    return ProviderError(
+        ProviderErrorCode.UNAVAILABLE,
+        "provider request failed",
+        retryable=False,
+    )
+
+
+def _should_retry(error: ProviderError) -> bool:
+    """仅允许明确标记为暂时不可用的网络、超时或 5xx 失败进入 adapter 内重试。"""
+    return error.code is ProviderErrorCode.UNAVAILABLE and error.retryable
+
+
+def _budget_exhausted_error() -> ProviderError:
+    """构造不泄露供应商正文、但允许控制面稍后重跑的总预算耗尽错误。"""
+    return ProviderError(
+        ProviderErrorCode.UNAVAILABLE,
+        "provider request budget exhausted",
+        retryable=True,
+    )
 
 
 def _request_identity(request: SourceRequest) -> tuple[Exchange, str]:

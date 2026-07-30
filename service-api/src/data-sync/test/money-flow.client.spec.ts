@@ -59,6 +59,7 @@ describe('MoneyFlowClient', () => {
       bucket: 'main',
       start: '2026-07-01',
       end: '2026-07-28',
+      dataVersion,
       knownAt: '2026-07-28T08:00:00Z',
       limit: 200,
       requestId: 'req-daily',
@@ -76,6 +77,7 @@ describe('MoneyFlowClient', () => {
       '/internal/v1/money-flow/methodologies/eastmoney.trade-direction/daily-series/equities/SSE/600519',
     );
     expect(url.searchParams.get('knownAt')).toBe('2026-07-28T08:00:00Z');
+    expect(url.searchParams.get('dataVersion')).toBe(dataVersion);
   });
 
   /** 验证内部 304 保留版本头，且一次 503 后仅重试一次。 */
@@ -159,6 +161,32 @@ describe('MoneyFlowClient', () => {
     ).rejects.toMatchObject({
       status: HttpStatus.CONFLICT,
       response: { code: 'query-conflict' },
+    });
+
+    const snapshotClient = new MoneyFlowClient(
+      config,
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ code: 'snapshot-expired', detail: 'secret' }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/problem+json' },
+        }),
+      ),
+    );
+    await expect(
+      snapshotClient.listDaily({
+        methodologyId: 'eastmoney.trade-direction',
+        methodologyVersion: '1',
+        scopePath: 'equities/SSE/600519',
+        bucket: 'main',
+        start: '2026-07-01',
+        end: '2026-07-28',
+        dataVersion,
+        limit: 200,
+        requestId: 'req-snapshot-expired',
+      }),
+    ).rejects.toMatchObject({
+      status: HttpStatus.CONFLICT,
+      response: { code: 'snapshot-expired' },
     });
   });
 });

@@ -68,6 +68,59 @@ ValuationObservationRevision = valuation_observation_revision.ValuationObservati
 EquityIdentifierVersion = equity_identifier_version.EquityIdentifierVersion
 
 
+def _selected_security_id(
+    *,
+    exchange: Exchange,
+    symbol: str,
+    as_of: date | None,
+    known_at: datetime | None,
+) -> object:
+    """构造双时态永久证券标量选择器；多身份会由数据库基数检查失败关闭。"""
+    if known_at is not None and known_at.tzinfo is None:
+        raise ValueError("known_at must include a timezone")
+    conditions = [
+        EquityIdentifierVersion.exchange == exchange.value,
+        EquityIdentifierVersion.symbol == symbol,
+        EquityIdentifierVersion.identity_state == "CONFIRMED",
+        EquityInstrument.master_confirmed_at.is_not(None),
+        EquityInstrument.listing_status != "PENDING",
+    ]
+    if as_of is None:
+        # 省略业务日只允许当前开放代码，历史退市证券必须显式携带详情路由的 `asOf`。
+        conditions.append(EquityIdentifierVersion.effective_to.is_(None))
+    else:
+        conditions.extend(
+            (
+                EquityIdentifierVersion.effective_from <= as_of,
+                or_(
+                    EquityIdentifierVersion.effective_to.is_(None),
+                    EquityIdentifierVersion.effective_to > as_of,
+                ),
+            )
+        )
+    if known_at is None:
+        conditions.append(EquityIdentifierVersion.known_to.is_(None))
+    else:
+        conditions.extend(
+            (
+                EquityIdentifierVersion.known_from <= known_at,
+                or_(
+                    EquityIdentifierVersion.known_to.is_(None),
+                    EquityIdentifierVersion.known_to > known_at,
+                ),
+            )
+        )
+    return (
+        select(EquityIdentifierVersion.security_id)
+        .join(
+            EquityInstrument,
+            EquityInstrument.security_id == EquityIdentifierVersion.security_id,
+        )
+        .where(*conditions)
+        .scalar_subquery()
+    )
+
+
 class SqlAlchemyFinancialReadRepository(FinancialReadRepository):
     """只选择未被替代且方法学已验证的财务生产发布，不读取未发布 `revision`。"""
 
@@ -83,8 +136,16 @@ class SqlAlchemyFinancialReadRepository(FinancialReadRepository):
         capability: FinancialCapability,
         methodology_code: str,
         methodology_version: int,
+        as_of: date | None = None,
+        known_at: datetime | None = None,
     ) -> FinancialPublicationSnapshot | None:
-        """用完整 `publication` 身份选择唯一当前版本，多个候选时宁可失败也不猜测。"""
+        """先解析请求时点的永久证券，再选择其唯一当前发布。"""
+        selected_security_id = _selected_security_id(
+            exchange=exchange,
+            symbol=symbol,
+            as_of=as_of,
+            known_at=known_at,
+        )
         statement = (
             select(
                 FinancialPublication.data_version,
@@ -114,22 +175,9 @@ class SqlAlchemyFinancialReadRepository(FinancialReadRepository):
                 EquityInstrument,
                 EquityInstrument.security_id == FinancialPublication.security_id,
             )
-            .join(
-                EquityIdentifierVersion,
-                and_(
-                    EquityIdentifierVersion.security_id == FinancialPublication.security_id,
-                    EquityIdentifierVersion.exchange == exchange.value,
-                    EquityIdentifierVersion.symbol == symbol,
-                    EquityIdentifierVersion.identity_state == "CONFIRMED",
-                    EquityIdentifierVersion.effective_range.op("@>")(
-                        FinancialPublication.effective_as_of
-                    ),
-                    EquityIdentifierVersion.knowledge_range.op("@>")(
-                        FinancialPublication.knowledge_cutoff
-                    ),
-                ),
-            )
             .where(
+                # 请求的双时态锚点已锁定永久证券；报告期不能再次被解释为当时上市身份。
+                FinancialPublication.security_id == selected_security_id,
                 FinancialPublication.capability == capability,
                 FinancialMethodology.code == methodology_code,
                 FinancialMethodology.version == methodology_version,
@@ -266,8 +314,16 @@ class SqlAlchemyFinancialReadRepository(FinancialReadRepository):
         exchange: Exchange,
         symbol: str,
         report_ref: UUID,
+        as_of: date | None = None,
+        known_at: datetime | None = None,
     ) -> FinancialPublicationSnapshot | None:
-        """解析报表公开引用所属的当前生产发布，不允许由调用方猜测方法学版本。"""
+        """先解析请求时点的永久证券，再反查公开报表引用所属发布。"""
+        selected_security_id = _selected_security_id(
+            exchange=exchange,
+            symbol=symbol,
+            as_of=as_of,
+            known_at=known_at,
+        )
         statement = (
             select(
                 FinancialPublication.data_version,
@@ -298,21 +354,6 @@ class SqlAlchemyFinancialReadRepository(FinancialReadRepository):
                 EquityInstrument.security_id == FinancialPublication.security_id,
             )
             .join(
-                EquityIdentifierVersion,
-                and_(
-                    EquityIdentifierVersion.security_id == FinancialPublication.security_id,
-                    EquityIdentifierVersion.exchange == exchange.value,
-                    EquityIdentifierVersion.symbol == symbol,
-                    EquityIdentifierVersion.identity_state == "CONFIRMED",
-                    EquityIdentifierVersion.effective_range.op("@>")(
-                        FinancialPublication.effective_as_of
-                    ),
-                    EquityIdentifierVersion.knowledge_range.op("@>")(
-                        FinancialPublication.knowledge_cutoff
-                    ),
-                ),
-            )
-            .join(
                 FinancialReport,
                 and_(
                     FinancialReport.security_id == FinancialPublication.security_id,
@@ -320,6 +361,7 @@ class SqlAlchemyFinancialReadRepository(FinancialReadRepository):
                 ),
             )
             .where(
+                FinancialPublication.security_id == selected_security_id,
                 FinancialReport.report_ref == report_ref,
                 FinancialPublication.capability == "financial.report",
                 FinancialMethodology.status == "validated",

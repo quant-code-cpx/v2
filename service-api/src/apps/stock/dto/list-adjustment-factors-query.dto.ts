@@ -4,6 +4,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Matches,
   Max,
@@ -14,6 +15,10 @@ import { DATE_ONLY_PATTERN } from './temporal-patterns.js';
 
 /** 约束累计复权因子的日期窗口和页上限。 */
 export class ListAdjustmentFactorsQueryDto {
+  /** 绑定 data-status 返回的精确因子 publication。 */
+  @IsUUID()
+  public readonly dataVersion!: string;
+
   /** 可选包含端起始日期。 */
   @IsOptional()
   @Matches(DATE_ONLY_PATTERN)

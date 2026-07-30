@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import delete
 
+from service_data_sync.application.ports.market_data import EquitySourceObservation
 from service_data_sync.bootstrap.settings import load_settings
 from service_data_sync.domain.equity import EquityDailyBar, EquityIdentifier
 from service_data_sync.infrastructure.database.connection import DatabaseClient
@@ -42,10 +43,24 @@ def test_repository_persists_and_reads_one_recent_month_bar() -> None:
         publication = repository.publish_daily_bars(
             identifier=identifier,
             bars=(bar,),
-            provider_id="integration-fixture",
-            source_payload_sha256="c" * 64,
-            raw_uri="s3://integration-fixture/recent-month.json",
-            observed_at=datetime(2026, 7, 1, tzinfo=UTC),
+            source=EquitySourceObservation(
+                provider_id="integration-fixture",
+                capability="equity.bar.1d.raw",
+                raw_payload_sha256="c" * 64,
+                raw_uri="s3://integration-fixture/raw/recent-month.json",
+                raw_content_type="application/json",
+                raw_byte_size=128,
+                normalized_payload_sha256="d" * 64,
+                normalized_uri="s3://integration-fixture/normalized/recent-month.json",
+                normalized_content_type="application/vnd.quant-v2.equity-daily-bar+json",
+                normalized_byte_size=96,
+                observed_at=datetime(2026, 7, 1, tzinfo=UTC),
+                upstream_source="integration-upstream",
+                adapter_version="integration-v1",
+                schema_fingerprint="e" * 64,
+            ),
+            start=date(2026, 6, 1),
+            end=date(2026, 6, 30),
         )
         bars = repository.list_daily_bars(
             instrument_id=publication.instrument.instrument_id,

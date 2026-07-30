@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -30,18 +31,21 @@ from service_data_sync.domain.corporate import (
     EarningsExpressMetric,
     EarningsGuidanceMetric,
 )
+from service_data_sync.domain.equity import EquityIdentifier
 
 _CAPABILITY = "corporate.disclosure.earnings.p0"
 _SCHEMA = "quant-v2.corporate-earnings-events.v1"
+_MAX_WINDOW_DAYS = 31
 
 
 @dataclass(frozen=True, slots=True)
 class CorporateEventsSyncResult:
-    """返回公告域发布版本和变更计数；无公告时返回成功空结果。"""
+    """返回公告域覆盖发布版本和变更计数；合法空窗也有真实 dataVersion。"""
 
-    data_version: UUID | None
+    data_version: UUID
     inserted_count: int
     unchanged_count: int
+    excluded_count: int = 0
     availability: str = "available"
 
 
@@ -60,41 +64,63 @@ class CorporateEventsSyncService:
         self._repository = repository
         self._raw_payload_store = raw_payload_store
 
-    async def sync(self, *, start: date, end: date) -> CorporateEventsSyncResult:
-        """同步有界公告窗口；能力或日期无效时在访问 Provider 前停止。"""
+    async def sync(
+        self,
+        *,
+        start: date,
+        end: date,
+        identifier: EquityIdentifier | None = None,
+        before_final_publication: Callable[[], None] | None = None,
+    ) -> CorporateEventsSyncResult:
+        """同步最多 31 天公告窗口，并可按已验证交易所证券身份过滤。"""
         if start > end:
             raise ValueError("start must not be after end")
+        if (end - start).days + 1 > _MAX_WINDOW_DAYS:
+            raise ValueError("corporate earnings window must not exceed 31 days")
         if _CAPABILITY not in self._source.capabilities():
             raise ProviderError(
                 ProviderErrorCode.INVALID_REQUEST,
                 "unsupported corporate earnings capability",
                 retryable=False,
             )
+        parameters = [("start", start.isoformat()), ("end", end.isoformat())]
+        if identifier is not None:
+            parameters.append(("instrument", identifier.qualified_symbol))
         batch = await self._source.fetch(
             SourceRequest(
                 capability=_CAPABILITY,
-                parameters=(("start", start.isoformat()), ("end", end.isoformat())),
+                parameters=tuple(parameters),
             )
         )
         documents, guidance_metrics, express_metrics = decode_corporate_events_batch(batch.payload)
-        if not documents:
-            # 该窗口无公告是可显示的正常结果，不应触发失败留证或空发布。
-            return CorporateEventsSyncResult(
-                data_version=None,
-                inserted_count=0,
-                unchanged_count=0,
-                availability="empty",
-            )
+        if identifier is not None and any(
+            document.source_security_code != identifier.symbol for document in documents
+        ):
+            raise _schema_error("corporate events payload escaped the requested instrument")
+        if any(not start <= document.announced_on <= end for document in documents):
+            raise _schema_error("corporate events payload escaped the requested date window")
+        source = _archive_batch(batch=batch, payload_store=self._raw_payload_store)
+        if before_final_publication is not None:
+            before_final_publication()
         published = self._repository.publish(
             documents=documents,
             guidance_metrics=guidance_metrics,
             express_metrics=express_metrics,
-            source=_archive_batch(batch=batch, payload_store=self._raw_payload_store),
+            source=source,
+            start=start,
+            end=end,
+            identifier=identifier,
         )
         return CorporateEventsSyncResult(
             data_version=published.data_version,
             inserted_count=published.inserted_count,
             unchanged_count=published.unchanged_count,
+            excluded_count=published.excluded_count,
+            availability=(
+                "empty"
+                if published.inserted_count + published.unchanged_count == 0
+                else "available"
+            ),
         )
 
 

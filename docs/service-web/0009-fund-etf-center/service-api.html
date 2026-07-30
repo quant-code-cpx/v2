@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1280" />
+    <title>基金与 ETF 中心 · service-api 技术方案</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17202a;
+        --muted: #637083;
+        --line: #dfe4ea;
+        --soft: #f6f8fa;
+        --brand: #1367d1;
+        --good: #087f5b;
+        --warn: #9a6700;
+        --danger: #b42318;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: #eef1f5;
+        font:
+          14px/1.65 Inter,
+          "PingFang SC",
+          "Microsoft YaHei",
+          sans-serif;
+      }
+      .shell {
+        width: 1180px;
+        margin: 32px auto;
+        background: #fff;
+        border: 1px solid var(--line);
+        box-shadow: 0 16px 40px rgba(23, 32, 42, 0.08);
+      }
+      header {
+        padding: 42px 48px 32px;
+        border-bottom: 1px solid var(--line);
+      }
+      main {
+        padding: 8px 48px 48px;
+      }
+      section {
+        padding: 30px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      section:last-child {
+        border-bottom: 0;
+      }
+      h1 {
+        margin: 8px 0 12px;
+        font-size: 34px;
+        line-height: 1.25;
+      }
+      h2 {
+        margin: 0 0 16px;
+        font-size: 23px;
+      }
+      h3 {
+        margin: 24px 0 10px;
+        font-size: 17px;
+      }
+      p,
+      ul,
+      ol {
+        margin: 10px 0;
+      }
+      code {
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: #edf2f7;
+        color: #0d4f9c;
+        font:
+          12px/1.6 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 11px 12px;
+        border: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: var(--soft);
+        font-size: 12px;
+        color: #445065;
+      }
+      .eyebrow {
+        color: var(--brand);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .lead {
+        max-width: 940px;
+        color: #445065;
+        font-size: 16px;
+      }
+      .meta,
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+      }
+      .meta div,
+      .card {
+        padding: 16px;
+        border: 1px solid var(--line);
+        background: var(--soft);
+      }
+      .meta strong {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+      .callout {
+        margin: 16px 0;
+        padding: 14px 16px;
+        border-left: 4px solid var(--brand);
+        background: #eef6ff;
+      }
+      .callout.good {
+        border-color: var(--good);
+        background: #eefaf5;
+      }
+      .callout.warn {
+        border-color: var(--warn);
+        background: #fff8e5;
+      }
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        align-items: stretch;
+        gap: 8px;
+      }
+      .flow div {
+        display: grid;
+        place-items: center;
+        min-height: 76px;
+        padding: 10px;
+        border: 1px solid var(--line);
+        background: var(--soft);
+        text-align: center;
+      }
+      .flow .arrow {
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 24px;
+      }
+      .status {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #e8f3ff;
+        color: #0d4f9c;
+        font-weight: 700;
+        font-size: 11px;
+      }
+      footer {
+        padding: 22px 48px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+      }
+      @media print {
+        body {
+          background: #fff;
+        }
+        .shell {
+          width: auto;
+          margin: 0;
+          border: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <article class="shell">
+      <header>
+        <div class="eyebrow">service-api · Implemented / 验证中</div>
+        <h1>基金与 ETF 中心：公开查询技术方案</h1>
+        <p class="lead">
+          复用现有 typed market-data 公开 POST，不新建 ETF
+          聚合快照、不访问同步库、不计算业务指标。 API
+          负责认证、严格合同、防腐转发、错误映射和可观测；所有业务值逐字段来自合格
+          publication。
+        </p>
+        <div class="meta">
+          <div>
+            <strong>公开入口</strong><code>POST /api/v1/market-data/query</code>
+          </div>
+          <div>
+            <strong>内部依赖</strong
+            ><code>POST /internal/v1/market-data/query</code>
+          </div>
+          <div>
+            <strong>一期数据集</strong>profile / bar / NAV / trading state
+          </div>
+        </div>
+      </header>
+      <main>
+        <section>
+          <h2>1. 能力卡与边界</h2>
+          <table>
+            <tbody>
+              <tr>
+                <th>Actor</th>
+                <td>已通过 service-api 全局认证的 QUANT V2 用户。</td>
+              </tr>
+              <tr>
+                <th>Consumer</th>
+                <td>
+                  service-web 的 ETF 查询适配层；不向浏览器暴露 data-sync
+                  内部地址或服务令牌。
+                </td>
+              </tr>
+              <tr>
+                <th>Owner</th>
+                <td>
+                  service-api：公开合同、认证、限流与错误；service-data-sync：dataset
+                  语义、publication 与记录事实。
+                </td>
+              </tr>
+              <tr>
+                <th>成功条件</th>
+                <td>
+                  公开响应通过 dataset + schemaVersion
+                  判别式校验，release/dataVersion/cursor
+                  与下游一致，业务记录不被改写。
+                </td>
+              </tr>
+              <tr>
+                <th>兼容策略</th>
+                <td>
+                  v1 字段与语义保持不变；ETF 新字段只在 schemaVersion 2
+                  发布。未知字段、未知版本和未知数据集 fail-closed。
+                </td>
+              </tr>
+              <tr>
+                <th>非目标</th>
+                <td>
+                  不直连数据库，不缓存业务聚合，不计算规模、折溢价、换手率、资金流，不拼接“综合详情
+                  publication”。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section>
+          <h2>2. 端到端依赖与模块设计</h2>
+          <div class="flow" aria-label="API 查询链路">
+            <div>service-web<br />ETF adapter</div>
+            <div class="arrow">→</div>
+            <div>公开 POST<br />controller</div>
+            <div class="arrow">→</div>
+            <div>MarketData<br />AccessService</div>
+            <div class="arrow">→</div>
+            <div>防腐 client<br />内部 POST</div>
+          </div>
+          <p>
+            现有
+            <code>MarketDataAccessModule</code
+            >、<code>MarketDataAccessController</code>、
+            <code>MarketDataAccessService</code> 和
+            <code>MarketDataAccessClient</code> 保持单向依赖。 client
+            使用服务令牌、透传
+            <code>X-Request-Id</code>、执行超时并验证内部响应的
+            <code>X-Data-Version</code> 与 release 一致；公开 controller
+            只返回严格响应体与
+            <code>Cache-Control: private, no-store</code>，不声明额外公开版本
+            header。
+          </p>
+          <div class="callout good">
+            决策已冻结：一期不新增
+            <code>/market/etfs/*</code> 聚合路由。列表是一次 profile typed
+            query； 详情先查 profile，获得稳定 entityRef 后并行查
+            bar、NAV、state。四份 publication 永远独立。
+          </div>
+        </section>
+
+        <section>
+          <h2>3. schemaVersion 2 公开合同</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>dataset</th>
+                <th>严格 record 字段</th>
+                <th>查询硬约束</th>
+                <th>API 响应处理</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>fund.etf.profile.reported</code></td>
+                <td>
+                  etfEntityRef、exchange、symbol、displayName、etfType、managementMode、managerName、custodianName、listedOn、delistedOn、listingStatus、quoteCurrency、navCurrency、sourceTimePrecision；允许合同声明的真实空值。
+                </td>
+                <td>
+                  exchange 必须单值 EQ；limit ≤ 50；symbol/name/status 只在
+                  descriptor 明示时可过滤。
+                </td>
+                <td>作为列表和详情身份入口；不把目录缺席转换为退市。</td>
+              </tr>
+              <tr>
+                <td><code>fund.etf.bar.1d.reported</code></td>
+                <td>
+                  tradeDate、etfEntityRef、open、high、low、close、volume、volumeUnit、amount、currency、tradeStatus、adjustment。
+                </td>
+                <td>
+                  exact entityRef；日期窗口；最多 366 条；adjustment 固定
+                  UNADJUSTED。
+                </td>
+                <td>原样返回；不产生 latest quote，不从零成交量推断状态。</td>
+              </tr>
+              <tr>
+                <td><code>fund.etf.nav.1d.reported</code></td>
+                <td>
+                  navDate、etfEntityRef、navKind、nav、currency、finality；来源发布时间允许为空。
+                </td>
+                <td>exact entityRef；日期窗口；navKind 显式；最多 366 条。</td>
+                <td>NAV 与 IOPV 语义隔离；不与收盘价计算折溢价。</td>
+              </tr>
+              <tr>
+                <td><code>fund.etf.trading_state.reported</code></td>
+                <td>
+                  etfEntityRef、stateDimension、state、effectiveFrom、effectiveTo、reason。
+                </td>
+                <td>exact entityRef；允许真实来源只发布部分维度。</td>
+                <td>
+                  TRADING/SUBSCRIPTION/REDEMPTION 独立；缺失维度保持未发布。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>3.1 响应不变量</h3>
+          <ul>
+            <li>
+              <code>AVAILABLE</code>：release 必须存在；内部依赖的
+              <code>X-Data-Version</code> 必须等于 release.dataVersion；公开
+              records 必须通过对应严格 schema。
+            </li>
+            <li>
+              尚无 publication：<code
+                >SOURCE_UNAVAILABLE + PUBLICATION_NOT_AVAILABLE</code
+              >；来源确认的合法空窗口：<code>EMPTY</code>。二者 records
+              都为空、release 都不含 dataVersion，并保留 reasonCode、observedAt
+              和 warnings。
+            </li>
+            <li>
+              来源已明确报告货币市场 ETF 的收益型净值语义、但当前
+              UNIT/ACCUMULATED 合同无法安全承载时：
+              <code
+                >CURRENTLY_UNSUPPORTED +
+                NAV_SEMANTICS_UNSUPPORTED_MONEY_MARKET</code
+              >。响应仍为 200、records 为空且没有
+              dataVersion/cursor；不得改写为来源故障、普通空结果或伪造单位净值。
+            </li>
+            <li>
+              <code>AVAILABLE + records=[]</code> 表示筛选无匹配；不得改写为
+              404、退市或来源故障。
+            </li>
+            <li>
+              opaque
+              cursor、coverage、quality、sources、publishedAt、knowledgeCutoff、publicUsableAt
+              原样保留。
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>4. 安全、可靠性与错误合同</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>主题</th>
+                <th>明确设计</th>
+                <th>验证</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>认证</td>
+                <td>
+                  沿用全局 bearer
+                  认证；内部调用只使用服务身份令牌，浏览器不可见。
+                </td>
+                <td>未认证公开请求拒绝；公开凭据不能调用内部路由。</td>
+              </tr>
+              <tr>
+                <td>授权与最小化</td>
+                <td>
+                  dataset/schemaVersion/fields/filter/sort allowlist；只返回公共
+                  descriptor 声明字段。
+                </td>
+                <td>越权字段、未知字段和未知 dataset 统一 400。</td>
+              </tr>
+              <tr>
+                <td>超时</td>
+                <td>
+                  沿用
+                  <code>dataSyncInternalRequestTimeoutMs</code
+                  >；超时映射依赖不可用，不隐藏已有卡片。
+                </td>
+                <td>
+                  注入超时，公开 Problem Details 不泄露
+                  provider、堆栈和服务令牌。
+                </td>
+              </tr>
+              <tr>
+                <td>限流</td>
+                <td>
+                  沿用公开边界限流；429 保留 Retry-After，Web 不制造重试风暴。
+                </td>
+                <td>限流合同测试与 header 断言。</td>
+              </tr>
+              <tr>
+                <td>幂等</td>
+                <td>
+                  查询是只读 POST，不要求
+                  Idempotency-Key；publication/dataVersion/cursor
+                  保证可重复读取边界。
+                </td>
+                <td>相同 CURRENT 请求在 publication 未变时响应一致。</td>
+              </tr>
+              <tr>
+                <td>响应边界</td>
+                <td>
+                  内部响应只接受 JSON；Content-Length 与流式累计字节均限制为 2
+                  MiB，并使用严格 UTF-8/JSON 解析。
+                </td>
+                <td>
+                  错误媒体类型、声明超限、无长度流式超限和坏 UTF-8 全部
+                  fail-closed。
+                </td>
+              </tr>
+              <tr>
+                <td>存储与缓存</td>
+                <td>
+                  不新增 Prisma 模型或 Redis 业务缓存；API 不保存 ETF 事实。
+                </td>
+                <td>架构测试禁止 service-api 引用 data-sync persistence。</td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>4.1 统一错误映射</h3>
+          <ul>
+            <li>
+              400/422 下游合同错误 → 公开 400；404 → 404；409 snapshot/cursor
+              失效 → 409。
+            </li>
+            <li>
+              429 → 429 并保留 Retry-After；其他下游失败、超时或响应合同漂移 →
+              503。
+            </li>
+            <li>
+              availability 是成功响应状态，不转换成异常；包括
+              <code>CURRENTLY_UNSUPPORTED</code>。四个详情查询可部分成功。
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>5. 性能、可观测与变更清单</h2>
+          <div class="grid">
+            <div class="card">
+              <strong>调用数</strong>
+              <p>
+                列表 1 次；详情首个 profile 完成后并发 3 次，共 4
+                次。列表禁止逐行查询 bar/NAV/state。
+              </p>
+            </div>
+            <div class="card">
+              <strong>负载上限</strong>
+              <p>
+                列表 50 条；bar/NAV 各 366 条。API
+                请求体和响应体继续受全局限制。
+              </p>
+            </div>
+            <div class="card">
+              <strong>指标</strong>
+              <p>
+                按 dataset/schemaVersion/availability/status 记录
+                QPS、p50/p95、超时、合同拒绝、409 与 503。
+              </p>
+            </div>
+          </div>
+          <h3>5.1 已实施范围</h3>
+          <ul>
+            <li>
+              已扩展 data-sync 市场数据合同镜像：四个 ETF v2 record 判别式
+              schema 与 descriptor allowlist。
+            </li>
+            <li>
+              已增强 <code>MarketDataAccessClient</code>：在通用 envelope
+              校验后按 dataset/schemaVersion 校验 records、availability/release
+              和响应大小。
+            </li>
+            <li>
+              已增加 controller/service/client 单元测试、data-sync 合同测试与
+              POST-only 架构测试；真实 E2E 作为最终门禁记录。
+            </li>
+            <li>
+              不新增数据库迁移、不新增 Redis key、不新增 ETF 专用公开
+              controller。
+            </li>
+          </ul>
+          <h3>5.2 Data Operations 公共控制面</h3>
+          <ul>
+            <li>
+              profile 支持精确
+              <code>ALL_VENUES</code> selector，一次预检显式枚举 SSE/SZSE
+              两个独立分区；不从 symbol 或当前目录推断交易所。
+            </li>
+            <li>
+              bar/NAV/state 支持 <code>ALL_ETFS</code> selector；预检冻结
+              SSE/SZSE 两份 profile
+              dataVersion、全集记录数与哈希，提交时只使用服务端预检结果。NAV
+              还冻结可同步集合与
+              “当前口径不支持”集合；后者生成可审计的跳过分区，不令整个命令变成
+              PARTIAL。
+            </li>
+            <li>
+              dataset 与 operation 固定映射为
+              profile→MASTER、bar→BARS、NAV→NAV、state→STATUS；不匹配在 API
+              边界直接拒绝。
+            </li>
+            <li>
+              预检、提交、计划任务和重试均复用既有认证 POST 路由；API 不重建
+              selector、不枚举产品、不直接访问同步库。
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>6. 无卡点实施与验收</h2>
+          <ol>
+            <li>
+              先合入版本化 ADR 与 YAML 合同，锁定四个 v2
+              record、查询上限、availability 和错误语义。
+            </li>
+            <li>
+              data-sync v2 reader 合同测试通过后，service-api 更新 schema
+              镜像与严格响应验证。
+            </li>
+            <li>
+              用同步服务实际 publication 执行内部查询，再通过已认证公开 POST
+              查询同一 dataset/dataVersion。
+            </li>
+            <li>
+              逐字段比对公开 records 与内部 typed
+              reader；任何新增、缺失、重命名、单位变化都使测试失败。
+            </li>
+            <li>
+              注入无 publication、空结果、cursor
+              失效、429、超时和合同漂移，验证状态与 Problem Details。
+            </li>
+            <li>
+              service-web E2E 只能读取公开 POST；构建产物扫描不得出现 provider
+              URL、内部令牌或硬编码产品记录。
+            </li>
+          </ol>
+          <div class="callout warn">
+            上线范围固定为已认证的内部产品环境。当前真实来源的外部再分发权不作为技术实现中的隐含假设；
+            若未来开放给外部用户，必须先完成 entitlement
+            与来源授权，但不会改变本页已冻结的 API 结构。
+          </div>
+          <p>
+            <span class="status">Implemented / 验证中</span>
+            公开查询与运维控制面均已落入生产代码；没有等待前端临时聚合、人工补数据或静态业务记录兜底的步骤。
+          </p>
+        </section>
+      </main>
+      <footer>
+        关联总方案：<a href="./index.html">基金与 ETF 中心跨服务技术方案</a> ·
+        同步方案：<a href="./service-data-sync.html"
+          >service-data-sync 技术方案</a
+        >
+      </footer>
+    </article>
+  </body>
+</html>

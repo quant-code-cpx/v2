@@ -1,337 +1,138 @@
-"""财务与估值 dark-launch probe 的无 egress 回归测试。"""
+"""财务探针与 command 化旧 `Celery` 入口测试。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from types import SimpleNamespace
 
-import pytest
+from celery import Celery
 
 from service_data_sync.bootstrap.settings import Settings, load_settings
 from service_data_sync.infrastructure.messaging import financial_tasks
-from service_data_sync.infrastructure.messaging.celery_app import create_worker_app
 
 
 @dataclass(frozen=True)
 class FakeProvider:
-    """提供稳定 adapter 标识，避免测试构造真实来源实现。"""
+    """提供不含网络能力的最小 adapter 身份。"""
 
     provider_id: str
 
 
 class FakeRegistry:
-    """按能力返回预置 adapter，记录 probe 只读取声明能力。"""
+    """按 capability 返回固定 adapter 集合，并记录探针查询。"""
 
-    def __init__(self, providers_by_capability: dict[str, tuple[FakeProvider, ...]]) -> None:
-        """保存能力到 adapter 的测试映射和请求记录。"""
-        self._providers_by_capability = providers_by_capability
-        self.requested_capabilities: set[str] = set()
+    def __init__(self, providers: dict[str, tuple[FakeProvider, ...]]) -> None:
+        """保存能力映射，测试中绝不提供 `fetch`。"""
+        self._providers = providers
+        self.requested: set[str] = set()
 
     def for_capability(self, capability: str) -> tuple[FakeProvider, ...]:
-        """记录 capability 查询；不提供任何会触发网络访问的 `fetch` 方法。"""
-        self.requested_capabilities.add(capability)
-        return self._providers_by_capability.get(capability, ())
+        """记录只读能力查询并返回预置 adapter。"""
+        self.requested.add(capability)
+        return self._providers.get(capability, ())
 
 
-class CapturedLogger:
-    """收集结构化 probe 日志，验证结果不携带来源响应或秘密。"""
-
-    def __init__(self) -> None:
-        """初始化空事件列表。"""
-        self.events: list[dict[str, object]] = []
-
-    def info(self, event: str, **fields: object) -> None:
-        """记录信息级 probe 事件。"""
-        self.events.append({"event": event, **fields})
-
-
-class FakeDatabaseClient:
-    """记录同步任务数据库资源是否在成功与失败后关闭。"""
-
-    instances: list[FakeDatabaseClient] = []
+class FakeCommandContainer:
+    """提供 command 提交所需最小组合根，并记录关闭动作。"""
 
     def __init__(self) -> None:
-        """创建未关闭的数据库测试资源。"""
+        """初始化不连接数据库或对象存储的替身依赖。"""
+        self.database = object()
+        self.source_registry = object()
+        self.trading_calendar = None
         self.closed = False
-        self.instances.append(self)
-
-    @classmethod
-    def from_settings(cls, settings: Settings) -> FakeDatabaseClient:
-        """忽略真实连接配置并返回可观察测试实例。"""
-        del settings
-        return cls()
 
     def close(self) -> None:
-        """标记数据库连接池已经释放。"""
+        """记录任务提交结束后释放组合根。"""
         self.closed = True
 
 
-class FakeObjectStorageClient:
-    """记录同步任务对象存储资源是否在成功与失败后关闭。"""
-
-    instances: list[FakeObjectStorageClient] = []
-
-    def __init__(self) -> None:
-        """创建未关闭的对象存储测试资源。"""
-        self.closed = False
-        self.instances.append(self)
-
-    @classmethod
-    def from_settings(cls, settings: Settings) -> FakeObjectStorageClient:
-        """忽略真实对象存储配置并返回可观察测试实例。"""
-        del settings
-        return cls()
-
-    def close(self) -> None:
-        """标记对象存储客户端已经释放。"""
-        self.closed = True
-
-
-class FakeRepository:
-    """接受同步任务传入的数据库资源，不执行真实 SQL。"""
-
-    def __init__(self, database: FakeDatabaseClient) -> None:
-        """保存数据库资源以证明组合根传参正确。"""
-        self.database = database
-
-
-class FakeRawStore:
-    """接受同步任务传入的对象存储资源，不执行真实上传。"""
-
-    def __init__(self, object_storage: FakeObjectStorageClient) -> None:
-        """保存对象存储资源以证明组合根传参正确。"""
-        self.object_storage = object_storage
-
-    def persist_failure(self, error: Exception) -> None:
-        """不写入测试对象存储，仅验证原始同步异常仍会向上传播。"""
-        del error
-        return None
-
-    def discard(self) -> None:
-        """模拟一次同步结束后释放临时来源字节。"""
-
-
-class FakeFinancialSyncService:
-    """返回确定性三能力摘要，或按测试开关模拟同步失败。"""
-
-    should_fail = False
-    calls: list[tuple[str, str]] = []
+class FakeControlPlane:
+    """记录任务仅构造控制面，不执行同步或发布。"""
 
     def __init__(self, **dependencies: object) -> None:
-        """保存任务组合的来源、仓储和 raw store 依赖。"""
+        """保存构造依赖，供断言 command 边界使用。"""
         self.dependencies = dependencies
-
-    async def sync_security(self, *, exchange: object, symbol: str) -> SimpleNamespace:
-        """记录证券身份，并返回三个独立能力的插入数。"""
-        self.calls.append((str(exchange), symbol))
-        if self.should_fail:
-            raise RuntimeError("canonical publish failed")
-        return SimpleNamespace(
-            reports=SimpleNamespace(inserted_count=2),
-            provider_metrics=SimpleNamespace(inserted_count=3),
-            valuations=SimpleNamespace(inserted_count=5),
-        )
 
 
 def test_probe_returns_disabled_without_building_source_registry(
-    configured_environment: None,
-    monkeypatch,
+    configured_environment: None, monkeypatch
 ) -> None:
-    """默认关闭时 probe 不得初始化 adapter，更不得触发任何 egress。"""
-    app = create_worker_app(load_settings())
+    """关闭财务能力时 probe 不得组合来源，也不能触发任何 egress。"""
+    del configured_environment
+    app = Celery("financial-probe-disabled")
+    financial_tasks.register_financial_tasks(app, settings=load_settings())
 
     def unexpected_registry(_settings: object) -> object:
-        """若默认关闭仍尝试组合来源，立即使测试失败。"""
+        """若停用 probe 仍读取 registry，立即暴露边界回归。"""
         raise AssertionError("disabled probe must not build source registry")
 
     monkeypatch.setattr(financial_tasks, "build_source_registry", unexpected_registry)
-
-    result = app.tasks["service_data_sync.financial.probe"].run()
-
-    assert result == {"status": "disabled", "capabilityCount": 0, "providerCount": 0}
-
-
-def test_probe_reports_missing_adapter_without_calling_provider(
-    configured_environment: None,
-    monkeypatch,
-) -> None:
-    """已配策略但未注册完整 adapter 时，只报告阻断状态且不访问来源。"""
-    settings = load_settings().model_copy(
-        update={
-            "financial_enabled": True,
-            "financial_source_policy": "research-policy-pending",
-            "financial_max_concurrency": 1,
-            "financial_requests_per_minute": 1,
-            "financial_request_timeout_seconds": 1,
-        }
-    )
-    app = create_worker_app(settings)
-    registry = FakeRegistry({})
-    logger = CapturedLogger()
-
-    monkeypatch.setattr(financial_tasks, "build_source_registry", lambda _settings: registry)
-    monkeypatch.setattr(financial_tasks, "_LOGGER", logger)
-
-    result = app.tasks["service_data_sync.financial.probe"].run()
-
-    assert result == {
-        "status": "provider-adapter-unavailable",
+    assert app.tasks[financial_tasks._PROBE_TASK].run() == {
+        "status": "disabled",
         "capabilityCount": 0,
         "providerCount": 0,
     }
-    assert registry.requested_capabilities == {
-        "financial.statement.raw",
-        "financial.metric.raw",
-        "financial.valuation.raw",
-    }
-    assert logger.events == [
-        {
-            "event": "financial.dark_launch_probe_completed",
-            "status": "provider-adapter-unavailable",
-            "source_policy": "research-policy-pending",
-            "capability_count": 0,
-            "provider_count": 0,
-        }
-    ]
 
 
-def test_probe_reports_declared_capabilities_without_selecting_a_source_composition(
-    configured_environment: None,
-    monkeypatch,
+def test_probe_counts_declared_capabilities_without_fetching(
+    configured_environment: None, monkeypatch
 ) -> None:
-    """probe 只确认三类能力均有 adapter，不选择或合并额外来源。"""
-    settings = load_settings().model_copy(
-        update={
-            "financial_enabled": True,
-            "financial_source_policy": "research-policy-pending",
-            "financial_max_concurrency": 1,
-            "financial_requests_per_minute": 1,
-            "financial_request_timeout_seconds": 1,
-        }
-    )
-    app = create_worker_app(settings)
-    provider = FakeProvider(provider_id="test-financial")
+    """启用 probe 只统计 adapter 声明能力，不选择来源、不发起同步。"""
+    del configured_environment
+    settings = _enabled_settings()
+    app = Celery("financial-probe-enabled")
+    financial_tasks.register_financial_tasks(app, settings=settings)
+    provider = FakeProvider(provider_id="approved-financial")
     registry = FakeRegistry(
-        {
-            "financial.statement.raw": (provider,),
-            "financial.metric.raw": (provider,),
-            "financial.valuation.raw": (provider,),
-        }
+        {capability: (provider,) for capability in financial_tasks._REQUIRED_CAPABILITIES}
     )
-
     monkeypatch.setattr(financial_tasks, "build_source_registry", lambda _settings: registry)
 
-    result = app.tasks["service_data_sync.financial.probe"].run()
-
-    assert result == {
+    assert app.tasks[financial_tasks._PROBE_TASK].run() == {
         "status": "sync-ready",
         "capabilityCount": 3,
         "providerCount": 1,
     }
+    assert registry.requested == financial_tasks._REQUIRED_CAPABILITIES
 
 
-def test_sync_task_rejects_disabled_feature_before_building_registry(
-    configured_environment: None,
-    monkeypatch: pytest.MonkeyPatch,
+def test_sync_task_submits_one_financial_command_and_closes_container(
+    configured_environment: None, monkeypatch
 ) -> None:
-    """开关关闭时同步任务不得构造来源、数据库或对象存储。"""
-    app = create_worker_app(load_settings())
-
-    def unexpected_registry(settings: Settings) -> object:
-        """若关闭状态仍构造来源注册表则立即失败。"""
-        del settings
-        raise AssertionError("disabled sync must not build registry")
-
-    monkeypatch.setattr(financial_tasks, "build_source_registry", unexpected_registry)
-
-    with pytest.raises(RuntimeError, match="disabled"):
-        app.tasks["service_data_sync.financial.sync_security"].run("SSE", "600519")
-
-
-@pytest.mark.parametrize("provider_count", [0, 2])
-def test_sync_task_requires_exactly_one_financial_provider(
-    configured_environment: None,
-    monkeypatch: pytest.MonkeyPatch,
-    provider_count: int,
-) -> None:
-    """零个或多个财务 adapter 都不能进入数据库写入，避免来源合并语义不明。"""
+    """单证券旧任务只能转换为稳定 command，绝不在 `Celery` 进程同步或发布。"""
+    del configured_environment
     settings = _enabled_settings()
-    app = create_worker_app(settings)
-    providers = tuple(
-        FakeProvider(provider_id=f"provider-{index}") for index in range(provider_count)
-    )
-    registry = FakeRegistry({"financial.statement.raw": providers})
+    app = Celery("financial-command-submission")
+    container = FakeCommandContainer()
+    received: dict[str, object] = {}
+    financial_tasks.register_financial_tasks(app, settings=settings)
+    monkeypatch.setattr(financial_tasks, "build_container", lambda _settings: container)
+    monkeypatch.setattr(financial_tasks, "build_catalog", lambda _settings, _registry: {})
+    monkeypatch.setattr(financial_tasks, "DataOperationsControlPlane", FakeControlPlane)
 
-    def configured_registry(current: Settings) -> FakeRegistry:
-        """返回当前测试指定数量的三表来源。"""
-        del current
-        return registry
+    def submit(control_plane: FakeControlPlane, **kwargs: object) -> dict[str, str]:
+        """记录 command 内容并返回固定受理收据。"""
+        received["controlPlane"] = control_plane
+        received.update(kwargs)
+        return {"commandId": "command-1"}
 
-    monkeypatch.setattr(financial_tasks, "build_source_registry", configured_registry)
-
-    with pytest.raises(RuntimeError, match="exactly one"):
-        app.tasks["service_data_sync.financial.sync_security"].run("SSE", "600519")
-
-
-def test_sync_task_returns_three_counts_and_always_closes_resources(
-    configured_environment: None,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """成功同步应返回三能力摘要，并在结果形成后释放数据库和对象存储。"""
-    _install_sync_task_fakes(monkeypatch)
-    FakeFinancialSyncService.should_fail = False
-    FakeFinancialSyncService.calls.clear()
-    settings = _enabled_settings()
-    app = create_worker_app(settings)
-    provider = FakeProvider(provider_id="only-provider")
-
-    def configured_registry(current: Settings) -> FakeRegistry:
-        """为同步任务返回唯一可选财务来源。"""
-        del current
-        return FakeRegistry({"financial.statement.raw": (provider,)})
-
-    monkeypatch.setattr(financial_tasks, "build_source_registry", configured_registry)
-
-    result = app.tasks["service_data_sync.financial.sync_security"].run("SSE", "600519")
-
-    assert result == {
-        "reportInserted": 2,
-        "metricInserted": 3,
-        "valuationInserted": 5,
+    monkeypatch.setattr(financial_tasks, "submit_system_command", submit)
+    assert app.tasks[financial_tasks._SYNC_TASK].run("SSE", "600519") == {"commandId": "command-1"}
+    assert received["target"] == {
+        "datasetCode": "financial.report",
+        "mode": "INCREMENTAL",
+        "selector": {"kind": "INSTRUMENT", "exchange": "SSE", "symbol": "600519"},
+        "dateFrom": None,
+        "dateTo": None,
+        "observationDate": None,
     }
-    assert FakeFinancialSyncService.calls == [("SSE", "600519")]
-    assert FakeDatabaseClient.instances[-1].closed is True
-    assert FakeObjectStorageClient.instances[-1].closed is True
-
-
-def test_sync_task_closes_resources_when_canonical_publish_fails(
-    configured_environment: None,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """同步或 canonical 发布异常不得泄漏连接池，错误仍应向 Celery 调用方传播。"""
-    _install_sync_task_fakes(monkeypatch)
-    FakeFinancialSyncService.should_fail = True
-    settings = _enabled_settings()
-    app = create_worker_app(settings)
-    provider = FakeProvider(provider_id="only-provider")
-
-    def configured_registry(current: Settings) -> FakeRegistry:
-        """为失败路径返回唯一财务来源，使异常发生在资源创建之后。"""
-        del current
-        return FakeRegistry({"financial.statement.raw": (provider,)})
-
-    monkeypatch.setattr(financial_tasks, "build_source_registry", configured_registry)
-
-    with pytest.raises(RuntimeError, match="canonical publish failed"):
-        app.tasks["service_data_sync.financial.sync_security"].run("SSE", "600519")
-
-    assert FakeDatabaseClient.instances[-1].closed is True
-    assert FakeObjectStorageClient.instances[-1].closed is True
-    FakeFinancialSyncService.should_fail = False
+    assert received["reason"] == "兼容财务 Celery 提交"
+    assert received["request_prefix"] == "legacy-financial-task"
+    assert container.closed is True
 
 
 def _enabled_settings() -> Settings:
-    """构造允许财务任务运行且不触发真实来源的受控设置。"""
+    """构造允许财务 command 提交但不接触真实来源的设置。"""
     return load_settings().model_copy(
         update={
             "financial_enabled": True,
@@ -341,14 +142,3 @@ def _enabled_settings() -> Settings:
             "financial_request_timeout_seconds": 1,
         }
     )
-
-
-def _install_sync_task_fakes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """替换任务组合根资源，使成功和异常释放语义可在单元测试观察。"""
-    FakeDatabaseClient.instances.clear()
-    FakeObjectStorageClient.instances.clear()
-    monkeypatch.setattr(financial_tasks, "DatabaseClient", FakeDatabaseClient)
-    monkeypatch.setattr(financial_tasks, "ObjectStorageClient", FakeObjectStorageClient)
-    monkeypatch.setattr(financial_tasks, "SqlAlchemyFinancialSyncRepository", FakeRepository)
-    monkeypatch.setattr(financial_tasks, "S3RawPayloadStore", FakeRawStore)
-    monkeypatch.setattr(financial_tasks, "FinancialSyncService", FakeFinancialSyncService)

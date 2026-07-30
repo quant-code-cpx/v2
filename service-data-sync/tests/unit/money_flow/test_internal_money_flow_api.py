@@ -25,6 +25,8 @@ from service_data_sync.interfaces.internal_money_flow_api import (
     register_money_flow_routes,
 )
 
+_DAILY_VERSION = UUID("00000000-0000-4000-8000-000000000102")
+
 
 class FakeReadRepository:
     """返回三类冻结页面，并支持注入仓储错误。"""
@@ -65,7 +67,7 @@ class FakeReadRepository:
         known_at = cast(datetime | None, kwargs["known_at"])
         return MoneyFlowDailyPage(
             series_id=UUID("00000000-0000-4000-8000-000000000101"),
-            data_version=UUID("00000000-0000-4000-8000-000000000102"),
+            data_version=_DAILY_VERSION,
             published_at=datetime(2026, 7, 24, 11, tzinfo=UTC),
             methodology={
                 "methodologyId": kwargs["methodology_id"],
@@ -137,6 +139,10 @@ def _app(repository: MoneyFlowReadRepository | None = None) -> FastAPI:
         """构造游标或身份冲突问题。"""
         return HTTPException(status_code=409, detail=detail)
 
+    def snapshot_problem() -> Exception:
+        """构造 publication 已切换问题。"""
+        return HTTPException(status_code=409, detail="snapshot expired")
+
     register_money_flow_routes(
         app,
         require_service_bearer=require_service_bearer,
@@ -144,6 +150,7 @@ def _app(repository: MoneyFlowReadRepository | None = None) -> FastAPI:
         not_found_problem=not_found_problem,
         validation_problem=validation_problem,
         conflict_problem=conflict_problem,
+        snapshot_problem=snapshot_problem,
         repository=repository or FakeReadRepository(),
     )
     return app
@@ -172,6 +179,10 @@ def _app_without_repository() -> FastAPI:
         """构造游标或身份冲突问题。"""
         return HTTPException(status_code=409, detail=detail)
 
+    def snapshot_problem() -> Exception:
+        """构造 publication 已切换问题。"""
+        return HTTPException(status_code=409, detail="snapshot expired")
+
     register_money_flow_routes(
         app,
         require_service_bearer=require_service_bearer,
@@ -179,6 +190,7 @@ def _app_without_repository() -> FastAPI:
         not_found_problem=not_found_problem,
         validation_problem=validation_problem,
         conflict_problem=conflict_problem,
+        snapshot_problem=snapshot_problem,
         repository=None,
     )
     return app
@@ -220,7 +232,7 @@ def test_daily_routes_preserve_equity_sector_and_market_scope() -> None:
     responses = (
         client.get(
             "/internal/v1/money-flow/methodologies/fixture-money-flow"
-            f"/daily-series/equities/SSE/600000{query}"
+            f"/daily-series/equities/SSE/600000{query}&dataVersion={_DAILY_VERSION}"
         ),
         client.get(
             "/internal/v1/money-flow/methodologies/fixture-money-flow"
@@ -275,7 +287,8 @@ def test_internal_routes_map_repository_failures_to_stable_statuses() -> None:
     daily_path = (
         "/internal/v1/money-flow/methodologies/fixture-money-flow"
         "/daily-series/equities/SSE/600000"
-        "?methodologyVersion=1&bucket=main&start=2026-07-01&end=2026-07-24"
+        f"?methodologyVersion=1&bucket=main&start=2026-07-01&end=2026-07-24"
+        f"&dataVersion={_DAILY_VERSION}"
     )
     ranking_path = (
         "/internal/v1/money-flow/methodologies/fixture-money-flow/supplier-rankings"
@@ -295,7 +308,7 @@ def test_internal_routes_map_repository_failures_to_stable_statuses() -> None:
     assert identity.get(daily_path).status_code == 409
     assert validation.get(daily_path).status_code == 400
     assert unavailable.get(methodology_path).status_code == 503
-    assert missing.get(daily_path).status_code == 404
+    assert missing.get(daily_path).status_code == 409
     assert missing.get(ranking_path).status_code == 404
     assert missing.get(methodology_path).status_code == 503
     assert TestClient(_app_without_repository()).get(methodology_path).status_code == 503
@@ -308,8 +321,23 @@ def test_daily_route_rejects_future_known_at_before_repository_read() -> None:
         "/internal/v1/money-flow/methodologies/fixture-money-flow"
         "/daily-series/equities/SSE/600000"
         "?methodologyVersion=1&bucket=main&start=2026-07-01&end=2026-07-24"
+        f"&dataVersion={_DAILY_VERSION}"
         "&knownAt=2099-01-01T00%3A00%3A00Z"
     )
 
     assert response.status_code == 400
     assert repository.daily_calls == []
+
+
+def test_equity_daily_route_rejects_mismatched_status_data_version() -> None:
+    """个股资金流 publication 漂移必须返回 409，禁止静默读取最新序列。"""
+    wrong_version = UUID("00000000-0000-4000-8000-000000000199")
+    response = TestClient(_app()).get(
+        "/internal/v1/money-flow/methodologies/fixture-money-flow"
+        "/daily-series/equities/SSE/600000"
+        "?methodologyVersion=1&bucket=main&start=2026-07-01&end=2026-07-24"
+        f"&dataVersion={wrong_version}"
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "snapshot expired"

@@ -10,6 +10,7 @@ import {
   IsISO8601,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   Min,
@@ -25,6 +26,10 @@ import { DATE_ONLY_PATTERN, OFFSET_DATE_TIME_PATTERN } from './temporal-patterns
 
 /** 约束财务指标来源、方法学、字段集合、双时态与分页范围。 */
 export class ListFinancialMetricsQueryDto {
+  /** 绑定 data-status 返回的精确指标 publication。 */
+  @IsUUID()
+  public readonly dataVersion!: string;
+
   /** 选择供应商直报或平台派生，二者不会合并。 */
   @IsIn(FINANCIAL_METRIC_ORIGINS)
   public readonly origin!: (typeof FINANCIAL_METRIC_ORIGINS)[number];

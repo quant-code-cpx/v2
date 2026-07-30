@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import cast
 from uuid import uuid4
@@ -59,6 +60,7 @@ class FakeRepository:
         self.release_calls: list[tuple[SectorScheme, date]] = []
         self.completed: list[StoredSector] = []
         self.failed: list[StoredSector] = []
+        self.started_sectors: tuple[StoredSector, ...] | None = None
         self.finished_status: str | None = None
 
     def start_run(
@@ -69,7 +71,8 @@ class FakeRepository:
         sectors: tuple[StoredSector, ...],
     ) -> SectorMembershipRun:
         """返回确定性 run 身份，验证应用先冻结分区后再访问来源。"""
-        assert sectors == self.sectors
+        assert sectors and all(sector in self.sectors for sector in sectors)
+        self.started_sectors = sectors
         return SectorMembershipRun(uuid4(), scheme, observation_date)
 
     def mark_partition_completed(
@@ -124,10 +127,16 @@ class FakeRepository:
         )
 
     def publish_release(
-        self, *, scheme: SectorScheme, observation_date: date
+        self,
+        *,
+        scheme: SectorScheme,
+        observation_date: date,
+        before_final_publication: Callable[[], None] | None = None,
     ) -> PublishedSectorMembershipRelease:
         """记录 reducer 调用并返回固定 release，证明单板块失败不会跳过汇总。"""
         self.release_calls.append((scheme, observation_date))
+        if before_final_publication is not None:
+            before_final_publication()
         return PublishedSectorMembershipRelease(
             release_id=uuid4(),
             data_version=uuid4(),
@@ -217,6 +226,35 @@ def test_sync_freezes_active_sectors_archives_raw_and_publishes_release() -> Non
     assert result.release is not None
     assert [sector.identifier.code for sector in repository.completed] == ["BK0001", "BK0002"]
     assert repository.finished_status == "succeeded"
+
+
+def test_sync_selects_one_active_sector_and_arms_terminal_only_for_release() -> None:
+    """SECTOR 重试只访问目标分区，且 reducer 真正返回 release 时才传播终态回调。"""
+    raw_store = FakeRawPayloadStore()
+    repository = FakeRepository(raw_store)
+    timeline: list[str] = []
+
+    def arm_terminal() -> None:
+        """记录 release 仓储在最终事务中武装控制面终态。"""
+        timeline.append("arm")
+
+    result = asyncio.run(
+        SectorMembershipSyncService(
+            source=FakeSource(),
+            repository=cast(SectorMembershipRepository, repository),
+            raw_payload_store=raw_store,
+        ).sync_scheme(
+            scheme=SectorScheme.EASTMONEY_INDUSTRY,
+            observation_date=date(2026, 7, 27),
+            sector_codes=("BK0002",),
+            before_final_publication=arm_terminal,
+        )
+    )
+
+    assert [item.identifier.code for item in result.items] == ["BK0002"]
+    assert [sector.identifier.code for sector in repository.snapshots] == ["BK0002"]
+    assert repository.started_sectors == (repository.sectors[1],)
+    assert timeline == ["arm"]
 
 
 def test_sync_isolates_provider_failure_and_still_runs_release_reducer() -> None:

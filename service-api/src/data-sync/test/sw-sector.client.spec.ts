@@ -17,7 +17,12 @@ describe('SwSectorClient', () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify(page()), {
         status: 200,
-        headers: { ETag: '"sw-v1"', 'Content-Type': 'application/json' },
+        headers: {
+          ETag: '"sw-v1"',
+          'Content-Type': 'application/json',
+          'X-Data-Version': '00000000-0000-4000-8000-000000000001',
+          'X-Request-Id': 'sw/client:test-request',
+        },
       }),
     );
     const client = new SwSectorClient(config, fetcher);
@@ -28,7 +33,7 @@ describe('SwSectorClient', () => {
       parentCode: '801010.SI',
       limit: 100,
       ifNoneMatch: '"sw-v0"',
-      requestId: 'sw-client-test-request',
+      requestId: 'sw/client:test-request',
     });
 
     expect(result).toMatchObject({ status: 200, etag: '"sw-v1"' });
@@ -40,7 +45,7 @@ describe('SwSectorClient', () => {
     expect(init?.headers).toMatchObject({
       Authorization: `Bearer ${config.dataSyncInternalBearerToken}`,
       'If-None-Match': '"sw-v0"',
-      'X-Request-Id': 'sw-client-test-request',
+      'X-Request-Id': 'sw/client:test-request',
     });
   });
 
@@ -48,9 +53,17 @@ describe('SwSectorClient', () => {
   it('maps invalid downstream methodology to dependency unavailable', async () => {
     const invalid = page();
     invalid.release.methodology.semanticSpecSha256 = 'invalid';
-    const fetcher = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(new Response(JSON.stringify(invalid), { status: 200 }));
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(invalid), {
+        status: 200,
+        headers: {
+          ETag: '"sw-invalid-v1"',
+          'Content-Type': 'application/json',
+          'X-Data-Version': invalid.release.dataVersion,
+          'X-Request-Id': 'sw-invalid-contract-test',
+        },
+      }),
+    );
     const client = new SwSectorClient(config, fetcher);
 
     await expect(

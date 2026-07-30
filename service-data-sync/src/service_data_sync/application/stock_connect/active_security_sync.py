@@ -1,7 +1,7 @@
 """沪深港通 `P0` 活跃证券集合同步。
 
 排行榜每行先保留来源代码、通道、方向、交易日和金额，再在发布前通过冻结身份视图解析证券，避免跨市场代码误绑。
-来源没有返回活跃证券是合法空结果；成功不存原始字节，失败才留存排障证据。
+来源没有返回活跃证券是合法空结果；成功和失败均受同一留存授权门禁约束，默认只保留摘要清单。
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ class StockConnectActiveSecuritySyncService:
         repository: StockConnectActiveSecurityRepository,
         raw_payload_store: RawPayloadStore,
     ) -> None:
-        """接收中立数据源、活跃榜仓储和失败排障载荷端口。"""
+        """接收中立数据源、活跃榜仓储和统一授权证据端口。"""
         self._source = source
         self._repository = repository
         self._raw_payload_store = raw_payload_store
@@ -116,7 +116,18 @@ def decode_stock_connect_active_security_batch(
         raise _schema_error("stock-connect P0 accepts only reported active securities")
     _reject_unknown(
         decoded,
-        {"schema", "channel", "direction", "valueKind", "records"},
+        {
+            "schema",
+            "channel",
+            "direction",
+            "valueKind",
+            "productName",
+            "sourcePublicationAvailability",
+            "sourcePublicationAt",
+            "sourceObservedAt",
+            "sourceFileSha256",
+            "records",
+        },
         "root",
     )
     values = decoded.get("records")
@@ -139,12 +150,14 @@ def _record(value: object) -> StockConnectActiveSecurity:
         value,
         {
             "instrumentCode",
+            "instrumentName",
             "tradeDate",
             "rankNo",
             "buyAmount",
             "sellAmount",
             "turnoverAmount",
             "currency",
+            "fieldAvailability",
         },
         "stock-connect active-security record",
     )
@@ -156,6 +169,8 @@ def _record(value: object) -> StockConnectActiveSecurity:
         sell_amount=_optional_decimal(value.get("sellAmount")),
         turnover_amount=_optional_decimal(value.get("turnoverAmount")),
         currency=_required(value, "currency"),
+        source_instrument_name=_optional_text(value.get("instrumentName")),
+        field_availability=_field_availability(value.get("fieldAvailability")),
     )
 
 
@@ -179,6 +194,13 @@ def _optional_decimal(value: object) -> Decimal | None:
     """使用精确十进制读取可选金额，零值仍是来源披露事实。"""
     normalized = _optional_text(value)
     return None if normalized is None else Decimal(normalized)
+
+
+def _field_availability(value: object) -> tuple[tuple[str, str], ...]:
+    """冻结每个排行金额的可用性，空金额不会在消费者侧被误判为零。"""
+    if not isinstance(value, dict):
+        raise ValueError("fieldAvailability is required")
+    return tuple(sorted((str(key), str(status)) for key, status in value.items()))
 
 
 def _reject_unknown(value: dict[str, object], allowed: set[str], location: str) -> None:

@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -96,6 +96,7 @@ class FinancialDerivationRepository(Protocol):
         metrics: Sequence[DerivedFinancialMetricInput],
         derivation_run_id: UUID,
         computed_at: datetime,
+        before_final_publication: Callable[[], None] | None = None,
     ) -> FinancialDerivedPublication:
-        """重验来源 publication 后追加派生 revision、输入血缘并发布。"""
+        """重验来源后追加派生 revision/血缘，并可在同事务武装控制面终态。"""
         ...

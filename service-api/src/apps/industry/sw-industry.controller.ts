@@ -83,28 +83,12 @@ function writeConditionalResponse<T>(
   response: Response,
   result: SwUpstreamResponse<T>,
 ): T | undefined {
-  if (result.etag !== undefined) response.setHeader('ETag', result.etag);
+  response.setHeader('ETag', result.etag);
+  response.setHeader('X-Data-Version', result.dataVersion);
   response.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
   if (result.status === 304) {
     response.status(HttpStatus.NO_CONTENT).send();
     return undefined;
   }
-  response.setHeader('X-Data-Version', releaseVersion(result.body));
   return result.body;
-}
-
-/** 从三个公开资源共有的 release 字段取得消费者 dataVersion。 */
-function releaseVersion(value: unknown): string {
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    !('release' in value) ||
-    typeof value.release !== 'object' ||
-    value.release === null ||
-    !('dataVersion' in value.release) ||
-    typeof value.release.dataVersion !== 'string'
-  ) {
-    throw new TypeError('SW response release is invalid');
-  }
-  return value.release.dataVersion;
 }

@@ -160,7 +160,7 @@ export function createAppTheme(): Theme {
             padding: "16px 14px",
             fontSize: 15,
             lineHeight: "24px",
-            // MUI's focused fieldset is the sole visible focus cue for text inputs.
+            // 文本输入框只使用 MUI 聚焦边框作为可见焦点提示，避免叠加两层焦点环。
             "&:focus-visible": { boxShadow: "none" },
           },
         },
@@ -203,8 +203,9 @@ export function createAppTheme(): Theme {
           },
           head: {
             height: componentGeometry.tableHeadHeight,
-            color: neutralColors[600],
-            backgroundColor: neutralColors[200],
+            color: neutralColors[700],
+            backgroundColor: neutralColors[100],
+            borderBottom: "1px solid rgb(145 158 171 / 20%)",
             fontWeight: 600,
           },
         },

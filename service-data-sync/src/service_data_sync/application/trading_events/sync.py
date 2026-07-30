@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -30,12 +30,14 @@ from service_data_sync.application.ports.trading_events import (
     PublishedTradingEvents,
     TradingEventsSourceObservation,
 )
+from service_data_sync.domain.equity import EquityIdentifier
 from service_data_sync.domain.trading_events import BlockTrade, DragonTigerEvent, DragonTigerSeat
 
 _DRAGON_TIGER_CAPABILITY = "market.dragon_tiger.disclosure.1d"
 _DRAGON_TIGER_SCHEMA = "quant-v2.dragon-tiger-disclosure.v1"
 _BLOCK_TRADE_CAPABILITY = "market.block_trade.execution.1d"
 _BLOCK_TRADE_SCHEMA = "quant-v2.block-trade-execution.v1"
+_MAX_WINDOW_DAYS = 31
 
 
 class _TradingPublisher(Protocol):
@@ -50,11 +52,12 @@ class _TradingPublisher(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class TradingEventsSyncResult:
-    """返回一个交易披露 dataset 的发布版本；无匹配披露时返回成功空结果。"""
+    """返回交易披露覆盖版本；无匹配披露时仍返回零记录 publication 的版本。"""
 
-    data_version: UUID | None
+    data_version: UUID
     inserted_count: int
     unchanged_count: int
+    excluded_count: int = 0
     availability: str = "available"
 
 
@@ -73,22 +76,40 @@ class DragonTigerSyncService:
         self._repository = repository
         self._raw_payload_store = raw_payload_store
 
-    async def sync(self, *, start: date, end: date) -> TradingEventsSyncResult:
-        """同步有界龙虎榜窗口，未注册 capability 或日期倒置立即停止。"""
+    async def sync(
+        self,
+        *,
+        start: date,
+        end: date,
+        identifier: EquityIdentifier | None = None,
+        before_final_publication: Callable[[], None] | None = None,
+    ) -> TradingEventsSyncResult:
+        """同步最多 31 天龙虎榜窗口，并可按已验证交易所证券身份过滤。"""
         batch = await _fetch_window(
             source=self._source,
             capability=_DRAGON_TIGER_CAPABILITY,
             start=start,
             end=end,
+            identifier=identifier,
         )
         events = decode_dragon_tiger_batch(batch.payload)
-        if not events:
-            return _empty_result()
+        if identifier is not None and any(
+            event.source_security_code != identifier.symbol for event in events
+        ):
+            raise _schema_error("dragon tiger payload escaped the requested instrument")
+        if any(not start <= event.trade_date <= end for event in events):
+            raise _schema_error("dragon tiger payload escaped the requested date window")
+        source = _archive_batch(batch=batch, payload_store=self._raw_payload_store)
+        if before_final_publication is not None:
+            before_final_publication()
         published = self._repository.publish_dragon_tiger(
             events=events,
-            source=_archive_batch(batch=batch, payload_store=self._raw_payload_store),
+            source=source,
+            start=start,
+            end=end,
+            identifier=identifier,
         )
-        return _result(published)
+        return _result(published, empty=not events)
 
 
 class BlockTradeSyncService:
@@ -106,40 +127,68 @@ class BlockTradeSyncService:
         self._repository = repository
         self._raw_payload_store = raw_payload_store
 
-    async def sync(self, *, start: date, end: date) -> TradingEventsSyncResult:
-        """同步有界大宗逐笔窗口，不能通过日汇总或龙虎榜字段补齐记录。"""
+    async def sync(
+        self,
+        *,
+        start: date,
+        end: date,
+        identifier: EquityIdentifier | None = None,
+        before_final_publication: Callable[[], None] | None = None,
+    ) -> TradingEventsSyncResult:
+        """同步最多 31 天大宗逐笔窗口，并可按已验证交易所证券身份过滤。"""
         batch = await _fetch_window(
             source=self._source,
             capability=_BLOCK_TRADE_CAPABILITY,
             start=start,
             end=end,
+            identifier=identifier,
         )
         trades = decode_block_trade_batch(batch.payload)
-        if not trades:
-            return _empty_result()
+        if identifier is not None and any(
+            trade.source_security_code != identifier.symbol for trade in trades
+        ):
+            raise _schema_error("block trade payload escaped the requested instrument")
+        if any(not start <= trade.trade_date <= end for trade in trades):
+            raise _schema_error("block trade payload escaped the requested date window")
+        source = _archive_batch(batch=batch, payload_store=self._raw_payload_store)
+        if before_final_publication is not None:
+            before_final_publication()
         published = self._repository.publish_block_trades(
             trades=trades,
-            source=_archive_batch(batch=batch, payload_store=self._raw_payload_store),
+            source=source,
+            start=start,
+            end=end,
+            identifier=identifier,
         )
-        return _result(published)
+        return _result(published, empty=not trades)
 
 
 async def _fetch_window(
-    *, source: DataSourcePort, capability: str, start: date, end: date
+    *,
+    source: DataSourcePort,
+    capability: str,
+    start: date,
+    end: date,
+    identifier: EquityIdentifier | None,
 ) -> ProviderBatch:
-    """读取一个明确 capability 的日期窗口，保持两个 P0 dataset 在 Provider 层完全隔离。"""
+    """读取受控窗口与可选证券，保持两个 P0 dataset 在 Provider 层完全隔离。"""
     if start > end:
         raise ValueError("start must not be after end")
+    if (end - start).days + 1 > _MAX_WINDOW_DAYS:
+        raise ValueError("trading events window must not exceed 31 days")
     if capability not in source.capabilities():
         raise ProviderError(
             ProviderErrorCode.INVALID_REQUEST,
             f"unsupported trading disclosure capability: {capability}",
             retryable=False,
         )
+    parameters = [("start", start.isoformat()), ("end", end.isoformat())]
+    if identifier is not None:
+        parameters.append(("instrument", identifier.qualified_symbol))
     return await source.fetch(
         SourceRequest(
             capability=capability,
-            parameters=(("start", start.isoformat()), ("end", end.isoformat())),
+            parameters=tuple(parameters),
         )
     )
 
@@ -367,22 +416,17 @@ def _archive_batch(
     )
 
 
-def _result(published: PublishedTradingEvents) -> TradingEventsSyncResult:
+def _result(published: PublishedTradingEvents, *, empty: bool = False) -> TradingEventsSyncResult:
     """将仓储发布结果收敛为服务返回 DTO，避免调用方依赖基础设施实现类型。"""
+    del empty
     return TradingEventsSyncResult(
         data_version=published.data_version,
         inserted_count=published.inserted_count,
         unchanged_count=published.unchanged_count,
-    )
-
-
-def _empty_result() -> TradingEventsSyncResult:
-    """返回无匹配交易披露的成功结果，入口层据此写空观测且不归档成功字节。"""
-    return TradingEventsSyncResult(
-        data_version=None,
-        inserted_count=0,
-        unchanged_count=0,
-        availability="empty",
+        excluded_count=published.excluded_count,
+        availability=(
+            "empty" if published.inserted_count + published.unchanged_count == 0 else "available"
+        ),
     )
 
 

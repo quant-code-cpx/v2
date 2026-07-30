@@ -12,7 +12,7 @@ import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo
 
@@ -20,6 +20,7 @@ from sqlalchemy import Select, func, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.orm import Session
 
+from service_data_sync.application.ports.canonical_release import CanonicalLineageRecord
 from service_data_sync.application.ports.market_data import (
     EquityAvailabilityObservation,
     EquityDatasetPublication,
@@ -45,9 +46,32 @@ from service_data_sync.domain.equity import (
 )
 from service_data_sync.domain.equity_master import EquityIdentityResolutionStatus
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.fenced_execution import current_fenced_execution
+from service_data_sync.infrastructure.database.models.canonical import (
+    CanonicalDataset,
+    MethodologyVersion,
+)
+from service_data_sync.infrastructure.database.models.provenance.source_batch import SourceBatch
+from service_data_sync.infrastructure.persistence.bar_window_coverage import (
+    BarWindowIdentity,
+    publish_bar_window_coverage,
+    resolve_bar_window_identity,
+)
+from service_data_sync.infrastructure.persistence.canonical_release_repository import (
+    SqlAlchemyCanonicalReleaseRepository,
+)
 from service_data_sync.infrastructure.persistence.equity_identity_resolver import (
     require_single_confirmed_identity_on_connection,
     resolve_identity_on_connection,
+)
+from service_data_sync.infrastructure.persistence.event_window_coverage import (
+    EventCoverageIdentity,
+    EventCoverageRecords,
+    publish_event_window_coverages,
+    resolve_event_coverage_identities,
+)
+from service_data_sync.infrastructure.persistence.legacy_canonical_release_bridge import (
+    publish_legacy_snapshot,
 )
 from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 
@@ -81,6 +105,7 @@ _FACTOR_DATASET = "equity.adjustment_factor"
 _ACTION_DATASET = "equity.corporate_action"
 _PROFILE_DATASET = "equity.profile"
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
+_RELEASE_MAPPING_VERSION = "equity-market-data-release-bridge-v1"
 _PERIOD_MODELS = {
     EquityBarPeriod.WEEK_1: EquityWeeklyBar,
     EquityBarPeriod.MONTH_1: EquityMonthlyBar,
@@ -118,6 +143,23 @@ def _current_publication_statement(
     )
 
 
+def _at_knowledge_time(
+    statement: Select[Any],
+    *,
+    model: Any,
+    known_at: datetime | None,
+) -> Select[Any]:
+    """把 revision 查询固定到 publication 知识截止点，避免发布切换竞态混入新事实。"""
+    if known_at is None:
+        return statement.where(model.valid_to.is_(None))
+    if known_at.tzinfo is None:
+        raise ValueError("known_at must include a timezone")
+    return statement.where(
+        model.valid_from <= known_at,
+        or_(model.valid_to.is_(None), model.valid_to > known_at),
+    )
+
+
 class PossibleCodeReuseError(ValueError):
     """表示退市后出现同代码行情，必须等待主数据显式确认而非误绑旧身份。"""
 
@@ -128,66 +170,99 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
     def __init__(self, database: DatabaseClient) -> None:
         """使用服务私有 Session 工厂，不向应用调用方暴露它。"""
         self._database = database
+        self._release_repository = SqlAlchemyCanonicalReleaseRepository(database)
 
     def publish_daily_bars(
         self,
         *,
         identifier: EquityIdentifier,
         bars: Sequence[EquityDailyBar],
-        provider_id: str,
-        source_payload_sha256: str,
-        raw_uri: str,
-        observed_at: datetime,
+        source: EquitySourceObservation,
+        start: date,
+        end: date,
     ) -> PublishedDailyBars:
-        """归档来源血缘、追加变化日线，并原子推进发布版本。"""
-        if not bars:
-            raise ValueError("bars must not be empty")
+        """原子发布日线 DATA 或合法零记录 coverage，并冻结完整来源与身份窗口。"""
+        if start > end:
+            raise ValueError("daily bar coverage window is invalid")
+        if source.capability != EquityBarPeriod.DAY_1.capability:
+            raise ValueError("daily bar source capability is invalid")
+        if any(not start <= bar.trade_date <= end for bar in bars):
+            raise ValueError("daily bar falls outside the requested coverage window")
         now = datetime.now(UTC)
         with self._database.transaction() as connection:
             source_batch_id = self._record_source_batch(
                 connection,
                 capability=_DAILY_DATASET,
-                provider_id=provider_id,
-                source_payload_sha256=source_payload_sha256,
-                raw_uri=raw_uri,
-                observed_at=observed_at,
+                provider_id=source.provider_id,
+                source_payload_sha256=source.source_payload_sha256,
+                raw_uri=source.raw_uri,
+                observed_at=source.observed_at,
                 created_at=now,
+                upstream_source=source.upstream_source,
+                adapter_version=source.adapter_version,
+                schema_fingerprint=source.schema_fingerprint,
             )
-            # 日线可能早于交易所主数据到达。
-            # 使用带来源证据的 `PENDING` 标识可避免丢失证券或猜测名称、上市状态。
-            instrument = self._ensure_instrument(
+            coverage_identity = resolve_bar_window_identity(
+                connection,
+                period=EquityBarPeriod.DAY_1,
+                identifier=identifier,
+                start=start,
+                end=end,
+            )
+            instrument = self._bar_window_instrument_on_connection(
                 connection,
                 identifier=identifier,
-                fact_date=min(bar.trade_date for bar in bars),
+                identity=coverage_identity,
+            )
+            inserted_count, unchanged_count = (
+                self._write_revisions(
+                    connection,
+                    security_id=instrument.security_id,
+                    bars=bars,
+                    source_batch_id=source_batch_id,
+                    observed_at=source.observed_at,
+                )
+                if bars
+                else (0, 0)
+            )
+            data_publication_version = (
+                self._publish(
+                    connection,
+                    dataset=_DAILY_DATASET,
+                    instrument=instrument,
+                    source_batch_id=source_batch_id,
+                    published_at=now,
+                )
+                if bars
+                else None
+            )
+            coverage = publish_bar_window_coverage(
+                connection,
+                release_repository=self._release_repository,
+                period=EquityBarPeriod.DAY_1,
+                identity=coverage_identity,
+                source=source,
                 source_batch_id=source_batch_id,
+                record_count=len(bars),
+                data_publication_version=data_publication_version,
                 now=now,
             )
-            self._assert_instrument_identity_dates(
+            # 新 publication 与旧诊断观察共享事务；零记录 coverage 取代成功空集的可变状态行。
+            self._clear_daily_bar_availability_on_connection(
                 connection,
                 identifier=identifier,
-                security_id=instrument.security_id,
-                fact_dates=tuple(bar.trade_date for bar in bars),
-                known_at=now,
-            )
-            inserted_count, unchanged_count = self._write_revisions(
-                connection,
-                security_id=instrument.security_id,
-                bars=bars,
-                source_batch_id=source_batch_id,
-                observed_at=observed_at,
-            )
-            data_version = self._publish(
-                connection,
-                dataset=_DAILY_DATASET,
-                instrument=instrument,
-                inserted_count=inserted_count,
-                published_at=now,
+                start=start,
+                end=end,
+                cleared_at=now,
             )
         return PublishedDailyBars(
-            data_version=data_version,
+            data_version=coverage.data_version,
             inserted_count=inserted_count,
             unchanged_count=unchanged_count,
             instrument=instrument,
+            coverage_version=coverage.coverage_version,
+            source_batch_id=coverage.source_batch_id,
+            publication_kind=coverage.publication_kind,
         )
 
     def record_daily_bar_availability(
@@ -201,7 +276,7 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         provider_id: str | None,
         observed_at: datetime,
     ) -> EquityAvailabilityObservation:
-        """持久化单窗口空集或来源不可用，不创建任何虚构日线事实。"""
+        """持久化旧任务或运维探针诊断，不创建事实且不构成成功覆盖。"""
         if availability not in {"empty", "source_unavailable"}:
             raise ValueError("daily-bar availability is invalid")
         if observed_at.tzinfo is None:
@@ -260,17 +335,35 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         """在日线真实发布后终结精确窗口的旧空集或来源不可用观测。"""
         if cleared_at.tzinfo is None:
             raise ValueError("cleared_at must include a timezone")
-        partition_key = _availability_partition_key(identifier, start, end)
         with self._database.transaction() as connection:
-            connection.execute(
-                update(DatasetAvailabilityObservation)
-                .where(
-                    DatasetAvailabilityObservation.dataset == _DAILY_DATASET,
-                    DatasetAvailabilityObservation.partition_key == partition_key,
-                    DatasetAvailabilityObservation.superseded_at.is_(None),
-                )
-                .values(superseded_at=cleared_at)
+            self._clear_daily_bar_availability_on_connection(
+                connection,
+                identifier=identifier,
+                start=start,
+                end=end,
+                cleared_at=cleared_at,
             )
+
+    def _clear_daily_bar_availability_on_connection(
+        self,
+        connection: Session,
+        *,
+        identifier: EquityIdentifier,
+        start: date,
+        end: date,
+        cleared_at: datetime,
+    ) -> None:
+        """在调用方已有事务内终结精确窗口空集观测，供 publication 原子复用。"""
+        partition_key = _availability_partition_key(identifier, start, end)
+        connection.execute(
+            update(DatasetAvailabilityObservation)
+            .where(
+                DatasetAvailabilityObservation.dataset == _DAILY_DATASET,
+                DatasetAvailabilityObservation.partition_key == partition_key,
+                DatasetAvailabilityObservation.superseded_at.is_(None),
+            )
+            .values(superseded_at=cleared_at)
+        )
 
     def get_instrument(self, instrument_id: UUID) -> StoredEquityInstrument | None:
         """按公开 UUID 读取一只证券，不关联供应商专有表。"""
@@ -443,13 +536,20 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         period: EquityBarPeriod,
         bars: Sequence[EquityPeriodBar],
         source: EquitySourceObservation,
-        window_end: date,
+        start: date,
+        end: date,
     ) -> PublishedEquityDataset:
-        """追加上游原生周/月修订，并推进该周期独立 publication 与 checkpoint。"""
-        if period not in _PERIOD_MODELS or not bars:
-            raise ValueError("weekly or monthly bars must not be empty")
+        """原子发布上游原生周/月 DATA 或合法零记录 coverage 与 checkpoint。"""
+        if period not in _PERIOD_MODELS:
+            raise ValueError("period must be weekly or monthly")
+        if start > end:
+            raise ValueError("period bar coverage window is invalid")
+        if source.capability != period.capability:
+            raise ValueError("period bar source capability does not match requested period")
         if any(bar.period is not period for bar in bars):
             raise ValueError("period bars must match requested period")
+        if any(not start <= bar.period_end <= end for bar in bars):
+            raise ValueError("period bar falls outside the requested coverage window")
         now = datetime.now(UTC)
         model = _PERIOD_MODELS[period]
         with self._database.transaction() as connection:
@@ -461,50 +561,73 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
                 raw_uri=source.raw_uri,
                 observed_at=source.observed_at,
                 created_at=now,
+                upstream_source=source.upstream_source,
+                adapter_version=source.adapter_version,
+                schema_fingerprint=source.schema_fingerprint,
             )
-            instrument = self._ensure_instrument(
+            coverage_identity = resolve_bar_window_identity(
+                connection,
+                period=period,
+                identifier=identifier,
+                start=start,
+                end=end,
+            )
+            instrument = self._bar_window_instrument_on_connection(
                 connection,
                 identifier=identifier,
-                fact_date=min(bar.period_end for bar in bars),
+                identity=coverage_identity,
+            )
+            inserted_count, unchanged_count = (
+                self._write_period_revisions(
+                    connection,
+                    model=model,
+                    security_id=instrument.security_id,
+                    bars=bars,
+                    source_batch_id=source_batch_id,
+                    observed_at=source.observed_at,
+                )
+                if bars
+                else (0, 0)
+            )
+            data_publication_version = (
+                self._publish(
+                    connection,
+                    dataset=period.capability,
+                    instrument=instrument,
+                    source_batch_id=source_batch_id,
+                    published_at=now,
+                )
+                if bars
+                else None
+            )
+            coverage = publish_bar_window_coverage(
+                connection,
+                release_repository=self._release_repository,
+                period=period,
+                identity=coverage_identity,
+                source=source,
                 source_batch_id=source_batch_id,
+                record_count=len(bars),
+                data_publication_version=data_publication_version,
                 now=now,
-            )
-            self._assert_instrument_identity_dates(
-                connection,
-                identifier=identifier,
-                security_id=instrument.security_id,
-                fact_dates=tuple(bar.period_end for bar in bars),
-                known_at=now,
-            )
-            inserted_count, unchanged_count = self._write_period_revisions(
-                connection,
-                model=model,
-                security_id=instrument.security_id,
-                bars=bars,
-                source_batch_id=source_batch_id,
-                observed_at=source.observed_at,
-            )
-            data_version = self._publish(
-                connection,
-                dataset=period.capability,
-                instrument=instrument,
-                inserted_count=inserted_count,
-                published_at=now,
             )
             self._advance_checkpoint(
                 connection,
                 capability=period.capability,
                 identifier=identifier,
-                window_end=window_end,
-                data_version=data_version,
+                window_end=end,
+                data_version=coverage.data_version,
                 updated_at=now,
             )
         return PublishedEquityDataset(
-            data_version=data_version,
+            data_version=coverage.data_version,
             published_at=now,
             inserted_count=inserted_count,
             unchanged_count=unchanged_count,
             instrument=instrument,
+            coverage_version=coverage.coverage_version,
+            source_batch_id=coverage.source_batch_id,
+            publication_kind=coverage.publication_kind,
         )
 
     def publish_adjustment_factors(
@@ -529,6 +652,9 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
                 raw_uri=source.raw_uri,
                 observed_at=source.observed_at,
                 created_at=now,
+                upstream_source=source.upstream_source,
+                adapter_version=source.adapter_version,
+                schema_fingerprint=source.schema_fingerprint,
             )
             instrument = self._confirmed_instrument_on_connection(
                 connection,
@@ -548,9 +674,8 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
                 connection,
                 dataset=_FACTOR_DATASET,
                 instrument=instrument,
-                inserted_count=inserted_count,
+                source_batch_id=source_batch_id,
                 published_at=now,
-                preferred_version=next_factor_version,
             )
             self._advance_checkpoint(
                 connection,
@@ -574,9 +699,15 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         identifier: EquityIdentifier,
         actions: Sequence[EquityCorporateAction],
         source: EquitySourceObservation,
-        window_end: date,
+        start: date,
+        end: date,
     ) -> PublishedEquityDataset:
-        """追加变化公司行动；合法空事件集也建立明确的已发布状态。"""
+        """在同事务追加公司行动、累积 release 与精确窗口 coverage。"""
+        if start > end:
+            raise ValueError("corporate action publication window is invalid")
+        action_fact_dates = tuple(_action_fact_date(action) for action in actions)
+        if any(not start <= fact_date <= end for fact_date in action_fact_dates):
+            raise ValueError("corporate action fact falls outside the requested coverage window")
         now = datetime.now(UTC)
         with self._database.transaction() as connection:
             source_batch_id = self._record_source_batch(
@@ -587,20 +718,31 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
                 raw_uri=source.raw_uri,
                 observed_at=source.observed_at,
                 created_at=now,
+                upstream_source=source.upstream_source,
+                adapter_version=source.adapter_version,
+                schema_fingerprint=source.schema_fingerprint,
             )
-            action_fact_dates = tuple(
-                action.ex_date
-                or action.record_date
-                or action.announcement_date
-                or action.report_period
-                for action in actions
+            (
+                coverage_identities,
+                coverage_scope,
+                universe_hash,
+            ) = resolve_event_coverage_identities(
+                connection,
+                start=start,
+                end=end,
+                identifier=identifier,
             )
             instrument = self._confirmed_instrument_on_connection(
                 connection,
                 identifier=identifier,
-                fact_dates=action_fact_dates or (window_end,),
+                fact_dates=action_fact_dates or (start, end),
                 known_at=now,
             )
+            if (
+                len(coverage_identities) != 1
+                or coverage_identities[0].security_id != instrument.security_id
+            ):
+                raise ValueError("corporate action coverage identity does not match instrument")
             inserted_count, unchanged_count = self._write_action_revisions(
                 connection,
                 identifier=identifier,
@@ -613,14 +755,41 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
                 connection,
                 dataset=_ACTION_DATASET,
                 instrument=instrument,
-                inserted_count=inserted_count,
+                source_batch_id=source_batch_id,
                 published_at=now,
+            )
+            dataset_id, methodology_version_id = _release_bridge_context(
+                connection,
+                dataset=_ACTION_DATASET,
+            )
+            publish_event_window_coverages(
+                connection,
+                release_repository=self._release_repository,
+                dataset_id=dataset_id,
+                dataset_code=_ACTION_DATASET,
+                methodology_version_id=methodology_version_id,
+                mapping_version=_RELEASE_MAPPING_VERSION,
+                source=source,
+                source_batch_id=source_batch_id,
+                identities=coverage_identities,
+                coverage_scope=coverage_scope,
+                universe_hash=universe_hash,
+                families=("CORPORATE_ACTION",),
+                records_for=lambda current_session, frozen_identities, family: (
+                    _action_coverage_records_by_identity(
+                        current_session,
+                        identities=frozen_identities,
+                        family=family,
+                        provider_id=source.provider_id,
+                    )
+                ),
+                now=now,
             )
             self._advance_checkpoint(
                 connection,
                 capability=_ACTION_DATASET,
                 identifier=identifier,
-                window_end=window_end,
+                window_end=end,
                 data_version=data_version,
                 updated_at=now,
             )
@@ -650,6 +819,9 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
                 raw_uri=source.raw_uri,
                 observed_at=source.observed_at,
                 created_at=now,
+                upstream_source=source.upstream_source,
+                adapter_version=source.adapter_version,
+                schema_fingerprint=source.schema_fingerprint,
             )
             instrument = self._confirmed_instrument_on_connection(
                 connection,
@@ -668,7 +840,7 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
                 connection,
                 dataset=_PROFILE_DATASET,
                 instrument=instrument,
-                inserted_count=inserted_count,
+                source_batch_id=source_batch_id,
                 published_at=now,
             )
             self._advance_checkpoint(
@@ -785,8 +957,9 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         period: EquityBarPeriod,
         start: date,
         end: date,
+        known_at: datetime | None = None,
     ) -> Sequence[StoredEquityBar]:
-        """从周期对应物理表读取当前 revision，绝不跨表聚合。"""
+        """从周期物理表读取 publication 截止点可见 revision，绝不跨表聚合。"""
         if start > end:
             raise ValueError("start must not be after end")
         if period is EquityBarPeriod.DAY_1:
@@ -795,26 +968,24 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         else:
             model = _PERIOD_MODELS[period]
             date_column = model.period_end
-        statement = (
-            select(
-                date_column.label("period_end"),
-                model.open_price,
-                model.high_price,
-                model.low_price,
-                model.close_price,
-                model.volume_shares,
-                model.amount_cny,
-                model.turnover_rate,
-                model.revision,
-                model.is_final,
-            )
-            .where(
-                model.security_id == security_id,
-                date_column >= start,
-                date_column <= end,
-                model.valid_to.is_(None),
-            )
-            .order_by(date_column)
+        statement = select(
+            date_column.label("period_end"),
+            model.open_price,
+            model.high_price,
+            model.low_price,
+            model.close_price,
+            model.volume_shares,
+            model.amount_cny,
+            model.turnover_rate,
+            model.revision,
+            model.is_final,
+        ).where(
+            model.security_id == security_id,
+            date_column >= start,
+            date_column <= end,
+        )
+        statement = _at_knowledge_time(statement, model=model, known_at=known_at).order_by(
+            date_column
         )
         with self._database.session() as connection:
             rows = connection.execute(statement).mappings().all()
@@ -825,22 +996,23 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         *,
         security_id: int,
         end: date,
+        known_at: datetime | None = None,
     ) -> Sequence[StoredAdjustmentFactor]:
-        """读取锚点前全部当前累计因子，以便按生效日向后选择。"""
-        statement = (
-            select(
-                EquityAdjustmentFactorModel.effective_date,
-                EquityAdjustmentFactorModel.cumulative_factor,
-                EquityAdjustmentFactorModel.revision,
-                EquityAdjustmentFactorModel.factor_version,
-            )
-            .where(
-                EquityAdjustmentFactorModel.security_id == security_id,
-                EquityAdjustmentFactorModel.effective_date <= end,
-                EquityAdjustmentFactorModel.valid_to.is_(None),
-            )
-            .order_by(EquityAdjustmentFactorModel.effective_date)
+        """读取 publication 截止点可见的累计因子，以便按生效日向后选择。"""
+        statement = select(
+            EquityAdjustmentFactorModel.effective_date,
+            EquityAdjustmentFactorModel.cumulative_factor,
+            EquityAdjustmentFactorModel.revision,
+            EquityAdjustmentFactorModel.factor_version,
+        ).where(
+            EquityAdjustmentFactorModel.security_id == security_id,
+            EquityAdjustmentFactorModel.effective_date <= end,
         )
+        statement = _at_knowledge_time(
+            statement,
+            model=EquityAdjustmentFactorModel,
+            known_at=known_at,
+        ).order_by(EquityAdjustmentFactorModel.effective_date)
         with self._database.session() as connection:
             rows = connection.execute(statement).mappings().all()
         return tuple(
@@ -861,8 +1033,9 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         security_id: int,
         start: date | None,
         end: date | None,
+        known_at: datetime | None = None,
     ) -> Sequence[StoredCorporateAction]:
-        """按报告期升序读取当前公司行动 revision。"""
+        """按报告期升序读取 publication 截止点可见的公司行动 revision。"""
         statement = select(
             EquityCorporateActionVersion.action_id,
             EquityCorporateActionVersion.revision,
@@ -877,7 +1050,11 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
             EquityCorporateActionVersion.transfer_shares_per_10,
         ).where(
             EquityCorporateActionVersion.security_id == security_id,
-            EquityCorporateActionVersion.valid_to.is_(None),
+        )
+        statement = _at_knowledge_time(
+            statement,
+            model=EquityCorporateActionVersion,
+            known_at=known_at,
         )
         if start is not None:
             statement = statement.where(EquityCorporateActionVersion.report_period >= start)
@@ -891,13 +1068,21 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
             rows = connection.execute(statement).mappings().all()
         return tuple(_stored_action(row) for row in rows)
 
-    def get_company_profile(self, *, security_id: int) -> StoredCompanyProfile | None:
-        """读取当前公司概况 revision。"""
+    def get_company_profile(
+        self,
+        *,
+        security_id: int,
+        known_at: datetime | None = None,
+    ) -> StoredCompanyProfile | None:
+        """读取 publication 截止点可见的公司概况 revision。"""
+        statement = select(EquityProfileVersion).where(
+            EquityProfileVersion.security_id == security_id,
+        )
         statement = (
-            select(EquityProfileVersion)
-            .where(
-                EquityProfileVersion.security_id == security_id,
-                EquityProfileVersion.valid_to.is_(None),
+            _at_knowledge_time(
+                statement,
+                model=EquityProfileVersion,
+                known_at=known_at,
             )
             .order_by(EquityProfileVersion.revision.desc())
             .limit(1)
@@ -940,6 +1125,38 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         )
         if row is None:
             raise ValueError("confirmed equity instrument is required")
+        return _stored_instrument(row)
+
+    def _bar_window_instrument_on_connection(
+        self,
+        connection: Session,
+        *,
+        identifier: EquityIdentifier,
+        identity: BarWindowIdentity,
+    ) -> StoredEquityInstrument:
+        """读取已由完整窗口解析器锁定的证券锚，并核对外部标识没有漂移。"""
+        if identity.exchange != identifier.exchange.value or identity.symbol != identifier.symbol:
+            raise ValueError("bar coverage identity does not match requested identifier")
+        row = (
+            connection.execute(
+                select(
+                    EquityInstrument.security_id,
+                    EquityInstrument.instrument_id,
+                    EquityInstrument.exchange,
+                    EquityInstrument.symbol,
+                    EquityInstrument.name,
+                    EquityInstrument.listing_status,
+                ).where(
+                    EquityInstrument.security_id == identity.security_id,
+                    EquityInstrument.master_confirmed_at.is_not(None),
+                    EquityInstrument.listing_status != "PENDING",
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            raise ValueError("confirmed bar window instrument is required")
         return _stored_instrument(row)
 
     def _assert_instrument_identity_dates(
@@ -1413,6 +1630,9 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         raw_uri: str,
         observed_at: datetime,
         created_at: datetime,
+        upstream_source: str | None = None,
+        adapter_version: str = "unversioned",
+        schema_fingerprint: str | None = None,
     ) -> UUID:
         """登记独立外部观测；相同 payload 不得折叠来源批次。"""
         return record_source_observation(
@@ -1423,6 +1643,9 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
             raw_uri=raw_uri,
             observed_at=observed_at,
             created_at=created_at,
+            upstream_source=upstream_source,
+            adapter_version=adapter_version,
+            schema_fingerprint=schema_fingerprint,
         )
 
     def _write_revisions(
@@ -1498,48 +1721,360 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         *,
         dataset: str,
         instrument: StoredEquityInstrument,
-        inserted_count: int,
+        source_batch_id: UUID,
         published_at: datetime,
-        preferred_version: UUID | None = None,
     ) -> UUID:
-        """仅当标准当前视图变化时推进单证券发布版本。"""
+        """把当前证券快照通过统一 release 仓储发布，并返回真实消费者版本。"""
         partition_key = _security_partition_key(instrument.security_id)
-        if inserted_count == 0:
-            # 幂等重放不得创建虚假数据版本，从而使 API/客户端缓存失效。
-            existing = connection.execute(
-                select(DatasetPublication.data_version).where(
-                    DatasetPublication.dataset == dataset,
-                    DatasetPublication.partition_key == partition_key,
-                    DatasetPublication.superseded_at.is_(None),
+        records, fact_min, fact_max = _current_release_records(
+            connection,
+            dataset=dataset,
+            security_id=instrument.security_id,
+        )
+        published = publish_legacy_snapshot(
+            connection,
+            release_repository=self._release_repository,
+            dataset_code=dataset,
+            partition_key=partition_key,
+            domain="equity",
+            grain="equity security + dataset-native current observation",
+            semantic_family="reported-equity-market-data",
+            mapping_version=_RELEASE_MAPPING_VERSION,
+            source_batch_id=source_batch_id,
+            records=records,
+            fact_min=fact_min,
+            fact_max=fact_max,
+            now=published_at,
+        )
+        # `data_version` 仅由统一 release 仓储生成；控制面记录的也是这条真实消费者版本。
+        _record_fenced_publication_checkpoint(published.data_version)
+        return published.data_version
+
+
+def _release_bridge_context(
+    connection: Session,
+    *,
+    dataset: str,
+) -> tuple[UUID, UUID]:
+    """读取刚由 legacy bridge 冻结的真实 dataset 与方法学身份。"""
+    dataset_id = connection.execute(
+        select(CanonicalDataset.dataset_id).where(
+            CanonicalDataset.code == dataset,
+            CanonicalDataset.schema_version == 1,
+        )
+    ).scalar_one()
+    methodology_version_id = connection.execute(
+        select(MethodologyVersion.methodology_version_id).where(
+            MethodologyVersion.code == f"{dataset}.release-bridge",
+            MethodologyVersion.version == 1,
+        )
+    ).scalar_one()
+    return UUID(str(dataset_id)), UUID(str(methodology_version_id))
+
+
+def _action_coverage_records_by_identity(
+    connection: Session,
+    *,
+    identities: Sequence[EventCoverageIdentity],
+    family: str,
+    provider_id: str,
+) -> Mapping[EventCoverageIdentity, EventCoverageRecords]:
+    """一次读取当前公司行动，并按公开事件日分配到冻结身份窗口。"""
+    if family != "CORPORATE_ACTION":
+        raise ValueError("corporate action coverage family is invalid")
+    identity_values = tuple(identities)
+    result_records: dict[EventCoverageIdentity, list[CanonicalLineageRecord]] = {
+        identity: [] for identity in identity_values
+    }
+    result_dates: dict[EventCoverageIdentity, list[date]] = {
+        identity: [] for identity in identity_values
+    }
+    if not identity_values:
+        return {}
+    fact_date = func.coalesce(
+        EquityCorporateActionVersion.ex_date,
+        EquityCorporateActionVersion.record_date,
+        EquityCorporateActionVersion.announcement_date,
+        EquityCorporateActionVersion.report_period,
+    )
+    rows = connection.execute(
+        select(
+            EquityCorporateActionVersion.security_id,
+            EquityCorporateActionVersion.action_id,
+            EquityCorporateActionVersion.content_sha256,
+            EquityCorporateActionVersion.source_batch_id,
+            fact_date.label("fact_date"),
+        )
+        .join(
+            SourceBatch,
+            SourceBatch.source_batch_id == EquityCorporateActionVersion.source_batch_id,
+        )
+        .where(
+            EquityCorporateActionVersion.security_id.in_(
+                {identity.security_id for identity in identity_values}
+            ),
+            EquityCorporateActionVersion.valid_to.is_(None),
+            SourceBatch.provider_id == provider_id,
+            fact_date >= min(identity.coverage_from for identity in identity_values),
+            fact_date <= max(identity.coverage_to for identity in identity_values),
+        )
+        .order_by(
+            EquityCorporateActionVersion.security_id,
+            fact_date,
+            EquityCorporateActionVersion.action_id,
+        )
+    ).all()
+    identities_by_security: dict[int, list[EventCoverageIdentity]] = {}
+    for identity in identity_values:
+        identities_by_security.setdefault(identity.security_id, []).append(identity)
+    for security_id, action_id, content_hash, source_batch_id, event_date in rows:
+        matches = [
+            identity
+            for identity in identities_by_security.get(int(security_id), ())
+            if identity.coverage_from <= event_date <= identity.coverage_to
+        ]
+        if len(matches) > 1:
+            raise ValueError("corporate action coverage identity windows overlap")
+        if not matches:
+            continue
+        identity = matches[0]
+        result_records[identity].append(
+            _release_record(
+                dataset=_ACTION_DATASET,
+                security_id=int(security_id),
+                native_key=str(action_id),
+                content_hash=content_hash,
+                source_batch_id=source_batch_id,
+            )
+        )
+        result_dates[identity].append(event_date)
+    return {
+        identity: EventCoverageRecords(
+            records=tuple(result_records[identity]),
+            fact_dates=tuple(result_dates[identity]),
+        )
+        for identity in identity_values
+    }
+
+
+def _current_release_records(
+    connection: Session,
+    *,
+    dataset: str,
+    security_id: int,
+) -> tuple[tuple[CanonicalLineageRecord, ...], date | None, date | None]:
+    """读取一个证券分区全部当前 revision，确保 release 不会只冻结本次增量。"""
+    if dataset == _DAILY_DATASET:
+        rows = (
+            connection.execute(
+                select(
+                    EquityDailyBarModel.trade_date.label("fact_date"),
+                    EquityDailyBarModel.content_sha256,
+                    EquityDailyBarModel.source_batch_id,
                 )
-            ).scalar_one_or_none()
-            if existing is not None:
-                return UUID(str(existing))
-        # 每个数据集分区仅有一条当前记录，读取方才能原子选择版本。
-        connection.execute(
-            update(DatasetPublication)
-            .where(
-                DatasetPublication.dataset == dataset,
-                DatasetPublication.partition_key == partition_key,
-                DatasetPublication.superseded_at.is_(None),
+                .where(
+                    EquityDailyBarModel.security_id == security_id,
+                    EquityDailyBarModel.valid_to.is_(None),
+                )
+                .order_by(EquityDailyBarModel.trade_date)
             )
-            .values(superseded_at=published_at)
+            .mappings()
+            .all()
         )
-        data_version = preferred_version or uuid4()
-        connection.execute(
-            insert(DatasetPublication).values(
-                publication_id=uuid4(),
+        return _dated_release_records(
+            dataset=dataset,
+            security_id=security_id,
+            rows=rows,
+        )
+    period_model = _period_model_for_dataset(dataset)
+    if period_model is not None:
+        rows = (
+            connection.execute(
+                select(
+                    period_model.period_end.label("fact_date"),
+                    period_model.content_sha256,
+                    period_model.source_batch_id,
+                )
+                .where(
+                    period_model.security_id == security_id,
+                    period_model.valid_to.is_(None),
+                )
+                .order_by(period_model.period_end)
+            )
+            .mappings()
+            .all()
+        )
+        return _dated_release_records(
+            dataset=dataset,
+            security_id=security_id,
+            rows=rows,
+        )
+    if dataset == _FACTOR_DATASET:
+        rows = (
+            connection.execute(
+                select(
+                    EquityAdjustmentFactorModel.effective_date.label("fact_date"),
+                    EquityAdjustmentFactorModel.content_sha256,
+                    EquityAdjustmentFactorModel.source_batch_id,
+                )
+                .where(
+                    EquityAdjustmentFactorModel.security_id == security_id,
+                    EquityAdjustmentFactorModel.valid_to.is_(None),
+                )
+                .order_by(EquityAdjustmentFactorModel.effective_date)
+            )
+            .mappings()
+            .all()
+        )
+        return _dated_release_records(
+            dataset=dataset,
+            security_id=security_id,
+            rows=rows,
+        )
+    if dataset == _ACTION_DATASET:
+        rows = (
+            connection.execute(
+                select(
+                    EquityCorporateActionVersion.action_id,
+                    func.coalesce(
+                        EquityCorporateActionVersion.ex_date,
+                        EquityCorporateActionVersion.record_date,
+                        EquityCorporateActionVersion.announcement_date,
+                        EquityCorporateActionVersion.report_period,
+                    ).label("fact_date"),
+                    EquityCorporateActionVersion.content_sha256,
+                    EquityCorporateActionVersion.source_batch_id,
+                )
+                .where(
+                    EquityCorporateActionVersion.security_id == security_id,
+                    EquityCorporateActionVersion.valid_to.is_(None),
+                )
+                .order_by(
+                    func.coalesce(
+                        EquityCorporateActionVersion.ex_date,
+                        EquityCorporateActionVersion.record_date,
+                        EquityCorporateActionVersion.announcement_date,
+                        EquityCorporateActionVersion.report_period,
+                    ),
+                    EquityCorporateActionVersion.action_id,
+                )
+            )
+            .mappings()
+            .all()
+        )
+        records = tuple(
+            _release_record(
                 dataset=dataset,
-                partition_key=partition_key,
-                data_version=data_version,
-                quality_status="passed",
-                published_at=published_at,
-                superseded_at=None,
-                effective_as_of=None,
-                knowledge_cutoff=None,
+                security_id=security_id,
+                native_key=str(row["action_id"]),
+                content_hash=row["content_sha256"],
+                source_batch_id=row["source_batch_id"],
             )
+            for row in rows
         )
-        return data_version
+        dates = tuple(cast(date, row["fact_date"]) for row in rows)
+        return records, (min(dates) if dates else None), (max(dates) if dates else None)
+    if dataset == _PROFILE_DATASET:
+        row = (
+            connection.execute(
+                select(
+                    EquityProfileVersion.content_sha256,
+                    EquityProfileVersion.source_batch_id,
+                ).where(
+                    EquityProfileVersion.security_id == security_id,
+                    EquityProfileVersion.valid_to.is_(None),
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            raise ValueError("equity profile publication has no current revision")
+        return (
+            (
+                _release_record(
+                    dataset=dataset,
+                    security_id=security_id,
+                    native_key="profile",
+                    content_hash=row["content_sha256"],
+                    source_batch_id=row["source_batch_id"],
+                ),
+            ),
+            None,
+            None,
+        )
+    raise ValueError("equity dataset is not supported by the canonical release bridge")
+
+
+def _period_model_for_dataset(
+    dataset: str,
+) -> type[EquityWeeklyBar] | type[EquityMonthlyBar] | None:
+    """将周/月 capability 映射到各自物理 revision 表，禁止跨周期拼接快照。"""
+    for period, model in _PERIOD_MODELS.items():
+        if period.capability == dataset:
+            return model
+    return None
+
+
+def _dated_release_records(
+    *,
+    dataset: str,
+    security_id: int,
+    rows: Sequence[Mapping[Any, Any]],
+) -> tuple[tuple[CanonicalLineageRecord, ...], date | None, date | None]:
+    """将按事实日期排序的当前 revision 投影为完整 release 血缘和日期范围。"""
+    dates = tuple(cast(date, row["fact_date"]) for row in rows)
+    records = tuple(
+        _release_record(
+            dataset=dataset,
+            security_id=security_id,
+            native_key=fact_date.isoformat(),
+            content_hash=row["content_sha256"],
+            source_batch_id=row["source_batch_id"],
+        )
+        for fact_date, row in zip(dates, rows, strict=True)
+    )
+    return records, (min(dates) if dates else None), (max(dates) if dates else None)
+
+
+def _release_record(
+    *,
+    dataset: str,
+    security_id: int,
+    native_key: str,
+    content_hash: object,
+    source_batch_id: object,
+) -> CanonicalLineageRecord:
+    """以真实 revision 摘要和来源批次构造 release 血缘，不能用随机值代替。"""
+    record_key_hash = hashlib.sha256(
+        f"equity:{dataset}:{security_id}:{native_key}".encode()
+    ).hexdigest()
+    return CanonicalLineageRecord(
+        record_key_hash=record_key_hash,
+        content_hash=_hex_hash(content_hash),
+        source_batch_id=UUID(str(source_batch_id)),
+        transform_hash=hashlib.sha256(_RELEASE_MAPPING_VERSION.encode()).hexdigest(),
+    )
+
+
+def _hex_hash(value: object) -> str:
+    """将数据库 `bytea` 内容摘要转换为统一小写十六进制，拒绝不完整血缘。"""
+    if isinstance(value, bytes):
+        result = value.hex()
+    elif isinstance(value, memoryview):
+        result = value.tobytes().hex()
+    else:
+        result = str(value)
+    if len(result) != 64 or any(character not in "0123456789abcdef" for character in result):
+        raise ValueError("equity revision content hash is invalid")
+    return result
+
+
+def _record_fenced_publication_checkpoint(data_version: UUID) -> None:
+    """把已提交或复用的 canonical dataVersion 交给同事务控制面写入脱敏 checkpoint。"""
+    execution = current_fenced_execution()
+    if execution is not None:
+        execution.record_checkpoint(kind="data-version", position=str(data_version))
 
 
 def _stored_instrument(row: Mapping[Any, Any]) -> StoredEquityInstrument:
@@ -1691,6 +2226,11 @@ def _factor_content_hash(factor: EquityAdjustmentFactor) -> bytes:
             "cumulativeFactor": str(factor.cumulative_factor),
         }
     )
+
+
+def _action_fact_date(action: EquityCorporateAction) -> date:
+    """按公开事件筛选口径选择除权、登记、公告或报告期中的首个可用日期。"""
+    return action.ex_date or action.record_date or action.announcement_date or action.report_period
 
 
 def _action_content_hash(action: EquityCorporateAction) -> bytes:

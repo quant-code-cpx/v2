@@ -48,6 +48,17 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env --profile '*'
 - Web 发布构建通过 `--build-arg VITE_API_BASE_URL=...` 注入公开 API origin。
 - 生产镜像变量 `*_IMAGE_REF` 必须替换为发布 CI 生成的 immutable digest。
 
+沪深港通正式链路默认失败关闭。启用前，部署 provisioner 必须把 HKEX SFTP
+私钥、严格 `known_hosts` 和摘要固定的 Securities Master profile 写入
+`data_sync_stock_connect_config` 卷，把 OMD-C、SSE MDGW、SZSE STEP
+终态交付及 sidecar manifest 写入 `data_sync_stock_connect_status` 卷；API 与
+worker 只读挂载这两个卷。随后设置 `.env.example` 所列
+`DATA_SYNC_STOCK_CONNECT_*`/`DATA_SYNC_HKEX_*` 变量，通过数据运维
+`market.stock_connect.overview.bundle` 的 `MARKET + ALL` 任务形成首个正式
+publication，完成三服务对账后再设置 `STOCK_CONNECT_API_ENABLED=true`。缺少授权或
+任一交付时，提交前 preflight 会分组件拒绝，不会排队后才失败，也不会使用网页抓取或
+样本数据替代。
+
 生产配置预检：
 
 ```bash

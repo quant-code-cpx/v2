@@ -69,6 +69,8 @@ class EtfDailyBar:
             raise ValueError("ETF amount must be finite and non-negative")
         if not self.volume_unit.strip():
             raise ValueError("ETF volume unit is required")
+        if _public_text_length(self.volume_unit) > 40:
+            raise ValueError("ETF volume unit exceeds the public contract")
         if (
             len(self.currency) != 3
             or self.currency != self.currency.upper()
@@ -77,6 +79,8 @@ class EtfDailyBar:
             raise ValueError("ETF currency must be an ISO uppercase code")
         if self.trade_status is not None and not self.trade_status.strip():
             raise ValueError("ETF trade status must not be blank")
+        if self.trade_status is not None and _public_text_length(self.trade_status) > 80:
+            raise ValueError("ETF trade status exceeds the public contract")
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,11 +126,20 @@ class EtfProfile:
     listing_status: str
     effective_from: date
     source_time_precision: str
+    display_name: str | None = None
 
     def __post_init__(self) -> None:
         """校验产品与生命周期字段，缺失目录项绝不能自动写为摘牌或暂停。"""
         if not self.etf_type.strip() or not self.management_mode.strip():
             raise ValueError("ETF profile type and management mode must not be blank")
+        if (
+            _public_text_length(self.etf_type) > 80
+            or _public_text_length(self.management_mode) > 80
+        ):
+            raise ValueError("ETF profile classification exceeds the public contract")
+        _validate_optional_text(self.display_name, label="display name", maximum=160)
+        _validate_optional_text(self.manager_name, label="manager name", maximum=160)
+        _validate_optional_text(self.custodian_name, label="custodian name", maximum=160)
         if (
             self.delisted_on is not None
             and self.listed_on is not None
@@ -158,13 +171,32 @@ class EtfDailyStatus:
             raise ValueError("ETF status dimension is invalid")
         if not self.status_code.strip():
             raise ValueError("ETF status code must not be blank")
+        if _public_text_length(self.status_code) > 80:
+            raise ValueError("ETF status code exceeds the public contract")
         if self.effective_to is not None and self.effective_to <= self.effective_from:
             raise ValueError("ETF status effective range is invalid")
         if self.reason is not None and not self.reason.strip():
             raise ValueError("ETF status reason must not be blank")
+        if self.reason is not None and _public_text_length(self.reason) > 500:
+            raise ValueError("ETF status reason exceeds the public contract")
 
 
 def _validate_currency(value: str) -> None:
     """校验 ETF 报价或净值币种为 ISO 大写代码，避免来源本地标签进入 canonical 字段。"""
     if len(value) != 3 or value != value.upper() or not value.isascii():
         raise ValueError("ETF currency must be an ISO uppercase code")
+
+
+def _validate_optional_text(value: str | None, *, label: str, maximum: int) -> None:
+    """拒绝空白或超过公开契约上限的可选文本，绝不截断来源事实。"""
+    if value is None:
+        return
+    if not value.strip():
+        raise ValueError(f"ETF {label} must not be blank")
+    if _public_text_length(value) > maximum:
+        raise ValueError(f"ETF {label} exceeds the public contract")
+
+
+def _public_text_length(value: str) -> int:
+    """按公开 TypeScript 合同的 UTF-16 code unit 计数，避免服务间接受边界不一致。"""
+    return len(value.encode("utf-16-le")) // 2

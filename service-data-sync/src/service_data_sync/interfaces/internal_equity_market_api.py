@@ -15,7 +15,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Header, Path, Query, Request
@@ -63,8 +63,10 @@ def register_equity_market_routes(
         symbol: Annotated[str, Path(pattern=r"^[0-9]{6}$")],
         start: Annotated[date, Query()],
         end: Annotated[date, Query()],
+        data_version: Annotated[UUID, Query(alias="dataVersion")],
         period: Annotated[str, Query()] = "1d",
         adjust: Annotated[str, Query()] = "none",
+        factor_data_version: Annotated[UUID | None, Query(alias="factorDataVersion")] = None,
         adjust_as_of: Annotated[date | None, Query(alias="adjustAsOf")] = None,
         cursor: Annotated[str | None, Query(min_length=1, max_length=1024)] = None,
         limit: Annotated[int, Query(ge=1, le=2000)] = 500,
@@ -75,6 +77,10 @@ def register_equity_market_routes(
             raise _validation_problem("start must not be after end")
         selected_period = _period_or_problem(period)
         adjustment_mode = _adjustment_or_problem(adjust)
+        if adjustment_mode == "none" and factor_data_version is not None:
+            raise _validation_problem("factorDataVersion requires qfq or hfq")
+        if adjustment_mode != "none" and factor_data_version is None:
+            raise _validation_problem("factorDataVersion is required for qfq or hfq")
         anchor = adjust_as_of or end
         identity_start = min(start, anchor) if adjustment_mode != "none" else start
         identity_end = max(end, anchor) if adjustment_mode != "none" else end
@@ -97,54 +103,21 @@ def register_equity_market_routes(
             end=end,
         )
         if instrument is None:
-            if availability is not None:
-                return _empty_bar_response(
-                    request=request,
-                    identifier=identifier,
-                    period=selected_period,
-                    adjustment_mode=adjustment_mode,
-                    anchor=anchor,
-                    observation=availability,
-                )
-            raise InternalProblem(
-                status=404,
-                code="not-found",
-                detail="Equity instrument is not found",
-            )
-        if availability is not None and availability.availability == "empty":
-            return _empty_bar_response(
-                request=request,
-                identifier=identifier,
-                period=selected_period,
-                adjustment_mode=adjustment_mode,
-                anchor=anchor,
-                observation=availability,
-            )
-        bar_publication = repository.get_current_publication(
+            raise _snapshot_expired("Equity identity or market snapshot changed")
+        bar_publication = _publication_or_problem(
+            repository,
             dataset=selected_period.capability,
             instrument=instrument,
+            expected_data_version=data_version,
+            detail="Equity bars are not published",
         )
-        if bar_publication is None:
-            if availability is not None:
-                return _empty_bar_response(
-                    request=request,
-                    identifier=identifier,
-                    period=selected_period,
-                    adjustment_mode=adjustment_mode,
-                    anchor=anchor,
-                    observation=availability,
-                )
-            raise InternalProblem(
-                status=503,
-                code="dependency-unavailable",
-                detail="Equity bars are not published",
-            )
         bars = tuple(
             repository.list_bars(
                 security_id=instrument.security_id,
                 period=selected_period,
                 start=start,
                 end=end,
+                known_at=bar_publication.published_at,
             )
         )
         factor_publication: EquityDatasetPublication | None = None
@@ -154,11 +127,13 @@ def register_equity_market_routes(
                 repository,
                 dataset="equity.adjustment_factor",
                 instrument=instrument,
+                expected_data_version=factor_data_version,
                 detail="Adjustment factors are not published",
             )
             factor_rows = repository.list_adjustment_factors(
                 security_id=instrument.security_id,
                 end=max(anchor, end),
+                known_at=factor_publication.published_at,
             )
             if not factor_rows or _factor_at(factor_rows, anchor) is None:
                 raise InternalProblem(
@@ -166,6 +141,18 @@ def register_equity_market_routes(
                     code="adjustment-unavailable",
                     detail="Adjustment factor anchor is unavailable",
                 )
+        if availability is not None and availability.availability == "empty":
+            return _empty_bar_response(
+                request=request,
+                if_none_match=if_none_match,
+                identifier=identifier,
+                period=selected_period,
+                adjustment_mode=adjustment_mode,
+                anchor=anchor,
+                observation=availability,
+                bar_publication=bar_publication,
+                factor_publication=factor_publication,
+            )
         cursor_scope = _cursor_scope(
             {
                 "instrument": str(instrument.instrument_id),
@@ -263,6 +250,7 @@ def register_equity_market_routes(
         exchange: str,
         symbol: Annotated[str, Path(pattern=r"^[0-9]{6}$")],
         end: Annotated[date, Query()],
+        data_version: Annotated[UUID, Query(alias="dataVersion")],
         start: Annotated[date | None, Query()] = None,
         cursor: Annotated[str | None, Query(min_length=1, max_length=1024)] = None,
         limit: Annotated[int, Query(ge=1, le=500)] = 500,
@@ -282,6 +270,7 @@ def register_equity_market_routes(
             repository,
             dataset="equity.adjustment_factor",
             instrument=instrument,
+            expected_data_version=data_version,
             detail="Adjustment factors are not published",
         )
         all_rows = tuple(
@@ -289,6 +278,7 @@ def register_equity_market_routes(
             for row in repository.list_adjustment_factors(
                 security_id=instrument.security_id,
                 end=end,
+                known_at=publication.published_at,
             )
             if start is None or row.factor.effective_date >= start
         )
@@ -350,6 +340,7 @@ def register_equity_market_routes(
         request: Request,
         exchange: str,
         symbol: Annotated[str, Path(pattern=r"^[0-9]{6}$")],
+        data_version: Annotated[UUID, Query(alias="dataVersion")],
         start: Annotated[date | None, Query()] = None,
         end: Annotated[date | None, Query()] = None,
         cursor: Annotated[str | None, Query(min_length=1, max_length=1024)] = None,
@@ -370,12 +361,14 @@ def register_equity_market_routes(
             repository,
             dataset="equity.corporate_action",
             instrument=instrument,
+            expected_data_version=data_version,
             detail="Corporate actions are not published",
         )
         all_rows = repository.list_corporate_actions(
             security_id=instrument.security_id,
             start=start,
             end=end,
+            known_at=publication.published_at,
         )
         rows, next_cursor = _page(
             all_rows,
@@ -427,10 +420,12 @@ def register_equity_market_routes(
         request: Request,
         exchange: str,
         symbol: Annotated[str, Path(pattern=r"^[0-9]{6}$")],
+        data_version: Annotated[UUID, Query(alias="dataVersion")],
+        as_of: Annotated[date | None, Query(alias="asOf")] = None,
         if_none_match: Annotated[str | None, Header(max_length=256)] = None,
     ) -> Response:
-        """读取当前已发布公司概况，不返回 provider 字段或数据库键。"""
-        fact_date = datetime.now(_SHANGHAI).date()
+        """按可选代码事实日读取已发布公司概况，不返回 provider 字段或数据库键。"""
+        fact_date = as_of or datetime.now(_SHANGHAI).date()
         identifier, instrument = _instrument_or_problem(
             repository,
             exchange,
@@ -442,9 +437,13 @@ def register_equity_market_routes(
             repository,
             dataset="equity.profile",
             instrument=instrument,
+            expected_data_version=data_version,
             detail="Company profile is not published",
         )
-        stored = repository.get_company_profile(security_id=instrument.security_id)
+        stored = repository.get_company_profile(
+            security_id=instrument.security_id,
+            known_at=publication.published_at,
+        )
         if stored is None:
             raise InternalProblem(
                 status=404,
@@ -455,6 +454,7 @@ def register_equity_market_routes(
         body = {
             "exchange": identifier.exchange.value,
             "symbol": identifier.symbol,
+            "identityAsOf": fact_date.isoformat(),
             "dataVersion": str(publication.data_version),
             "publishedAt": _timestamp(publication),
             "qualityStatus": "passed",
@@ -483,7 +483,10 @@ def register_equity_market_routes(
             etag=_etag(
                 "profile",
                 publication,
-                {"instrument": str(instrument.instrument_id)},
+                {
+                    "instrument": str(instrument.instrument_id),
+                    "identityAsOf": fact_date.isoformat(),
+                },
             ),
             body=body,
         )
@@ -633,16 +636,24 @@ def _publication_or_problem(
     *,
     dataset: str,
     instrument: StoredEquityInstrument,
+    expected_data_version: UUID | None,
     detail: str,
 ) -> EquityDatasetPublication:
-    """要求永久证券分区已有通过质量门的当前发布。"""
+    """要求永久证券分区当前发布精确等于状态门控版本。"""
     publication = repository.get_current_publication(
         dataset=dataset,
         instrument=instrument,
     )
     if publication is None:
-        raise InternalProblem(status=503, code="dependency-unavailable", detail=detail)
+        raise _snapshot_expired(detail)
+    if expected_data_version is None or publication.data_version != expected_data_version:
+        raise _snapshot_expired("Published equity market snapshot changed")
     return publication
+
+
+def _snapshot_expired(detail: str) -> InternalProblem:
+    """拒绝已经切换、回收或不属于目标证券的 publication 版本。"""
+    return InternalProblem(status=409, code="snapshot-expired", detail=detail)
 
 
 def _bar_resource(
@@ -683,23 +694,28 @@ def _bar_resource(
 def _empty_bar_response(
     *,
     request: Request,
+    if_none_match: str | None,
     identifier: EquityIdentifier,
     period: EquityBarPeriod,
     adjustment_mode: str,
     anchor: date,
     observation: EquityAvailabilityObservation,
+    bar_publication: EquityDatasetPublication,
+    factor_publication: EquityDatasetPublication | None,
 ) -> Response:
-    """返回不含伪造事实和 publication 版本的成功空页。"""
+    """返回绑定精确 publication 的合法空页，不伪造行情记录。"""
     body = {
         "exchange": identifier.exchange.value,
         "symbol": identifier.symbol,
         "period": period.value,
         "adjustmentMode": adjustment_mode,
         "adjustAsOf": None if adjustment_mode == "none" else anchor.isoformat(),
-        "factorVersion": None,
-        "formulaVersion": None,
-        "dataVersion": None,
-        "publishedAt": None,
+        "factorVersion": (
+            None if factor_publication is None else str(factor_publication.data_version)
+        ),
+        "formulaVersion": None if factor_publication is None else _FORMULA_VERSION,
+        "dataVersion": str(bar_publication.data_version),
+        "publishedAt": _timestamp(bar_publication),
         "availability": observation.availability.upper(),
         "observedAt": observation.observed_at.isoformat().replace("+00:00", "Z"),
         "reasonCode": observation.reason_code,
@@ -708,12 +724,27 @@ def _empty_bar_response(
         "items": [],
         "nextCursor": None,
     }
-    return JSONResponse(
-        content=body,
-        headers={
-            "Cache-Control": "no-store",
-            "X-Request-Id": _request_id(request),
-        },
+    return _conditional_response(
+        request=request,
+        if_none_match=if_none_match,
+        publication=bar_publication,
+        etag=_etag(
+            "bars-empty",
+            bar_publication,
+            {
+                "exchange": identifier.exchange.value,
+                "symbol": identifier.symbol,
+                "period": period.value,
+                "adjust": adjustment_mode,
+                "adjustAsOf": None if factor_publication is None else anchor.isoformat(),
+                "factorVersion": (
+                    None if factor_publication is None else str(factor_publication.data_version)
+                ),
+                "availability": observation.availability,
+                "observedAt": observation.observed_at.isoformat(),
+            },
+        ),
+        body=body,
     )
 
 

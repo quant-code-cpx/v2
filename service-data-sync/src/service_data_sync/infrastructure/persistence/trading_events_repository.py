@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -29,6 +30,7 @@ from service_data_sync.application.ports.trading_events import (
     PublishedTradingEvents,
     TradingEventsSourceObservation,
 )
+from service_data_sync.domain.equity import EquityIdentifier
 from service_data_sync.domain.trading_events import BlockTrade, DragonTigerEvent
 from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.database.models.canonical import CanonicalCheckpoint
@@ -45,6 +47,13 @@ from service_data_sync.infrastructure.database.models.market import (
 from service_data_sync.infrastructure.database.models.provenance.source_batch import SourceBatch
 from service_data_sync.infrastructure.persistence.canonical_release_repository import (
     SqlAlchemyCanonicalReleaseRepository,
+)
+from service_data_sync.infrastructure.persistence.event_window_coverage import (
+    EventCoverageIdentity,
+    EventCoverageRecords,
+    PublishedEventCoverages,
+    publish_event_window_coverages,
+    resolve_event_coverage_identities,
 )
 from service_data_sync.infrastructure.persistence.typed_p0_support import (
     TypedP0SourceApproval,
@@ -112,18 +121,37 @@ class SqlAlchemyTradingEventsRepository(DragonTigerRepository, BlockTradeReposit
         *,
         events: Sequence[DragonTigerEvent],
         source: TradingEventsSourceObservation,
+        start: date,
+        end: date,
+        identifier: EquityIdentifier | None = None,
     ) -> PublishedTradingEvents:
-        """原子发布龙虎榜事件和席位，来源键相同且内容不变时复用现有 release。"""
+        """原子发布龙虎榜事实及逐证券窗口 manifest，合法空窗 record_count 为零。"""
         values = tuple(events)
-        if not values or len({value.source_event_key for value in values}) != len(values):
-            raise ValueError("dragon-tiger events must be non-empty and unique by source event key")
+        if start > end:
+            raise ValueError("dragon-tiger publication window is invalid")
+        if len({value.source_event_key for value in values}) != len(values):
+            raise ValueError("dragon-tiger events must be unique by source event key")
+        if identifier is not None and any(
+            value.source_security_code != identifier.symbol for value in values
+        ):
+            raise ValueError("dragon-tiger events do not match requested instrument")
         approval = _approved_source(self._approved_sources, source)
         prepared: list[_PreparedDragon] = []
         source_batch_id: UUID | None = None
+        dataset_id: UUID | None = None
+        methodology_id: UUID | None = None
+        coverage_identities: tuple[EventCoverageIdentity, ...] = ()
+        coverage_scope = ""
+        universe_hash = ""
+        coverage_publication: PublishedEventCoverages | None = None
+        accepted_values: list[DragonTigerEvent] = []
+        excluded_count = 0
 
         def prepare(session: Session) -> CanonicalReleaseCandidate:
             """在单事务内登记来源、解析证券及交易所、映射原因并生成 release 候选。"""
-            nonlocal source_batch_id
+            nonlocal excluded_count
+            nonlocal coverage_identities, coverage_scope, dataset_id
+            nonlocal methodology_id, source_batch_id, universe_hash
             now = datetime.now(UTC)
             dataset_id = ensure_dataset(
                 session,
@@ -148,17 +176,36 @@ class SqlAlchemyTradingEventsRepository(DragonTigerRepository, BlockTradeReposit
             source_batch_id = record_source_batch(
                 session, source=source, source_dataset_id=source_dataset_id, now=now
             )
+            (
+                coverage_identities,
+                coverage_scope,
+                universe_hash,
+            ) = resolve_event_coverage_identities(
+                session,
+                start=start,
+                end=end,
+                identifier=identifier,
+            )
+            eligible_values, excluded_count = _dragon_roster_values(
+                values=values,
+                identities=coverage_identities,
+                identifier=identifier,
+            )
+            accepted_values[:] = eligible_values
             resolved = {
                 value.source_event_key: _resolve_security_and_venue(
-                    session, source_code=value.source_security_code, trade_date=value.trade_date
+                    session,
+                    source_code=value.source_security_code,
+                    trade_date=value.trade_date,
+                    identifier=identifier,
                 )
-                for value in values
+                for value in eligible_values
             }
             current = _current_dragon(
                 session, provider_id=source.provider_id, methodology_version_id=methodology_id
             )
             prepared[:] = []
-            for value in values:
+            for value in eligible_values:
                 security_id, venue_id = resolved[value.source_event_key]
                 reason_family = _reason_family(
                     session,
@@ -199,6 +246,7 @@ class SqlAlchemyTradingEventsRepository(DragonTigerRepository, BlockTradeReposit
                 changed={item.value.source_event_key: item for item in prepared},
                 source_batch_id=source_batch_id,
                 now=now,
+                window_end=end,
             )
 
         def write(session: Session, candidate: CanonicalReleaseCandidate, release_id: UUID) -> None:
@@ -287,13 +335,62 @@ class SqlAlchemyTradingEventsRepository(DragonTigerRepository, BlockTradeReposit
                     content_hash=item.content_hash,
                 )
 
+        def write_visibility(
+            session: Session,
+            candidate: CanonicalReleaseCandidate,
+            publication_id: UUID,
+            data_version: UUID,
+            release_id: UUID,
+        ) -> None:
+            """为龙虎榜累积 release 选择结果发布逐证券窗口 manifest。"""
+            del publication_id, data_version, release_id
+            nonlocal coverage_publication
+            if (
+                dataset_id is None
+                or methodology_id is None
+                or source_batch_id is None
+                or not coverage_identities
+            ):
+                raise AssertionError("dragon-tiger coverage preparation did not resolve state")
+            resolved_methodology_id = methodology_id
+            coverage_publication = publish_event_window_coverages(
+                session,
+                release_repository=self._release_repository,
+                dataset_id=dataset_id,
+                dataset_code=_DRAGON_DATASET,
+                methodology_version_id=resolved_methodology_id,
+                mapping_version=_DRAGON_MAPPING,
+                source=source,
+                source_batch_id=source_batch_id,
+                identities=coverage_identities,
+                coverage_scope=coverage_scope,
+                universe_hash=universe_hash,
+                families=("DRAGON_TIGER",),
+                records_for=lambda current_session, frozen_identities, family: (
+                    _dragon_coverage_records_by_identity(
+                        current_session,
+                        identities=frozen_identities,
+                        methodology_version_id=resolved_methodology_id,
+                        provider_id=source.provider_id,
+                    )
+                ),
+                now=candidate.created_at,
+            )
+
         publication = self._release_repository.publish_prepared(
-            prepare_candidate=prepare, write_facts=write
+            prepare_candidate=prepare,
+            write_facts=write,
+            write_visibility=write_visibility,
+            record_fenced_progress=False,
         )
+        del publication
+        if coverage_publication is None:
+            raise AssertionError("dragon-tiger publication completed without coverage manifest")
         return PublishedTradingEvents(
-            data_version=publication.data_version,
+            data_version=coverage_publication.data_version,
             inserted_count=len(prepared),
-            unchanged_count=len(values) - len(prepared),
+            unchanged_count=len(accepted_values) - len(prepared),
+            excluded_count=excluded_count,
         )
 
     def publish_block_trades(
@@ -301,20 +398,37 @@ class SqlAlchemyTradingEventsRepository(DragonTigerRepository, BlockTradeReposit
         *,
         trades: Sequence[BlockTrade],
         source: TradingEventsSourceObservation,
+        start: date,
+        end: date,
+        identifier: EquityIdentifier | None = None,
     ) -> PublishedTradingEvents:
-        """原子发布大宗逐笔成交，保留来源 occurrence 而不按经济字段错误去重。"""
+        """原子发布大宗逐笔及逐证券窗口 manifest，合法空窗仍可被消费。"""
         values = tuple(trades)
-        if not values or len(
-            {(value.source_trade_key, value.occurrence_no) for value in values}
-        ) != len(values):
-            raise ValueError("block trades must be non-empty and unique by source key/occurrence")
+        if start > end:
+            raise ValueError("block-trade publication window is invalid")
+        if len({(value.source_trade_key, value.occurrence_no) for value in values}) != len(values):
+            raise ValueError("block trades must be unique by source key/occurrence")
+        if identifier is not None and any(
+            value.source_security_code != identifier.symbol for value in values
+        ):
+            raise ValueError("block trades do not match requested instrument")
         approval = _approved_source(self._approved_sources, source)
         prepared: list[_PreparedBlock] = []
         source_batch_id: UUID | None = None
+        dataset_id: UUID | None = None
+        methodology_id: UUID | None = None
+        coverage_identities: tuple[EventCoverageIdentity, ...] = ()
+        coverage_scope = ""
+        universe_hash = ""
+        coverage_publication: PublishedEventCoverages | None = None
+        accepted_values: list[BlockTrade] = []
+        excluded_count = 0
 
         def prepare(session: Session) -> CanonicalReleaseCandidate:
             """在事务内注册来源、解析证券场所并按来源逐笔键构造 release 候选。"""
-            nonlocal source_batch_id
+            nonlocal excluded_count
+            nonlocal coverage_identities, coverage_scope, dataset_id
+            nonlocal methodology_id, source_batch_id, universe_hash
             now = datetime.now(UTC)
             dataset_id = ensure_dataset(
                 session,
@@ -339,17 +453,36 @@ class SqlAlchemyTradingEventsRepository(DragonTigerRepository, BlockTradeReposit
             source_batch_id = record_source_batch(
                 session, source=source, source_dataset_id=source_dataset_id, now=now
             )
+            (
+                coverage_identities,
+                coverage_scope,
+                universe_hash,
+            ) = resolve_event_coverage_identities(
+                session,
+                start=start,
+                end=end,
+                identifier=identifier,
+            )
+            eligible_values, excluded_count = _block_roster_values(
+                values=values,
+                identities=coverage_identities,
+                identifier=identifier,
+            )
+            accepted_values[:] = eligible_values
             resolved = {
                 (value.source_trade_key, value.occurrence_no): _resolve_security_and_venue(
-                    session, source_code=value.source_security_code, trade_date=value.trade_date
+                    session,
+                    source_code=value.source_security_code,
+                    trade_date=value.trade_date,
+                    identifier=identifier,
                 )
-                for value in values
+                for value in eligible_values
             }
             current = _current_block(
                 session, provider_id=source.provider_id, methodology_version_id=methodology_id
             )
             prepared[:] = []
-            for value in values:
+            for value in eligible_values:
                 key = (value.source_trade_key, value.occurrence_no)
                 security_id, venue_id = resolved[key]
                 economic_fingerprint = _block_economic_fingerprint(value)
@@ -389,6 +522,7 @@ class SqlAlchemyTradingEventsRepository(DragonTigerRepository, BlockTradeReposit
                 },
                 source_batch_id=source_batch_id,
                 now=now,
+                window_end=end,
             )
 
         def write(session: Session, candidate: CanonicalReleaseCandidate, release_id: UUID) -> None:
@@ -457,14 +591,123 @@ class SqlAlchemyTradingEventsRepository(DragonTigerRepository, BlockTradeReposit
                     content_hash=item.content_hash,
                 )
 
+        def write_visibility(
+            session: Session,
+            candidate: CanonicalReleaseCandidate,
+            publication_id: UUID,
+            data_version: UUID,
+            release_id: UUID,
+        ) -> None:
+            """为大宗交易累积 release 选择结果发布逐证券窗口 manifest。"""
+            del publication_id, data_version, release_id
+            nonlocal coverage_publication
+            if (
+                dataset_id is None
+                or methodology_id is None
+                or source_batch_id is None
+                or not coverage_identities
+            ):
+                raise AssertionError("block-trade coverage preparation did not resolve state")
+            resolved_methodology_id = methodology_id
+            coverage_publication = publish_event_window_coverages(
+                session,
+                release_repository=self._release_repository,
+                dataset_id=dataset_id,
+                dataset_code=_BLOCK_DATASET,
+                methodology_version_id=resolved_methodology_id,
+                mapping_version=_BLOCK_MAPPING,
+                source=source,
+                source_batch_id=source_batch_id,
+                identities=coverage_identities,
+                coverage_scope=coverage_scope,
+                universe_hash=universe_hash,
+                families=("BLOCK_TRADE",),
+                records_for=lambda current_session, frozen_identities, family: (
+                    _block_coverage_records_by_identity(
+                        current_session,
+                        identities=frozen_identities,
+                        methodology_version_id=resolved_methodology_id,
+                        provider_id=source.provider_id,
+                    )
+                ),
+                now=candidate.created_at,
+            )
+
         publication = self._release_repository.publish_prepared(
-            prepare_candidate=prepare, write_facts=write
+            prepare_candidate=prepare,
+            write_facts=write,
+            write_visibility=write_visibility,
+            record_fenced_progress=False,
         )
+        del publication
+        if coverage_publication is None:
+            raise AssertionError("block-trade publication completed without coverage manifest")
         return PublishedTradingEvents(
-            data_version=publication.data_version,
+            data_version=coverage_publication.data_version,
             inserted_count=len(prepared),
-            unchanged_count=len(values) - len(prepared),
+            unchanged_count=len(accepted_values) - len(prepared),
+            excluded_count=excluded_count,
         )
+
+
+def _dragon_roster_values(
+    *,
+    values: Sequence[DragonTigerEvent],
+    identities: Sequence[EventCoverageIdentity],
+    identifier: EquityIdentifier | None,
+) -> tuple[tuple[DragonTigerEvent, ...], int]:
+    """过滤全市场龙虎榜为冻结 A 股 roster；合法目标外事实仅计数并保留在 raw 证据。"""
+    del identifier
+    accepted = tuple(
+        value
+        for value in values
+        if _in_frozen_roster(
+            source_code=value.source_security_code,
+            fact_date=value.trade_date,
+            identities=identities,
+        )
+    )
+    return accepted, len(values) - len(accepted)
+
+
+def _block_roster_values(
+    *,
+    values: Sequence[BlockTrade],
+    identities: Sequence[EventCoverageIdentity],
+    identifier: EquityIdentifier | None,
+) -> tuple[tuple[BlockTrade, ...], int]:
+    """过滤全市场大宗交易为冻结 A 股 roster；目标外成交不得阻断目标 coverage。"""
+    del identifier
+    accepted = tuple(
+        value
+        for value in values
+        if _in_frozen_roster(
+            source_code=value.source_security_code,
+            fact_date=value.trade_date,
+            identities=identities,
+        )
+    )
+    return accepted, len(values) - len(accepted)
+
+
+def _in_frozen_roster(
+    *,
+    source_code: str,
+    fact_date: date,
+    identities: Sequence[EventCoverageIdentity],
+) -> bool:
+    """判定六位来源代码在事实日是否唯一属于冻结 roster，歧义或坏格式失败关闭。"""
+    if re.fullmatch(r"[0-9]{6}", source_code) is None:
+        raise ValueError("trading disclosure source security code is malformed")
+    symbol_matches = [item for item in identities if item.symbol == source_code]
+    matches = [
+        item for item in symbol_matches if item.coverage_from <= fact_date <= item.coverage_to
+    ]
+    if len(matches) > 1:
+        raise ValueError("trading disclosure identity is ambiguous in frozen roster")
+    if symbol_matches and not matches:
+        raise ValueError("trading target fact falls outside the requested coverage window")
+    return len(matches) == 1
 
 
 def _approved_source(
@@ -478,17 +721,28 @@ def _approved_source(
 
 
 def _resolve_security_and_venue(
-    session: Session, *, source_code: str, trade_date: date
+    session: Session,
+    *,
+    source_code: str,
+    trade_date: date,
+    identifier: EquityIdentifier | None,
 ) -> tuple[int, UUID]:
-    """按事实日期解析唯一确认的股票与交易所，代码跨场所歧义时拒绝发布。"""
+    """按事实日期和可选交易所约束解析唯一身份，代码跨场所不得误绑定。"""
+    filters = [
+        EquityIdentifierVersion.symbol == source_code,
+        EquityIdentifierVersion.identity_state == "CONFIRMED",
+        EquityIdentifierVersion.effective_from <= trade_date,
+        (EquityIdentifierVersion.effective_to.is_(None))
+        | (EquityIdentifierVersion.effective_to > trade_date),
+        EquityIdentifierVersion.known_to.is_(None),
+    ]
+    if identifier is not None:
+        if source_code != identifier.symbol:
+            raise ValueError("trading disclosure does not match requested instrument")
+        filters.append(EquityIdentifierVersion.exchange == identifier.exchange.value)
     rows = session.execute(
         select(EquityIdentifierVersion.security_id, EquityIdentifierVersion.exchange).where(
-            EquityIdentifierVersion.symbol == source_code,
-            EquityIdentifierVersion.identity_state == "CONFIRMED",
-            EquityIdentifierVersion.effective_from <= trade_date,
-            (EquityIdentifierVersion.effective_to.is_(None))
-            | (EquityIdentifierVersion.effective_to > trade_date),
-            EquityIdentifierVersion.known_to.is_(None),
+            *filters
         )
     ).all()
     candidates = {(int(security_id), str(exchange)) for security_id, exchange in rows}
@@ -580,6 +834,195 @@ def _current_block(
     return result
 
 
+def _dragon_coverage_records_by_identity(
+    session: Session,
+    *,
+    identities: Sequence[EventCoverageIdentity],
+    methodology_version_id: UUID,
+    provider_id: str,
+) -> Mapping[EventCoverageIdentity, EventCoverageRecords]:
+    """一次读取冻结 roster 的龙虎榜血缘，并按交易日分配到唯一身份窗口。"""
+    identity_values = tuple(identities)
+    mutable_records: dict[EventCoverageIdentity, list[CanonicalLineageRecord]] = {
+        identity: [] for identity in identity_values
+    }
+    mutable_dates: dict[EventCoverageIdentity, list[date]] = {
+        identity: [] for identity in identity_values
+    }
+    if not identity_values:
+        return {}
+    rows = session.execute(
+        select(
+            DragonTigerEventRevision.security_id,
+            DragonTigerEventRevision.source_event_key,
+            DragonTigerEventRevision.content_hash,
+            DragonTigerEventRevision.source_batch_id,
+            DragonTigerEventRevision.trade_date,
+        )
+        .join(
+            SourceBatch,
+            SourceBatch.source_batch_id == DragonTigerEventRevision.source_batch_id,
+        )
+        .where(
+            DragonTigerEventRevision.security_id.in_(
+                {identity.security_id for identity in identity_values}
+            ),
+            DragonTigerEventRevision.methodology_version_id == methodology_version_id,
+            DragonTigerEventRevision.known_to.is_(None),
+            DragonTigerEventRevision.trade_date
+            >= min(identity.coverage_from for identity in identity_values),
+            DragonTigerEventRevision.trade_date
+            <= max(identity.coverage_to for identity in identity_values),
+            SourceBatch.provider_id == provider_id,
+        )
+        .order_by(
+            DragonTigerEventRevision.security_id,
+            DragonTigerEventRevision.trade_date,
+            DragonTigerEventRevision.source_event_key,
+        )
+    ).all()
+    identities_by_security = _coverage_identities_by_security(identity_values)
+    for security_id, source_key, content_hash, batch_id, trade_date in rows:
+        identity = _coverage_identity_for_fact(
+            identities_by_security=identities_by_security,
+            security_id=int(security_id),
+            fact_date=trade_date,
+        )
+        if identity is None:
+            continue
+        mutable_records[identity].append(
+            CanonicalLineageRecord(
+                record_key_hash=_hash(str(source_key)),
+                content_hash=str(content_hash),
+                source_batch_id=UUID(str(batch_id)),
+                transform_hash=_hash(_DRAGON_MAPPING),
+            )
+        )
+        mutable_dates[identity].append(trade_date)
+    return _coverage_records_result(
+        identities=identity_values,
+        mutable_records=mutable_records,
+        mutable_dates=mutable_dates,
+    )
+
+
+def _block_coverage_records_by_identity(
+    session: Session,
+    *,
+    identities: Sequence[EventCoverageIdentity],
+    methodology_version_id: UUID,
+    provider_id: str,
+) -> Mapping[EventCoverageIdentity, EventCoverageRecords]:
+    """一次读取冻结 roster 的大宗逐笔血缘，并按交易日分配到唯一身份窗口。"""
+    identity_values = tuple(identities)
+    mutable_records: dict[EventCoverageIdentity, list[CanonicalLineageRecord]] = {
+        identity: [] for identity in identity_values
+    }
+    mutable_dates: dict[EventCoverageIdentity, list[date]] = {
+        identity: [] for identity in identity_values
+    }
+    if not identity_values:
+        return {}
+    rows = session.execute(
+        select(
+            BlockTradeExecutionRevision.security_id,
+            BlockTradeExecutionRevision.source_event_key,
+            BlockTradeExecutionRevision.occurrence_no,
+            BlockTradeExecutionRevision.content_hash,
+            BlockTradeExecutionRevision.source_batch_id,
+            BlockTradeExecutionRevision.trade_date,
+        )
+        .join(
+            SourceBatch,
+            SourceBatch.source_batch_id == BlockTradeExecutionRevision.source_batch_id,
+        )
+        .where(
+            BlockTradeExecutionRevision.security_id.in_(
+                {identity.security_id for identity in identity_values}
+            ),
+            BlockTradeExecutionRevision.methodology_version_id == methodology_version_id,
+            BlockTradeExecutionRevision.known_to.is_(None),
+            BlockTradeExecutionRevision.trade_date
+            >= min(identity.coverage_from for identity in identity_values),
+            BlockTradeExecutionRevision.trade_date
+            <= max(identity.coverage_to for identity in identity_values),
+            SourceBatch.provider_id == provider_id,
+        )
+        .order_by(
+            BlockTradeExecutionRevision.security_id,
+            BlockTradeExecutionRevision.trade_date,
+            BlockTradeExecutionRevision.source_event_key,
+            BlockTradeExecutionRevision.occurrence_no,
+        )
+    ).all()
+    identities_by_security = _coverage_identities_by_security(identity_values)
+    for security_id, source_key, occurrence_no, content_hash, batch_id, trade_date in rows:
+        identity = _coverage_identity_for_fact(
+            identities_by_security=identities_by_security,
+            security_id=int(security_id),
+            fact_date=trade_date,
+        )
+        if identity is None:
+            continue
+        mutable_records[identity].append(
+            CanonicalLineageRecord(
+                record_key_hash=_hash(f"{source_key}:{occurrence_no}"),
+                content_hash=str(content_hash),
+                source_batch_id=UUID(str(batch_id)),
+                transform_hash=_hash(_BLOCK_MAPPING),
+            )
+        )
+        mutable_dates[identity].append(trade_date)
+    return _coverage_records_result(
+        identities=identity_values,
+        mutable_records=mutable_records,
+        mutable_dates=mutable_dates,
+    )
+
+
+def _coverage_identities_by_security(
+    identities: Sequence[EventCoverageIdentity],
+) -> Mapping[int, tuple[EventCoverageIdentity, ...]]:
+    """按永久证券聚合冻结身份分段，供批量事实查询做常数级 SQL 后分桶。"""
+    mutable: dict[int, list[EventCoverageIdentity]] = {}
+    for identity in identities:
+        mutable.setdefault(identity.security_id, []).append(identity)
+    return {security_id: tuple(values) for security_id, values in mutable.items()}
+
+
+def _coverage_identity_for_fact(
+    *,
+    identities_by_security: Mapping[int, Sequence[EventCoverageIdentity]],
+    security_id: int,
+    fact_date: date,
+) -> EventCoverageIdentity | None:
+    """把事实分配给唯一覆盖身份；窗口重叠会使 coverage 真值不确定并失败关闭。"""
+    matches = [
+        identity
+        for identity in identities_by_security.get(security_id, ())
+        if identity.coverage_from <= fact_date <= identity.coverage_to
+    ]
+    if len(matches) > 1:
+        raise ValueError("trading event coverage identity windows overlap")
+    return None if not matches else matches[0]
+
+
+def _coverage_records_result(
+    *,
+    identities: Sequence[EventCoverageIdentity],
+    mutable_records: Mapping[EventCoverageIdentity, Sequence[CanonicalLineageRecord]],
+    mutable_dates: Mapping[EventCoverageIdentity, Sequence[date]],
+) -> Mapping[EventCoverageIdentity, EventCoverageRecords]:
+    """冻结批量分桶结果，并为真实空窗显式保留零记录映射。"""
+    return {
+        identity: EventCoverageRecords(
+            records=tuple(mutable_records[identity]),
+            fact_dates=tuple(mutable_dates[identity]),
+        )
+        for identity in identities
+    }
+
+
 def _dragon_candidate(
     session: Session,
     *,
@@ -591,6 +1034,7 @@ def _dragon_candidate(
     changed: Mapping[str, _PreparedDragon],
     source_batch_id: UUID,
     now: datetime,
+    window_end: date,
 ) -> CanonicalReleaseCandidate:
     """合并当前龙虎榜和变化事件，未变化行继续指向其首次接受的来源批次。"""
     records: list[CanonicalLineageRecord] = []
@@ -628,10 +1072,11 @@ def _dragon_candidate(
         partition_key=partition_key,
         records=records,
         dates=dates,
-        checkpoint_position={"tradeDate": max(dates).isoformat()},
+        checkpoint_position={"tradeDate": max(dates, default=window_end).isoformat()},
         policy_code="dragon-tiger.disclosure.quality",
         rule_code="source-seat-and-amount-reconciliation",
         now=now,
+        publication_effective_as_of=window_end,
     )
 
 
@@ -646,6 +1091,7 @@ def _block_candidate(
     changed: Mapping[tuple[str, int], _PreparedBlock],
     source_batch_id: UUID,
     now: datetime,
+    window_end: date,
 ) -> CanonicalReleaseCandidate:
     """合并当前大宗逐笔记录和变化项，来源键与 occurrence 一起构成稳定业务键。"""
     records: list[CanonicalLineageRecord] = []
@@ -674,7 +1120,7 @@ def _block_candidate(
                 transform_hash=_hash(_BLOCK_MAPPING),
             )
         )
-    latest_key = max({*current, *changed})
+    latest_key = max({*current, *changed}, default=("", 0))
     return _candidate(
         session,
         dataset_id=dataset_id,
@@ -684,10 +1130,14 @@ def _block_candidate(
         partition_key=partition_key,
         records=records,
         dates=dates,
-        checkpoint_position={"tradeDate": max(dates).isoformat(), "sourceKey": latest_key[0]},
+        checkpoint_position={
+            "tradeDate": max(dates, default=window_end).isoformat(),
+            "sourceKey": latest_key[0],
+        },
         policy_code="block-trade.execution.quality",
         rule_code="occurrence-preserved",
         now=now,
+        publication_effective_as_of=window_end,
     )
 
 
@@ -705,6 +1155,7 @@ def _candidate(
     policy_code: str,
     rule_code: str,
     now: datetime,
+    publication_effective_as_of: date,
 ) -> CanonicalReleaseCandidate:
     """构造带 fencing token 的 canonical release 候选，防止并发同步倒退检查点。"""
     fencing_token = session.execute(
@@ -729,12 +1180,13 @@ def _candidate(
             policy_version=1,
             rules=(CanonicalQualityRule(rule_code, "blocking", True),),
         ),
-        fact_min=min(dates),
-        fact_max=max(dates),
+        fact_min=min(dates) if dates else None,
+        fact_max=max(dates) if dates else None,
         checkpoint_kind="published",
         checkpoint_position=checkpoint_position,
         expected_fencing_token=0 if fencing_token is None else int(fencing_token),
         created_at=now,
+        publication_effective_as_of=publication_effective_as_of,
     )
 
 

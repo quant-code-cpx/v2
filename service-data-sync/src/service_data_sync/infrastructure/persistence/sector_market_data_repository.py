@@ -12,13 +12,14 @@ import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import insert, or_, select, update
 from sqlalchemy.orm import Session
 
+from service_data_sync.application.ports.canonical_release import CanonicalLineageRecord
 from service_data_sync.application.ports.sector_market_data import (
     DatasetPublication,
     PublishedSectorBars,
@@ -34,6 +35,13 @@ from service_data_sync.domain.sector import (
     SectorScheme,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.fenced_execution import current_fenced_execution
+from service_data_sync.infrastructure.persistence.canonical_release_repository import (
+    SqlAlchemyCanonicalReleaseRepository,
+)
+from service_data_sync.infrastructure.persistence.legacy_canonical_release_bridge import (
+    publish_legacy_snapshot,
+)
 from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 
 from ..database.models.publication.dataset_publication import (
@@ -51,6 +59,7 @@ _MODEL_BY_PERIOD = {
 }
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _CATALOG_DATASET = "sector.catalog.raw"
+_RELEASE_MAPPING_VERSION = "sector-market-data-release-bridge-v1"
 
 
 class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
@@ -59,6 +68,7 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
     def __init__(self, database: DatabaseClient) -> None:
         """使用服务自有 Session 工厂，不向应用调用方泄漏数据库实现。"""
         self._database = database
+        self._release_repository = SqlAlchemyCanonicalReleaseRepository(database)
 
     def publish_bars(
         self,
@@ -100,9 +110,10 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
                 connection,
                 identifier=identifier,
                 period=period,
-                inserted_count=inserted_count,
+                source_batch_id=source_batch_id,
                 published_at=now,
             )
+            _record_fenced_publication_checkpoint(data_version)
         return PublishedSectorBars(
             data_version=data_version,
             inserted_count=inserted_count,
@@ -129,7 +140,7 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
             raise ValueError("catalog entries must use the requested scheme")
         now = datetime.now(UTC)
         with self._database.transaction() as connection:
-            self._record_source_batch(
+            source_batch_id = self._record_source_batch(
                 connection,
                 provider_id=provider_id,
                 capability=_CATALOG_DATASET,
@@ -139,15 +150,18 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
                 created_at=now,
             )
             inserted_count, unchanged_count = self._activate_catalog_entries(
-                connection, entries=entries, now=now
-            )
-            data_version = self._publish_dataset(
                 connection,
-                dataset=_CATALOG_DATASET,
-                partition_key=scheme.value,
-                changed_count=inserted_count,
+                entries=entries,
+                now=now,
+            )
+            data_version = self._publish_catalog(
+                connection,
+                scheme=scheme,
+                entries=entries,
+                source_batch_id=source_batch_id,
                 published_at=now,
             )
+            _record_fenced_publication_checkpoint(data_version)
         return PublishedSectorCatalog(
             data_version=data_version,
             inserted_count=inserted_count,
@@ -381,7 +395,24 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
         entries: Sequence[SectorCatalogEntry],
         now: datetime,
     ) -> tuple[int, int]:
-        """逐条激活目录项，仅在名称或状态变化时修改 canonical 身份。"""
+        """逐条激活完整目录项，并拒绝无法证明全量性的残缺快照。"""
+        entry_codes = {entry.identifier.code for entry in entries}
+        active_rows = (
+            connection.execute(
+                select(SectorEntity.sector_code)
+                .where(
+                    SectorEntity.scheme == entries[0].identifier.scheme.value,
+                    SectorEntity.status == "ACTIVE",
+                )
+                .with_for_update()
+            )
+            .mappings()
+            .all()
+        )
+        missing_active_codes = {str(row["sector_code"]) for row in active_rows} - entry_codes
+        if missing_active_codes:
+            # 目录缺项不等于退市；更不能将新 source batch 虚假归因给未出现的旧实体。
+            raise ValueError("sector catalog snapshot does not cover current active sectors")
         inserted_count = 0
         unchanged_count = 0
         for entry in entries:
@@ -524,62 +555,180 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
         *,
         identifier: SectorIdentifier,
         period: SectorPeriod,
-        inserted_count: int,
+        source_batch_id: UUID,
         published_at: datetime,
     ) -> UUID:
-        """仅在当前标准视图变化时推进该分类体系、代码、周期的发布版本。"""
-        return self._publish_dataset(
+        """将一个板块周期的全部当前 revision 发布为真实 canonical release。"""
+        records, fact_min, fact_max = _current_bar_release_records(
             connection,
-            dataset=period.capability,
+            identifier=identifier,
+            period=period,
+        )
+        return self._publish_release(
+            connection,
+            dataset_code=period.capability,
             partition_key=identifier.qualified_key,
-            changed_count=inserted_count,
+            source_batch_id=source_batch_id,
+            records=records,
+            fact_min=fact_min,
+            fact_max=fact_max,
             published_at=published_at,
         )
 
-    def _publish_dataset(
+    def _publish_catalog(
         self,
         connection: Session,
         *,
-        dataset: str,
-        partition_key: str,
-        changed_count: int,
+        scheme: SectorScheme,
+        entries: Sequence[SectorCatalogEntry],
+        source_batch_id: UUID,
         published_at: datetime,
     ) -> UUID:
-        """仅在某个数据集分区当前视图变化时推进其发布版本。"""
-        if changed_count == 0:
-            existing = connection.execute(
-                select(DatasetPublicationModel.data_version).where(
-                    DatasetPublicationModel.dataset == dataset,
-                    DatasetPublicationModel.partition_key == partition_key,
-                    DatasetPublicationModel.superseded_at.is_(None),
-                )
-            ).scalar_one_or_none()
-            if existing is not None:
-                return UUID(str(existing))
+        """将完整分类体系目录作为单一来源观察的可验证 release 发布。"""
+        return self._publish_release(
+            connection,
+            dataset_code=_CATALOG_DATASET,
+            partition_key=scheme.value,
+            source_batch_id=source_batch_id,
+            records=_catalog_release_records(
+                scheme=scheme,
+                entries=entries,
+                source_batch_id=source_batch_id,
+            ),
+            fact_min=None,
+            fact_max=None,
+            published_at=published_at,
+        )
+
+    def _publish_release(
+        self,
+        connection: Session,
+        *,
+        dataset_code: str,
+        partition_key: str,
+        source_batch_id: UUID,
+        records: tuple[CanonicalLineageRecord, ...],
+        fact_min: date | None,
+        fact_max: date | None,
+        published_at: datetime,
+    ) -> UUID:
+        """在已有 revision 事务内委托唯一的 canonical release 发布器切换消费者版本。"""
+        publication = publish_legacy_snapshot(
+            connection,
+            release_repository=self._release_repository,
+            dataset_code=dataset_code,
+            partition_key=partition_key,
+            domain="sector",
+            grain="sector identity + dataset-native current observation",
+            semantic_family="reported-sector-market-data",
+            mapping_version=_RELEASE_MAPPING_VERSION,
+            source_batch_id=source_batch_id,
+            records=records,
+            fact_min=fact_min,
+            fact_max=fact_max,
+            now=published_at,
+        )
+        return publication.data_version
+
+
+def _current_bar_release_records(
+    connection: Session,
+    *,
+    identifier: SectorIdentifier,
+    period: SectorPeriod,
+) -> tuple[tuple[CanonicalLineageRecord, ...], date, date]:
+    """读取一个可见板块周期分区的全部当前 revision 及其真实来源批次。"""
+    model = _model_for_period(period)
+    rows = (
         connection.execute(
-            update(DatasetPublicationModel)
+            select(
+                model.period_end.label("fact_date"),
+                model.content_sha256,
+                model.source_batch_id,
+            )
+            .join(SectorEntity, SectorEntity.sector_key == model.sector_key)
             .where(
-                DatasetPublicationModel.dataset == dataset,
-                DatasetPublicationModel.partition_key == partition_key,
-                DatasetPublicationModel.superseded_at.is_(None),
+                SectorEntity.scheme == identifier.scheme.value,
+                SectorEntity.sector_code == identifier.code,
+                model.valid_to.is_(None),
             )
-            .values(superseded_at=published_at)
+            .order_by(model.period_end)
         )
-        data_version = uuid4()
-        connection.execute(
-            insert(DatasetPublicationModel).values(
-                publication_id=uuid4(),
-                dataset=dataset,
-                partition_key=partition_key,
-                data_version=data_version,
-                quality_status="passed",
-                published_at=published_at,
-                superseded_at=None,
-                effective_as_of=None,
-                knowledge_cutoff=None,
-            )
+        .mappings()
+        .all()
+    )
+    if not rows:
+        raise ValueError("sector bar publication has no current revision")
+    dates = tuple(cast(date, row["fact_date"]) for row in rows)
+    records = tuple(
+        CanonicalLineageRecord(
+            record_key_hash=hashlib.sha256(
+                f"sector:{period.capability}:{identifier.qualified_key}:{fact_date.isoformat()}".encode()
+            ).hexdigest(),
+            content_hash=_canonical_hash(row["content_sha256"]),
+            source_batch_id=UUID(str(row["source_batch_id"])),
+            transform_hash=_transform_hash(),
         )
-        return data_version
+        for fact_date, row in zip(dates, rows, strict=True)
+    )
+    return records, min(dates), max(dates)
+
+
+def _catalog_release_records(
+    *,
+    scheme: SectorScheme,
+    entries: Sequence[SectorCatalogEntry],
+    source_batch_id: UUID,
+) -> tuple[CanonicalLineageRecord, ...]:
+    """将已覆盖的完整目录输入映射为每个当前可见实体的真实快照血缘。"""
+    return tuple(
+        CanonicalLineageRecord(
+            record_key_hash=hashlib.sha256(
+                f"sector:{_CATALOG_DATASET}:{scheme.value}:{entry.identifier.code}".encode()
+            ).hexdigest(),
+            content_hash=hashlib.sha256(
+                json.dumps(
+                    {
+                        "scheme": scheme.value,
+                        "code": entry.identifier.code,
+                        "name": entry.name,
+                        "status": "ACTIVE",
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode()
+            ).hexdigest(),
+            source_batch_id=source_batch_id,
+            transform_hash=_transform_hash(),
+        )
+        for entry in entries
+    )
+
+
+def _canonical_hash(value: object) -> str:
+    """校验数据库 revision 的既有内容摘要，拒绝为 release 血缘补造散列。"""
+    if isinstance(value, bytes):
+        result = value.hex()
+    elif isinstance(value, memoryview):
+        result = value.tobytes().hex()
+    else:
+        result = str(value)
+    if len(result) != 64 or any(character not in "0123456789abcdef" for character in result):
+        raise ValueError("sector revision content hash is invalid")
+    return result
+
+
+def _transform_hash() -> str:
+    """返回固定映射版本摘要，规则变更必须通过版本号而非临时随机值表达。"""
+    return hashlib.sha256(_RELEASE_MAPPING_VERSION.encode()).hexdigest()
+
+
+def _record_fenced_publication_checkpoint(data_version: UUID) -> None:
+    """把目录消费者实际 `dataVersion` 交给当前 fenced 控制面同事务完成 run。"""
+    execution = current_fenced_execution()
+    if execution is not None:
+        execution.record_checkpoint(kind="data-version", position=str(data_version))
 
 
 def _model_for_period(

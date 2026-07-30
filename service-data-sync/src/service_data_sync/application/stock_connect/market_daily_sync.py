@@ -1,7 +1,7 @@
 """沪深港通 `P0` 官方通道日终统计同步。
 
 每个通道和方向的统计独立发布，金额缺失会连同披露可用性状态保留，不能从持仓、排行或另一方向推算。
-成功路径只保存标准事实与来源摘要；失败路径保存最小可复验证据。
+成功与失败路径共用同一留存授权门禁；默认只保存标准事实、来源摘要和失败证据清单。
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from service_data_sync.application.ports.data_source import (
     ProviderErrorCode,
     SourceRequest,
 )
-from service_data_sync.application.ports.market_data import RawPayload, RawPayloadStore
+from service_data_sync.application.ports.market_data import RawPayloadStore
 from service_data_sync.application.ports.stock_connect import (
     StockConnectMarketDailyRepository,
     StockConnectSourceObservation,
@@ -52,7 +52,7 @@ class StockConnectMarketDailySyncService:
         repository: StockConnectMarketDailyRepository,
         raw_payload_store: RawPayloadStore,
     ) -> None:
-        """接收来源无关 adapter、通道统计仓储及双载荷归档端口。"""
+        """接收来源无关 adapter、通道统计仓储及统一授权证据端口。"""
         self._source = source
         self._repository = repository
         self._raw_payload_store = raw_payload_store
@@ -131,36 +131,20 @@ def decode_stock_connect_market_daily_batch(
 def _archive_batch(
     *, batch: ProviderBatch, payload_store: RawPayloadStore
 ) -> StockConnectSourceObservation:
-    """构造来源摘要；字节仅在失败时由外层包装器归档用于排障。"""
+    """构造不可回放来源摘要；外层统一门禁决定失败时是否允许保留来源字节。"""
+    del payload_store
     raw_payload = batch.raw_payload if batch.raw_payload is not None else batch.payload
     raw_digest = hashlib.sha256(raw_payload).hexdigest()
     normalized_digest = hashlib.sha256(batch.payload).hexdigest()
-    prefix = f"stock-connect/{batch.capability}/{batch.provider_id}/{batch.observed_at:%Y/%m/%d}"
-    raw_uri = payload_store.put(
-        RawPayload(
-            object_key=f"raw/{prefix}/{raw_digest}.json",
-            content_sha256=raw_digest,
-            content_type=batch.raw_content_type or batch.content_type,
-            payload=raw_payload,
-        )
-    )
-    normalized_uri = payload_store.put(
-        RawPayload(
-            object_key=f"normalized/{prefix}/{normalized_digest}.json",
-            content_sha256=normalized_digest,
-            content_type=batch.content_type,
-            payload=batch.payload,
-        )
-    )
     return StockConnectSourceObservation(
         provider_id=batch.provider_id,
         capability=batch.capability,
         raw_payload_sha256=raw_digest,
-        raw_uri=raw_uri,
+        raw_uri=f"digest-only://sha256/{raw_digest}",
         raw_content_type=batch.raw_content_type or batch.content_type,
         raw_byte_size=len(raw_payload),
         normalized_payload_sha256=normalized_digest,
-        normalized_uri=normalized_uri,
+        normalized_uri=f"digest-only://sha256/{normalized_digest}",
         normalized_content_type=batch.content_type,
         normalized_byte_size=len(batch.payload),
         observed_at=batch.observed_at,
@@ -184,6 +168,9 @@ def _record(value: object) -> StockConnectMarketDaily:
         quota_balance=_optional_decimal(value.get("quotaBalance")),
         currency=_required(value, "currency"),
         availability_status=_required(value, "availabilityStatus"),
+        trade_count=_optional_int(value.get("tradeCount")),
+        etf_turnover_amount=_optional_decimal(value.get("etfTurnoverAmount")),
+        field_availability=_field_availability(value.get("fieldAvailability")),
     )
 
 
@@ -201,6 +188,19 @@ def _optional_decimal(value: object) -> Decimal | None:
     return None if normalized is None else Decimal(normalized)
 
 
+def _optional_int(value: object) -> int | None:
+    """解析可选非负整数，禁止把来源缺失笔数解释为零。"""
+    normalized = _optional_text(value)
+    return None if normalized is None else int(normalized)
+
+
+def _field_availability(value: object) -> tuple[tuple[str, str], ...]:
+    """冻结每个字段的可用性状态，避免仅靠空值猜测制度或来源缺失。"""
+    if not isinstance(value, dict):
+        raise ValueError("fieldAvailability is required")
+    return tuple(sorted((str(key), str(status)) for key, status in value.items()))
+
+
 def _optional_text(value: object) -> str | None:
     """处理 JSON 空值、空白与 pandas 缺失字面量，避免它们进入 canonical 事实。"""
     if value is None:
@@ -210,5 +210,5 @@ def _optional_text(value: object) -> str | None:
 
 
 def _schema_error(message: str) -> ProviderError:
-    """构造不可重试 schema 错误，错误上游对象仍由调用前的归档策略保存。"""
+    """构造不可重试 schema 错误；错误证据仍受同一许可与加密门禁约束。"""
     return ProviderError(ProviderErrorCode.SCHEMA, message, retryable=False)

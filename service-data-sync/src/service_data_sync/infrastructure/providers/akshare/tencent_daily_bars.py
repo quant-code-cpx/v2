@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -25,6 +26,37 @@ from service_data_sync.domain.equity import EquityIdentifier, Exchange
 
 _CAPABILITY = "equity.bar.1d.raw"
 _SCHEMA = "quant-v2.equity-daily-bar.v1"
+_AKSHARE_VERSION = "1.18.78"
+_ADAPTER_VERSION = "akshare-1.18.78-stock_zh_a_hist_tx-v2"
+_UPSTREAM_SOURCE = "tencent-stock-kline"
+_EXPECTED_COLUMNS = (
+    "date",
+    "open",
+    "close",
+    "high",
+    "low",
+    "volume",
+    "turnover",
+    "amount",
+)
+_SCHEMA_FINGERPRINT = hashlib.sha256(
+    json.dumps(
+        {
+            "sdk": "akshare",
+            "sdkVersion": _AKSHARE_VERSION,
+            "function": "stock_zh_a_hist_tx",
+            "columns": _EXPECTED_COLUMNS,
+            "units": {
+                "volume": "share",
+                "amount": "CNY",
+                "turnover": "ratio",
+            },
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+).hexdigest()
 
 
 class AkshareTencentDailyBarsAdapter:
@@ -34,6 +66,7 @@ class AkshareTencentDailyBarsAdapter:
     """
 
     provider_id = "akshare-tencent"
+    supported_exchanges = frozenset({Exchange.SSE, Exchange.SZSE})
 
     def __init__(self, *, request_timeout_seconds: int) -> None:
         """为阻塞式 AKShare 请求设置受限的墙钟超时。"""
@@ -46,12 +79,17 @@ class AkshareTencentDailyBarsAdapter:
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
         """获取一个包含端日线窗口，并将上游失败隔离为中立错误。
 
-        原始行仅附在批次中，后续失败留存策略决定是否归档；成功路径不会把原始响应
-        作为长期数据集保存。
+        原始行与标准载荷一并交给应用层归档；只有两份对象都成功固化后才能发布窗口覆盖。
         """
         if request.capability != _CAPABILITY:
             raise ProviderError(
                 ProviderErrorCode.INVALID_REQUEST, "unsupported capability", retryable=False
+            )
+        if getattr(ak, "__version__", None) != _AKSHARE_VERSION:
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "unsupported AKShare SDK version",
+                retryable=False,
             )
         identifier, start, end = _request_values(request)
         try:
@@ -63,6 +101,7 @@ class AkshareTencentDailyBarsAdapter:
                     start_date=start.strftime("%Y%m%d"),
                     end_date=end.strftime("%Y%m%d"),
                     adjust="",
+                    timeout=float(self._request_timeout_seconds),
                 )
         except TimeoutError as error:
             raise ProviderError(
@@ -73,6 +112,9 @@ class AkshareTencentDailyBarsAdapter:
                 ProviderErrorCode.UNAVAILABLE, "provider request failed", retryable=True
             ) from error
         try:
+            # 空窗口只有在 SDK 仍返回冻结列集合时才是可证明的业务空集；无列响应属于 schema 漂移。
+            if tuple(str(column) for column in frame.columns) != _EXPECTED_COLUMNS:
+                raise ValueError("provider columns do not match frozen schema")
             raw_records = frame.to_dict(orient="records")
             bars = [_normalize_record(record) for record in raw_records]
         except (KeyError, TypeError, ValueError, InvalidOperation) as error:
@@ -104,6 +146,9 @@ class AkshareTencentDailyBarsAdapter:
             content_type="application/vnd.quant-v2.equity-daily-bar+json",
             raw_payload=raw_payload,
             raw_content_type="application/json",
+            upstream_source=_UPSTREAM_SOURCE,
+            adapter_version=_ADAPTER_VERSION,
+            schema_fingerprint=_SCHEMA_FINGERPRINT,
         )
 
 
@@ -118,6 +163,12 @@ def _request_values(request: SourceRequest) -> tuple[EquityIdentifier, date, dat
         raise ProviderError(
             ProviderErrorCode.INVALID_REQUEST, "invalid daily-bar request", retryable=False
         ) from error
+    if identifier.exchange not in AkshareTencentDailyBarsAdapter.supported_exchanges:
+        raise ProviderError(
+            ProviderErrorCode.CURRENTLY_UNSUPPORTED,
+            "Tencent daily bars do not support this exchange",
+            retryable=False,
+        )
     if start > end:
         raise ProviderError(
             ProviderErrorCode.INVALID_REQUEST, "invalid date range", retryable=False
@@ -130,7 +181,6 @@ def _tencent_symbol(identifier: EquityIdentifier) -> str:
     prefix = {
         Exchange.SSE: "sh",
         Exchange.SZSE: "sz",
-        Exchange.BSE: "bj",
     }[identifier.exchange]
     return f"{prefix}{identifier.symbol}"
 
@@ -161,7 +211,7 @@ def _normalize_record(record: dict[str, Any]) -> dict[str, str | None]:
         "close": str(close_price),
         "volumeShares": str(normalized_volume),
         "amountCny": str(amount_cny),
-        "turnoverRate": None,
+        "turnoverRate": str(_decimal(record["turnover"])),
     }
 
 

@@ -1,7 +1,8 @@
 # service-api
 
 NestJS 11 单进程 API。当前包含 `UserModule`、`AuthModule`、`AuditModule`、`StockModule`、
-`IndustryModule`、`MoneyFlowModule`、`DataSyncModule`、Redis 和 PostgreSQL 持久化。
+`IndustryModule`、`MoneyFlowModule`、`MarketOverviewModule`、`StockConnectModule`、
+`DataSyncModule`、Redis 和 PostgreSQL 持久化。
 
 技术方案：[API 服务基础架构与技术方案](../docs/service-api/0001-service-api-foundation/index.html)。
 决策记录：[ADR-0005](../docs/decisions/0005-service-api-runtime-and-architecture.md)。
@@ -21,8 +22,15 @@ NestJS 11 单进程 API。当前包含 `UserModule`、`AuthModule`、`AuditModul
   `post_close_observation` EOD 横截面与排行，以及申万三级 taxonomy、父级闭包和估值观察。
 - `MoneyFlowModule`：提供已发布方法学目录、个股/板块/市场日频序列和供应商滚动排行；不可发布的
   research 方法学 fail-closed。
+- `MarketOverviewModule`：提供单一市场首页 complete bundle、指数日线、全市场证券/资金流排行、交易日历、
+  板块强弱，以及申万日线、正式成分和逐字段估值；只读取 data-sync publication，不在请求线程拼接横截面。
+- `StockConnectModule`：只代理已批准的真实 bundle publication；保留币种、availability、lineage、
+  来源 publication 与观察时间，不从成交额推导净额，也不把官方活跃榜描述为全市场排行。
 - `DataSyncModule`：集中装配 `service-data-sync` 内部 HTTP Client 与运行时合同校验；不包含同步任务、
   供应商 SDK 或权威数据持久化。
+- `DataOperationsModule`：实现数据运维公开控制面；只通过 `DataSyncModule` 调用 data-sync 内部 POST
+  接口，在 API PostgreSQL 中可靠保存 Submission、Outbox 与审计，不直连 data-sync 数据库、Provider
+  或 Redis 业务状态。
 - 不含 Worker、Scheduler、队列、实时通信或其他业务模块。
 
 Prisma schema 位于 `prisma/`，入口文件只定义 generator 与 datasource；数据模型按领域放在
@@ -97,6 +105,97 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env \
 POST-only 方法与动作路径规则见
 [ADR-0018](../docs/decisions/0018-service-api-post-only-http-method.md)。读取类 POST 命中
 `If-None-Match` 时返回 `204`，不会返回仅适用于条件 GET/HEAD 的 `304`。
+
+### 市场概览与行业板块
+
+公开合同见
+[`0027-service-api-market-overview.openapi.yaml`](../docs/contracts/0027-service-api-market-overview.openapi.yaml)。
+市场概览公开入口全部使用 POST，请求参数放在 JSON body；API 通过带 Bearer、`X-Request-Id`、
+`If-None-Match` 的内部资源式 GET 读取 `service-data-sync`，严格校验响应 schema、强 ETag 与
+`X-Data-Version`。公开路径为：
+
+- `/api/v1/market/overview`
+- `/api/v1/market/indices/{indexId}/bars`
+- `/api/v1/market/equities/rankings`
+- `/api/v1/market/money-flow/equity-rankings`
+- `/api/v1/market/calendar/query`
+- `/api/v1/market/sectors/strength`
+- `/api/v1/market/sectors/money-flow-rankings`
+- `/api/v1/market/industries/sw/{code}/bars`
+- `/api/v1/market/industries/sw/{code}/constituents`
+- `/api/v1/market/industries/sw/{code}/valuation`
+
+十条能力返回 200 的共同前置是对应真实来源 publication 已完成、通过质量门且严格合同校验成功；缺失、
+不完整、跨版本或合同漂移一律 fail-closed 为 404、424 或 503，不使用 fixture、零值或跨数据集拼接兜底。
+首页只返回 `market.overview-bundle.eod` 的一个完整 publication；指定日期缺失为 404，latest 指针不存在或
+下游合同漂移为 503，绝不返回 200 加零值。内部 304 在公开 POST 边界映射为无响应体的 204。latest 首页的
+ETag 同时绑定 EOD 版本与分钟桶市场状态，精确历史读取固定返回 `historical_snapshot` 收盘状态；两者的
+`X-Data-Version` 都只表示原子 EOD bundle。质量来源用 `external` 与 `derived` 区分 Tushare 外部事实和
+`quant-v2-derivation` 写时派生，不能把平台计算伪装成供应商直报。
+
+申万前收盘若由同一 `sw_daily` 行复算会携带派生方法学；PE_TTM 与股息率来源未报告时固定返回
+`availability=source_not_reported` 和 `value=null`，不能补零。主要指数路径只接受
+`sse-composite`、`szse-component`、`csi-300`、`chinext` 四个稳定 ID；申万行情的
+`1d`、`1w`、`1mo` 均读取同步阶段已物化 publication，API 不做请求时聚合。板块资金流排行固定保留
+`moneyflow_ind_dc` 的东财来源与方法学标签，不以板块涨跌排行替代。申万成分明确返回
+`latest_revision_effective_interval`、知识截止与来源观测时刻，不能描述为“当时可知”历史快照。
+
+### 沪深港通中心
+
+沪深港通五条公开读取路由均为 POST：
+
+- `/api/v1/market/stock-connect/readiness/query`
+- `/api/v1/market/stock-connect/overview/query`
+- `/api/v1/market/stock-connect/channels/query`
+- `/api/v1/market/stock-connect/active-securities/query`
+- `/api/v1/market/stock-connect/securities/context/query`
+
+它们使用 `operationId + 规范请求体 + dataVersion` 生成 representation 强 ETag；业务响应的
+`X-Data-Version` 返回 bundle 版本，readiness 响应返回删除顶层 `dataVersion`
+后规范序列化正文的 SHA-256，并由 API 独立重算。活跃证券请求必须携带父 overview/channel 的
+`parentPublicationDataVersion`，父版本变化或旧游标分别返回 409，不会跨 publication 拼接。
+readiness 没有持久化证据时返回 `READINESS_NOT_OBSERVED`，不会从业务 409 或当前时间猜测休市/失败。
+完成 data-sync、API 与 Web 的真实链路验收前保持 `STOCK_CONNECT_API_ENABLED=false`。
+
+### 数据运维控制面
+
+数据运维公开 POST 契约见
+[`0023-service-api-data-operations.openapi.yaml`](../docs/contracts/0023-service-api-data-operations.openapi.yaml)，
+下游内部 POST 契约见
+[`0022-data-sync-operations-internal.openapi.yaml`](../docs/contracts/0022-data-sync-operations-internal.openapi.yaml)。
+首次主动写操作固定返回 `202`、`deliveryStatus=PENDING` 和 `operationResult=UNKNOWN`；请求线程仅在同一
+API PostgreSQL 事务写入 Submission、冻结 Outbox 与审计记录，绝不 best-effort 直调 data-sync。
+
+根 Compose profile 会启动独立 dispatcher。宿主机排障时可在完成 migration 后运行：
+
+```bash
+pnpm data-operations:dispatch
+```
+
+该进程使用 PostgreSQL `FOR UPDATE SKIP LOCKED`、lease 与指数退避投递冻结 outbox，并持续对账已接受的
+COMMAND、RUN、HEALTH_CHECK 和 SCHEDULE 权威资源。它与 API 进程共用 `DATABASE_URL`、
+`DATA_SYNC_INTERNAL_BASE_URL` 以及三枚服务身份：既有内部路由使用
+`DATA_SYNC_INTERNAL_API_BEARER_TOKEN`，0022 只读路由使用
+`DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN`，0022 主动操作使用
+`DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN`。开发与测试环境可将后两项回退为既有 token；生产环境必须
+分别注入三枚凭据，读凭据不能投递写操作。
+
+普通内部读取继续使用 2 秒单次预算；Provider 全窗预检使用独立
+`DATA_SYNC_INTERNAL_PREFLIGHT_TIMEOUT_MS`（默认 310000 ms）且不会自动重复整窗探针。若
+service-data-sync 的全窗预检预算提高到 3600 秒上限，API 和入口网关必须同步设置至少 3610000 ms。
+
+`DEAD_LETTER` 不开放浏览器 route。仅在受控维护窗口，由活动 `SUPER_ADMIN` 使用原 Submission ID 和明确确认值
+重投同一条冻结 outbox：
+
+```bash
+DATA_OPERATIONS_REPLAY_SUBMISSION_ID="<submission-uuid>" \
+DATA_OPERATIONS_REPLAY_ACTOR_ID="<active-super-admin-uuid>" \
+DATA_OPERATIONS_REPLAY_CONFIRMATION="REPLAY_DEAD_LETTER" \
+pnpm data-operations:replay-dead-letter
+```
+
+runbook 会在写事务内再次验证操作者仍为活动 `SUPER_ADMIN`，只把原 outbox 重置为 `PENDING`，不会创建新的
+Submission、payload 或内部幂等键；审计仅保存下游 key 的 HMAC 摘要。
 
 ### 自动初始化超级管理员
 
@@ -233,6 +332,9 @@ docker build --tag quant-v2/service-api:local .
 [00000 rollback.sql](prisma/migrations/20260726000000_initial_user_auth/rollback.sql)；Apex 用户访问 migration 的人工回滚脚本位于
 [10100 rollback.sql](prisma/migrations/20260726010100_apex_user_access/rollback.sql)；账户安全查询索引回滚位于
 [00000 account security rollback.sql](prisma/migrations/20260728000000_account_security_operations/rollback.sql)。
+数据运维控制面 migration 的受控人工回滚位于
+[data operations rollback.sql](prisma/migrations/20260729000000_data_operations_control_plane/rollback.sql)；
+仅可在尚未写入 Submission、Outbox、搜索游标与新增审计 action 的维护窗口执行。
 用户访问回滚仅可在尚未写入 Apex 账号、SUPER_ADMIN、软删除或新 Session family 状态时执行；
 PostgreSQL enum 值不会被破坏性移除。
 

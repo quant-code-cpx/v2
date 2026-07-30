@@ -31,6 +31,7 @@ export class SectorMarketDataService {
   public listSectors(
     query: ListSectorsQueryDto,
     ifNoneMatch: string | undefined,
+    requestId: string,
   ): Promise<UpstreamResponse<SectorPage>> {
     return this.client.listSectors({
       scheme: query.scheme,
@@ -38,6 +39,7 @@ export class SectorMarketDataService {
       cursor: query.cursor,
       limit: query.limit,
       ifNoneMatch,
+      requestId,
     });
   }
 
@@ -46,6 +48,7 @@ export class SectorMarketDataService {
     path: SectorPathDto,
     query: ListSectorBarsQueryDto,
     ifNoneMatch: string | undefined,
+    requestId: string,
   ): Promise<UpstreamResponse<SectorBarPage>> {
     if (query.start > query.end) {
       throw new BadRequestException('start must not be after end');
@@ -59,6 +62,7 @@ export class SectorMarketDataService {
       cursor: query.cursor,
       limit: query.limit,
       ifNoneMatch,
+      requestId,
     });
   }
 
@@ -66,6 +70,7 @@ export class SectorMarketDataService {
   public listEodSnapshots(
     query: ListSectorEodSnapshotsQueryDto,
     ifNoneMatch: string | undefined,
+    requestId: string,
   ): Promise<UpstreamResponse<SectorEodPage>> {
     return this.client.listEodSnapshots({
       scheme: query.scheme,
@@ -75,6 +80,7 @@ export class SectorMarketDataService {
       cursor: query.cursor,
       limit: query.limit,
       ifNoneMatch,
+      requestId,
     });
   }
 
@@ -83,12 +89,14 @@ export class SectorMarketDataService {
     path: SectorPathDto,
     query: GetSectorEodSnapshotQueryDto,
     ifNoneMatch: string | undefined,
+    requestId: string,
   ): Promise<UpstreamResponse<SectorEodResource>> {
     return this.client.getEodSnapshot({
       scheme: path.scheme,
       code: path.sectorCode,
       asOf: query.asOf,
       ifNoneMatch,
+      requestId,
     });
   }
 
@@ -97,6 +105,7 @@ export class SectorMarketDataService {
     path: SectorPathDto,
     query: ListSectorMembershipQueryDto,
     ifNoneMatch: string | undefined,
+    requestId: string,
   ): Promise<UpstreamResponse<SectorConstituentPage>> {
     return this.client.listConstituents({
       scheme: path.scheme,
@@ -105,6 +114,7 @@ export class SectorMarketDataService {
       cursor: query.cursor,
       limit: query.limit,
       ifNoneMatch,
+      requestId,
     });
   }
 
@@ -113,15 +123,23 @@ export class SectorMarketDataService {
     path: EquityMembershipPathDto,
     query: ListEquitySectorsQueryDto,
     ifNoneMatch: string | undefined,
+    requestId: string,
   ): Promise<UpstreamResponse<EquitySectorPage>> {
+    // 股票中心叶查询只接受状态端给出的精确 publication；历史 release 选择器属于其他读取场景。
+    if (query.asOf !== undefined) {
+      throw new BadRequestException('dataVersion and asOf must not be combined');
+    }
     return this.client.listEquitySectors({
       exchange: path.exchange,
       symbol: path.symbol,
       scheme: query.scheme,
-      asOf: query.asOf,
+      dataVersion: query.dataVersion,
+      identityAsOf: query.identityAsOf,
+      knownAt: query.knownAt,
       cursor: query.cursor,
       limit: query.limit,
       ifNoneMatch,
+      requestId,
     });
   }
 }

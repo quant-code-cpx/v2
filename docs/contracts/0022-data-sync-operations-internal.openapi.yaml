@@ -2,6 +2,9 @@ openapi: 3.1.0
 info:
   title: quant-v2 数据运维控制面内部 API
   version: 1.0.0
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
   x-contract-status: Proposed
   description: >-
     service-data-sync 拥有的数据目录、同步命令、运行、健康评估、自动计划和运维事件合同。
@@ -720,7 +723,7 @@ components:
                 type: string
             availability:
               type: array
-              maxItems: 4
+              maxItems: 5
               items:
                 $ref: "#/components/schemas/DatasetAvailability"
             observationStates:
@@ -749,7 +752,7 @@ components:
           minLength: 1
           maxLength: 160
     DatasetAvailability:
-      enum: [ENABLED, DISABLED, SOURCE_UNAVAILABLE, UNKNOWN]
+      enum: [ENABLED, DISABLED, SOURCE_UNAVAILABLE, MODEL_ONLY, UNKNOWN]
     DatasetObservationState:
       enum: [PRESENT, EMPTY_VALID, EMPTY_UNEXPECTED, NOT_YET_SYNCED, UNKNOWN]
       description: 区分有数据、业务上允许为空、异常空集、从未同步和暂不可判定
@@ -811,6 +814,7 @@ components:
           supportedModes,
           scheduleSupportedModes,
           scheduleTargetPolicyOptions,
+          selectorKinds,
           maxRangeDays,
           scheduleEligible,
           manualEnabled,
@@ -840,6 +844,16 @@ components:
             isDefault=true；scheduleEligible=false 时必须为空
           items:
             $ref: "#/components/schemas/ScheduleTargetPolicyOption"
+        selectorKinds:
+          type: array
+          minItems: 1
+          maxItems: 11
+          uniqueItems: true
+          description: >-
+            该数据集可接受的严格目标选择器类别。Web、CLI、Celery 与 scheduler 只能从此集合构造
+            selector，不能传递任意 Provider 参数或 URI。
+          items:
+            $ref: "#/components/schemas/TargetSelectorKind"
         maxRangeDays:
           type: [integer, "null"]
           minimum: 1
@@ -1186,7 +1200,7 @@ components:
     SyncTarget:
       type: object
       additionalProperties: false
-      required: [datasetCode, mode]
+      required: [datasetCode, mode, selector]
       properties:
         datasetCode:
           type: string
@@ -1194,6 +1208,11 @@ components:
           maxLength: 160
         mode:
           $ref: "#/components/schemas/SyncMode"
+        selector:
+          $ref: "#/components/schemas/TargetSelector"
+          description: >-
+            由数据集 capability.selectorKinds 约束的业务范围。它冻结到 Run.sourceSnapshot，
+            不能携带 Provider 参数、URL、凭据或任意 JSON。
         dateFrom:
           type: [string, "null"]
           format: date
@@ -1203,6 +1222,67 @@ components:
         observationDate:
           type: [string, "null"]
           format: date
+      allOf:
+        - if:
+            properties:
+              selector:
+                type: object
+                required: [kind]
+                properties:
+                  kind:
+                    const: ETF
+          then:
+            description: ETF selector 只能绑定四个 canonical dataset 及其唯一操作
+            oneOf:
+              - properties:
+                  datasetCode:
+                    const: fund.etf.profile.reported
+                  selector:
+                    type: object
+                    properties:
+                      operation:
+                        const: MASTER
+              - properties:
+                  datasetCode:
+                    const: fund.etf.trading_state.reported
+                  selector:
+                    type: object
+                    properties:
+                      operation:
+                        const: STATUS
+              - properties:
+                  datasetCode:
+                    const: fund.etf.bar.1d.reported
+                  selector:
+                    type: object
+                    properties:
+                      operation:
+                        const: BARS
+              - properties:
+                  datasetCode:
+                    const: fund.etf.nav.1d.reported
+                  selector:
+                    type: object
+                    properties:
+                      operation:
+                        const: NAV
+        - if:
+            properties:
+              datasetCode:
+                enum:
+                  [
+                    fund.etf.profile.reported,
+                    fund.etf.trading_state.reported,
+                    fund.etf.bar.1d.reported,
+                    fund.etf.nav.1d.reported,
+                  ]
+          then:
+            properties:
+              selector:
+                type: object
+                properties:
+                  kind:
+                    const: ETF
       oneOf:
         - properties:
             mode:
@@ -1236,6 +1316,342 @@ components:
               type: "null"
             observationDate:
               type: "null"
+    SyncDraftTarget:
+      description: preflight 请求与 schedule 模板使用的未冻结同步目标
+      allOf:
+        - $ref: "#/components/schemas/SyncTarget"
+        - type: object
+          properties:
+            selector:
+              $ref: "#/components/schemas/DraftTargetSelector"
+    SyncFrozenTarget:
+      description: preflight 返回、submit 与实际 Run 使用的冻结同步目标
+      allOf:
+        - $ref: "#/components/schemas/SyncTarget"
+        - type: object
+          properties:
+            selector:
+              $ref: "#/components/schemas/FrozenTargetSelector"
+    TargetSelectorKind:
+      enum:
+        [
+          GLOBAL,
+          INSTRUMENT,
+          SECTOR,
+          SCHEME,
+          EXCHANGE,
+          CONTRACT,
+          ETF,
+          MARGIN,
+          STOCK_CONNECT,
+          TRADING_EVENT,
+          INDEX,
+        ]
+    TargetSelector:
+      description: >-
+        现有生产同步入口所需的、受限的业务目标选择器并集。禁止 arbitrary JSON；每个
+        datasetCode 的实际允许 kind 由 DatasetCapability.selectorKinds 声明并在 preflight 与
+        submit 时复验。v1 批次仍按 datasetCode 唯一，不允许同一数据集携带多个 selector。
+      oneOf:
+        - $ref: "#/components/schemas/GlobalTargetSelector"
+        - $ref: "#/components/schemas/InstrumentTargetSelector"
+        - $ref: "#/components/schemas/SectorTargetSelector"
+        - $ref: "#/components/schemas/SchemeTargetSelector"
+        - $ref: "#/components/schemas/ExchangeTargetSelector"
+        - $ref: "#/components/schemas/ContractTargetSelector"
+        - $ref: "#/components/schemas/EtfTargetSelector"
+        - $ref: "#/components/schemas/MarginTargetSelector"
+        - $ref: "#/components/schemas/StockConnectTargetSelector"
+        - $ref: "#/components/schemas/TradingEventTargetSelector"
+        - $ref: "#/components/schemas/IndexTargetSelector"
+      discriminator:
+        propertyName: kind
+    DraftTargetSelector:
+      description: >-
+        preflight 请求与 schedule 模板使用的 selector；profile MASTER 可用 ALL_VENUES 显式覆盖
+        SSE、SZSE，ALL_ETFS 的 profileDataVersions 必须为 null。
+      oneOf:
+        - $ref: "#/components/schemas/GlobalTargetSelector"
+        - $ref: "#/components/schemas/InstrumentTargetSelector"
+        - $ref: "#/components/schemas/SectorTargetSelector"
+        - $ref: "#/components/schemas/SchemeTargetSelector"
+        - $ref: "#/components/schemas/ExchangeTargetSelector"
+        - $ref: "#/components/schemas/ContractTargetSelector"
+        - $ref: "#/components/schemas/EtfMasterTargetSelector"
+        - $ref: "#/components/schemas/EtfSingleTargetSelector"
+        - $ref: "#/components/schemas/EtfAllDraftTargetSelector"
+        - $ref: "#/components/schemas/MarginTargetSelector"
+        - $ref: "#/components/schemas/StockConnectTargetSelector"
+        - $ref: "#/components/schemas/TradingEventTargetSelector"
+        - $ref: "#/components/schemas/IndexTargetSelector"
+    FrozenTargetSelector:
+      description: >-
+        preflight 返回、submit 与实际 Run 使用的 selector；profile MASTER 的 ALL_VENUES 不绑定
+        profile publication，ALL_ETFS 必须冻结沪深双 profile publication。
+      oneOf:
+        - $ref: "#/components/schemas/GlobalTargetSelector"
+        - $ref: "#/components/schemas/InstrumentTargetSelector"
+        - $ref: "#/components/schemas/SectorTargetSelector"
+        - $ref: "#/components/schemas/SchemeTargetSelector"
+        - $ref: "#/components/schemas/ExchangeTargetSelector"
+        - $ref: "#/components/schemas/ContractTargetSelector"
+        - $ref: "#/components/schemas/EtfMasterTargetSelector"
+        - $ref: "#/components/schemas/EtfSingleTargetSelector"
+        - $ref: "#/components/schemas/EtfAllFrozenTargetSelector"
+        - $ref: "#/components/schemas/MarginTargetSelector"
+        - $ref: "#/components/schemas/StockConnectTargetSelector"
+        - $ref: "#/components/schemas/TradingEventTargetSelector"
+        - $ref: "#/components/schemas/IndexTargetSelector"
+    GlobalTargetSelector:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind:
+          const: GLOBAL
+    InstrumentTargetSelector:
+      type: object
+      additionalProperties: false
+      required: [kind, exchange, symbol]
+      properties:
+        kind:
+          const: INSTRUMENT
+        exchange:
+          enum: [SSE, SZSE, BSE]
+        symbol:
+          type: string
+          pattern: "^[0-9A-Z.-]{1,32}$"
+    SectorTargetSelector:
+      type: object
+      additionalProperties: false
+      required: [kind, scheme, sectorCode]
+      properties:
+        kind:
+          const: SECTOR
+        scheme:
+          type: string
+          minLength: 1
+          maxLength: 64
+        sectorCode:
+          type: string
+          minLength: 1
+          maxLength: 120
+    SchemeTargetSelector:
+      type: object
+      additionalProperties: false
+      required: [kind, scheme]
+      properties:
+        kind:
+          const: SCHEME
+        scheme:
+          type: string
+          minLength: 1
+          maxLength: 64
+    ExchangeTargetSelector:
+      type: object
+      additionalProperties: false
+      required: [kind, exchange]
+      properties:
+        kind:
+          const: EXCHANGE
+        exchange:
+          enum: [SSE, SZSE, BSE]
+    ContractTargetSelector:
+      type: object
+      additionalProperties: false
+      required: [kind, venue, contract]
+      properties:
+        kind:
+          const: CONTRACT
+        venue:
+          enum: [CFFEX, SHFE, DCE, CZCE, INE]
+        contract:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: "^[0-9A-Z._-]+$"
+    EtfTargetSelector:
+      description: >-
+        ETF selector 的公开兼容并集。MASTER 保留既有单市场形状，并以 ALL_VENUES 显式覆盖
+        SSE、SZSE；单只 ETF 使用显式 qualified identity，venue 可为 null，非 null 时必须与
+        identity 前缀一致；只有全部已发布 ETF 使用 ALL_ETFS 与 profileDataVersions。
+      oneOf:
+        - $ref: "#/components/schemas/EtfMasterTargetSelector"
+        - $ref: "#/components/schemas/EtfSingleTargetSelector"
+        - $ref: "#/components/schemas/EtfAllDraftTargetSelector"
+        - $ref: "#/components/schemas/EtfAllFrozenTargetSelector"
+    EtfMasterTargetSelector:
+      oneOf:
+        - $ref: "#/components/schemas/EtfMasterSingleVenueTargetSelector"
+        - $ref: "#/components/schemas/EtfMasterAllVenuesTargetSelector"
+    EtfMasterSingleVenueTargetSelector:
+      type: object
+      additionalProperties: false
+      required: [kind, operation, venue, etf]
+      properties:
+        kind:
+          const: ETF
+        operation:
+          const: MASTER
+        venue:
+          enum: [SSE, SZSE]
+        etf:
+          type: "null"
+    EtfMasterAllVenuesTargetSelector:
+      description: >-
+        profile dataset 的显式沪深双市场范围；执行器只按固定枚举 SSE、SZSE fan-out，不依据
+        代码前缀、目录缺席或其他隐含规则推断市场。
+      type: object
+      additionalProperties: false
+      required: [kind, operation, venue, scope, etf]
+      properties:
+        kind:
+          const: ETF
+        operation:
+          const: MASTER
+        venue:
+          type: "null"
+        scope:
+          const: ALL_VENUES
+        etf:
+          type: "null"
+    EtfSingleTargetSelector:
+      description: >-
+        单只 ETF 的 etf 是权威 qualified identity；venue 仅作可选一致性校验，不能用来猜测
+        基金类别，非 null 时必须与 etf 前缀一致。
+      type: object
+      additionalProperties: false
+      required: [kind, operation, venue, etf]
+      properties:
+        kind:
+          const: ETF
+        operation:
+          enum: [STATUS, BARS, NAV]
+        venue:
+          type: [string, "null"]
+          enum: [SSE, SZSE, null]
+        etf:
+          type: string
+          pattern: "^(SSE|SZSE)\\.[0-9]{6}$"
+      oneOf:
+        - properties:
+            venue:
+              type: "null"
+        - properties:
+            venue:
+              const: SSE
+            etf:
+              pattern: "^SSE\\.[0-9]{6}$"
+        - properties:
+            venue:
+              const: SZSE
+            etf:
+              pattern: "^SZSE\\.[0-9]{6}$"
+    EtfProfileDataVersions:
+      type: object
+      additionalProperties: false
+      required: [SSE, SZSE]
+      properties:
+        SSE:
+          type: string
+          format: uuid
+        SZSE:
+          type: string
+          format: uuid
+    EtfAllDraftTargetSelector:
+      type: object
+      additionalProperties: false
+      required: [kind, operation, venue, scope, etf, profileDataVersions]
+      properties:
+        kind:
+          const: ETF
+        operation:
+          enum: [STATUS, BARS, NAV]
+        venue:
+          type: "null"
+        scope:
+          const: ALL_ETFS
+        etf:
+          type: "null"
+        profileDataVersions:
+          type: "null"
+          description: preflight 请求与 schedule 模板尚未冻结 profile publication
+    EtfAllFrozenTargetSelector:
+      type: object
+      additionalProperties: false
+      required: [kind, operation, venue, scope, etf, profileDataVersions]
+      properties:
+        kind:
+          const: ETF
+        operation:
+          enum: [STATUS, BARS, NAV]
+        venue:
+          type: "null"
+        scope:
+          const: ALL_ETFS
+        etf:
+          type: "null"
+        profileDataVersions:
+          $ref: "#/components/schemas/EtfProfileDataVersions"
+    MarginTargetSelector:
+      type: object
+      additionalProperties: false
+      required: [kind, operation, venue, security]
+      properties:
+        kind:
+          const: MARGIN
+        operation:
+          enum: [MARKET, SECURITY, ELIGIBILITY]
+        venue:
+          enum: [SSE, SZSE]
+        security:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/InstrumentTargetSelector"
+    StockConnectTargetSelector:
+      type: object
+      additionalProperties: false
+      description: >-
+        互联互通 overview bundle 的唯一业务选择器。MARKET 同步统计、官方活跃榜、状态、日历和
+        最小身份；不暴露越界的 HOLDING，也不把活跃榜拆成会产生残缺 publication 的独立操作。
+        ALL + null 是一次展开四通道的全量入口。
+      required: [kind, operation, channel, direction]
+      properties:
+        kind:
+          const: STOCK_CONNECT
+        operation:
+          const: MARKET
+        channel:
+          enum: [ALL, SH, SZ]
+        direction:
+          type: [string, "null"]
+          enum: [NORTHBOUND, SOUTHBOUND, null]
+    TradingEventTargetSelector:
+      type: object
+      additionalProperties: false
+      required: [kind, operation]
+      properties:
+        kind:
+          const: TRADING_EVENT
+        operation:
+          enum: [DRAGON_TIGER, BLOCK_TRADE]
+    IndexTargetSelector:
+      type: object
+      additionalProperties: false
+      required: [kind, administrator, capability, indexCode]
+      properties:
+        kind:
+          const: INDEX
+        administrator:
+          enum: [CSI, CNI]
+        capability:
+          type: string
+          minLength: 1
+          maxLength: 120
+        indexCode:
+          type: string
+          minLength: 1
+          maxLength: 64
     SyncPreflightRequest:
       type: object
       additionalProperties: false
@@ -1245,10 +1661,12 @@ components:
           type: array
           minItems: 1
           maxItems: 100
-          description: v1 同一请求内 datasetCode 必须唯一，重复目标返回 422
+          description: >-
+            v1 同一请求内 datasetCode 必须唯一，重复目标返回 422。ETF datasetCode 与操作固定
+            一一映射；ALL_ETFS 必须以 profileDataVersions=null 进入预检。
           x-unique-by: datasetCode
           items:
-            $ref: "#/components/schemas/SyncTarget"
+            $ref: "#/components/schemas/SyncDraftTarget"
     PreflightTargetResult:
       type: object
       additionalProperties: false
@@ -1264,7 +1682,7 @@ components:
         ]
       properties:
         target:
-          $ref: "#/components/schemas/SyncTarget"
+          $ref: "#/components/schemas/SyncFrozenTarget"
         eligible:
           type: boolean
         estimatedPartitions:
@@ -1340,10 +1758,12 @@ components:
           type: array
           minItems: 1
           maxItems: 100
-          description: 必须与 preflight 冻结顺序一致，且 datasetCode 唯一
+          description: >-
+            必须与 preflight 冻结顺序和 target 完全一致，且 datasetCode 唯一；ALL_ETFS
+            必须携带预检冻结的 SSE/SZSE 双 profileDataVersions。
           x-unique-by: datasetCode
           items:
-            $ref: "#/components/schemas/SyncTarget"
+            $ref: "#/components/schemas/SyncFrozenTarget"
         actor:
           $ref: "#/components/schemas/ActorContext"
     CommandActionTarget:
@@ -1701,7 +2121,7 @@ components:
         run:
           $ref: "#/components/schemas/RunSummary"
         target:
-          $ref: "#/components/schemas/SyncTarget"
+          $ref: "#/components/schemas/SyncFrozenTarget"
         sourceSnapshot:
           type: array
           minItems: 1
@@ -1711,7 +2131,8 @@ components:
             $ref: "#/components/schemas/SourceBinding"
         attempt:
           type: integer
-          minimum: 1
+          minimum: 0
+          description: 尚未被 worker 领取的 QUEUED run 为 0；首次实际执行后递增为 1。
         actorRef:
           type: string
         qualityGate:
@@ -2308,7 +2729,16 @@ components:
     ScheduleFrequency:
       type: object
       additionalProperties: false
-      required: [kind, timezone]
+      required:
+        [
+          kind,
+          timezone,
+          localTime,
+          dayOfWeek,
+          dayOfMonth,
+          intervalMinutes,
+          calendarCode,
+        ]
       properties:
         kind:
           enum: [TRADING_DAY, DAILY, WEEKLY, MONTHLY, INTERVAL]
@@ -2486,6 +2916,7 @@ components:
           summary,
           datasetCode,
           mode,
+          selector,
           targetPolicy,
           misfirePolicy,
           coalesce,
@@ -2503,6 +2934,12 @@ components:
           description: v1 唯一计划键；创建重复 datasetCode 返回 409，更新不可改绑其他数据集
         mode:
           $ref: "#/components/schemas/SyncMode"
+        selector:
+          $ref: "#/components/schemas/DraftTargetSelector"
+          description: >-
+            ETF 计划模板固定映射 profile→MASTER、trading_state→STATUS、bar→BARS、nav→NAV；
+            新建 profile 计划使用 ALL_VENUES，由每次触发显式 fan-out SSE、SZSE；ALL_ETFS 的
+            profileDataVersions 保持 null，并在每次触发时重新冻结。
         targetPolicy:
           $ref: "#/components/schemas/ScheduleTargetPolicy"
         misfirePolicy:
@@ -2568,6 +3005,7 @@ components:
           scheduleId,
           datasetCode,
           mode,
+          selector,
           targetPolicy,
           frequency,
           misfirePolicy,
@@ -2589,6 +3027,12 @@ components:
           description: v1 每个 datasetCode 至多一个计划；创建重复值返回 409
         mode:
           $ref: "#/components/schemas/SyncMode"
+        selector:
+          $ref: "#/components/schemas/DraftTargetSelector"
+          description: >-
+            ETF 计划模板固定映射 profile→MASTER、trading_state→STATUS、bar→BARS、nav→NAV；
+            新建 profile 计划使用 ALL_VENUES，既有单市场 MASTER 仍可兼容修订；ALL_ETFS 的
+            profileDataVersions 必须为 null。
         targetPolicy:
           $ref: "#/components/schemas/ScheduleTargetPolicy"
         frequency:

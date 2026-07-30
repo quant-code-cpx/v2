@@ -205,6 +205,7 @@ def _decode_entry(row: object, *, exchange: Exchange) -> EquityLifecycleEntry:
         status=EquityLifecycleStatus(_required_string(row, "status")),
         effective_on=date.fromisoformat(_required_string(row, "effectiveOn")),
         evidence_kind=EquityLifecycleEvidenceKind(_required_string(row, "evidenceKind")),
+        name=_optional_string(row, "name"),
         listed_on=_optional_date(row, "listedOn"),
         delisted_on=_optional_date(row, "delistedOn"),
         correction_approval_reference=_optional_string(row, "correctionApprovalReference"),

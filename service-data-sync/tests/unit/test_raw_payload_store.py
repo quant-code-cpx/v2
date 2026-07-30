@@ -5,11 +5,17 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import cast
 
 import pytest
 
-from service_data_sync.application.ports.data_source import ProviderBatch, SourceRequest
+from service_data_sync.application.ports.data_source import (
+    ProviderBatch,
+    ProviderError,
+    ProviderErrorCode,
+    SourceRequest,
+)
 from service_data_sync.application.ports.market_data import RawPayload
 from service_data_sync.infrastructure.object_storage.client import ObjectStorageClient
 from service_data_sync.infrastructure.object_storage.raw_payload_store import (
@@ -71,6 +77,27 @@ class FakeSource:
         )
 
 
+class FakeUnsupportedSource:
+    """抛出会被 NAV 用例转成成功空态的暂不支持错误及脱敏摘要。"""
+
+    provider_id = "akshare-test"
+
+    def capabilities(self) -> frozenset[str]:
+        """声明 ETF NAV 能力供失败证据包装器透传。"""
+        return frozenset({"fund.etf.nav.1d.reported"})
+
+    async def fetch(self, request: SourceRequest) -> ProviderBatch:
+        """附加不含代码和 URL 的语义冲突摘要后抛出暂不支持。"""
+        evidence = b'{"navTypes":["0","1"],"rawResponseRetention":"hash_only"}'
+        error = ProviderError(
+            ProviderErrorCode.CURRENTLY_UNSUPPORTED,
+            "unsupported NAV semantics",
+            retryable=False,
+        )
+        error.attach_failure_evidence(evidence)
+        raise error
+
+
 def test_raw_payload_store_defers_success_payload_and_returns_unretained_marker() -> None:
     """成功路径仅返回摘要标记，不能把来源字节写入对象存储。"""
     client = FakeS3Client()
@@ -109,7 +136,66 @@ def test_raw_payload_store_persists_staged_payload_and_manifest_on_failure() -> 
     assert client.calls[0]["Body"] == b'{"raw":true}'
     manifest = json.loads(cast(bytes, client.calls[1]["Body"]))
     assert manifest["errorType"] == "RuntimeError"
-    assert manifest["objects"][0]["sha256"] == "a" * 64
+    assert manifest["objects"][0]["sha256"] == sha256(b'{"raw":true}').hexdigest()
+
+
+def test_manifest_only_failure_never_persists_source_bytes() -> None:
+    """默认受限业务模式只写摘要清单，失败也不能绕过许可保留来源字节。"""
+    client = FakeS3Client()
+    store = S3RawPayloadStore(
+        ObjectStorageClient(client=client, bucket="raw-evidence"),
+        retention_mode="MANIFEST_ONLY",
+    )
+    store.put(
+        RawPayload(
+            object_key="raw/stock-connect/test.dat",
+            content_sha256="d" * 64,
+            content_type="application/octet-stream",
+            payload=b"licensed-source-bytes",
+        )
+    )
+
+    manifest_uri = store.persist_failure(RuntimeError("schema failed"))
+
+    assert manifest_uri is not None
+    assert len(client.calls) == 1
+    manifest = json.loads(cast(bytes, client.calls[0]["Body"]))
+    assert manifest["retentionMode"] == "MANIFEST_ONLY"
+    evidence = manifest["objects"][0]
+    assert evidence["sha256"] == sha256(b"licensed-source-bytes").hexdigest()
+    assert evidence["byteSize"] == len(b"licensed-source-bytes")
+    assert "uri" not in evidence
+
+
+def test_licensed_raw_manifest_persists_rights_evidence_and_kms_policy() -> None:
+    """许可留存必须把非秘密审核引用写入清单，且来源字节与清单使用同一 KMS 策略。"""
+    client = FakeS3Client()
+    store = S3RawPayloadStore(
+        ObjectStorageClient(client=client, bucket="raw-evidence"),
+        retention_mode="LICENSED_RAW_ALLOWED",
+        kms_key_id="alias/quant-v2-stock-connect",
+        rights_evidence_ref="license-audit:stock-connect:2026-07",
+    )
+    store.put(
+        RawPayload(
+            object_key="raw/stock-connect/test.dat",
+            content_sha256="d" * 64,
+            content_type="application/octet-stream",
+            payload=b"licensed-source-bytes",
+        )
+    )
+
+    store.persist_failure(RuntimeError("schema failed"))
+
+    assert len(client.calls) == 2
+    assert all(
+        call["ServerSideEncryption"] == "aws:kms"
+        and call["SSEKMSKeyId"] == "alias/quant-v2-stock-connect"
+        for call in client.calls
+    )
+    manifest = json.loads(cast(bytes, client.calls[-1]["Body"]))
+    assert manifest["rightsEvidenceRef"] == "license-audit:stock-connect:2026-07"
+    assert manifest["retentionMode"] == "LICENSED_RAW_ALLOWED"
 
 
 def test_retain_failure_evidence_discards_success_and_archives_exception() -> None:
@@ -167,6 +253,31 @@ def test_failure_evidence_source_stages_batch_before_a_decode_failure() -> None:
     assert len(client.calls) == 3
     assert client.calls[0]["Body"] == b'{"akshare":true}'
     assert client.calls[1]["Body"] == b'{"normalized":true}'
+
+
+def test_handled_currently_unsupported_persists_the_provider_summary_immediately() -> None:
+    """应用稍后吞掉暂不支持异常时，包装器也必须先固化可追溯的脱敏来源摘要。"""
+    client = FakeS3Client()
+    store = S3RawPayloadStore(ObjectStorageClient(client=client, bucket="raw-evidence"))
+    source = FailureEvidenceDataSource(FakeUnsupportedSource(), store)
+
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(
+            source.fetch(
+                SourceRequest(
+                    capability="fund.etf.nav.1d.reported",
+                    parameters=(("etf", "SZSE.159001"),),
+                )
+            )
+        )
+
+    assert captured.value.code is ProviderErrorCode.CURRENTLY_UNSUPPORTED
+    assert len(client.calls) == 2
+    assert client.calls[0]["Body"] == (b'{"navTypes":["0","1"],"rawResponseRetention":"hash_only"}')
+    manifest = json.loads(cast(bytes, client.calls[1]["Body"]))
+    assert manifest["errorType"] == "ProviderError"
+    assert manifest["objects"][0]["product"] == "provider-failure-summary"
+    assert manifest["objects"][0]["capability"] == "fund.etf.nav.1d.reported"
 
 
 def test_raw_payload_store_reads_only_the_configured_private_bucket() -> None:

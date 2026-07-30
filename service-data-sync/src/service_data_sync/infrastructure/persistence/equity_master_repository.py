@@ -14,7 +14,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import case, exists, insert, literal, select, update
+from sqlalchemy import case, exists, func, insert, literal, literal_column, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.orm import Session
 
@@ -30,6 +30,7 @@ from service_data_sync.domain.equity_master import (
 )
 
 from ..database.connection import DatabaseClient
+from ..database.fenced_execution import current_fenced_execution
 from ..database.models.equity.identity.equity_identifier_version import (
     EquityIdentifierVersion,
 )
@@ -237,6 +238,7 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
                     .mappings()
                     .one()
                 )
+                _record_fenced_aggregate_checkpoint(UUID(str(existing["data_version"])))
                 return PublishedCnAAggregate(
                     data_version=UUID(str(existing["data_version"])),
                     published_at=existing["published_at"],
@@ -275,6 +277,7 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
                         component_data_version=component_data_version,
                     )
                 )
+            _record_fenced_aggregate_checkpoint(data_version)
         return PublishedCnAAggregate(data_version=data_version, published_at=published_at)
 
     def _latest_catalog(self, connection: Session, exchange: Exchange) -> Mapping[Any, Any] | None:
@@ -324,16 +327,21 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
         now: datetime,
     ) -> None:
         """记录目录缺席观测并关闭恢复条目，生命周期状态始终由显式证据维护。"""
+        # `ON CONFLICT` 的目标行不是普通 SELECT 外层，显式列引用避免 SQLAlchemy
+        # 把整张 anomaly 表加入标量子查询而在多条开放异常时返回多行。
+        prior_snapshot = EquityMasterSnapshot.__table__.alias("prior_missing_snapshot")
         prior_snapshot_date = (
-            select(EquityMasterSnapshot.target_date)
+            select(prior_snapshot.c.target_date)
             .where(
-                EquityMasterSnapshot.snapshot_id == EquityPresenceAnomaly.last_missing_snapshot_id
+                prior_snapshot.c.snapshot_id
+                == literal_column("equity_presence_anomaly.last_missing_snapshot_id")
             )
             .scalar_subquery()
         )
         missing_identifiers = (
             select(
-                literal(uuid4()),
+                # UUID 必须由 PostgreSQL 为 SELECT 的每个缺席证券逐行生成。
+                func.gen_random_uuid(),
                 EquityIdentifierVersion.security_id,
                 EquityIdentifierVersion.exchange,
                 EquityIdentifierVersion.symbol,
@@ -842,6 +850,13 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
             )
         )
         return data_version
+
+
+def _record_fenced_aggregate_checkpoint(data_version: UUID) -> None:
+    """把全市场身份聚合版本交给当前 fenced 控制面同事务落账。"""
+    execution = current_fenced_execution()
+    if execution is not None:
+        execution.record_checkpoint(kind="data-version", position=str(data_version))
 
 
 def _effective_date(entry: EquityCatalogEntry, target_date: date) -> tuple[date, str]:

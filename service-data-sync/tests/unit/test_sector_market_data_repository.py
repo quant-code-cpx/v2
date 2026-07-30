@@ -7,8 +7,16 @@ from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any, cast
+from unittest.mock import Mock
 from uuid import UUID, uuid4
 
+import pytest
+from sqlalchemy.orm import Session
+
+from service_data_sync.application.ports.canonical_release import (
+    CanonicalLineageRecord,
+    PublishedCanonicalRelease,
+)
 from service_data_sync.domain.sector import (
     SectorBar,
     SectorCatalogEntry,
@@ -17,6 +25,13 @@ from service_data_sync.domain.sector import (
     SectorScheme,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.fenced_execution import (
+    FencedExecution,
+    fenced_execution,
+)
+from service_data_sync.infrastructure.persistence import (
+    sector_market_data_repository as sector_market_repository,
+)
 from service_data_sync.infrastructure.persistence.sector_market_data_repository import (
     SqlAlchemySectorMarketDataRepository,
     _bar_content_hash,
@@ -118,10 +133,23 @@ class FakeDatabase:
             yield connection
 
 
-def test_repository_writes_weekly_table_and_advances_weekly_publication() -> None:
-    """周线只写周线物理表与周线发布数据集，不触碰日线表。"""
+def test_repository_writes_weekly_table_and_advances_weekly_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """周线只写周线物理表，并把真实完整快照交给统一 release 发布器。"""
     sector_id = uuid4()
-    engine = FakeEngine([_sector_row(sector_id), {"source_batch_id": uuid4()}, None, None, None])
+    source_batch_id = uuid4()
+    data_version = uuid4()
+    release_bridge = _release_bridge(data_version=data_version)
+    monkeypatch.setattr(
+        sector_market_repository,
+        "_current_bar_release_records",
+        Mock(
+            return_value=(_lineage_records(source_batch_id), date(2026, 6, 30), date(2026, 6, 30))
+        ),
+    )
+    monkeypatch.setattr(sector_market_repository, "publish_legacy_snapshot", release_bridge)
+    engine = FakeEngine([_sector_row(sector_id), {"source_batch_id": source_batch_id}, None, None])
     repository = _repository(engine)
 
     publication = repository.publish_bars(
@@ -139,19 +167,33 @@ def test_repository_writes_weekly_table_and_advances_weekly_publication() -> Non
     assert "sector_weekly_bar" in statements
     assert "sector_daily_bar" not in statements
     assert "INSERT INTO source_batch" in statements
+    assert publication.data_version == data_version
+    assert release_bridge.call_args.kwargs["dataset_code"] == "sector.bar.1w.raw"
+    assert release_bridge.call_args.kwargs["records"] == _lineage_records(source_batch_id)
 
 
-def test_repository_keeps_current_monthly_publication_when_values_are_unchanged() -> None:
-    """同值月线重放只保留现有当前发布，避免制造伪数据版本。"""
+def test_repository_keeps_current_monthly_publication_when_values_are_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同值月线重放仍经 release 发布器复用已绑定的真实 dataVersion。"""
     sector_id = uuid4()
     bar = _bar()
     data_version = uuid4()
+    source_batch_id = uuid4()
+    release_bridge = _release_bridge(data_version=data_version, reused_publication=True)
+    monkeypatch.setattr(
+        sector_market_repository,
+        "_current_bar_release_records",
+        Mock(
+            return_value=(_lineage_records(source_batch_id), date(2026, 6, 30), date(2026, 6, 30))
+        ),
+    )
+    monkeypatch.setattr(sector_market_repository, "publish_legacy_snapshot", release_bridge)
     engine = FakeEngine(
         [
             _sector_row(sector_id),
-            {"source_batch_id": uuid4()},
+            {"source_batch_id": source_batch_id},
             {"revision": 1, "content_sha256": _bar_content_hash(bar, is_final=True)},
-            {"data_version": data_version},
         ]
     )
     repository = _repository(engine)
@@ -169,6 +211,7 @@ def test_repository_keeps_current_monthly_publication_when_values_are_unchanged(
     assert publication.data_version == data_version
     assert publication.inserted_count == 0
     assert publication.unchanged_count == 1
+    assert release_bridge.call_count == 1
 
 
 def test_repository_reads_current_daily_bar_from_daily_table() -> None:
@@ -210,32 +253,46 @@ def test_repository_reads_current_daily_bar_from_daily_table() -> None:
     assert "sector_daily_bar" in engine.connection.statements[0]
 
 
-def test_repository_publishes_catalog_activates_pending_sector_and_reads_publication() -> None:
-    """目录发布应保留占位 UUID、激活名称并提供稳定当前版本读取。"""
+def test_repository_publishes_catalog_activates_pending_sector_and_reads_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """目录发布应保留占位 UUID，并以完整输入的真实来源批次绑定 release。"""
     data_version = uuid4()
     published_at = datetime(2026, 7, 1, tzinfo=UTC)
+    source_batch_id = uuid4()
+    release_bridge = _release_bridge(data_version=data_version)
+    monkeypatch.setattr(sector_market_repository, "publish_legacy_snapshot", release_bridge)
     engine = FakeEngine(
         [
-            {"source_batch_id": uuid4()},
+            {"source_batch_id": source_batch_id},
+            [],
             {"sector_key": 1, "name": None, "status": "PENDING"},
-            None,
-            None,
             None,
             {"data_version": data_version, "published_at": published_at},
         ]
     )
-    repository = _repository(engine)
-
-    publication = repository.publish_catalog(
-        scheme=SectorScheme.EASTMONEY_INDUSTRY,
-        entries=(
-            SectorCatalogEntry(SectorIdentifier(SectorScheme.EASTMONEY_INDUSTRY, "BK0475"), "证券"),
-        ),
-        provider_id="test-provider",
-        source_payload_sha256="c" * 64,
-        raw_uri="s3://test/catalog.json",
-        observed_at=published_at,
+    database = FakeDatabase(engine)
+    repository = SqlAlchemySectorMarketDataRepository(cast(DatabaseClient, database))
+    execution = FencedExecution(
+        database=cast(DatabaseClient, database),
+        run_id=uuid4(),
+        fencing_token=1,
+        finalizer=_ignore_fenced_finalizer,
     )
+
+    with fenced_execution(execution):
+        publication = repository.publish_catalog(
+            scheme=SectorScheme.EASTMONEY_INDUSTRY,
+            entries=(
+                SectorCatalogEntry(
+                    SectorIdentifier(SectorScheme.EASTMONEY_INDUSTRY, "BK0475"), "证券"
+                ),
+            ),
+            provider_id="test-provider",
+            source_payload_sha256="c" * 64,
+            raw_uri="s3://test/catalog.json",
+            observed_at=published_at,
+        )
     current = repository.get_current_publication(
         dataset="sector.catalog.raw", partition_key="eastmoney.industry"
     )
@@ -246,6 +303,11 @@ def test_repository_publishes_catalog_activates_pending_sector_and_reads_publica
     assert "sector_entity.status" in statements
     assert current is not None
     assert current.data_version == data_version
+    assert execution.checkpoint_kind == "data-version"
+    assert execution.checkpoint_position == str(publication.data_version)
+    bridge_arguments = release_bridge.call_args.kwargs
+    assert bridge_arguments["dataset_code"] == "sector.catalog.raw"
+    assert bridge_arguments["records"][0].source_batch_id == source_batch_id
 
 
 def test_repository_reads_active_catalog_by_identifier_and_stable_cursor() -> None:
@@ -270,9 +332,68 @@ def test_repository_reads_active_catalog_by_identifier_and_stable_cursor() -> No
     assert "sector_entity.status" in paged_engine.connection.statements[0]
 
 
+def test_catalog_rejects_partial_input_before_release_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """当前 ACTIVE 目录未被本次完整候选覆盖时不得伪造来源血缘或发布版本。"""
+    release_bridge = Mock()
+    monkeypatch.setattr(sector_market_repository, "publish_legacy_snapshot", release_bridge)
+    engine = FakeEngine(
+        [
+            {"source_batch_id": uuid4()},
+            [{"sector_code": "BK0001"}],
+        ]
+    )
+
+    with pytest.raises(ValueError, match="does not cover"):
+        _repository(engine).publish_catalog(
+            scheme=SectorScheme.EASTMONEY_INDUSTRY,
+            entries=(
+                SectorCatalogEntry(
+                    SectorIdentifier(SectorScheme.EASTMONEY_INDUSTRY, "BK0002"), "证券"
+                ),
+            ),
+            provider_id="test-provider",
+            source_payload_sha256="d" * 64,
+            raw_uri="s3://test/catalog.json",
+            observed_at=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+
+    assert release_bridge.call_count == 0
+
+
+def _release_bridge(*, data_version: UUID, reused_publication: bool = False) -> Mock:
+    """构造只返回正规 release 结果的替身，令仓储测试聚焦当前 revision 选择。"""
+    return Mock(
+        return_value=PublishedCanonicalRelease(
+            release_id=uuid4(),
+            data_version=data_version,
+            reused_release=reused_publication,
+            reused_publication=reused_publication,
+            published_at=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+    )
+
+
+def _lineage_records(source_batch_id: UUID) -> tuple[CanonicalLineageRecord, ...]:
+    """提供带真实来源批次的最小当前 revision 血缘，供桥接调用断言使用。"""
+    return (
+        CanonicalLineageRecord(
+            record_key_hash="a" * 64,
+            content_hash="b" * 64,
+            source_batch_id=source_batch_id,
+            transform_hash="c" * 64,
+        ),
+    )
+
+
 def _repository(engine: FakeEngine) -> SqlAlchemySectorMarketDataRepository:
     """围绕带短 Session 边界的替身数据库构造仓储。"""
     return SqlAlchemySectorMarketDataRepository(cast(DatabaseClient, FakeDatabase(engine)))
+
+
+def _ignore_fenced_finalizer(_session: Session, _execution: FencedExecution) -> None:
+    """为仓储单测提供不写控制面状态的最小终态回调。"""
 
 
 def _sector_row(sector_id: UUID) -> dict[str, Any]:

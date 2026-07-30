@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>service-web｜沪深港通中心前端技术方案</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17202a;
+        --muted: #637083;
+        --line: #dfe5ec;
+        --soft: #f6f8fb;
+        --blue: #155eef;
+        --red: #c62828;
+        --green: #16845b;
+        --amber: #9a6700;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #eef2f6;
+        color: var(--ink);
+        font:
+          14px/1.72 Inter,
+          "PingFang SC",
+          "Microsoft YaHei",
+          sans-serif;
+      }
+      main {
+        width: 1180px;
+        margin: 32px auto 72px;
+        padding: 52px 64px;
+        background: #fff;
+        border: 1px solid var(--line);
+        box-shadow: 0 8px 28px rgba(20, 34, 52, 0.08);
+      }
+      h1 {
+        margin: 8px 0 12px;
+        font-size: 34px;
+        line-height: 1.25;
+      }
+      h2 {
+        margin: 42px 0 14px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+        font-size: 23px;
+      }
+      h3 {
+        margin: 24px 0 8px;
+        font-size: 17px;
+      }
+      p {
+        margin: 8px 0 14px;
+      }
+      a {
+        color: var(--blue);
+      }
+      code {
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: #edf2f7;
+        font-family: ui-monospace, monospace;
+      }
+      pre {
+        overflow: auto;
+        padding: 16px;
+        background: #111827;
+        color: #e5eef9;
+        border-radius: 8px;
+        line-height: 1.55;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 14px 0 24px;
+        font-size: 13px;
+      }
+      th,
+      td {
+        padding: 10px 11px;
+        border: 1px solid var(--line);
+        vertical-align: top;
+        text-align: left;
+      }
+      th {
+        background: #f0f4f8;
+        font-weight: 700;
+      }
+      ul,
+      ol {
+        padding-left: 22px;
+      }
+      li {
+        margin: 5px 0;
+      }
+      .eyebrow {
+        color: var(--blue);
+        font-weight: 800;
+        letter-spacing: 0.08em;
+      }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 18px 0 28px;
+      }
+      .tag {
+        padding: 5px 10px;
+        border: 1px solid #cad6e4;
+        border-radius: 999px;
+        background: var(--soft);
+      }
+      .callout {
+        margin: 18px 0;
+        padding: 14px 16px;
+        border-left: 4px solid var(--blue);
+        background: #f3f7ff;
+      }
+      .ok {
+        border-left-color: var(--green);
+        background: #f0faf6;
+      }
+      .warn {
+        border-left-color: var(--amber);
+        background: #fff9e8;
+      }
+      .flow {
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        background: var(--soft);
+        font-family: ui-monospace, monospace;
+      }
+      .check td:first-child {
+        width: 28px;
+        color: var(--green);
+        font-weight: 800;
+      }
+      .up {
+        color: var(--red);
+        font-weight: 700;
+      }
+      .down {
+        color: var(--green);
+        font-weight: 700;
+      }
+      @media print {
+        body {
+          background: #fff;
+        }
+        main {
+          width: auto;
+          margin: 0;
+          padding: 20mm 16mm;
+          border: 0;
+          box-shadow: none;
+        }
+        a {
+          color: inherit;
+          text-decoration: none;
+        }
+        h2 {
+          break-after: avoid;
+        }
+        table,
+        pre,
+        .callout {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">SERVICE-WEB · PC DESKTOP ONLY · IMPLEMENTATION READY</div>
+      <h1>沪深港通中心前端技术方案</h1>
+      <p>
+        在现有 300px sidebar、72px app bar 与 MUI light theme
+        下新增互联互通总览、通道详情和证券互联互通上下文。 页面只通过 service-api 的五个 POST
+        端点读取真实 publication 或独立持久化 readiness 证据，不包含样本数据、随机数据或浏览器端估算。
+      </p>
+      <div class="meta">
+        <span class="tag">状态：Proposed · 可实施</span>
+        <span class="tag">视口：1440×900 / PC</span>
+        <span class="tag">React + MUI + TanStack Query</span>
+        <span class="tag">红涨绿跌</span>
+        <span class="tag">URL 可复现</span>
+        <span class="tag">最后修改：2026-07-30</span>
+      </div>
+      <div class="callout ok">
+        <strong>上线不留卡点：</strong>路由、筛选、query
+        key、数据状态、深链接、降级、可访问性和浏览器验收已冻结。路由与导航随 Web
+        镜像固定部署；在真实 publication 未就绪或 service-api 运行时开关关闭时，页面以明确
+        fail-closed 状态响应，不依赖 Web 构建期开关，也不存在先上假页面再换数据的阶段。
+      </div>
+      <p>
+        <strong>本次变更摘要：</strong>对齐常驻路由、无
+        publication、部分通道、父版本校验、图表生命周期与 可访问逐点摘要的真实实现边界。
+      </p>
+
+      <h2>1. 信息架构与页面职责</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>路由</th>
+            <th>页面</th>
+            <th>回答的问题</th>
+            <th>主接口</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>/market/stock-connect</code></td>
+            <td>互联互通总览</td>
+            <td>同一共同交易日四条通道表现、状态、额度与官方活跃证券概览。</td>
+            <td>
+              <code>readiness/query</code> + <code>overview/query</code> + 选中通道
+              <code>active-securities/query</code>
+            </td>
+          </tr>
+          <tr>
+            <td><code>/market/stock-connect/:channel</code></td>
+            <td>通道详情</td>
+            <td>单通道精确日期统计、日终状态、额度、趋势与官方活跃榜/榜内净额榜。</td>
+            <td>
+              <code>readiness/query</code> + <code>channels/query</code> +
+              <code>active-securities/query</code>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <code>/market/stock-connect/securities/:instrumentEntityRef</code>
+            </td>
+            <td>证券互联互通上下文</td>
+            <td>该稳定证券在互联互通通道内何时、以什么排名和金额出现。</td>
+            <td><code>securities/context/query</code></td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        <code>:channel</code> 仅接受 <code>sh-northbound</code>、<code>sz-northbound</code>、
+        <code>sh-southbound</code>、<code>sz-southbound</code>。非法值由 route loader 进入站内
+        404，不发送 API。
+      </p>
+
+      <h3>1.1 总览页面</h3>
+      <ol>
+        <li>
+          标题区：产品边界、共同交易日、publication 时间、来源和 quality；其下独立显示
+          candidateTradeDate、readyTradeDate 与逐通道 readiness 证据。
+        </li>
+        <li>方向切换：全部 / 北向 / 南向；只改变 URL 和视图，不混合金额。</li>
+        <li>四通道卡片：成交额、净买入/净卖出（仅可用时）、额度状态、交易状态、币种。</li>
+        <li>趋势区：按币种分组的通道序列；不显示跨币种总线。</li>
+        <li>官方活跃证券区：明确“来源活跃证券 Top 10”，通道切换与榜内排序。</li>
+      </ol>
+
+      <h3>1.2 通道详情页面</h3>
+      <ol>
+        <li>
+          面包屑、通道语义、精确日期选择、状态与 publication；readiness
+          提示独立解释该日休市、等待、失败或来源缺失。
+        </li>
+        <li>关键事实：买入、卖出、成交额、净买入/净卖出、额度；每项同时显示 availability。</li>
+        <li>趋势图：成交额与可用净额，不把成交额线命名为资金流。</li>
+        <li>榜单 tabs：活跃证券 / 榜内净买入 / 榜内净卖出；制度未披露时禁用并解释。</li>
+        <li>
+          来源与口径抽屉：数据源、来源 publication
+          可用性、来源发布时间、接收时间、币种、公式、质量和 dataVersion。来源未提供 publication
+          时明确显示“来源未提供 publication；接收于…”，不能拿
+          <code>sourceObservedAt</code> 冒充发布时间。
+        </li>
+      </ol>
+
+      <h3>1.3 证券上下文页面</h3>
+      <p>
+        只展示互联互通范围事实，不承担完整股票/港股详情。北向稳定身份可链接现有 A
+        股详情；南向若未来存在港股详情， 通过统一 route registry
+        生成链接。本期无港股详情时仍保留本页，不指向不存在的路由。
+      </p>
+
+      <h2>2. URL 是筛选状态的唯一可分享来源</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>参数</th>
+            <th>取值</th>
+            <th>默认/规范化</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>date</code></td>
+            <td><code>latest</code> 或 <code>YYYY-MM-DD</code></td>
+            <td>默认 latest；API 返回 resolvedTradeDate，但 URL 保持 latest 语义。</td>
+          </tr>
+          <tr>
+            <td><code>direction</code></td>
+            <td><code>all|northbound|southbound</code></td>
+            <td>总览默认 all；详情由 channel 决定并忽略该参数。</td>
+          </tr>
+          <tr>
+            <td><code>channel</code></td>
+            <td>四个 channel slug</td>
+            <td>总览活跃榜默认 sh-northbound；详情由 path 提供。</td>
+          </tr>
+          <tr>
+            <td><code>ranking</code></td>
+            <td><code>active|net-buy|net-sell</code></td>
+            <td>默认 active；不可用时保留请求值并展示不可用状态，不静默改 tab。</td>
+          </tr>
+          <tr>
+            <td><code>trendDays</code></td>
+            <td><code>20|60|120|250</code></td>
+            <td>默认 20；非法值改写为默认并 replace history。</td>
+          </tr>
+          <tr>
+            <td><code>pageSize</code></td>
+            <td><code>20|50|100</code></td>
+            <td>默认 20。</td>
+          </tr>
+          <tr>
+            <td><code>cursor</code></td>
+            <td>不透明字符串</td>
+            <td>筛选或 dataVersion 变化时删除；上一/下一游标保存在 history state。</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        解析使用集中式 Zod schema；规范化一次后以
+        <code>replace</code> 写回。所有筛选控件由 URL 派生，刷新、复制链接和浏览器前进后退均可复现。
+      </p>
+
+      <h2>3. Remote state 与请求编排</h2>
+      <pre>
+stockConnectKeys = {
+  overview: (filters, actorRef) =&gt;
+    ['stock-connect', 'overview', actorRef, filters],
+  readiness: (filters, actorRef) =&gt;
+    ['stock-connect', 'readiness', actorRef, filters],
+  channel: (filters, actorRef) =&gt;
+    ['stock-connect', 'channel', actorRef, filters],
+  active: (filters, actorRef, collectionVersion) =&gt;
+    ['stock-connect', 'active', actorRef, collectionVersion, filters],
+  security: (filters, actorRef) =&gt;
+    ['stock-connect', 'security', actorRef, filters],
+}</pre>
+      <ul>
+        <li>
+          请求统一走现有共享 transport，POST body 与 OpenAPI 一致；组件不直接使用
+          <code>fetch</code>。
+        </li>
+        <li>总览成功后，只有当前可见榜单才加载 active query；不预取四通道全部榜单。</li>
+        <li>
+          active POST 必填 <code>parentPublicationDataVersion</code>：总览页传共同 overview
+          版本，通道页传 channel bundle 版本。409
+          <code>PARENT_PUBLICATION_MISMATCH</code> 时按“父查询 → active”顺序最多自动
+          整体复核一次；持续冲突显示版本更新态，人工重试也成对刷新。
+        </li>
+        <li>
+          <code>staleTime=5min</code>、<code>gcTime=30min</code>；publication
+          是日终不可变版本，窗口聚焦时以 If-None-Match 复核。readiness
+          使用独立 query key 和 1 分钟 staleTime，正文 dataVersion
+          按规范 JSON 重算 SHA-256，不能借用父 publication 或其错误状态。
+        </li>
+        <li>筛选变化取消旧请求；响应只有 query key 与当前 URL 一致时才渲染，避免竞态闪回。</li>
+        <li>
+          503 时保留 TanStack Query 上一成功数据并显示“连接异常，当前为 dataVersion
+          …”；不得伪装成最新。
+        </li>
+        <li>
+          新模块不安装 Mock Service Worker、不注册 fixture transport、不把
+          <code>prototype.html</code> 数据带入 TypeScript。
+        </li>
+      </ul>
+
+      <h2>4. 字段渲染规则</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>事实</th>
+            <th>可用</th>
+            <th>不可用</th>
+            <th>颜色/符号</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>成交额</td>
+            <td>格式化原币金额并显示 CNY/HKD。</td>
+            <td>“— 来源缺失”。</td>
+            <td>中性色；不得使用资金流红绿。</td>
+          </tr>
+          <tr>
+            <td>净买入</td>
+            <td><span class="up">+ 金额 · 净买入</span></td>
+            <td>“— 未披露（制度）”或“— 来源缺失”。</td>
+            <td>中国市场语义：正数红色，必须同时有 + 与文字。</td>
+          </tr>
+          <tr>
+            <td>净卖出</td>
+            <td><span class="down">− 金额 · 净卖出</span></td>
+            <td>同上。</td>
+            <td>负数绿色，必须同时有 − 与文字。</td>
+          </tr>
+          <tr>
+            <td>额度</td>
+            <td>“额度充足”或原始 CNY 余额；显示“日终”。</td>
+            <td>“— 日终额度来源缺失”。</td>
+            <td>不把 threshold-above 的空余额显示为 0。</td>
+          </tr>
+          <tr>
+            <td>状态</td>
+            <td>交易日/已收盘/暂停/未开市；买卖接受状态。</td>
+            <td>“状态未知”，publication 仍可追踪。</td>
+            <td>不使用仅颜色表达。</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        数字由共享 formatter 处理，但 money amount 始终先作为 decimal string；不转 JavaScript float
+        做业务计算。图表输入保留 currency 分组， tooltip
+        展示完整日期、通道、字段名、符号、文字和币种。
+      </p>
+
+      <h2>5. 身份、深链接与降级</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>身份状态</th>
+            <th>列表呈现</th>
+            <th>交互</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>RESOLVED</code> + A 股详情存在</td>
+            <td>证券名、代码、市场。</td>
+            <td>主链接到现有股票详情；次入口到互联互通上下文。</td>
+          </tr>
+          <tr>
+            <td><code>RESOLVED</code> + 港股详情尚不存在</td>
+            <td>证券名、代码、HKEX。</td>
+            <td>只链接互联互通上下文；不伪造港股详情 URL。</td>
+          </tr>
+          <tr>
+            <td><code>SOURCE_UNRESOLVED</code></td>
+            <td>源代码、源名称（若有）、“来源身份未解析”。</td>
+            <td>整行非链接；提供“查看来源与日期”，不拼 entityRef。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout warn">
+        缺少完整港股主数据并不阻塞本模块：只有 HKEX Securities Master
+        明确给出稳定 Securities ID 且日期化代码生命周期可验证时，才为互联互通事实建立最小稳定身份。
+        仅有 trading code/name 的行保持 <code>SOURCE_UNRESOLVED</code>。完整港股详情是未来依赖，
+        不在本期自动扩展。
+      </div>
+
+      <h2>6. 空、错与复杂状态</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>状态</th>
+            <th>页面行为</th>
+            <th>禁止行为</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>首次加载</td>
+            <td>标题/筛选可用，卡片和表格显示固定尺寸 skeleton，aria-busy=true。</td>
+            <td>不显示上次其他通道值。</td>
+          </tr>
+          <tr>
+            <td>精确日无 publication</td>
+            <td>
+              readiness 按持久化证据解释官方闭市、等待交付/执行、失败、来源缺失或尚未齐套；
+              保留日期选择和返回 latest。
+            </td>
+            <td>不静默跳到前一交易日。</td>
+          </tr>
+          <tr>
+            <td>沪深与香港休市差异</td>
+            <td>各通道状态卡分别说明；总览 latest 仍取共同已发布日。</td>
+            <td>不把单边休市写成系统故障。</td>
+          </tr>
+          <tr>
+            <td>制度未披露</td>
+            <td>字段级“— 未披露（制度）”，净额 tab disabled 且有可聚焦说明。</td>
+            <td>不从成交额反推净买入。</td>
+          </tr>
+          <tr>
+            <td>来源缺失/无 publication</td>
+            <td>
+              业务查询保持 409/503 fail-closed，独立 readiness 提示仍可展示
+              candidate/ready 日期和逐通道 reasonCode；readiness 也为
+              <code>READINESS_NOT_OBSERVED</code> 时明确说明“尚无可核验证据”。
+              公开合同未提供的 requestId 不在浏览器中虚构。
+            </td>
+            <td>不渲染 0，不加载本地样本。</td>
+          </tr>
+          <tr>
+            <td>部分通道失败</td>
+            <td>
+              若无完整 bundle：总览首次读取明确 fail-closed，不拼装且不承诺存在旧数据。只有 API
+              成功响应显式提供结构化通道可用性时才逐通道表达；同 query key
+              后台复核失败时可继续标注并保留已验证缓存。
+            </td>
+            <td>不把不同日期、版本合成“今日总览”。</td>
+          </tr>
+          <tr>
+            <td>父 publication 更新</td>
+            <td>榜单与父统计整体复核；持续冲突显示“数据版本正在更新”，允许人工成对重试。</td>
+            <td>不保留旧统计后只读取当前 latest 榜单。</td>
+          </tr>
+          <tr>
+            <td>翻页空结果</td>
+            <td>回到第一页按钮，保留筛选；表头仍显示范围。</td>
+            <td>不显示“全市场无数据”。</td>
+          </tr>
+          <tr>
+            <td>身份缺失</td>
+            <td>显示源代码/名称与来源身份警告。</td>
+            <td>不生成不可用链接。</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        复杂状态视觉稿见
+        <a href="assets/prototype-states.png">prototype-states.png</a>。
+      </p>
+
+      <h2>7. 组件结构与性能</h2>
+      <pre>
+service-web/src/views/StockConnectView/
+  StockConnectOverviewPage.tsx
+  StockConnectChannelPage.tsx
+  StockConnectSecurityPage.tsx
+  components/
+    PublicationBar.tsx
+    StockConnectReadinessNotice.tsx
+    ChannelSummaryCard.tsx
+    ChannelDetailMetrics.tsx
+    MoneyFact.tsx
+    StockConnectFilters.tsx
+    StockConnectOverviewToolbar.tsx
+    StockConnectPageHeader.tsx
+    StockConnectRemoteState.tsx
+    StockConnectTrendChart.tsx
+    ActiveSecurityTable.tsx
+    ActiveSecurityTableRow.tsx
+    SecurityActivityTable.tsx
+    SourceMethodDrawer.tsx
+  hooks/
+    useStockConnectUrlState.ts
+    useStockConnectQueries.ts
+  test/
+    parent-publication-recovery.test.tsx
+    stock-connect-components.test.tsx
+    source-method-drawer.test.tsx
+    stock-connect-presentation.test.ts
+    stock-connect-security-links.test.tsx
+    stock-connect-url.test.ts
+  utils/
+    stock-connect-presentation.ts
+    stock-connect-security-links.ts
+    stock-connect-url.ts
+
+service-web/src/api/stock-connect.ts
+service-web/src/types/stock-connect.ts
+service-web/src/router/stock-connect-loaders.ts
+service-web/src/router/test/stock-connect-routes.test.ts</pre>
+      <ul>
+        <li>
+          三个 route element 使用
+          <code>lazy()</code> 独立切块；图表库仅详情/总览块加载。
+        </li>
+        <li>
+          卡片、表格、状态条按职责组合，避免一个组件堆叠 channel/direction/net 多个 boolean props。
+        </li>
+        <li>
+          表格稳定 key 使用 entityRef 或
+          <code>sourceCode + tradeDate + channel</code>；不使用数组索引。
+        </li>
+        <li>
+          金额格式化、availability 映射和 route registry 使用纯函数并 memoize；不在 render
+          中重复解析 Decimal。
+        </li>
+        <li>桌面内容区最小 1100px；不实现移动端、响应式折叠或暗色壳层。</li>
+      </ul>
+
+      <h2>8. 可访问性与视觉验收</h2>
+      <ul>
+        <li>
+          所有筛选有可见 label；channel card 可键盘聚焦，Enter/Space 导航；焦点环不被 overflow
+          截断。
+        </li>
+        <li>
+          tabs 使用 MUI Tabs 语义；不可用 tab 通过邻接说明和
+          <code>aria-describedby</code> 解释原因。
+        </li>
+        <li>红/绿之外始终有正负号和“净买入/净卖出”文字；状态 badge 同时有图标或文字。</li>
+        <li>表格表头 scope 正确，排序按钮有当前方向；loading/error 更新使用礼貌 live region。</li>
+        <li>
+          趋势图提供包含交易日、成交额、净额和 dataVersion 的逐点可读摘要表；ECharts 关闭动画以满足
+          reduced-motion，tooltip 不作为唯一信息源。
+        </li>
+        <li>不使用渐变、玻璃效果、暗色壳层、AI dashboard 装饰、移动端汉堡菜单。</li>
+      </ul>
+
+      <h2>9. 发布、回滚与验收</h2>
+      <ol>
+        <li>
+          合入 API types、transport、导航与路由；页面始终以 fail-closed
+          状态工作，组件测试只验证状态逻辑，不成为产品数据来源。
+        </li>
+        <li>接入真实 staging publication，在受控环境完成 overview、channel、security 页面联调。</li>
+        <li>
+          Playwright 禁止 route.fulfill 和 service worker mock；记录真实 API 响应 dataVersion 与 DOM
+          对账。
+        </li>
+        <li>
+          三服务验收完成且已有批准 publication 后，运行时开启 service-api
+          <code>STOCK_CONNECT_API_ENABLED</code>；观察 409/503、渲染异常、Web Vitals 与 API p95。
+        </li>
+        <li>
+          回滚只关闭 service-api 运行时开关并停用同步计划；Web 保留可分享 URL
+          和明确不可用状态，不需要重建静态镜像，也不影响现有市场页和数据 publication。
+        </li>
+      </ol>
+      <table class="check">
+        <tbody>
+          <tr>
+            <td>✓</td>
+            <td>
+              1440×900 与 1280×800 PC 视口无横向溢出、遮挡、截断；sidebar/appbar 与仓库现状一致。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>URL 刷新、复制、前进后退完整恢复日期、方向、通道、榜单、趋势和分页。</td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>真实 CNY/HKD 不混合求和；成交额文案中不出现“净流入”。</td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>正数红色且显示“+ / 净买入”，负数绿色且显示“− / 净卖出”。</td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              北向制度未披露、休市差异、来源缺失、无 publication、部分失败、身份缺失均有确定状态。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              readiness 与业务 publication 独立加载和失败；候选日、共同已发布日、证据时间、
+              状态/reasonCode 均来自 API，浏览器重算摘要与响应
+              <code>X-Data-Version</code> 一致且不使用当前时间推测。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              浏览器网络只访问 service-api POST 路由，不出现第三方源、data-sync
+              内部路由或模拟数据路径。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>10. 可编辑原型</h2>
+      <p>
+        <a href="prototype.html"><code>prototype.html</code></a> 是 1440×900 PC
+        可编辑原型入口；它只表达布局、字段可用性和真实 API 装载位置，
+        不包含虚构证券、日期或金额。评审图： <a href="assets/prototype-desktop.png">总览</a>、
+        <a href="assets/prototype-channel-detail.png">通道详情</a>、
+        <a href="assets/prototype-states.png">复杂状态</a>。
+      </p>
+    </main>
+  </body>
+</html>

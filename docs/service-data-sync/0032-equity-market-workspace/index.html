@@ -1,0 +1,1232 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>0032 · 股票中心全量数据同步与发布方案</title>
+    <meta
+      name="description"
+      content="股票中心真实 A 股数据的全量回填、增量同步、canonical 存储、质量门、publication、内部读取与恢复方案。"
+    />
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #18202f;
+        --muted: #667085;
+        --line: #dfe3e8;
+        --soft-line: #edf0f3;
+        --paper: #ffffff;
+        --canvas: #f5f7f9;
+        --brand: #1769aa;
+        --brand-soft: #eaf3fb;
+        --good: #177245;
+        --good-soft: #e9f6ef;
+        --warn: #9a6700;
+        --warn-soft: #fff6df;
+        --bad: #b42318;
+        --bad-soft: #fff0ee;
+        --violet: #6941c6;
+        --violet-soft: #f2edff;
+        --shadow: 0 12px 32px rgba(20, 33, 52, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        min-width: 1200px;
+        scroll-behavior: smooth;
+        background: var(--canvas);
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--canvas);
+        font:
+          14px/1.65 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      a {
+        color: var(--brand);
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+
+      code {
+        padding: 1px 5px;
+        border: 1px solid #dbe7f2;
+        border-radius: 5px;
+        color: #164c77;
+        background: #f4f8fc;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 0.92em;
+      }
+
+      pre {
+        overflow: auto;
+        margin: 14px 0 0;
+        padding: 16px 18px;
+        border: 1px solid #25364e;
+        border-radius: 8px;
+        color: #e9eef5;
+        background: #172033;
+        font: 12px/1.7 "SFMono-Regular", Consolas, monospace;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: 248px minmax(0, 1fr);
+        width: 1180px;
+        margin: 0 auto;
+        padding: 28px 0 64px;
+        gap: 24px;
+      }
+
+      .sidebar {
+        position: sticky;
+        top: 20px;
+        align-self: start;
+        max-height: calc(100vh - 40px);
+        overflow: auto;
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--paper);
+        box-shadow: var(--shadow);
+      }
+
+      .eyebrow {
+        color: var(--brand);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+      }
+
+      .sidebar strong {
+        display: block;
+        margin: 4px 0 14px;
+        font-size: 17px;
+      }
+
+      .sidebar a {
+        display: block;
+        margin: 3px 0;
+        padding: 6px 8px;
+        border-radius: 6px;
+        color: #475467;
+        font-size: 12px;
+      }
+
+      .sidebar a:hover {
+        color: var(--brand);
+        background: var(--brand-soft);
+        text-decoration: none;
+      }
+
+      main {
+        min-width: 0;
+      }
+
+      .hero,
+      section {
+        margin-bottom: 18px;
+        padding: 28px 32px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--paper);
+        box-shadow: var(--shadow);
+      }
+
+      .hero {
+        border-top: 4px solid var(--brand);
+      }
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        margin-top: 0;
+        color: #172033;
+        line-height: 1.35;
+      }
+
+      h1 {
+        margin-bottom: 12px;
+        font-size: 31px;
+        letter-spacing: -0.02em;
+      }
+
+      h2 {
+        margin-bottom: 18px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--soft-line);
+        font-size: 23px;
+      }
+
+      h3 {
+        margin: 24px 0 10px;
+        font-size: 17px;
+      }
+
+      h4 {
+        margin: 18px 0 8px;
+        font-size: 14px;
+      }
+
+      p {
+        margin: 9px 0;
+      }
+
+      ul,
+      ol {
+        margin: 10px 0;
+        padding-left: 22px;
+      }
+
+      li + li {
+        margin-top: 5px;
+      }
+
+      .lead {
+        color: #475467;
+        font-size: 15px;
+      }
+
+      .meta,
+      .cards,
+      .decision-grid,
+      .budget-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .meta {
+        grid-template-columns: repeat(4, 1fr);
+        margin-top: 20px;
+      }
+
+      .meta div,
+      .card,
+      .decision,
+      .budget {
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fbfcfd;
+      }
+
+      .meta dt {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .meta dd {
+        margin: 5px 0 0;
+        font-weight: 700;
+      }
+
+      .cards {
+        grid-template-columns: repeat(3, 1fr);
+      }
+
+      .decision-grid,
+      .budget-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .card strong,
+      .decision strong,
+      .budget strong {
+        display: block;
+        margin-bottom: 5px;
+      }
+
+      .decision {
+        border-left: 4px solid var(--brand);
+      }
+
+      .decision.good {
+        border-left-color: var(--good);
+        background: var(--good-soft);
+      }
+
+      .decision.warn {
+        border-left-color: var(--warn);
+        background: var(--warn-soft);
+      }
+
+      .decision.bad {
+        border-left-color: var(--bad);
+        background: var(--bad-soft);
+      }
+
+      .callout {
+        margin: 14px 0;
+        padding: 14px 17px;
+        border: 1px solid #b9d5ec;
+        border-left: 4px solid var(--brand);
+        border-radius: 7px;
+        background: var(--brand-soft);
+      }
+
+      .callout.good {
+        border-color: #aad6bf;
+        border-left-color: var(--good);
+        background: var(--good-soft);
+      }
+
+      .callout.warn {
+        border-color: #ead28d;
+        border-left-color: var(--warn);
+        background: var(--warn-soft);
+      }
+
+      .callout.bad {
+        border-color: #efb5ad;
+        border-left-color: var(--bad);
+        background: var(--bad-soft);
+      }
+
+      .table-wrap {
+        overflow: auto;
+        margin: 14px 0;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--paper);
+        font-size: 12px;
+      }
+
+      th,
+      td {
+        padding: 10px 11px;
+        border-bottom: 1px solid var(--soft-line);
+        border-right: 1px solid var(--soft-line);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th:last-child,
+      td:last-child {
+        border-right: 0;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      th {
+        color: #344054;
+        background: #f7f9fb;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .tag {
+        display: inline-block;
+        margin: 1px 3px 1px 0;
+        padding: 2px 7px;
+        border: 1px solid currentColor;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+        line-height: 1.4;
+      }
+
+      .tag.good {
+        color: var(--good);
+        background: var(--good-soft);
+      }
+
+      .tag.warn {
+        color: var(--warn);
+        background: var(--warn-soft);
+      }
+
+      .tag.bad {
+        color: var(--bad);
+        background: var(--bad-soft);
+      }
+
+      .tag.info {
+        color: var(--brand);
+        background: var(--brand-soft);
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 8px;
+        margin: 16px 0;
+      }
+
+      .flow div {
+        position: relative;
+        min-height: 104px;
+        padding: 13px;
+        border: 1px solid var(--line);
+        border-top: 3px solid var(--brand);
+        border-radius: 7px;
+        background: #fbfcfd;
+      }
+
+      .flow div:not(:last-child)::after {
+        position: absolute;
+        top: 42px;
+        right: -10px;
+        z-index: 2;
+        content: "→";
+        color: var(--brand);
+        font-weight: 900;
+      }
+
+      .flow strong,
+      .flow span {
+        display: block;
+      }
+
+      .flow span {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .phase {
+        display: grid;
+        grid-template-columns: 92px minmax(0, 1fr) 190px;
+        gap: 14px;
+        padding: 15px 0;
+        border-bottom: 1px solid var(--soft-line);
+      }
+
+      .phase:last-child {
+        border-bottom: 0;
+      }
+
+      .phase-id {
+        color: var(--brand);
+        font-weight: 900;
+        letter-spacing: 0.05em;
+      }
+
+      .phase h3 {
+        margin: 0 0 4px;
+      }
+
+      .gate {
+        align-self: start;
+        padding: 8px 10px;
+        border-radius: 6px;
+        color: var(--good);
+        background: var(--good-soft);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .checklist {
+        list-style: none;
+        padding-left: 0;
+      }
+
+      .checklist li {
+        position: relative;
+        padding-left: 24px;
+      }
+
+      .checklist li::before {
+        position: absolute;
+        left: 0;
+        content: "✓";
+        color: var(--good);
+        font-weight: 900;
+      }
+
+      .footer {
+        padding: 20px 0;
+        color: var(--muted);
+        text-align: center;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="eyebrow">SERVICE-DATA-SYNC · 0032</div>
+        <strong>股票中心全量数据发布</strong>
+        <a href="#summary">1 核心结论</a>
+        <a href="#baseline">2 当前基线</a>
+        <a href="#datasets">3 数据集与来源</a>
+        <a href="#model">4 Canonical 模型</a>
+        <a href="#workflow">5 全量与增量同步</a>
+        <a href="#publication">6 质量与 publication</a>
+        <a href="#contract">7 内部读取契约</a>
+        <a href="#nofake">8 禁止假数据</a>
+        <a href="#reliability">9 性能与可靠性</a>
+        <a href="#delivery">10 实施与回滚</a>
+        <a href="#acceptance">11 验收标准</a>
+        <a href="#evidence">12 证据与关联方案</a>
+      </aside>
+
+      <main>
+        <header class="hero">
+          <div class="eyebrow">IMPLEMENTED · REAL PUBLICATION VALIDATING</div>
+          <h1>股票中心：真实 A 股全量同步、冻结横截面与发布方案</h1>
+          <p class="lead">
+            本方案把沪深京 A 股证券目录、生命周期、普通停复牌、日周月行情、复权、公司行动、财务、
+            估值、行业概念、申万归属、股本市值和证券事件收敛为可审计的真实数据链；资金流只保留
+            research 状态与明确不可用边界，不进入生产 publication；
+            <strong>没有合格 publication 就不对消费者声称有数据，任何生产环境都不得用 fixture、demo 或人工构造行情补位。</strong>
+          </p>
+          <dl class="meta">
+            <div><dt>状态</dt><dd>Implemented · real publication validating</dd></div>
+            <div><dt>市场 / 时区</dt><dd>沪深京 A 股 / Asia/Shanghai</dd></div>
+            <div><dt>产品频率</dt><dd>EOD；不含实时与 Level-2</dd></div>
+            <div><dt>日期</dt><dd>2026-07-30</dd></div>
+          </dl>
+          <div class="callout warn">
+            <strong>环境事实：</strong>2026-07-30 对本机开发 PostgreSQL 的只读核验显示
+            <code>dataset_publication</code> 为 0 行。该事实只说明当前开发环境尚无可消费版本；
+            首次上线必须先完成本方案定义的真实全量回填和发布验收。
+          </div>
+        </header>
+
+        <section id="summary">
+          <h2>1. 核心结论与固定决策</h2>
+          <div class="decision-grid">
+            <div class="decision good">
+              <strong>全量的精确定义</strong>
+              覆盖 CN_A_STABLE 当前与历史身份集合，以及每个来源能提供且通过质量门的完整历史。
+              上游不存在的历史以可用起点表达，禁止补造记录；research-disabled 资金流不属于当前全量承诺。
+            </div>
+            <div class="decision good">
+              <strong>统一列表只读冻结 EOD 横截面</strong>
+              新增 <code>equity.discovery.eod</code>；筛选、排序、分页始终绑定一个
+              <code>dataVersion</code> 和 component manifest，不在查询时 N+1 拼数千只证券。
+            </div>
+            <div class="decision">
+              <strong>普通停牌与暂停上市分离</strong>
+              既有 <code>SUSPENDED</code> 只表示交易所明确的暂停上市；新增
+              <code>equity.trading_status.1d</code> 表达普通停复牌，页面不得混名。
+            </div>
+            <div class="decision">
+              <strong>市值只由真实股本 × 未复权收盘价生成</strong>
+              总股本、已上市流通 A 股按生效日选择；价格、股本和计算方法学都写入血缘。
+              不使用供应商直接“市值”字段静默回填。
+            </div>
+            <div class="decision">
+              <strong>方法学不混用</strong>
+              列表默认估值使用已发布的 Eastmoney provider observation；
+              资金流只有在方法学从 research 晋级 validated 且生产开关开启后才能进入列表。
+              当前不设生产默认、不发布研究数据；任何晋级或切换都产生新版本。
+            </div>
+            <div class="decision bad">
+              <strong>生产入口只在全链真实发布后开启</strong>
+              开发阶段可以分批交付代码，但包含股票中心入口的 Web 版本必须等三服务 E2E 使用真实来源和真实
+              publication 通过后才能部署；不能用空壳、fixture 或手填 CSV 验收。
+            </div>
+          </div>
+
+          <h3>边界</h3>
+          <ul>
+            <li>包含 EOD 证券发现与个股详情所需全部数据集；不拆出新的个股独立方案。</li>
+            <li>不接实时行情、WebSocket、Level-2、分钟线、盘口和盘中资金流。</li>
+            <li>service-data-sync 是市场数据权威层；service-api 只能经版本化内部 HTTP 读取。</li>
+            <li>来源切换必须新建 adapter policy、重叠比对和新 publication，禁止静默 fallback。</li>
+          </ul>
+        </section>
+
+        <section id="baseline">
+          <h2>2. 当前能力基线与缺口</h2>
+          <p>
+            “已实现”表示代码中已有 adapter、canonical/revision、publication 与读取链；
+            不表示当前环境已有可消费记录。模型存在但没有同步、发布或 reader 时仍判定为不可消费。
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>能力</th>
+                  <th>当前同步 / 来源</th>
+                  <th>当前存储</th>
+                  <th>publication / reader</th>
+                  <th>当前缺口</th>
+                  <th>目标处置</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>证券目录与生命周期</td>
+                  <td><span class="tag good">已实现</span> 三所目录与双时态生命周期模型</td>
+                  <td>instrument、identifier/name、listing status 双时态</td>
+                  <td><span class="tag good">已实现</span> CN_A_STABLE 与 typed reader</td>
+                  <td>普通停牌不属于该状态；SUSPENDED 当前没有已验证 producer</td>
+                  <td>保留已有 LISTED/DELISTED 事实；SUSPENDED 原因化，不用普通停牌或目录缺席推断</td>
+                </tr>
+                <tr>
+                  <td>日 / 周 / 月行情</td>
+                  <td><span class="tag good">已实现</span> 腾讯日线；东财原生周/月线</td>
+                  <td>三张周期表、年度分区、revision</td>
+                  <td><span class="tag good">已实现</span> 每证券每周期独立发布</td>
+                  <td>discovery producer/snapshot/reader 已实现；真实 publication E2E 仍在验证</td>
+                  <td>在同一 EOD manifest 中派生昨收、涨跌并原因化缺口</td>
+                </tr>
+                <tr>
+                  <td>复权、公司行动、概况</td>
+                  <td><span class="tag good">已实现</span> 新浪因子、东财分红送转、巨潮概况</td>
+                  <td>factor/action/profile revision</td>
+                  <td><span class="tag good">已实现</span> typed reader</td>
+                  <td>只有逐证券分区</td>
+                  <td>详情继续独立发布和失败隔离</td>
+                </tr>
+                <tr>
+                  <td>财务、指标、估值</td>
+                  <td><span class="tag good">技术实现</span> AKShare 东财；默认关闭</td>
+                  <td>报告、行项目、供应商指标、平台派生、估值 revision</td>
+                  <td><span class="tag good">已实现</span> PIT publication / reader</td>
+                  <td>全证券真实首发仍待环境验证</td>
+                  <td>估值已是 discovery 可选 component；缺 publication 时返回 PARTIAL 原因</td>
+                </tr>
+                <tr>
+                  <td>日频资金流</td>
+                  <td><span class="tag warn">fail closed</span> 东财 order-size、同花顺排行</td>
+                  <td>series、ranking、methodology</td>
+                  <td><span class="tag warn">仅模型与 reader</span> 无控制面 canonical producer</td>
+                  <td>方法学状态为 research、production_enabled=false；生产 publication 关闭</td>
+                  <td>本方案保持明确不可用；后续须单独完成方法学评审、来源许可与连续探针后才能晋级</td>
+                </tr>
+                <tr>
+                  <td>行业 / 概念归属</td>
+                  <td><span class="tag good">已实现</span> Eastmoney 当前观察</td>
+                  <td>membership snapshot/release/item/interval</td>
+                  <td><span class="tag good">已实现</span> 正反向 reader</td>
+                  <td>观察日期不等于真实调入调出日</td>
+                  <td>保持 observed snapshot 语义，纳入横截面</td>
+                </tr>
+                <tr>
+                  <td>申万 taxonomy / 估值</td>
+                  <td><span class="tag good">已实现</span> 乐咕三级快照</td>
+                  <td>SW node/closure/valuation</td>
+                  <td><span class="tag good">已实现</span></td>
+                  <td>历史调入调出区间不由当前快照推断</td>
+                  <td><code>sw_index_third_cons</code> 当前 observation snapshot 与 membership release 已实现</td>
+                </tr>
+                <tr>
+                  <td>股本与市值</td>
+                  <td><span class="tag good">已实现</span> 东财历史股本</td>
+                  <td>股本 revision + discovery component</td>
+                  <td><span class="tag good">已实现</span> typed publication / reader</td>
+                  <td>只有股本与同日未复权 close 都有合格版本时才可派生市值</td>
+                  <td>缺任一输入返回 null + reason，不使用供应商市值或反推股本</td>
+                </tr>
+                <tr>
+                  <td>龙虎榜 / 大宗交易</td>
+                  <td><span class="tag good">已实现</span> 东财 P0 adapter + 控制面 producer</td>
+                  <td>event/seat/execution revision + 逐证券窗口 coverage manifest</td>
+                  <td>通用 SQL reader + 专用身份查询</td>
+                  <td>单 run 31 天；多个成功窗口只有无缝覆盖请求区间时才证明合法空集</td>
+                  <td>exchange+symbol 全程绑定 immutable identity；空窗只发布 coverage 证据，不伪造事件事实</td>
+                </tr>
+                <tr>
+                  <td>业绩预告 / 快报</td>
+                  <td><span class="tag good">已实现</span> 东财 P0 adapter + 控制面 producer</td>
+                  <td>corporate event/revision/document + 逐证券公告窗 coverage manifest</td>
+                  <td>通用 reader + 专用身份查询</td>
+                  <td>网络/429/5xx 有界重试；普通 4xx 与 schema 漂移失败关闭</td>
+                  <td>按 31 天公告窗回填；查询窗口使用公告日，报告期只作财报期字段</td>
+                </tr>
+                <tr>
+                  <td>统一股票横截面</td>
+                  <td><span class="tag good">已实现</span> providerless canonical producer</td>
+                  <td>snapshot + component manifest</td>
+                  <td><span class="tag good">已实现</span> publication / frozen reader</td>
+                  <td>可选组件允许 PARTIAL；资金流能力从 columns/sort/filter 失败关闭</td>
+                  <td>BASE 全目录发布；查询、排序和 cursor 始终绑定一个 dataVersion</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="datasets">
+          <h2>3. 数据集、来源与方法学</h2>
+          <p>
+            所有来源都通过 provider-neutral port；下表的 SDK 函数名只允许出现在 AKShare adapter 内。
+            当前固定运行基线继续使用仓库锁定版本，升级必须重新跑 schema、单位、容量与恢复认证。
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Canonical dataset / capability</th>
+                  <th>主来源与 adapter</th>
+                  <th>分区 / 历史边界</th>
+                  <th>关键方法学</th>
+                  <th>发布要求</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>equity.master.cn-a</code><br /><code>equity.lifecycle.explicit</code></td>
+                  <td>交易所目录与显式生命周期；复用现有 adapter</td>
+                  <td>交易所 + targetDate；历史事件全量</td>
+                  <td>代码缺席不推断退市；普通停牌不写 lifecycle</td>
+                  <td>沪深京三组件共同通过</td>
+                </tr>
+                <tr>
+                  <td><code>equity.trading_status.1d</code></td>
+                  <td>使用 Eastmoney <code>stock_tfp_em(date)</code> 的来源明确记录；未知市场标签与未验证 BSE 覆盖原因化</td>
+                  <td>tradeDate；从来源可验证起点回填</td>
+                  <td>TRADED / SUSPENDED / RESUMED；无记录不能单独证明 TRADED，须与最终 bar 对账</td>
+                  <td>目录、停复牌表与 bar 三方闭合</td>
+                </tr>
+                <tr>
+                  <td><code>equity.bar.1d|1w|1mo</code></td>
+                  <td>腾讯未复权日线；Eastmoney 原生周/月线</td>
+                  <td>证券 + 周期 + 年份；来源全部可用历史</td>
+                  <td>周/月不从日线聚合；量统一为股、额为 CNY</td>
+                  <td>OHLC、非负量额、唯一日期、isFinal</td>
+                </tr>
+                <tr>
+                  <td><code>equity.adjustment_factor</code></td>
+                  <td>Sina 稀疏累计后复权因子</td>
+                  <td>证券完整因子序列</td>
+                  <td>qfq/hfq 在查询时以同一 bar/factor 版本计算</td>
+                  <td>覆盖窗口连续且因子为正</td>
+                </tr>
+                <tr>
+                  <td><code>equity.corporate_action</code><br /><code>equity.profile</code></td>
+                  <td>Eastmoney 分红送转；CNINFO 公司概况</td>
+                  <td>证券全历史 / 最新修订</td>
+                  <td>公告、登记、除权日分离；空字段不覆盖已知值</td>
+                  <td>身份唯一、日期合法、来源证据可追溯</td>
+                </tr>
+                <tr>
+                  <td><code>financial.statement|metric|derived|valuation</code></td>
+                  <td>Eastmoney 财务与估值 adapter；平台公式独立任务</td>
+                  <td>证券 + 报告期 / 交易日；来源可用历史</td>
+                  <td>PIT 双时态；provider 与 platform-derived 严格分离；保留真实上市前 issuer 报告，reportPeriod 不反推上市状态</td>
+                  <td>三表、指标、估值分别发布；派生绑定输入版本</td>
+                </tr>
+                <tr>
+                  <td><code>money_flow.equity.1d.order_size</code></td>
+                  <td>仅研究态 Eastmoney order-size 模型/reader；无控制面 canonical producer</td>
+                  <td>当前不建立生产分区或 publication</td>
+                  <td>methodology=research、production_enabled=false；不与 THS 排行混算</td>
+                  <td>本轮固定 UNAVAILABLE；未来须完成来源许可、连续探针和方法学晋级后另发新版本</td>
+                </tr>
+                <tr>
+                  <td><code>sector.membership.snapshot</code></td>
+                  <td>Eastmoney industry / concept</td>
+                  <td>scheme + observationDate</td>
+                  <td>仅声明观察时归属，不伪造真实进出日期</td>
+                  <td>已发布目录内身份全解析；未知成员隔离</td>
+                </tr>
+                <tr>
+                  <td><code>sector.sw2021.membership.snapshot</code></td>
+                  <td>乐咕 <code>sw_index_third_cons</code>；新增 membership adapter</td>
+                  <td>三级行业 + observationDate；历史只从归档快照形成</td>
+                  <td>申万三级节点映射到一、二级闭包；“纳入时间”只作来源字段，不推断退出日</td>
+                  <td>每只当前上市股票恰好 0 或 1 个三级归属；未覆盖必须原因化</td>
+                </tr>
+                <tr>
+                  <td><code>equity.share_capital.reported</code></td>
+                  <td>Eastmoney <code>stock_zh_a_gbjg_em</code> 历史股本结构</td>
+                  <td>证券 + effectiveDate；来源全部历史</td>
+                  <td>股；总股本与已上市流通 A 股分别保存；不从市值反推股本</td>
+                  <td>正值、构成不超总量、变更日单调、最新覆盖全市场</td>
+                </tr>
+                <tr>
+                  <td><code>corporate.disclosure.earnings.p0</code></td>
+                  <td>Eastmoney <code>stock_yjyg_em</code> / <code>stock_yjkb_em</code></td>
+                  <td>报告期季度；来源可用起点起全量</td>
+                  <td>公告日是 knownAt；预告与快报是不同 eventKind</td>
+                  <td>报告期、公告日、证券身份和数值单位完整</td>
+                </tr>
+                <tr>
+                  <td><code>market.dragon_tiger.disclosure.1d</code><br /><code>market.block_trade.execution.1d</code></td>
+                  <td>Eastmoney P0 adapter</td>
+                  <td>tradeDate；来源可用历史</td>
+                  <td>上榜事实/席位与大宗逐笔分表；不保存事后收益叙事</td>
+                  <td>市场汇总与明细计数对账，空日可合法发布</td>
+                </tr>
+                <tr>
+                  <td><code>equity.discovery.eod</code></td>
+                  <td>只读取上述已发布 canonical；无外部 adapter</td>
+                  <td>CN_A + asOfTradeDate</td>
+                  <td>close × shares 派生市值；涨跌使用前一可比已发布收盘；资金流字段不进入当前 capabilities</td>
+                  <td>100% 身份行都有 DATA 或受控 nullReason；可选组件允许 PARTIAL，禁止以空值冒充真实 0</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="callout">
+            <strong>已支持链路的来源选择已定：</strong>申万归属固定为
+            <code>sw_index_third_cons</code> 当前快照语义；股本固定为
+            <code>stock_zh_a_gbjg_em</code> 历史结构；普通停复牌使用
+            <code>stock_tfp_em</code> 的来源明确记录，未知市场标签不按代码前缀补全。生命周期
+            <code>SUSPENDED</code> 目前没有已验证 producer，资金流没有 validated 方法学；两者都以
+            NOT_COVERED / UNAVAILABLE 原因化，不改用未认证来源或假数据。
+          </div>
+        </section>
+
+        <section id="model">
+          <h2>4. Canonical、revision 与发布模型</h2>
+          <h3>新增逻辑表</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>表</th><th>职责与逻辑键</th><th>重要字段</th><th>索引 / 分区</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>equity_trading_status_revision</code></td>
+                  <td>普通停复牌事实；security + trade_date + revision</td>
+                  <td>status、suspendAt、resumeAt、reason、market、knownFrom/To、sourceBatchId</td>
+                  <td>按 trade_date 年分区；当前 revision 唯一</td>
+                </tr>
+                <tr>
+                  <td><code>equity_share_capital_revision</code></td>
+                  <td>股本有效状态；security + effective_on + revision</td>
+                  <td>totalShares、listedTradableAShares、restrictedShares、reason、knownFrom/To</td>
+                  <td>按 effective_on 年分区；security/date 查询索引</td>
+                </tr>
+                <tr>
+                  <td><code>sw_membership_release</code></td>
+                  <td>一次申万三级归属快照的 release</td>
+                  <td>schemeVersion、observationDate、sourceBatchId、qualityStatus</td>
+                  <td>observationDate + schemeVersion 唯一</td>
+                </tr>
+                <tr>
+                  <td><code>sw_membership_item</code></td>
+                  <td>release 内证券到三级节点映射</td>
+                  <td>securityId、thirdLevelNodeId、sourceIncludedOn、resolutionStatus</td>
+                  <td>release/security 唯一；node 反向索引</td>
+                </tr>
+                <tr>
+                  <td><code>equity_discovery_snapshot</code></td>
+                  <td>股票列表冻结投影；data_version + security</td>
+                  <td>身份、状态、tradeDate、OHLC 摘要、量额、换手、股本、市值、估值；资金流保留空字段但不进入当前 capabilities</td>
+                  <td>按 as_of 年分区；为允许排序字段建立 dataVersion 前缀索引</td>
+                </tr>
+                <tr>
+                  <td><code>equity_discovery_membership</code></td>
+                  <td>横截面多值行业/概念/申万过滤</td>
+                  <td>dataVersion、securityId、scheme、sectorCode、level</td>
+                  <td>dataVersion/scheme/code/security 组合索引</td>
+                </tr>
+                <tr>
+                  <td><code>equity_discovery_availability</code></td>
+                  <td>每行每语义族的可用性与空值原因</td>
+                  <td>family、availability、nullReason、componentDataVersion、methodologyId</td>
+                  <td>dataVersion/security/family 唯一</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>不新建的副本</h3>
+          <ul>
+            <li>不复制 identity、bar、financial、event canonical；discovery 是可重建消费投影。</li>
+            <li>不把外部 SDK 字段直接放进 domain；adapter 先输出版本化中立 payload。</li>
+            <li>不把 publication、checkpoint、来源批次塞入 JSON 大字段；继续使用现有治理表与外键。</li>
+            <li>所有表使用 Declarative registry、显式 Alembic migration；迁移支持 downgrade 或指针回滚。</li>
+          </ul>
+
+          <h3>横截面字段口径</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>字段</th><th>计算 / 选择</th><th>空值条件</th><th>禁止行为</th></tr></thead>
+              <tbody>
+                <tr><td>close</td><td>目标 tradeDate 未复权最终日线 close</td><td>停牌、未上市、已退市或来源未覆盖</td><td>使用盘中价或复权价</td></tr>
+                <tr><td>changeAmount / changePercent</td><td>与前一可比实际交易记录的 close 比较</td><td>没有前值或价格不可比</td><td>按自然日前一日、用 0 补齐</td></tr>
+                <tr><td>turnoverRate</td><td>优先使用同一日线来源报告值；另存方法学</td><td>来源缺失</td><td>用 volume/未知流通股本猜测</td></tr>
+                <tr><td>totalMarketCap</td><td>close × 生效中的 totalShares</td><td>close 或股本缺失</td><td>供应商市值静默覆盖</td></tr>
+                <tr><td>floatMarketCap</td><td>close × listedTradableAShares</td><td>任一输入缺失</td><td>把“已流通股份”与自由流通盘混名</td></tr>
+                <tr><td>valuation</td><td>目标日之前最近一次同方法学已发布观察</td><td>不适用、亏损导致 PE 无意义、无观察</td><td>跨方法学补值</td></tr>
+                <tr><td>moneyFlow</td><td>仅在 validated 方法学的生产 publication 中选择；当前无生产值</td><td>当前固定为 NOT_COVERED / UNAVAILABLE</td><td>使用 research 观察、THS 排行、价格涨跌或零值替代</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="workflow">
+          <h2>5. 全量回填、增量同步与编排</h2>
+          <div class="flow">
+            <div><strong>1. 身份基线</strong><span>三所目录与生命周期；冻结 CN_A_STABLE。</span></div>
+            <div><strong>2. 事实回填</strong><span>按证券/日期并发抓取行情、财务、股本和事件。</span></div>
+            <div><strong>3. 独立发布</strong><span>每个数据集先完成自己的质量门与 publication。</span></div>
+            <div><strong>4. 横截面构建</strong><span>同一 asOf 选择组件版本，计算派生列和原因化空值。</span></div>
+            <div><strong>5. 原子可见</strong><span>写 component manifest 后一次推进 discovery 指针。</span></div>
+          </div>
+
+          <h3>父任务与依赖图</h3>
+          <pre>equity_workspace.full_backfill
+├─ master.exchange_snapshot[SSE, SZSE, BSE] ── lifecycle.explicit
+├─ per_security
+│  ├─ bars[1d, 1w, 1mo] ── adjustment_factor ── corporate_action
+│  ├─ company_profile ── share_capital
+│  ├─ financial[statement, provider_metric, valuation] ── derived_metric
+│  └─ money_flow.equity.1d（当前 research，明确跳过且原因化）
+├─ market_snapshot
+│  ├─ trading_status.1d
+│  ├─ sector[industry, concept].membership
+│  ├─ sw2021.membership
+│  └─ events[earnings, dragon_tiger, block_trade]
+└─ equity.discovery.eod.build ── publish</pre>
+
+          <h3>运行模式</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>模式</th><th>输入</th><th>行为</th><th>checkpoint / 幂等</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>首次全量</td>
+                  <td>市场、来源可用起点、targetAsOf</td>
+                  <td>覆盖全部身份和来源全部可用历史；按证券与年份切片</td>
+                  <td>dataset + partition + source policy + schema version；内容摘要相同不新增 revision</td>
+                </tr>
+                <tr>
+                  <td>日增量</td>
+                  <td>targetTradeDate</td>
+                  <td>收盘后同步目录、状态、bar、事件和横截面；research 资金流不进入生产编排</td>
+                  <td>目标日分区；重复执行只产生 unchanged 计数</td>
+                </tr>
+                <tr>
+                  <td>低频增量</td>
+                  <td>报告期 / observationDate</td>
+                  <td>财务、估值、股本、分类、概况按自己的节奏运行</td>
+                  <td>知识时间变化追加 revision；不覆盖历史</td>
+                </tr>
+                <tr>
+                  <td>修复回放</td>
+                  <td>sourceBatchId / dataVersion / date range</td>
+                  <td>优先从已归档标准 payload 重放；必要时重新抓取并形成新观察</td>
+                  <td>新 mappingVersion；旧 publication 保留</td>
+                </tr>
+                <tr>
+                  <td>横截面重建</td>
+                  <td>asOf + 精确 component versions</td>
+                  <td>不访问外部来源，只重建消费投影</td>
+                  <td>manifest 摘要相同则复用结果；不同则新 dataVersion</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>调度与容量</h3>
+          <ul>
+            <li>父任务进入 0031 控制面定义的全局 fencing；所有旧 CLI/Celery 写路径在本模块实施时接入同一 fence。</li>
+            <li>默认安全速率为每 provider 单并发、每秒 1 请求；真实探针得到配额后只通过配置提高，不写死在代码。</li>
+            <li>每个证券任务有 20 秒墙钟超时、最多 3 次带抖动退避；schema/单位/身份错误不可重试，直接隔离。</li>
+            <li>事件首发固定切成最多 31 天的 operation window。10 年闭区间最多 118 个窗口；每个窗口成功后才记录 coverage bundle checkpoint，失败只重跑该窗口。</li>
+            <li>龙虎榜席位使用与 AKShare 固定接口同源的东财 HEAD、BUY、SELL 日期窗报表批量分页，不按每个 head 再发两次请求。2024-04 真实探针分别为 1,720 / 8,593 / 8,589 行，按服务端约 500 行每页约 37 页；每页独立 HTTP timeout 与有限重试。</li>
+            <li>事件分页先冻结总页数与总记录数，再按稳定键抓满所有页；跨页重复冲突、孤儿席位、BUY/SELL 缺边或金额不平都使整窗失败。取消后不再调度新页，失败证据保留已抓页的脱敏摘要。</li>
+            <li>全市场父 run 永久冻结 <code>{instrumentId, exchange, symbol, identityAsOf}</code> roster 和 source snapshot；分区键使用 instrument UUID。retry 只能继承该 roster 的成功分区，不得按当前目录重算或以可复用代码命名。</li>
+            <li>全量任务分片 100 只证券；单 shard 可恢复。父任务只汇总状态，不持有巨大内存数组。</li>
+            <li>EOD discovery 只在所有必需组件达到目标日或存在合法原因状态后构建；失败不推进当前指针。</li>
+          </ul>
+        </section>
+
+        <section id="publication">
+          <h2>6. 质量门、完整性与 publication</h2>
+          <h3>六态覆盖，不把缺失伪装成零</h3>
+          <div class="cards">
+            <div class="card"><strong>DATA</strong>真实来源记录通过质量门并进入 publication。</div>
+            <div class="card"><strong>LEGITIMATE_EMPTY</strong>有完整来源响应且该证券/日期确实无记录。</div>
+            <div class="card"><strong>NOT_APPLICABLE</strong>如亏损证券的 PE、未上市日期行情，业务上不适用。</div>
+            <div class="card"><strong>SOURCE_UNAVAILABLE</strong>来源失败、未准入或覆盖不足；不得进入 FULL discovery。</div>
+            <div class="card"><strong>QUARANTINED</strong>schema、单位、身份或质量异常；保留证据，不对外可见。</div>
+            <div class="card"><strong>STALE_LAST_GOOD</strong>新任务失败，消费者继续读上一合格版本并显示陈旧。</div>
+          </div>
+
+          <h3>BASE/PARTIAL 与 FULL discovery 门禁</h3>
+          <ul class="checklist">
+            <li>首个可消费 BASE 由身份、已有来源覆盖的生命周期事实和目标日交易状态组成；未覆盖的 SUSPENDED 必须原因化。BASE 合格即可发布 <code>completeness=PARTIAL</code>，不因可选宽列尚未回填而永久阻断股票中心。</li>
+            <li>bar、股本、估值和 memberships 为独立可选组件；缺失时字段为 null + reason、component 明确不可用，绝不伪造成 FULL。资金流固定不进入当前 capabilities。</li>
+            <li>身份组件为同一 CN_A_STABLE publication，沪深京 child dataVersion 完整。</li>
+            <li>每个目标证券在行情、交易状态、股本、估值、行业/概念、申万中均有 DATA、LEGITIMATE_EMPTY、NOT_APPLICABLE 或受控不可用原因。</li>
+            <li>任何必需语义族存在 SOURCE_UNAVAILABLE 或 QUARANTINED 时不发布新版本；继续保留上一版本。</li>
+            <li>目标日所有 bar 为最终记录，OHLC、量额、日期、币种和单位校验通过。</li>
+            <li>总市值与流通市值可以由明确股本输入重算，误差为 Decimal 精确运算的舍入范围。</li>
+            <li>行业/概念允许多值；申万三级最多一个。未覆盖必须有受控原因，不能填“未知行业”。</li>
+            <li>估值的 methodology code/version、supplier、观察窗口与 component dataVersion 完整；资金流记录 research/disabled 治理状态，不生成 component dataVersion。</li>
+            <li>记录数、覆盖率、空值原因分布和上一版本差异均写入 quality result。</li>
+          </ul>
+
+          <h3>Publication 原子性</h3>
+          <ol>
+            <li>在单事务外完成来源抓取、标准化、revision 写入和质量计算；尚不改变消费者指针。</li>
+            <li>冻结所有 component publication，生成排序稳定的 manifest 与 SHA-256。</li>
+            <li>在一个数据库事务中写 discovery snapshot、availability、membership、release 和 component rows。</li>
+            <li>通过当前 fence token 后创建 <code>dataset_publication</code> 并 supersede 旧指针。</li>
+            <li>事务提交后发出运维事件；API 不依赖消息及时性，始终以 publication 表为准。</li>
+          </ol>
+
+          <h3>事件窗口 coverage publication</h3>
+          <ul class="checklist">
+            <li>公司行动、预告、快报、龙虎榜和大宗交易都按 <code>securityId + family + [coverageFrom, coverageTo]</code> 保存不可变覆盖证据；provider/source 级事实 publication 不能替另一证券证明空。</li>
+            <li>来源成功、schema 完整且坏行计数为零时才可写 coverage；网络失败、分页不完整、字段缺失、金额不平或身份无法解析均失败关闭。</li>
+            <li>合法空窗的 manifest <code>factCount=0</code>，但不向事件事实表写 sentinel；global 累积事实 release 的总记录数可以非零。</li>
+            <li>长窗口由多个含端日期区间的无缝并集证明；任意一天缺口都返回 PARTIAL / SOURCE_UNAVAILABLE，而不是 AVAILABLE 空页。</li>
+            <li>存在重叠观察时，以请求边界、coverageFrom 和 coverageTo + 1 切成不重叠 slice，每个 slice 选择当时最新的 coverage；旧宽窗只能补缺口，不能吞掉新纠错窗。</li>
+            <li>每个 slice 只用自己的 coverage 知识时间读取该日期片的事实，禁止把全窗最大 cutoff 套到其他旧 slice；响应 knowledgeCutoff 报告实际使用证据的最大时间。</li>
+            <li>实际选中 slice 的 <code>coverageVersion</code>、slice 范围、事实 publication 与 identity version 一起生成 composite <code>dataVersion</code> 和 ETag；新增空窗或纠错窗都必须改变条件读取结果。</li>
+            <li><code>knownAt</code> 只选择当时已创建且未被当时 supersede 的 coverage；events/query 与 data-status 共用同一事实选择器、来源和方法学投影，不能用一个宽窗的总 recordCount 推断其中某日非空。</li>
+          </ul>
+
+          <h3>无 publication</h3>
+          <p>
+            内部 reader 返回稳定 <code>publication-unavailable</code>，包含 dataset、partition、
+            availability、reasonCode、observedAt 和可选 lastGoodPublication；不返回 200 空列表，
+            因为“没有发布”与“发布后查询为空”不是同一业务事实。
+          </p>
+        </section>
+
+        <section id="contract">
+          <h2>7. service-data-sync 内部读取契约</h2>
+          <p>
+            本方案同时是已实施 internal v1 reader 的评审基线；service-api 使用 service bearer、
+            request id、超时和严格 schema 校验。遵守任务约束，本轮不创建 OpenAPI 文件；后续治理记录只能 additive。
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>方法与路径</th><th>用途</th><th>请求要点</th><th>响应与错误</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><code>POST /internal/v1/equity-discovery/query</code></td>
+                  <td>统一列表筛选、排序和 cursor 分页</td>
+                  <td>q、exchanges、lifecycleStatuses、tradingStatuses、memberships、sort、cursor、limit、dataVersion?</td>
+                  <td>release meta、capabilities、records、nextCursor；无发布 503 publication-unavailable；版本错 409 snapshot-expired</td>
+                </tr>
+                <tr>
+                  <td><code>POST /internal/v1/equities/{exchange}/{symbol}/events/query</code></td>
+                  <td>按公开证券身份读取公司与交易事件</td>
+                  <td>families、asOf、start、end、knownAt、cursor、limit</td>
+                  <td>先按 asOf + knownAt 解析 immutable security id，再校验事件窗不跨 identifier range；不要求调用方传 UUID</td>
+                </tr>
+                <tr>
+                  <td><code>POST /internal/v1/equities/{exchange}/{symbol}/data-status/query</code></td>
+                  <td>汇总详情页各数据集状态</td>
+                  <td>families、asOf、knownAt</td>
+                  <td>每族 availability、freshness、dataVersion、source label、methodology；不返回事实数据</td>
+                </tr>
+                <tr>
+                  <td>既有 <code>/internal/v1/equities/…</code></td>
+                  <td>身份、生命周期、bar、factor、action、profile、financial</td>
+                  <td>保持 GET typed reads 与 ETag；profile/financial additive 接受 asOf</td>
+                  <td>必须先解析永久身份再选 publication，禁止 exchange + symbol 的“当前版本”查询在代码复用时多行失败</td>
+                </tr>
+                <tr>
+                  <td>既有 sector / SW / money-flow reads</td>
+                  <td>详情页独立数据集</td>
+                  <td>保持方法学与 publication 约束</td>
+                  <td>新增 SW equity-membership read；其他 additive</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>Cursor 与排序</h3>
+          <ul>
+            <li>cursor 为 data-sync 签发的 opaque base64url；内部包含 contractVersion、dataVersion、filterHash、sort tuple 和 HMAC。</li>
+            <li>允许排序字段固定：symbol、name、close、changePercent、amountCny、turnoverRate、totalMarketCap、floatMarketCap、peTtm、pb；资金流排序和筛选当前稳定拒绝。</li>
+            <li>所有排序追加 exchange、symbol 和内部行锚点作为稳定 tie-breaker；锚点只在 HMAC 签名 opaque cursor 内使用，不进入公开正文；nulls 固定 LAST。</li>
+            <li>cursor 的 dataVersion、filterHash 或 sort 不匹配返回 409，禁止悄悄从第一页继续。</li>
+          </ul>
+        </section>
+
+        <section id="nofake">
+          <h2>8. 生产运行禁止假数据</h2>
+          <div class="callout bad">
+            <strong>强约束：</strong>fixture、mock、fake adapter、demo seed 只允许存在于
+            <code>tests/</code> 或显式 test profile。staging/production 的配置校验、发布门和 E2E
+            必须共同证明数据来自已登记真实来源批次。
+          </div>
+          <ul class="checklist">
+            <li>非 test 环境启动时拒绝 providerId、adapter class 或 source policy 中含 fake、fixture、demo、sample。</li>
+            <li>每条可发布 revision 必须有非空 <code>sourceBatchId</code>，可追溯 provider、upstreamSource、observedAt、adapterVersion 和 schemaFingerprint。</li>
+            <li>discovery 每个非派生值必须绑定 component dataVersion；派生值必须绑定公式版本与输入版本。</li>
+            <li>真实来源返回空集只能成为 LEGITIMATE_EMPTY，必须有完整请求证据与覆盖判断；异常响应不能转换为空集。</li>
+            <li>验收环境不执行 demo seed；首发通过真实全量命令生成，并随机抽样回溯到 source batch。</li>
+            <li>单元和契约测试可用 fixture，但测试报告不得作为生产数据可用性证据。</li>
+          </ul>
+        </section>
+
+        <section id="reliability">
+          <h2>9. 性能、可靠性、观测与恢复</h2>
+          <div class="budget-grid">
+            <div class="budget"><strong>全量规模</strong>按 6,500 只证券、30+ 年日线、全报告期设计；数据按证券/年份切片，禁止单事务全市场写入。</div>
+            <div class="budget"><strong>横截面规模</strong>单 dataVersion 约 6,500 行；构建内存目标 ≤ 512 MiB，使用 server-side cursor 与批量 COPY/upsert。</div>
+            <div class="budget"><strong>查询目标</strong>发现列表 P95 ≤ 250 ms、P99 ≤ 600 ms；默认 50、最大 100，压缩响应 ≤ 512 KiB。</div>
+            <div class="budget"><strong>发布延迟</strong>EOD 必需组件目标在收盘后 120 分钟内完成；不承诺盘中更新。</div>
+            <div class="budget"><strong>保留</strong>成功 raw 按 0030 策略不长期重复留存；失败证据、manifest、revision、publication 永久审计。</div>
+            <div class="budget"><strong>回滚</strong>切换到上一 discovery dataVersion ≤ 5 分钟；不删除新 revision，保留复盘证据。</div>
+          </div>
+
+          <h3>指标与告警</h3>
+          <ul>
+            <li><code>sync_run_duration_seconds</code>、<code>source_request_total</code>、<code>source_retry_total</code>、<code>quarantine_total</code>，均按 dataset/provider/reason 标注。</li>
+            <li><code>publication_lag_seconds</code>、<code>publication_coverage_ratio</code>、<code>discovery_build_duration_seconds</code>、<code>discovery_diff_ratio</code>。</li>
+            <li>告警：必需组件超过 SLO、连续 3 次来源失败、schema fingerprint 变化、覆盖率下降、异常大版本差异、fence 冲突。</li>
+            <li>日志只记录内部 ID、dataset、partition、run/attempt、requestId；不记录 bearer、完整响应体或个人数据。</li>
+          </ul>
+
+          <h3>恢复矩阵</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>故障</th><th>自动处置</th><th>消费者状态</th><th>恢复</th></tr></thead>
+              <tbody>
+                <tr><td>来源超时 / 429 / 5xx</td><td>有界退避，耗尽后失败分区</td><td>上一 publication stale</td><td>从 checkpoint 重跑失败 shard</td></tr>
+                <tr><td>schema / 单位漂移</td><td>不可重试，隔离 payload 和 fingerprint</td><td>上一版本继续可读</td><td>升级 mappingVersion 后 replay</td></tr>
+                <tr><td>单证券身份无法解析</td><td>隔离，不写事件/行情</td><td>新 FULL discovery 不发布</td><td>修复 identity 后重放 source batch</td></tr>
+                <tr><td>构建中 component 指针变化</td><td>放弃 build，不提交</td><td>上一版本继续可读</td><td>重新冻结 manifest 后构建</td></tr>
+                <tr><td>发布后质量回归</td><td>停止后续发布，告警</td><td>受影响版本可见直到回滚</td><td>切回上一指针并追加撤回事件</td></tr>
+                <tr><td>对象存储 / DB 不可用</td><td>任务失败，不吞异常</td><td>API 读最后可用版本或 503</td><td>依赖恢复后按 run/attempt 重试</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="delivery">
+          <h2>10. 实施顺序、发布与回滚</h2>
+          <div class="phase">
+            <div class="phase-id">PHASE 0</div>
+            <div>
+              <h3>契约与控制面落座</h3>
+              <p>任务禁止新增 ADR/OpenAPI；以服务内 strict schema 与契约测试固化边界，将股票中心写任务接入既有 0031 全局 fence，并保持非 test 假数据路径关闭。</p>
+            </div>
+            <div class="gate">门禁：架构测试与 POST/GET 边界固定</div>
+          </div>
+          <div class="phase">
+            <div class="phase-id">PHASE 1</div>
+            <div>
+              <h3>缺失 canonical 数据链</h3>
+              <p>实现普通停复牌、申万 membership、历史股本及专用事件身份 reader；完成 migration、adapter、CLI/Celery、质量与 publication。</p>
+            </div>
+            <div class="gate">门禁：真实 probe + replay + integration</div>
+          </div>
+          <div class="phase">
+            <div class="phase-id">PHASE 2</div>
+            <div>
+              <h3>全量历史首发</h3>
+              <p>先发布身份，再分证券回填 bars、factor、action、profile、financial、valuation、memberships、share capital 与 events；资金流维持 research/disabled，不进入首发。</p>
+            </div>
+            <div class="gate">门禁：全市场覆盖清单无未解释缺口</div>
+          </div>
+          <div class="phase">
+            <div class="phase-id">PHASE 3</div>
+            <div>
+              <h3>Discovery 构建与内部 API</h3>
+              <p>生成同日冻结横截面、component manifest、availability 与索引；实现三条内部查询并完成 cursor/ETag/回滚测试。</p>
+            </div>
+            <div class="gate">门禁：BASE 全身份 publication；可选组件 PARTIAL 可解释 + 性能预算</div>
+          </div>
+          <div class="phase">
+            <div class="phase-id">PHASE 4</div>
+            <div>
+              <h3>三服务真实 E2E 与排程</h3>
+              <p>API 和 Web 只读本次真实 publication；人工比对来源样本，通过后启用收盘后增量 schedule，最后部署包含股票中心入口的 Web 版本。</p>
+            </div>
+            <div class="gate">门禁：无 fixture 请求、无跨库、无 N+1</div>
+          </div>
+
+          <h3>回滚</h3>
+          <ul>
+            <li>先回滚到上一 Web 构建产物，再关闭 discovery 增量 schedule；现有单数据集 API 保持可用。</li>
+            <li>将 <code>equity.discovery.eod</code> 当前指针切回上一通过版本，不删除被撤回版本和源 revision。</li>
+            <li>新 adapter 单独通过 source policy 关闭；关闭不会触发替代来源或空 publication。</li>
+            <li>数据库 migration 在未写入生产数据时可 downgrade；已有数据时优先前向修复和指针回滚。</li>
+          </ul>
+        </section>
+
+        <section id="acceptance">
+          <h2>11. 可执行验收标准</h2>
+          <ul class="checklist">
+            <li>三所目录中的每只证券都出现在全量覆盖清单，身份冲突为 0。</li>
+            <li>普通停牌、暂停上市、退市三个概念在模型、API 和页面文案中互不混用。</li>
+            <li>日/周/月线各自来自原生上游周期；复权窗口能回溯 bar/factor 两个 dataVersion。</li>
+            <li>股本历史来自真实 Eastmoney 股本结构，市值可以从同日 close 与有效股本重算。</li>
+            <li>申万三级成分通过真实接口同步；每条归属能回溯 source batch，不用公司概况行业文本替代。</li>
+            <li>财务与估值的 provider/methodology/version/knownAt 完整，平台派生指标保留输入 manifest；资金流明确 research/disabled 且筛选、列、排序失败关闭。</li>
+            <li>龙虎榜、大宗交易、预告和快报按 exchange+symbol 可读，内部 UUID 不泄漏给公开层。</li>
+            <li>BASE discovery 的身份、名称、交易所和生命周期覆盖三所全部证券；可选组件
+              SOURCE_UNAVAILABLE / QUARANTINED 时 publication 为 PARTIAL，字段为 null 且有 nullReason，
+              不拿旧日期或其他来源值补齐。</li>
+            <li>重复执行全量与增量任务不产生重复事实；任一 shard 失败后可从 checkpoint 恢复。</li>
+            <li>component 在构建中变化时不会产生混合版本；cursor 永不跨 dataVersion。</li>
+            <li>断源、schema 漂移、DB 故障和错误发布均完成演练，上一 publication 可继续读并可回滚。</li>
+            <li>staging E2E 的每条抽样记录都能追溯真实 sourceBatchId；运行态没有 fixture/mock/demo provider。</li>
+            <li>Docker 中通过 Ruff format/check、Pyright、unit、architecture、integration 与镜像构建。</li>
+          </ul>
+
+          <div class="callout good">
+            <strong>上线判定：</strong>只有上述全部通过且 service-api 0007、service-web 0007 的真实 E2E
+            同时通过，股票中心才允许从关闭状态切为可见。不存在“先用假数据上线、以后再接同步”的路径。
+          </div>
+        </section>
+
+        <section id="evidence">
+          <h2>12. 证据、关联方案与本次验证</h2>
+          <h3>关联方案</h3>
+          <ul>
+            <li><a href="../../service-web/0007-equity-market-workspace/index.html">service-web 0007 · 股票中心页面与原型</a></li>
+            <li><a href="../../service-api/0007-equity-market-workspace/index.html">service-api 0007 · 股票中心公开 API</a></li>
+            <li><a href="../0011-equity-data-sync-and-api/index.html">0011 · 个股行情、复权、公司行动与概况</a></li>
+            <li><a href="../0014-equity-instrument-master/index.html">0014 · A 股证券主数据与上市生命周期</a></li>
+            <li><a href="../0016-financial-statements-valuation/index.html">0016 · 财务与估值</a></li>
+            <li><a href="../0017-daily-money-flow/index.html">0017 · 日频资金流</a></li>
+            <li><a href="../0024-corporate-events/index.html">0024 · 公司事件</a></li>
+            <li><a href="../0025-trading-events/index.html">0025 · 龙虎榜与大宗交易</a></li>
+            <li><a href="../0031-data-operations-control-plane/index.html">0031 · 数据运维控制面</a></li>
+          </ul>
+
+          <h3>代码证据</h3>
+          <ul>
+            <li><a href="../../../service-data-sync/src/service_data_sync/bootstrap/container.py"><code>bootstrap/container.py</code></a> — 当前真实 adapter 注册与能力开关。</li>
+            <li><a href="../../../service-data-sync/src/service_data_sync/application/equity/market_extension_sync.py"><code>equity/market_extension_sync.py</code></a> — 周/月、因子、行动、概况同步。</li>
+            <li><a href="../../../service-data-sync/src/service_data_sync/application/financial/sync.py"><code>financial/sync.py</code></a> — 三类财务来源载荷与发布。</li>
+            <li><a href="../../../service-data-sync/src/service_data_sync/application/money_flow/sync.py"><code>money_flow/sync.py</code></a> — 方法学隔离资金流。</li>
+            <li><a href="../../../service-data-sync/src/service_data_sync/application/trading_events/sync.py"><code>trading_events/sync.py</code></a> — 龙虎榜与大宗交易。</li>
+            <li><a href="../../../service-data-sync/src/service_data_sync/infrastructure/database/models/publication/dataset_publication.py"><code>dataset_publication.py</code></a> — 当前版本指针。</li>
+          </ul>
+
+          <h3>外部接口证据</h3>
+          <ul>
+            <li><a href="https://akshare.akfamily.xyz/data/index/index.html">AKShare 指数文档</a> — <code>sw_index_third_cons</code> 的当前三级成分与纳入时间字段。</li>
+            <li><a href="https://akshare.akfamily.xyz/data/stock/stock.html">AKShare 股票文档</a> — <code>stock_tfp_em</code>、<code>stock_zh_a_gbjg_em</code>、预告/快报等固定接口语义。</li>
+          </ul>
+
+          <h3>本次文档验证</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>项目</th><th>结果</th><th>说明</th></tr></thead>
+              <tbody>
+                <tr><td>目标目录</td><td><span class="tag good">通过</span></td><td>创建前确认 <code>0032-equity-market-workspace/</code> 不存在。</td></tr>
+                <tr><td>现状证据</td><td><span class="tag good">完成</span></td><td>CodeGraph 优先核对 adapter 注册、模块调用、publication 与 reader；文档证据补充来源边界。</td></tr>
+                <tr><td>生产代码验证</td><td><span class="tag warn">未运行</span></td><td>本次只新增技术方案，不修改生产源码、配置、migration 或契约；实施阶段按服务 AGENTS.md 执行完整 Docker 验证。</td></tr>
+                <tr><td>Git 操作</td><td><span class="tag good">符合</span></td><td>未提交、未推送、未创建 PR。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <div class="footer">quant-v2 · service-data-sync · equity market workspace · 0032</div>
+      </main>
+    </div>
+  </body>
+</html>

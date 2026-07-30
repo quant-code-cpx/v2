@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -36,6 +37,7 @@ from service_data_sync.domain.corporate import (
     EarningsExpressMetric,
     EarningsGuidanceMetric,
 )
+from service_data_sync.domain.equity import EquityIdentifier
 from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.database.models.canonical import CanonicalCheckpoint
 from service_data_sync.infrastructure.database.models.equity.identity.equity_identifier_version import (  # noqa: E501
@@ -47,8 +49,16 @@ from service_data_sync.infrastructure.database.models.market import (
     CorporateEventRevision,
     DisclosureDocument,
 )
+from service_data_sync.infrastructure.database.models.provenance.source_batch import SourceBatch
 from service_data_sync.infrastructure.persistence.canonical_release_repository import (
     SqlAlchemyCanonicalReleaseRepository,
+)
+from service_data_sync.infrastructure.persistence.event_window_coverage import (
+    EventCoverageIdentity,
+    EventCoverageRecords,
+    PublishedEventCoverages,
+    publish_event_window_coverages,
+    resolve_event_coverage_identities,
 )
 from service_data_sync.infrastructure.persistence.typed_p0_support import (
     TypedP0SourceApproval,
@@ -108,24 +118,44 @@ class SqlAlchemyCorporateEventsRepository(CorporateEventsRepository):
         guidance_metrics: Sequence[EarningsGuidanceMetric],
         express_metrics: Sequence[EarningsExpressMetric],
         source: CorporateSourceObservation,
+        start: date,
+        end: date,
+        identifier: EquityIdentifier | None = None,
     ) -> PublishedCorporateEvents:
-        """原子固化同批文档与其 P0 指标；重放不因来源对象 URI 变化制造新事件版本。"""
+        """原子固化公告事实及逐证券窗口 manifest；合法空窗也发布零记录版本。"""
         document_values = tuple(documents)
         guidance_values = tuple(guidance_metrics)
         express_values = tuple(express_metrics)
-        if not document_values:
-            raise ValueError("corporate publication requires disclosure documents")
+        if start > end:
+            raise ValueError("corporate publication window is invalid")
+        if not document_values and (guidance_values or express_values):
+            raise ValueError("corporate metrics require disclosure documents")
         if len({item.source_document_id for item in document_values}) != len(document_values):
             raise ValueError("corporate documents must be unique by source document identity")
+        if identifier is not None and any(
+            item.source_security_code != identifier.symbol for item in document_values
+        ):
+            raise ValueError("corporate documents do not match requested instrument")
         approval = self._approved_sources.get(source.provider_id)
         if approval is None:
             raise ValueError("corporate source provider is not approved for publication")
         prepared: list[_PreparedEvent] = []
         source_batch_id: UUID | None = None
+        dataset_id: UUID | None = None
+        methodology_id: UUID | None = None
+        coverage_identities: tuple[EventCoverageIdentity, ...] = ()
+        coverage_scope = ""
+        universe_hash = ""
+        coverage_publication: PublishedEventCoverages | None = None
+        accepted_guidance: list[EarningsGuidanceMetric] = []
+        accepted_express: list[EarningsExpressMetric] = []
+        excluded_count = 0
 
         def prepare(session: Session) -> CanonicalReleaseCandidate:
             """在单事务内登记证据、解析文档身份并构造按来源分区的完整 release。"""
-            nonlocal source_batch_id
+            nonlocal excluded_count
+            nonlocal coverage_identities, coverage_scope, dataset_id
+            nonlocal methodology_id, source_batch_id, universe_hash
             now = datetime.now(UTC)
             dataset_id = ensure_dataset(
                 session,
@@ -150,16 +180,42 @@ class SqlAlchemyCorporateEventsRepository(CorporateEventsRepository):
             source_batch_id = record_source_batch(
                 session, source=source, source_dataset_id=source_dataset_id, now=now
             )
+            (
+                coverage_identities,
+                coverage_scope,
+                universe_hash,
+            ) = resolve_event_coverage_identities(
+                session,
+                start=start,
+                end=end,
+                identifier=identifier,
+            )
             source_id = _source_id(approval)
             documents_by_source_id = {item.source_document_id: item for item in document_values}
             _validate_metric_documents(documents_by_source_id, guidance_values, express_values)
+            (
+                eligible_documents,
+                eligible_guidance,
+                eligible_express,
+                excluded_count,
+            ) = _corporate_roster_values(
+                documents=document_values,
+                guidance=guidance_values,
+                express=express_values,
+                identities=coverage_identities,
+                identifier=identifier,
+            )
+            accepted_guidance[:] = eligible_guidance
+            accepted_express[:] = eligible_express
+            documents_by_source_id = {item.source_document_id: item for item in eligible_documents}
             document_ids = _upsert_documents(
                 session,
                 source_id=source_id,
-                documents=document_values,
+                documents=eligible_documents,
                 source_batch_id=source_batch_id,
+                identifier=identifier,
             )
-            groups = _event_groups(guidance_values, express_values)
+            groups = _event_groups(eligible_guidance, eligible_express)
             current = _current_events(
                 session, source_id=source_id, methodology_version_id=methodology_id
             )
@@ -175,6 +231,7 @@ class SqlAlchemyCorporateEventsRepository(CorporateEventsRepository):
                         session,
                         source_code=document.source_security_code,
                         fact_date=document.announced_on,
+                        identifier=identifier,
                     ),
                     event_family="EARNINGS_GUIDANCE" if kind == "GUIDANCE" else "EARNINGS_EXPRESS",
                     now=now,
@@ -216,6 +273,7 @@ class SqlAlchemyCorporateEventsRepository(CorporateEventsRepository):
                 source_batch_id=source_batch_id,
                 source_observed_at=source.observed_at,
                 now=now,
+                publication_effective_as_of=end,
             )
 
         def write(session: Session, candidate: CanonicalReleaseCandidate, release_id: UUID) -> None:
@@ -272,13 +330,63 @@ class SqlAlchemyCorporateEventsRepository(CorporateEventsRepository):
                     content_hash=item.content_hash,
                 )
 
+        def write_visibility(
+            session: Session,
+            candidate: CanonicalReleaseCandidate,
+            publication_id: UUID,
+            data_version: UUID,
+            release_id: UUID,
+        ) -> None:
+            """在全局累积 release 新建或复用后发布逐证券窗口 manifest 与覆盖版本。"""
+            del publication_id, data_version, release_id
+            nonlocal coverage_publication
+            if (
+                dataset_id is None
+                or methodology_id is None
+                or source_batch_id is None
+                or not coverage_identities
+            ):
+                raise AssertionError("corporate coverage preparation did not resolve state")
+            resolved_methodology_id = methodology_id
+            coverage_publication = publish_event_window_coverages(
+                session,
+                release_repository=self._release_repository,
+                dataset_id=dataset_id,
+                dataset_code=_DATASET,
+                methodology_version_id=resolved_methodology_id,
+                mapping_version=_MAPPING_VERSION,
+                source=source,
+                source_batch_id=source_batch_id,
+                identities=coverage_identities,
+                coverage_scope=coverage_scope,
+                universe_hash=universe_hash,
+                families=("EARNINGS_FORECAST", "EARNINGS_EXPRESS"),
+                records_for=lambda current_session, frozen_identities, family: (
+                    _corporate_coverage_records_by_identity(
+                        current_session,
+                        identities=frozen_identities,
+                        family=family,
+                        methodology_version_id=resolved_methodology_id,
+                        provider_id=source.provider_id,
+                    )
+                ),
+                now=candidate.created_at,
+            )
+
         publication = self._release_repository.publish_prepared(
-            prepare_candidate=prepare, write_facts=write
+            prepare_candidate=prepare,
+            write_facts=write,
+            write_visibility=write_visibility,
+            record_fenced_progress=False,
         )
+        del publication
+        if coverage_publication is None:
+            raise AssertionError("corporate publication completed without coverage manifest")
         return PublishedCorporateEvents(
-            data_version=publication.data_version,
+            data_version=coverage_publication.data_version,
             inserted_count=len(prepared),
-            unchanged_count=len(_event_groups(guidance_values, express_values)) - len(prepared),
+            unchanged_count=len(_event_groups(accepted_guidance, accepted_express)) - len(prepared),
+            excluded_count=excluded_count,
         )
 
 
@@ -299,12 +407,70 @@ def _validate_metric_documents(
             raise ValueError("corporate metric document evidence is missing or has another issuer")
 
 
+def _corporate_roster_values(
+    *,
+    documents: Sequence[CorporateDocument],
+    guidance: Sequence[EarningsGuidanceMetric],
+    express: Sequence[EarningsExpressMetric],
+    identities: Sequence[EventCoverageIdentity],
+    identifier: EquityIdentifier | None,
+) -> tuple[
+    tuple[CorporateDocument, ...],
+    tuple[EarningsGuidanceMetric, ...],
+    tuple[EarningsExpressMetric, ...],
+    int,
+]:
+    """全市场发布只接纳冻结 A 股 roster 内事实，合法目标外行保留 raw 但不阻断覆盖。"""
+    del identifier
+    accepted_documents: list[CorporateDocument] = []
+    excluded_document_ids: set[str] = set()
+    for document in documents:
+        if re.fullmatch(r"[0-9]{6}", document.source_security_code) is None:
+            raise ValueError("corporate source security code is malformed")
+        symbol_matches = [
+            item for item in identities if item.symbol == document.source_security_code
+        ]
+        matches = [
+            item
+            for item in symbol_matches
+            if item.coverage_from <= document.announced_on <= item.coverage_to
+        ]
+        if len(matches) > 1:
+            raise ValueError("corporate source security identity is ambiguous in frozen roster")
+        if matches:
+            accepted_documents.append(document)
+        elif symbol_matches:
+            raise ValueError("corporate target fact falls outside the requested coverage window")
+        else:
+            excluded_document_ids.add(document.source_document_id)
+    accepted_guidance = tuple(
+        item for item in guidance if item.source_document_id not in excluded_document_ids
+    )
+    accepted_express = tuple(
+        item for item in express if item.source_document_id not in excluded_document_ids
+    )
+    excluded_count = (
+        len(excluded_document_ids)
+        + len(guidance)
+        - len(accepted_guidance)
+        + len(express)
+        - len(accepted_express)
+    )
+    return (
+        tuple(accepted_documents),
+        accepted_guidance,
+        accepted_express,
+        excluded_count,
+    )
+
+
 def _upsert_documents(
     session: Session,
     *,
     source_id: UUID,
     documents: Sequence[CorporateDocument],
     source_batch_id: UUID,
+    identifier: EquityIdentifier | None,
 ) -> dict[str, UUID]:
     """登记或更新官方文档定位与最新已验证内容摘要；事件 revision 始终保留旧证据版本。"""
     result: dict[str, UUID] = {}
@@ -313,7 +479,10 @@ def _upsert_documents(
             NAMESPACE_URL, f"quant-v2:disclosure-document:{source_id}:{document.source_document_id}"
         )
         security_id = _resolve_security_id(
-            session, source_code=document.source_security_code, fact_date=document.announced_on
+            session,
+            source_code=document.source_security_code,
+            fact_date=document.announced_on,
+            identifier=identifier,
         )
         published_precision = (
             document.visible_time_precision
@@ -356,21 +525,28 @@ def _upsert_documents(
     return result
 
 
-def _resolve_security_id(session: Session, *, source_code: str, fact_date: date) -> int:
-    """按事实日期解析唯一已确认股票身份；公告 schema 未带交易所时歧义必须隔离。"""
+def _resolve_security_id(
+    session: Session,
+    *,
+    source_code: str,
+    fact_date: date,
+    identifier: EquityIdentifier | None,
+) -> int:
+    """按事实日期和可选交易所约束解析唯一身份，禁止代码跨场所误绑定。"""
+    filters = [
+        EquityIdentifierVersion.symbol == source_code,
+        EquityIdentifierVersion.identity_state == "CONFIRMED",
+        EquityIdentifierVersion.effective_from <= fact_date,
+        (EquityIdentifierVersion.effective_to.is_(None))
+        | (EquityIdentifierVersion.effective_to > fact_date),
+        EquityIdentifierVersion.known_to.is_(None),
+    ]
+    if identifier is not None:
+        if source_code != identifier.symbol:
+            raise ValueError("corporate issuer does not match requested instrument")
+        filters.append(EquityIdentifierVersion.exchange == identifier.exchange.value)
     rows = (
-        session.execute(
-            select(EquityIdentifierVersion.security_id).where(
-                EquityIdentifierVersion.symbol == source_code,
-                EquityIdentifierVersion.identity_state == "CONFIRMED",
-                EquityIdentifierVersion.effective_from <= fact_date,
-                (EquityIdentifierVersion.effective_to.is_(None))
-                | (EquityIdentifierVersion.effective_to > fact_date),
-                EquityIdentifierVersion.known_to.is_(None),
-            )
-        )
-        .scalars()
-        .all()
+        session.execute(select(EquityIdentifierVersion.security_id).where(*filters)).scalars().all()
     )
     candidates = {int(row) for row in rows}
     if len(candidates) != 1:
@@ -476,6 +652,98 @@ def _prepared_event(
     )
 
 
+def _corporate_coverage_records_by_identity(
+    session: Session,
+    *,
+    identities: Sequence[EventCoverageIdentity],
+    family: str,
+    methodology_version_id: UUID,
+    provider_id: str,
+) -> Mapping[EventCoverageIdentity, EventCoverageRecords]:
+    """一次读取冻结 roster 的公告血缘，并按公告日分配到唯一身份窗口。"""
+    identity_values = tuple(identities)
+    mutable_records: dict[EventCoverageIdentity, list[CanonicalLineageRecord]] = {
+        identity: [] for identity in identity_values
+    }
+    mutable_dates: dict[EventCoverageIdentity, list[date]] = {
+        identity: [] for identity in identity_values
+    }
+    if not identity_values:
+        return {}
+    value_kind = "GUIDANCE" if family == "EARNINGS_FORECAST" else "EXPRESS"
+    rows = session.execute(
+        select(
+            CorporateEvent.security_id,
+            CorporateEvent.source_event_key,
+            CorporateEventRevision.content_hash,
+            CorporateEventRevision.source_batch_id,
+            DisclosureDocument.announced_on,
+        )
+        .select_from(CorporateEventRevision)
+        .join(CorporateEvent, CorporateEvent.event_id == CorporateEventRevision.event_id)
+        .join(
+            DisclosureDocument,
+            DisclosureDocument.document_id == CorporateEventRevision.primary_document_id,
+        )
+        .join(
+            CorporateEarningsValue,
+            CorporateEarningsValue.event_revision_id == CorporateEventRevision.event_revision_id,
+        )
+        .join(
+            SourceBatch,
+            SourceBatch.source_batch_id == CorporateEventRevision.source_batch_id,
+        )
+        .where(
+            CorporateEvent.security_id.in_({identity.security_id for identity in identity_values}),
+            CorporateEventRevision.methodology_version_id == methodology_version_id,
+            CorporateEventRevision.known_to.is_(None),
+            CorporateEarningsValue.value_kind == value_kind,
+            DisclosureDocument.announced_on
+            >= min(identity.coverage_from for identity in identity_values),
+            DisclosureDocument.announced_on
+            <= max(identity.coverage_to for identity in identity_values),
+            SourceBatch.provider_id == provider_id,
+        )
+        .distinct()
+        .order_by(
+            CorporateEvent.security_id,
+            DisclosureDocument.announced_on,
+            CorporateEvent.source_event_key,
+        )
+    ).all()
+    identities_by_security: dict[int, list[EventCoverageIdentity]] = {}
+    for identity in identity_values:
+        identities_by_security.setdefault(identity.security_id, []).append(identity)
+    transform_hash = hashlib.sha256(_MAPPING_VERSION.encode()).hexdigest()
+    for security_id, source_event_key, content_hash, batch_id, announced_on in rows:
+        matches = [
+            identity
+            for identity in identities_by_security.get(int(security_id), ())
+            if identity.coverage_from <= announced_on <= identity.coverage_to
+        ]
+        if len(matches) > 1:
+            raise ValueError("corporate coverage identity windows overlap")
+        if not matches:
+            continue
+        identity = matches[0]
+        mutable_records[identity].append(
+            CanonicalLineageRecord(
+                record_key_hash=_record_key(str(source_event_key)),
+                content_hash=str(content_hash),
+                source_batch_id=UUID(str(batch_id)),
+                transform_hash=transform_hash,
+            )
+        )
+        mutable_dates[identity].append(announced_on)
+    return {
+        identity: EventCoverageRecords(
+            records=tuple(mutable_records[identity]),
+            fact_dates=tuple(mutable_dates[identity]),
+        )
+        for identity in identity_values
+    }
+
+
 def _event_status(item: _PreparedEvent) -> str:
     """保留预告类别或快报初步状态，不用通用成功状态抹平来源语义。"""
     first = item.metrics[0]
@@ -564,6 +832,7 @@ def _candidate(
     source_batch_id: UUID,
     source_observed_at: datetime,
     now: datetime,
+    publication_effective_as_of: date,
 ) -> CanonicalReleaseCandidate:
     """合成来源分区当前事件 release，未变化事件继续引用原始来源批次与内容摘要。"""
     records: list[CanonicalLineageRecord] = []
@@ -616,6 +885,7 @@ def _candidate(
         checkpoint_position={"observedAt": source_observed_at.isoformat()},
         expected_fencing_token=0 if fencing_token is None else int(fencing_token),
         created_at=now,
+        publication_effective_as_of=publication_effective_as_of,
     )
 
 

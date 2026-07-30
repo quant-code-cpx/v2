@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
+from functools import partial
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import akshare as ak
 
@@ -33,6 +36,7 @@ _CAPABILITIES = frozenset(
 )
 _SCHEMA = "quant-v2.sector-bar.v1"
 _CATALOG_SCHEMA = "quant-v2.sector-catalog.v1"
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
 _INDUSTRY_PERIODS = {
     SectorPeriod.DAY_1: "日k",
     SectorPeriod.WEEK_1: "周k",
@@ -43,6 +47,8 @@ _CONCEPT_PERIODS = {
     SectorPeriod.WEEK_1: "weekly",
     SectorPeriod.MONTH_1: "monthly",
 }
+_FETCH_MAX_ATTEMPTS = 3
+_FETCH_RETRY_BASE_SECONDS = 0.5
 
 
 class AkshareEastmoneySectorBarsAdapter:
@@ -70,14 +76,16 @@ class AkshareEastmoneySectorBarsAdapter:
             return await self._fetch_catalog(request)
         identifier, period, start, end = _request_values(request)
         try:
-            async with asyncio.timeout(self._request_timeout_seconds):
-                frame = await asyncio.to_thread(
+            frame = await _call_with_retry(
+                partial(
                     _fetch_history,
                     identifier=identifier,
                     period=period,
                     start=start,
                     end=end,
-                )
+                ),
+                total_timeout_seconds=self._request_timeout_seconds,
+            )
         except TimeoutError as error:
             raise ProviderError(
                 ProviderErrorCode.UNAVAILABLE, "provider request timed out", retryable=True
@@ -134,8 +142,10 @@ class AkshareEastmoneySectorBarsAdapter:
         """读取一个分类体系的目录快照，并保留完整供应商记录作为原始证据。"""
         scheme = _catalog_scheme(request)
         try:
-            async with asyncio.timeout(self._request_timeout_seconds):
-                frame = await asyncio.to_thread(_fetch_catalog, scheme=scheme)
+            frame = await _call_with_retry(
+                partial(_fetch_catalog, scheme=scheme),
+                total_timeout_seconds=self._request_timeout_seconds,
+            )
         except TimeoutError as error:
             raise ProviderError(
                 ProviderErrorCode.UNAVAILABLE, "provider request timed out", retryable=True
@@ -183,6 +193,33 @@ class AkshareEastmoneySectorBarsAdapter:
         )
 
 
+async def _call_with_retry(
+    operation: Callable[[], Any],
+    *,
+    total_timeout_seconds: int,
+) -> Any:
+    """在单一总墙钟预算内最多执行三次来源调用，避免瞬断直接卡死目录和行情链路。"""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + total_timeout_seconds
+    for attempt in range(_FETCH_MAX_ATTEMPTS):
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            raise TimeoutError("sector provider total request budget exhausted")
+        try:
+            async with asyncio.timeout(remaining):
+                return await asyncio.to_thread(operation)
+        except Exception as error:
+            if isinstance(error, asyncio.CancelledError) or attempt + 1 >= _FETCH_MAX_ATTEMPTS:
+                raise
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError("sector provider total request budget exhausted") from error
+            delay = min(_FETCH_RETRY_BASE_SECONDS * (2**attempt), remaining)
+            if delay > 0:
+                await asyncio.sleep(delay)
+    raise AssertionError("sector provider retry loop exhausted without a terminal result")
+
+
 def _request_values(request: SourceRequest) -> tuple[SectorIdentifier, SectorPeriod, date, date]:
     """解析中立参数，并验证其与独立周期能力名称一致。"""
     if request.capability not in _CAPABILITIES:
@@ -211,14 +248,28 @@ def _request_values(request: SourceRequest) -> tuple[SectorIdentifier, SectorPer
 
 
 def _catalog_scheme(request: SourceRequest) -> SectorScheme:
-    """解析仅含分类体系的目录请求，并拒绝夹带行情参数的错误能力。"""
+    """解析当前目录观察请求，并拒绝把今天快照伪装为历史目录。"""
     if request.capability != "sector.catalog.raw":
         raise ProviderError(
             ProviderErrorCode.INVALID_REQUEST, "unsupported capability", retryable=False
         )
     parameters = dict(request.parameters)
+    if len(parameters) != len(request.parameters) or frozenset(parameters) not in {
+        frozenset({"sectorScheme"}),
+        frozenset({"sectorScheme", "observationDate"}),
+    }:
+        raise ProviderError(
+            ProviderErrorCode.INVALID_REQUEST, "invalid sector-catalog request", retryable=False
+        )
     try:
-        return SectorScheme(parameters["sectorScheme"])
+        scheme = SectorScheme(parameters["sectorScheme"])
+        observation = parameters.get("observationDate")
+        if (
+            observation is not None
+            and date.fromisoformat(observation) != datetime.now(_SHANGHAI).date()
+        ):
+            raise ValueError("historical catalog observation")
+        return scheme
     except (KeyError, ValueError) as error:
         raise ProviderError(
             ProviderErrorCode.INVALID_REQUEST, "invalid sector-catalog request", retryable=False

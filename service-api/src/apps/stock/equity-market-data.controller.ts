@@ -14,6 +14,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 
 import type { AuthenticatedRequest } from '../../common/models/auth-context.js';
+import { EquityVersionedAsOfQueryDto } from './dto/equity-temporal-query.dto.js';
 import { EquityPathDto } from './dto/equity-path.dto.js';
 import { ListAdjustmentFactorsQueryDto } from './dto/list-adjustment-factors-query.dto.js';
 import { ListCorporateActionsQueryDto } from './dto/list-corporate-actions-query.dto.js';
@@ -89,11 +90,17 @@ export class EquityMarketDataController {
   /** 返回当前已发布公司概况。 */
   public async getCompanyProfile(
     @Param() path: EquityPathDto,
+    @Query() query: EquityVersionedAsOfQueryDto,
     @Headers('if-none-match') ifNoneMatch: string | undefined,
     @Req() request: CorrelatedAuthenticatedRequest,
     @Res({ passthrough: true }) response: Response,
   ): Promise<unknown> {
-    const result = await this.marketData.getCompanyProfile(path, ifNoneMatch, request.requestId);
+    const result = await this.marketData.getCompanyProfile(
+      path,
+      query,
+      ifNoneMatch,
+      request.requestId,
+    );
     return writeConditionalResponse(response, result);
   }
 }

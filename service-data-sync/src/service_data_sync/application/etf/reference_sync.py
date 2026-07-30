@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from uuid import UUID
@@ -24,7 +25,7 @@ from service_data_sync.application.ports.market_data import RawPayloadStore
 from service_data_sync.domain.etf import EtfDailyStatus, EtfIdentifier, EtfProfile
 
 _MASTER_CAPABILITY = "fund.etf.master"
-_MASTER_SCHEMA = "quant-v2.etf-master.v1"
+_MASTER_SCHEMAS = frozenset({"quant-v2.etf-master.v1", "quant-v2.etf-master.v2"})
 _STATUS_CAPABILITY = "fund.etf.trading_state"
 _STATUS_SCHEMA = "quant-v2.etf-trading-state.v1"
 _MASTER_DATASET = "fund.etf.profile.reported"
@@ -40,6 +41,8 @@ class EtfReferenceSyncResult:
     inserted_count: int
     unchanged_count: int
     availability: str = "available"
+    reason_code: str | None = None
+    retryable: bool = False
 
 
 class EtfMasterSyncService:
@@ -59,8 +62,14 @@ class EtfMasterSyncService:
         self._raw_payload_store = raw_payload_store
         self._availability_repository = availability_repository
 
-    async def sync(self, *, venue: str, observation_date: date) -> EtfReferenceSyncResult:
-        """抓取一个沪深目录快照；来源不可用或合法空目录返回成功空状态。"""
+    async def sync(
+        self,
+        *,
+        venue: str,
+        observation_date: date,
+        before_final_publication: Callable[[], None] | None = None,
+    ) -> EtfReferenceSyncResult:
+        """抓取一个沪深目录快照；无 publication 或空目录均保持来源不可用，不能解释为零产品。"""
         if venue not in {"SSE", "SZSE"}:
             raise ValueError("ETF P0 master venue must be SSE or SZSE")
         partition_key = _master_partition_key(venue=venue, observation_date=observation_date)
@@ -84,8 +93,12 @@ class EtfMasterSyncService:
                     and "unsupported ETF capability" in str(error)
                     else error.code.value
                 ),
+                retryable=error.retryable,
                 provider_id=self._source.provider_id,
                 observed_at=datetime.now(UTC),
+                entity_partition=f"venue:{venue}",
+                coverage_from=observation_date,
+                coverage_to=observation_date,
             )
         profiles = decode_etf_master_batch(batch.payload, venue=venue)
         if not profiles:
@@ -93,11 +106,17 @@ class EtfMasterSyncService:
                 repository=self._availability_repository,
                 dataset=_MASTER_DATASET,
                 partition_key=partition_key,
-                availability="empty",
-                reason_code="no_matching_facts",
+                availability="source_unavailable",
+                reason_code="directory_publication_unavailable",
+                retryable=True,
                 provider_id=batch.provider_id,
                 observed_at=batch.observed_at,
+                entity_partition=f"venue:{venue}",
+                coverage_from=observation_date,
+                coverage_to=observation_date,
             )
+        if before_final_publication is not None:
+            before_final_publication()
         published = self._repository.publish_profiles(
             profiles=profiles,
             source=_archive_batch(batch=batch, payload_store=self._raw_payload_store),
@@ -133,7 +152,14 @@ class EtfStatusSyncService:
         self._raw_payload_store = raw_payload_store
         self._availability_repository = availability_repository
 
-    async def sync(self, *, etf: EtfIdentifier, start: date, end: date) -> EtfReferenceSyncResult:
+    async def sync(
+        self,
+        *,
+        etf: EtfIdentifier,
+        start: date,
+        end: date,
+        before_final_publication: Callable[[], None] | None = None,
+    ) -> EtfReferenceSyncResult:
         """抓取 ETF 有界日级状态窗口；来源不可用或空结果不推断停牌且可成功结束。"""
         if start > end:
             raise ValueError("start must not be after end")
@@ -162,9 +188,13 @@ class EtfStatusSyncService:
                     and "unsupported ETF capability" in str(error)
                     else error.code.value
                 ),
+                retryable=error.retryable,
                 provider_id=self._source.provider_id,
                 observed_at=datetime.now(UTC),
                 etf=etf,
+                entity_partition=f"etf:{etf.qualified_key}",
+                coverage_from=start,
+                coverage_to=end,
             )
         statuses = decode_etf_status_batch(batch.payload, etf=etf)
         if not statuses:
@@ -177,7 +207,12 @@ class EtfStatusSyncService:
                 provider_id=batch.provider_id,
                 observed_at=batch.observed_at,
                 etf=etf,
+                entity_partition=f"etf:{etf.qualified_key}",
+                coverage_from=start,
+                coverage_to=end,
             )
+        if before_final_publication is not None:
+            before_final_publication()
         published = self._repository.publish_statuses(
             etf=etf,
             statuses=statuses,
@@ -198,8 +233,8 @@ class EtfStatusSyncService:
 
 
 def decode_etf_master_batch(payload: bytes, *, venue: str) -> tuple[EtfProfile, ...]:
-    """解码交易所 ETF 目录，拒绝 venue 漂移、重复上市工具和未治理字段。"""
-    decoded = _payload(payload, schema=_MASTER_SCHEMA)
+    """解码交易所 ETF 目录，新旧标准载荷均保持严格字段白名单。"""
+    decoded = _payload(payload, schemas=_MASTER_SCHEMAS)
     if decoded.get("venue") != venue:
         raise _schema_error("ETF master venue mismatch")
     _reject_unknown(decoded, {"schema", "venue", "profiles"}, "root")
@@ -254,6 +289,7 @@ def _profile(value: object, *, venue: str) -> EtfProfile:
         value,
         {
             "symbol",
+            "displayName",
             "etfType",
             "managementMode",
             "managerName",
@@ -283,6 +319,7 @@ def _profile(value: object, *, venue: str) -> EtfProfile:
         listing_status=_required(value, "listingStatus"),
         effective_from=date.fromisoformat(_required(value, "effectiveFrom")),
         source_time_precision=_required(value, "sourceTimePrecision"),
+        display_name=_optional_text(value.get("displayName")),
     )
 
 
@@ -303,13 +340,19 @@ def _status(value: object, *, etf: EtfIdentifier) -> EtfDailyStatus:
     )
 
 
-def _payload(payload: bytes, *, schema: str) -> dict[str, object]:
+def _payload(
+    payload: bytes,
+    *,
+    schema: str | None = None,
+    schemas: frozenset[str] | None = None,
+) -> dict[str, object]:
     """读取指定标准 schema，避免产品目录与状态公告载荷混用。"""
     try:
         decoded = json.loads(payload)
     except json.JSONDecodeError as error:
         raise _schema_error("ETF reference payload is not JSON") from error
-    if not isinstance(decoded, dict) or decoded.get("schema") != schema:
+    allowed = schemas if schemas is not None else frozenset({schema} if schema is not None else ())
+    if not isinstance(decoded, dict) or decoded.get("schema") not in allowed:
         raise _schema_error("unexpected ETF reference schema")
     return decoded
 
@@ -336,8 +379,12 @@ def _availability_result(
     partition_key: str,
     availability: str,
     reason_code: str,
+    retryable: bool = False,
     provider_id: str | None,
     observed_at: datetime,
+    entity_partition: str,
+    coverage_from: date,
+    coverage_to: date,
     etf: EtfIdentifier | None = None,
 ) -> EtfReferenceSyncResult:
     """写入非事实 ETF 参考数据观测，并返回可安全显示为空的统一结果。"""
@@ -349,6 +396,9 @@ def _availability_result(
             reason_code=reason_code,
             provider_id=provider_id,
             observed_at=observed_at,
+            entity_partition=entity_partition,
+            coverage_from=coverage_from,
+            coverage_to=coverage_to,
         )
     return EtfReferenceSyncResult(
         etf=etf,
@@ -356,6 +406,8 @@ def _availability_result(
         inserted_count=0,
         unchanged_count=0,
         availability=availability,
+        reason_code=reason_code,
+        retryable=retryable,
     )
 
 

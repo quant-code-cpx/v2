@@ -13,7 +13,14 @@ export function configureApi(app: NestExpressApplication, config: AppConfigServi
     origin: config.corsOrigin,
     credentials: true,
     methods: ['POST'],
-    allowedHeaders: ['Authorization', 'Content-Type', 'If-Match', 'If-None-Match', 'X-Request-Id'],
+    allowedHeaders: [
+      'Authorization',
+      'Content-Type',
+      'Idempotency-Key',
+      'If-Match',
+      'If-None-Match',
+      'X-Request-Id',
+    ],
     exposedHeaders: ['ETag', 'Location', 'Retry-After', 'X-Data-Version', 'X-Request-Id'],
   });
   app.use(requestIdMiddleware);

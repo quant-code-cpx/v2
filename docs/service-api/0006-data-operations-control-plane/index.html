@@ -1339,7 +1339,10 @@ DataOperationsModule
               DATE_RANGE、OBSERVATION_DATE，也可在 manualEnabled=false
               时为空；独立 <code>scheduleSupportedModes</code> 只允许 FULL、
               INCREMENTAL、OBSERVATION_DATE。range 含两端，snapshot 只用
-              observationDate。preflight 依赖 data-sync，停机返回 503；submit
+              observationDate。每个同步 target 还必须携带受
+              <code>DatasetCapability.selectorKinds</code> 约束的严格业务 selector；
+              它覆盖 GLOBAL、证券、板块、交易所、合约及既有专项入口，但不接受
+              Provider 参数、URI、凭据或任意 JSON。preflight 依赖 data-sync，停机返回 503；submit
               只校验 preflightId/requestHash/targets 的引用形状。targetPolicy
               必填 policyVersion，前两种计划模式 dateResolution=NONE，
               观察日只能选计划本地日期或最近完成交易日。公开 capability 同步投影
@@ -1355,7 +1358,8 @@ DataOperationsModule
               Submission/Outbox。v1 以 datasetCode
               作为计划唯一绑定：每数据集最多一条； 重复 create 由 data-sync 返回
               409，update 不得把 scheduleId 改绑到其他 datasetCode，Web
-              编辑时固定数据集字段。
+              编辑时固定数据集字段。计划同样冻结一个允许的 selector，API 只将其安全
+              规范化后写入 Outbox，不自行解释为 Provider 调用。
             </p>
           </article>
         </div>
@@ -1469,6 +1473,7 @@ X-Request-Id: 7b8d196b-6bbc-48ef-9e9b-973a1cd5b126
     {
       "datasetCode": "equity.bar.1d.raw",
       "mode": "DATE_RANGE",
+      "selector": { "kind": "INSTRUMENT", "exchange": "SSE", "symbol": "600000" },
       "dateFrom": "2026-07-01",
       "dateTo": "2026-07-28",
       "observationDate": null
@@ -1976,7 +1981,12 @@ reconciler
               </tr>
               <tr>
                 <td>超时</td>
-                <td>查询与 preflight 单次 2 s，总 deadline 5 s</td>
+                <td>
+                  普通查询单次最多 2 s；Provider 全窗 preflight 使用独立
+                  <code>DATA_SYNC_INTERNAL_PREFLIGHT_TIMEOUT_MS</code>（默认 310 s、上限
+                  3610 s）且不自动重跑整窗探针。提高 data-sync 预检 deadline
+                  时，API 与入口网关预算必须同步提高。
+                </td>
                 <td>单次 5 s；不占用 HTTP 请求 deadline</td>
                 <td>查询/preflight 503；结构合法主动写保持 PENDING</td>
               </tr>

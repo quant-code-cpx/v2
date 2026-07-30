@@ -1,0 +1,1335 @@
+openapi: 3.1.0
+info:
+  title: quant-v2 沪深港通内部只读 API
+  version: 1.0.0
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+  x-contract-status: Accepted
+  description: >-
+    service-data-sync 向 service-api 提供的版本化只读合同。业务数据响应只读取已发布的
+    stock-connect bundle；readiness 响应读取独立持久化的官方日历、交付、执行与发布证据快照。
+    不存在业务 publication 或 readiness 快照时分别返回 409，禁止返回暂存表、以抓取时间
+    推测交易日或任何模拟数据。
+servers:
+  - url: http://data-sync-api:8000
+security:
+  - serviceBearer: []
+paths:
+  /internal/v1/stock-connect/overview/query:
+    post:
+      operationId: queryStockConnectOverviewInternal
+      summary: 查询四条通道在共同交易日的总览
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        $ref: "#/components/requestBodies/OverviewQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/Overview"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/stock-connect/readiness/query:
+    post:
+      operationId: queryStockConnectReadinessInternal
+      summary: 查询所选通道独立持久化的日历、数据交付与发布就绪证据
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        $ref: "#/components/requestBodies/ReadinessQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/Readiness"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/stock-connect/channels/query:
+    post:
+      operationId: queryStockConnectChannelInternal
+      summary: 查询单条通道的日终统计、状态、额度与趋势
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        $ref: "#/components/requestBodies/ChannelQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/Channel"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/stock-connect/active-securities/query:
+    post:
+      operationId: queryStockConnectActiveSecuritiesInternal
+      summary: 查询官方活跃证券榜及其可用的派生净额榜
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        $ref: "#/components/requestBodies/ActiveSecurityQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/ActiveSecurityPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /internal/v1/stock-connect/securities/context/query:
+    post:
+      operationId: queryStockConnectSecurityContextInternal
+      summary: 查询证券在互联互通通道内的身份与历史表现
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        $ref: "#/components/requestBodies/SecurityContextQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/SecurityContext"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+components:
+  securitySchemes:
+    serviceBearer:
+      type: http
+      scheme: bearer
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: true
+      description: 由 service-api 创建并贯穿三服务的调用链关联标识
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  headers:
+    RequestId:
+      description: 跨服务调用链关联标识
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    DataVersion:
+      description: >-
+        业务响应为不可变 bundle publication 版本；readiness 响应为规范化快照正文
+        删除顶层 dataVersion 后计算的 SHA-256 小写十六进制摘要。
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 160
+  requestBodies:
+    OverviewQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OverviewQuery"
+    ReadinessQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ReadinessQuery"
+    ChannelQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ChannelQuery"
+    ActiveSecurityQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ActiveSecurityQuery"
+    SecurityContextQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SecurityContextQuery"
+  responses:
+    Overview:
+      description: 四条通道共同交易日总览
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OverviewResponse"
+    Readiness:
+      description: 独立于业务 publication 的就绪证据快照；不得以查询时钟补造 observedAt
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ReadinessResponse"
+    Channel:
+      description: 单通道日终详情
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ChannelResponse"
+    ActiveSecurityPage:
+      description: 活跃证券游标分页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ActiveSecurityPage"
+    SecurityContext:
+      description: 证券互联互通上下文
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SecurityContextResponse"
+    Problem:
+      description: RFC 9457 Problem Details；不得泄露凭证、原始文件路径或上游响应
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    DateSelection:
+      type: object
+      additionalProperties: false
+      required: [mode, exactDate]
+      properties:
+        mode:
+          enum: [LATEST, EXACT]
+        exactDate:
+          type: [string, "null"]
+          format: date
+      oneOf:
+        - properties:
+            mode:
+              const: LATEST
+            exactDate:
+              type: "null"
+        - properties:
+            mode:
+              const: EXACT
+            exactDate:
+              type: string
+              format: date
+    OverviewQuery:
+      type: object
+      additionalProperties: false
+      required: [date, channels, trendTradingDays]
+      properties:
+        date:
+          $ref: "#/components/schemas/DateSelection"
+        channels:
+          type: array
+          minItems: 1
+          maxItems: 4
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ChannelCode"
+        trendTradingDays:
+          type: integer
+          minimum: 1
+          maximum: 250
+    ReadinessQuery:
+      type: object
+      additionalProperties: false
+      required: [date, channels]
+      properties:
+        date:
+          $ref: "#/components/schemas/DateSelection"
+        channels:
+          type: array
+          minItems: 1
+          maxItems: 4
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ChannelCode"
+    ChannelQuery:
+      type: object
+      additionalProperties: false
+      required: [date, channel, trendTradingDays]
+      properties:
+        date:
+          $ref: "#/components/schemas/DateSelection"
+        channel:
+          $ref: "#/components/schemas/ChannelCode"
+        trendTradingDays:
+          type: integer
+          minimum: 1
+          maximum: 250
+    ActiveSecurityQuery:
+      type: object
+      additionalProperties: false
+      required:
+        [date, channel, ranking, parentPublicationDataVersion, cursor, limit]
+      properties:
+        date:
+          $ref: "#/components/schemas/DateSelection"
+        channel:
+          $ref: "#/components/schemas/ChannelCode"
+        ranking:
+          enum: [SOURCE_ACTIVE, NET_BUY, NET_SELL]
+        parentPublicationDataVersion:
+          type: string
+          minLength: 1
+          maxLength: 160
+          pattern: "^[^\\u0000-\\u001F\\u007F]+$"
+          description: >-
+            页面当前展示的父 publication 版本。总览页传 overview publication
+            dataVersion，通道页传 channel bundle dataVersion；服务必须据此固定解析
+            组成 bundle，禁止按当前 latest 拼接。版本、日期或通道不匹配时返回 409
+            PARENT_PUBLICATION_MISMATCH。
+        cursor:
+          type: [string, "null"]
+          maxLength: 1024
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+    SecurityContextQuery:
+      type: object
+      additionalProperties: false
+      required: [instrumentEntityRef, date, channel, historyTradingDays]
+      properties:
+        instrumentEntityRef:
+          type: string
+          minLength: 1
+          maxLength: 160
+        date:
+          $ref: "#/components/schemas/DateSelection"
+        channel:
+          oneOf:
+            - $ref: "#/components/schemas/ChannelCode"
+            - type: "null"
+        historyTradingDays:
+          type: integer
+          minimum: 1
+          maximum: 250
+    ChannelCode:
+      enum: [SH_NORTHBOUND, SZ_NORTHBOUND, SH_SOUTHBOUND, SZ_SOUTHBOUND]
+    Direction:
+      enum: [NORTHBOUND, SOUTHBOUND]
+    ExchangeRoute:
+      enum: [SHANGHAI, SHENZHEN]
+    Currency:
+      enum: [CNY, HKD]
+    Availability:
+      enum:
+        [
+          REPORTED,
+          DERIVED,
+          NOT_DISCLOSED_BY_REGIME,
+          SOURCE_MISSING,
+          NOT_APPLICABLE,
+        ]
+    Money:
+      type: object
+      additionalProperties: false
+      required: [amount, currency, unit]
+      properties:
+        amount:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: "^-?[0-9]+(?:\\.[0-9]+)?$"
+          description: 十进制字符串；不得经过浮点数或自动缩放。
+        currency:
+          $ref: "#/components/schemas/Currency"
+        unit:
+          const: BASE
+          description: CNY/HKD 的基础货币单位，不是万元、百万元或亿元。
+    NonNegativeMoney:
+      allOf:
+        - $ref: "#/components/schemas/Money"
+        - type: object
+          properties:
+            amount:
+              type: string
+              minLength: 1
+              maxLength: 80
+              pattern: "^[0-9]+(?:\\.[0-9]+)?$"
+      description: 买入、卖出、成交额和额度余额使用的非负原币基础单位金额。
+    MoneyFact:
+      type: object
+      additionalProperties: false
+      required: [availability, value, lineageRef]
+      properties:
+        availability:
+          $ref: "#/components/schemas/Availability"
+        value:
+          oneOf:
+            - $ref: "#/components/schemas/Money"
+            - type: "null"
+        lineageRef:
+          type: [string, "null"]
+          maxLength: 200
+      allOf:
+        - if:
+            properties:
+              availability:
+                enum: [REPORTED, DERIVED]
+          then:
+            properties:
+              value:
+                $ref: "#/components/schemas/Money"
+              lineageRef:
+                type: string
+                minLength: 1
+        - if:
+            properties:
+              availability:
+                enum: [NOT_DISCLOSED_BY_REGIME, SOURCE_MISSING, NOT_APPLICABLE]
+          then:
+            properties:
+              value:
+                type: "null"
+    ReportedNonNegativeMoneyFact:
+      allOf:
+        - $ref: "#/components/schemas/MoneyFact"
+        - type: object
+          properties:
+            availability:
+              enum:
+                [
+                  REPORTED,
+                  NOT_DISCLOSED_BY_REGIME,
+                  SOURCE_MISSING,
+                  NOT_APPLICABLE,
+                ]
+          allOf:
+            - if:
+                properties:
+                  availability:
+                    const: REPORTED
+              then:
+                properties:
+                  value:
+                    $ref: "#/components/schemas/NonNegativeMoney"
+      description: 只允许官方报告的非负值；不可用分支保持真实空值，禁止平台派生或负数。
+    DerivedSignedMoneyFact:
+      allOf:
+        - $ref: "#/components/schemas/MoneyFact"
+        - type: object
+          properties:
+            availability:
+              enum:
+                [
+                  DERIVED,
+                  NOT_DISCLOSED_BY_REGIME,
+                  SOURCE_MISSING,
+                  NOT_APPLICABLE,
+                ]
+      description: 只允许由同一来源行的买入减卖出得到的有符号净额，禁止伪装为官方直接报告值。
+    CountFact:
+      type: object
+      additionalProperties: false
+      required: [availability, value, lineageRef]
+      properties:
+        availability:
+          $ref: "#/components/schemas/Availability"
+        value:
+          type: [integer, "null"]
+          minimum: 0
+        lineageRef:
+          type: [string, "null"]
+          maxLength: 200
+      allOf:
+        - if:
+            properties:
+              availability:
+                enum: [REPORTED, DERIVED]
+          then:
+            properties:
+              value:
+                type: integer
+              lineageRef:
+                type: string
+                minLength: 1
+        - if:
+            properties:
+              availability:
+                enum: [NOT_DISCLOSED_BY_REGIME, SOURCE_MISSING, NOT_APPLICABLE]
+          then:
+            properties:
+              value:
+                type: "null"
+    MarketStats:
+      type: object
+      additionalProperties: false
+      description: >-
+        当买入和卖出均为 REPORTED 时，成交额必须同币种精确等于 buyAmount + sellAmount，
+        净买入必须为 DERIVED 且同币种精确等于 buyAmount - sellAmount；全部计算使用十进制字符串。
+      x-quant-v2-money-invariants:
+        - turnoverAmount = buyAmount + sellAmount
+        - netBuyAmount = buyAmount - sellAmount
+        - currencies and BASE units must match within one row
+      required:
+        [
+          buyAmount,
+          sellAmount,
+          turnoverAmount,
+          netBuyAmount,
+          tradeCount,
+          etfTurnoverAmount,
+        ]
+      properties:
+        buyAmount:
+          $ref: "#/components/schemas/ReportedNonNegativeMoneyFact"
+        sellAmount:
+          $ref: "#/components/schemas/ReportedNonNegativeMoneyFact"
+        turnoverAmount:
+          $ref: "#/components/schemas/ReportedNonNegativeMoneyFact"
+        netBuyAmount:
+          $ref: "#/components/schemas/DerivedSignedMoneyFact"
+        tradeCount:
+          $ref: "#/components/schemas/CountFact"
+        etfTurnoverAmount:
+          $ref: "#/components/schemas/ReportedNonNegativeMoneyFact"
+    ChannelStatus:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          tradingDay,
+          sessionState,
+          buyOrderAccepted,
+          sellOrderAccepted,
+          quotaState,
+          quotaBalance,
+          observedAt,
+          finality,
+        ]
+      properties:
+        tradingDay:
+          type: boolean
+        sessionState:
+          enum: [OPEN, CLOSED, HALTED, NOT_OPEN, UNKNOWN]
+        buyOrderAccepted:
+          type: [boolean, "null"]
+        sellOrderAccepted:
+          type: [boolean, "null"]
+        quotaState:
+          description: >-
+            额度使用状态。SUFFICIENT 表示剩余额度仍在披露阈值以上、官方不提供精确值；
+            ACTUAL_REPORTED 表示低于阈值且官方给出精确余额；EXHAUSTED 表示额度用尽。
+            本字段不是资金净流入。
+          enum:
+            [
+              SUFFICIENT,
+              ACTUAL_REPORTED,
+              EXHAUSTED,
+              NOT_APPLICABLE,
+              SOURCE_MISSING,
+            ]
+        quotaBalance:
+          description: >-
+            官方日终剩余额度；币种恒为 CNY。仅 ACTUAL_REPORTED/EXHAUSTED
+            可携带数值，禁止由成交额、买卖金额或抓取时间推算。
+          $ref: "#/components/schemas/ReportedNonNegativeMoneyFact"
+        observedAt:
+          type: string
+          format: date-time
+        finality:
+          const: END_OF_DAY
+      allOf:
+        - if:
+            properties:
+              quotaState:
+                const: SUFFICIENT
+          then:
+            properties:
+              quotaBalance:
+                properties:
+                  availability:
+                    const: NOT_DISCLOSED_BY_REGIME
+                  value:
+                    type: "null"
+        - if:
+            properties:
+              quotaState:
+                enum: [ACTUAL_REPORTED, EXHAUSTED]
+          then:
+            properties:
+              quotaBalance:
+                properties:
+                  availability:
+                    const: REPORTED
+                  value:
+                    properties:
+                      currency:
+                        const: CNY
+        - if:
+            properties:
+              quotaState:
+                const: SOURCE_MISSING
+          then:
+            properties:
+              quotaBalance:
+                properties:
+                  availability:
+                    const: SOURCE_MISSING
+                  value:
+                    type: "null"
+        - if:
+            properties:
+              quotaState:
+                const: NOT_APPLICABLE
+          then:
+            properties:
+              quotaBalance:
+                properties:
+                  availability:
+                    const: NOT_APPLICABLE
+                  value:
+                    type: "null"
+    SourceRef:
+      type: object
+      additionalProperties: false
+      description: >-
+        官方来源证据。sourceObservedAt 仅表示平台接收/抓取时间，不能用于 tradeDate、latest
+        或冒充来源 publication；SFTP mtime 也不能填入 sourcePublicationAt。
+      required:
+        [
+          sourceCode,
+          productName,
+          sourcePublicationAvailability,
+          sourcePublicationAt,
+          sourceObservedAt,
+          sourceFileSha256,
+        ]
+      properties:
+        sourceCode:
+          enum:
+            [
+              HKEX_DATA_MARKETPLACE,
+              HKEX_OMDC,
+              HKEX_CALENDAR,
+              SSE_MDGW,
+              SZSE_STEP,
+            ]
+        productName:
+          type: string
+          minLength: 1
+          maxLength: 160
+        sourcePublicationAvailability:
+          enum: [REPORTED, NOT_PROVIDED_BY_SOURCE]
+        sourcePublicationAt:
+          type: [string, "null"]
+          format: date-time
+        sourceObservedAt:
+          type: string
+          format: date-time
+        sourceFileSha256:
+          type: [string, "null"]
+          pattern: "^[a-f0-9]{64}$"
+      allOf:
+        - if:
+            properties:
+              sourcePublicationAvailability:
+                const: REPORTED
+            required: [sourcePublicationAvailability]
+          then:
+            properties:
+              sourcePublicationAt:
+                type: string
+                format: date-time
+        - if:
+            properties:
+              sourcePublicationAvailability:
+                const: NOT_PROVIDED_BY_SOURCE
+            required: [sourcePublicationAvailability]
+          then:
+            properties:
+              sourcePublicationAt:
+                type: "null"
+    Publication:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          bundleReleaseId,
+          dataVersion,
+          tradeDate,
+          publishedAt,
+          qualityStatus,
+          qualityIssues,
+          sourceRefs,
+        ]
+      properties:
+        bundleReleaseId:
+          type: string
+          format: uuid
+        dataVersion:
+          type: string
+          minLength: 1
+          maxLength: 160
+        tradeDate:
+          type: string
+          format: date
+        publishedAt:
+          type: string
+          format: date-time
+        qualityStatus:
+          enum: [APPROVED, APPROVED_WITH_WARNINGS]
+        qualityIssues:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [code, component, detail]
+            properties:
+              code:
+                enum:
+                  [
+                    IDENTITY_SOURCE_UNRESOLVED,
+                    STATUS_SOURCE_NOT_AVAILABLE_HISTORICAL,
+                    SESSION_STATE_DERIVED_FROM_CALENDAR_AND_FINALITY,
+                    OPTIONAL_FIELD_SOURCE_MISSING,
+                  ]
+              component:
+                type: string
+                minLength: 1
+                maxLength: 120
+              detail:
+                type: string
+                minLength: 1
+                maxLength: 300
+        sourceRefs:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items:
+            $ref: "#/components/schemas/SourceRef"
+    ChannelSummary:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          channel,
+          direction,
+          route,
+          tradeDate,
+          stats,
+          status,
+          activeSecurityCount,
+        ]
+      properties:
+        channel:
+          $ref: "#/components/schemas/ChannelCode"
+        direction:
+          $ref: "#/components/schemas/Direction"
+        route:
+          $ref: "#/components/schemas/ExchangeRoute"
+        tradeDate:
+          type: string
+          format: date
+        stats:
+          $ref: "#/components/schemas/MarketStats"
+        status:
+          $ref: "#/components/schemas/ChannelStatus"
+        activeSecurityCount:
+          type: integer
+          minimum: 0
+          maximum: 10
+    TrendPoint:
+      type: object
+      additionalProperties: false
+      required: [channel, tradeDate, dataVersion, stats, status]
+      properties:
+        channel:
+          $ref: "#/components/schemas/ChannelCode"
+        tradeDate:
+          type: string
+          format: date
+        dataVersion:
+          type: string
+          minLength: 1
+          maxLength: 160
+          description: 该交易日趋势点对应的不可变 bundle publication 版本。
+        stats:
+          $ref: "#/components/schemas/MarketStats"
+        status:
+          $ref: "#/components/schemas/ChannelStatus"
+    OverviewResponse:
+      type: object
+      additionalProperties: false
+      required:
+        [resolvedTradeDate, dateResolution, channels, trend, publication]
+      properties:
+        resolvedTradeDate:
+          type: string
+          format: date
+          description: LATEST 时为所选通道最后一个共同完成且已发布的交易日
+        dateResolution:
+          enum: [LATEST_COMMON, EXACT]
+        channels:
+          type: array
+          minItems: 1
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/ChannelSummary"
+        trend:
+          type: array
+          description: 每条通道最多返回 trendTradingDays 个点；点内 channel 禁止省略。
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/TrendPoint"
+        publication:
+          $ref: "#/components/schemas/Publication"
+    ReadinessCalendar:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          dataVersion,
+          observedAt,
+          sourceFileSha256,
+          sourcePublicationAt,
+          publicationAvailability,
+        ]
+      properties:
+        dataVersion:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: 已冻结官方交易日历清单及对象证据的规范化 SHA-256 版本。
+        observedAt:
+          type: [string, "null"]
+          format: date-time
+          description: 日历证据最后一次被持久化观察到的时间；无证据时为 null。
+        sourceFileSha256:
+          type: [string, "null"]
+          pattern: "^[0-9a-f]{64}$"
+          description: 官方日历源文件或对象的 SHA-256；源缺失时为 null。
+        sourcePublicationAt:
+          type: [string, "null"]
+          format: date-time
+          description: 官方来源明确提供的发布时间；未报告或来源缺失时为 null。
+        publicationAvailability:
+          enum: [REPORTED, NOT_REPORTED, SOURCE_MISSING]
+      allOf:
+        - if:
+            properties:
+              publicationAvailability:
+                const: REPORTED
+          then:
+            properties:
+              sourcePublicationAt:
+                type: string
+                format: date-time
+        - if:
+            properties:
+              publicationAvailability:
+                enum: [NOT_REPORTED, SOURCE_MISSING]
+          then:
+            properties:
+              sourcePublicationAt:
+                type: "null"
+    ReadinessChannel:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          channel,
+          calendarState,
+          state,
+          reasonCode,
+          bundleDataVersion,
+          evidenceObservedAt,
+        ]
+      properties:
+        channel:
+          $ref: "#/components/schemas/ChannelCode"
+        calendarState:
+          enum: [OPEN, CLOSED, UNKNOWN]
+        state:
+          enum: [READY, PENDING, FAILED, SOURCE_MISSING, NOT_TRADING]
+        reasonCode:
+          enum:
+            [
+              BUNDLE_PUBLISHED,
+              OFFICIAL_CALENDAR_CLOSED,
+              CALENDAR_EVIDENCE_MISSING,
+              CALENDAR_SOURCE_MISSING,
+              DELIVERY_ENTITLEMENT_MISSING,
+              DELIVERY_OBJECT_MISSING,
+              STATUS_SOURCE_MISSING,
+              PREFLIGHT_PENDING,
+              PREFLIGHT_FAILED,
+              COMMAND_NOT_SUBMITTED,
+              EXECUTION_PENDING,
+              EXECUTION_SOURCE_MISSING,
+              EXECUTION_FAILED,
+              PUBLICATION_INCOMPLETE,
+            ]
+        bundleDataVersion:
+          type: [string, "null"]
+          maxLength: 160
+          description: READY 时对应已发布 bundle；其他状态必须为 null。
+        evidenceObservedAt:
+          type: string
+          format: date-time
+          description: 该通道状态所依据的最近持久化证据时间，不得使用查询时钟。
+      allOf:
+        - if:
+            properties:
+              state:
+                const: READY
+          then:
+            properties:
+              calendarState:
+                const: OPEN
+              reasonCode:
+                const: BUNDLE_PUBLISHED
+              bundleDataVersion:
+                type: string
+                minLength: 1
+        - if:
+            properties:
+              state:
+                const: NOT_TRADING
+          then:
+            properties:
+              calendarState:
+                const: CLOSED
+              reasonCode:
+                const: OFFICIAL_CALENDAR_CLOSED
+              bundleDataVersion:
+                type: "null"
+        - if:
+            properties:
+              state:
+                const: PENDING
+          then:
+            properties:
+              reasonCode:
+                enum:
+                  [
+                    PREFLIGHT_PENDING,
+                    COMMAND_NOT_SUBMITTED,
+                    EXECUTION_PENDING,
+                    PUBLICATION_INCOMPLETE,
+                  ]
+              bundleDataVersion:
+                type: "null"
+        - if:
+            properties:
+              state:
+                const: FAILED
+          then:
+            properties:
+              reasonCode:
+                enum: [PREFLIGHT_FAILED, EXECUTION_FAILED, PUBLICATION_INCOMPLETE]
+              bundleDataVersion:
+                type: "null"
+        - if:
+            properties:
+              state:
+                const: SOURCE_MISSING
+          then:
+            properties:
+              reasonCode:
+                enum:
+                  [
+                    CALENDAR_EVIDENCE_MISSING,
+                    CALENDAR_SOURCE_MISSING,
+                    DELIVERY_ENTITLEMENT_MISSING,
+                    DELIVERY_OBJECT_MISSING,
+                    STATUS_SOURCE_MISSING,
+                    EXECUTION_SOURCE_MISSING,
+                  ]
+              bundleDataVersion:
+                type: "null"
+    ReadinessResponse:
+      type: object
+      additionalProperties: false
+      description: >-
+        该快照独立于业务 publication。selectedChannels 与 channels 必须按 ChannelCode
+        字典序稳定排列且完全同集；observedAt 为所有日历、运行及发布持久化证据时间的最大值。
+        dataVersion 的输入为删除顶层 dataVersion 后，递归按对象键字典序、数组原序、保留 null、
+        UTF-8、无空白且不转义 Unicode 的 JSON 文本；禁止使用查询时钟或随机量。
+      x-quant-v2-readiness-invariants:
+        - X-Data-Version = dataVersion
+        - dataVersion = sha256(canonical-json(body without top-level dataVersion))
+        - LATEST candidateTradeDate is the latest common official OPEN date with persisted evidence
+        - EXACT candidateTradeDate is requestedExactDate only when its calendar row is persisted
+        - readyTradeDate is non-null only when every selected channel is READY
+        - no persisted readiness snapshot yields 409 READINESS_NOT_OBSERVED
+      required:
+        [
+          schemaVersion,
+          dataVersion,
+          mode,
+          selectedChannels,
+          requestedExactDate,
+          candidateTradeDate,
+          readyTradeDate,
+          observedAt,
+          calendar,
+          channels,
+        ]
+      properties:
+        schemaVersion:
+          const: quant-v2.stock-connect-readiness.v1
+        dataVersion:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        mode:
+          enum: [LATEST, EXACT]
+        selectedChannels:
+          type: array
+          minItems: 1
+          maxItems: 4
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ChannelCode"
+        requestedExactDate:
+          type: [string, "null"]
+          format: date
+        candidateTradeDate:
+          type: [string, "null"]
+          format: date
+        readyTradeDate:
+          type: [string, "null"]
+          format: date
+        observedAt:
+          type: string
+          format: date-time
+        calendar:
+          $ref: "#/components/schemas/ReadinessCalendar"
+        channels:
+          type: array
+          minItems: 1
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/ReadinessChannel"
+      allOf:
+        - if:
+            properties:
+              mode:
+                const: LATEST
+          then:
+            properties:
+              requestedExactDate:
+                type: "null"
+        - if:
+            properties:
+              mode:
+                const: EXACT
+          then:
+            properties:
+              requestedExactDate:
+                type: string
+                format: date
+    ChannelResponse:
+      type: object
+      additionalProperties: false
+      required: [resolvedTradeDate, dateResolution, channel, trend, publication]
+      properties:
+        resolvedTradeDate:
+          type: string
+          format: date
+        dateResolution:
+          enum: [LATEST_CHANNEL, EXACT]
+        channel:
+          $ref: "#/components/schemas/ChannelSummary"
+        trend:
+          type: array
+          maxItems: 250
+          items:
+            $ref: "#/components/schemas/TrendPoint"
+        publication:
+          $ref: "#/components/schemas/Publication"
+    InstrumentIdentity:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          identityAvailability,
+          instrumentEntityRef,
+          sourceSecurityCode,
+          displayName,
+          listingVenue,
+        ]
+      properties:
+        identityAvailability:
+          description: >-
+            RESOLVED 表示已映射到稳定证券实体；SOURCE_UNRESOLVED 表示获许可主档文件缺件或
+            单只证券无法映射，只保留来源代码、来源名称与场所，禁止生成 entityRef 或详情链接。
+          enum: [RESOLVED, SOURCE_UNRESOLVED]
+        instrumentEntityRef:
+          type: [string, "null"]
+          maxLength: 160
+        sourceSecurityCode:
+          type: string
+          minLength: 1
+          maxLength: 32
+        displayName:
+          type: [string, "null"]
+          maxLength: 160
+        listingVenue:
+          enum: [SSE, SZSE, HKEX]
+      allOf:
+        - if:
+            properties:
+              identityAvailability:
+                const: RESOLVED
+          then:
+            properties:
+              instrumentEntityRef:
+                type: string
+                minLength: 1
+        - if:
+            properties:
+              identityAvailability:
+                const: SOURCE_UNRESOLVED
+          then:
+            properties:
+              instrumentEntityRef:
+                type: "null"
+    ActiveSecurity:
+      type: object
+      additionalProperties: false
+      description: >-
+        来源活跃证券榜的一行；当买入和卖出均报告时，成交额与净额必须分别满足同币种
+        buy + sell 与 buy - sell 精确恒等式。本对象不代表全市场排名。
+      x-quant-v2-money-invariants:
+        - turnoverAmount = buyAmount + sellAmount
+        - netBuyAmount = buyAmount - sellAmount
+      required:
+        [
+          rankingRank,
+          sourceRank,
+          identity,
+          buyAmount,
+          sellAmount,
+          turnoverAmount,
+          netBuyAmount,
+        ]
+      properties:
+        rankingRank:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: 当前 ranking 下的确定性名次；同额按 sourceRank、sourceSecurityCode 排序。
+        sourceRank:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: HKEX 官方活跃榜原始名次；不得解释为全市场名次。
+        identity:
+          $ref: "#/components/schemas/InstrumentIdentity"
+        buyAmount:
+          $ref: "#/components/schemas/ReportedNonNegativeMoneyFact"
+        sellAmount:
+          $ref: "#/components/schemas/ReportedNonNegativeMoneyFact"
+        turnoverAmount:
+          $ref: "#/components/schemas/ReportedNonNegativeMoneyFact"
+        netBuyAmount:
+          $ref: "#/components/schemas/DerivedSignedMoneyFact"
+    ActiveSecurityPage:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          resolvedTradeDate,
+          dateResolution,
+          channel,
+          ranking,
+          rankingAvailability,
+          rankingScope,
+          items,
+          nextCursor,
+          publication,
+        ]
+      properties:
+        resolvedTradeDate:
+          type: string
+          format: date
+        dateResolution:
+          description: >
+            绑定 overview 父 publication 时为 LATEST_COMMON，绑定单通道父 publication
+            时为 LATEST_CHANNEL；精确日期查询为 EXACT。
+          enum: [LATEST_COMMON, LATEST_CHANNEL, EXACT]
+        channel:
+          $ref: "#/components/schemas/ChannelCode"
+        ranking:
+          enum: [SOURCE_ACTIVE, NET_BUY, NET_SELL]
+        rankingAvailability:
+          $ref: "#/components/schemas/Availability"
+        rankingScope:
+          const: SOURCE_ACTIVE_SECURITIES_ONLY
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/ActiveSecurity"
+        nextCursor:
+          type: [string, "null"]
+          maxLength: 1024
+        publication:
+          $ref: "#/components/schemas/Publication"
+      allOf:
+        - if:
+            properties:
+              ranking:
+                const: SOURCE_ACTIVE
+          then:
+            properties:
+              rankingAvailability:
+                const: REPORTED
+        - if:
+            properties:
+              ranking:
+                enum: [NET_BUY, NET_SELL]
+          then:
+            properties:
+              rankingAvailability:
+                enum:
+                  [
+                    DERIVED,
+                    NOT_DISCLOSED_BY_REGIME,
+                    SOURCE_MISSING,
+                    NOT_APPLICABLE,
+                  ]
+        - if:
+            properties:
+              ranking:
+                enum: [NET_BUY, NET_SELL]
+              rankingAvailability:
+                enum: [NOT_DISCLOSED_BY_REGIME, SOURCE_MISSING, NOT_APPLICABLE]
+          then:
+            properties:
+              items:
+                maxItems: 0
+              nextCursor:
+                type: "null"
+    SecurityChannelActivity:
+      type: object
+      additionalProperties: false
+      required:
+        [channel, tradeDate, dataVersion, sourceRank, turnoverAmount, netBuyAmount]
+      properties:
+        channel:
+          $ref: "#/components/schemas/ChannelCode"
+        tradeDate:
+          type: string
+          format: date
+        dataVersion:
+          type: string
+          minLength: 1
+          maxLength: 160
+          description: 该历史活动行对应的不可变 bundle publication 版本。
+        sourceRank:
+          type: integer
+          minimum: 1
+          maximum: 10
+        turnoverAmount:
+          $ref: "#/components/schemas/ReportedNonNegativeMoneyFact"
+        netBuyAmount:
+          $ref: "#/components/schemas/DerivedSignedMoneyFact"
+    SecurityContextResponse:
+      type: object
+      additionalProperties: false
+      required: [resolvedTradeDate, identity, activities, publication]
+      properties:
+        resolvedTradeDate:
+          type: string
+          format: date
+        identity:
+          $ref: "#/components/schemas/InstrumentIdentity"
+        activities:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/SecurityChannelActivity"
+        publication:
+          $ref: "#/components/schemas/Publication"
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail, instance, code, requestId]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 500
+        instance:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        code:
+          enum:
+            [
+              VALIDATION_FAILED,
+              AUTHENTICATION_FAILED,
+              EXACT_DATE_NOT_PUBLISHED,
+              PUBLICATION_NOT_READY,
+              READINESS_NOT_OBSERVED,
+              PARENT_PUBLICATION_MISMATCH,
+              CURSOR_VERSION_MISMATCH,
+              DATA_SOURCE_UNAVAILABLE,
+              INTERNAL_DEPENDENCY_FAILED,
+              SECURITY_CONTEXT_NOT_FOUND,
+            ]
+        requestId:
+          type: string
+          maxLength: 128

@@ -7,11 +7,13 @@ from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
+from unittest.mock import Mock
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.orm import Session
 
+from service_data_sync.application.ports.canonical_release import PublishedCanonicalRelease
 from service_data_sync.application.ports.sector_eod import (
     SectorEodQualityResult,
     SectorEodRun,
@@ -24,6 +26,10 @@ from service_data_sync.domain.sector import (
     SortOrder,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.fenced_execution import (
+    FencedExecution,
+    fenced_execution,
+)
 from service_data_sync.infrastructure.persistence import sector_eod_repository
 from service_data_sync.infrastructure.persistence.sector_eod_repository import (
     SqlAlchemySectorEodRepository,
@@ -354,7 +360,9 @@ def test_fencing_and_quality_helpers_reject_cross_run_evidence_and_invalid_statu
 def test_publish_inserts_atomic_snapshot_quotes_quality_and_publication(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """完整新内容应写入 header、报价、质量和 dataset publication，不修改旧 K 线表。"""
+    """完整新内容应写入 header、报价、质量、发布和 fenced 实际版本。"""
+    data_version = uuid4()
+    release_bridge = _release_bridge(data_version=data_version)
     engine = FakeEngine(
         [
             [{"sector_key": 1, "sector_code": "BK0001"}],
@@ -368,28 +376,41 @@ def test_publish_inserts_atomic_snapshot_quotes_quality_and_publication(
         "record_source_observation",
         _record_source_batch_with_fixed_id(source_batch_id),
     )
-    repository = _repository(engine)
-
-    publication = repository.publish_snapshot(
-        scheme=SectorScheme.EASTMONEY_INDUSTRY,
-        trade_date=date(2026, 7, 27),
-        source_cutoff_at=datetime(2026, 7, 27, 8, 15, tzinfo=UTC),
-        observed_at=datetime(2026, 7, 27, 8, 20, tzinfo=UTC),
-        quotes=(_quote("BK0001"),),
-        provider_id="test-provider",
-        source_payload_sha256="a" * 64,
-        raw_uri="s3://test/raw.json",
-        adapter_version="test-v1",
-        schema_fingerprint="b" * 64,
+    monkeypatch.setattr(sector_eod_repository, "publish_legacy_snapshot", release_bridge)
+    database = FakeDatabase(engine.connection)
+    repository = SqlAlchemySectorEodRepository(cast(DatabaseClient, database))
+    execution = FencedExecution(
+        database=cast(DatabaseClient, database),
+        run_id=uuid4(),
+        fencing_token=1,
+        finalizer=_ignore_fenced_finalizer,
     )
+
+    with fenced_execution(execution):
+        publication = repository.publish_snapshot(
+            scheme=SectorScheme.EASTMONEY_INDUSTRY,
+            trade_date=date(2026, 7, 27),
+            source_cutoff_at=datetime(2026, 7, 27, 8, 15, tzinfo=UTC),
+            observed_at=datetime(2026, 7, 27, 8, 20, tzinfo=UTC),
+            quotes=(_quote("BK0001"),),
+            provider_id="test-provider",
+            source_payload_sha256="a" * 64,
+            raw_uri="s3://test/raw.json",
+            adapter_version="test-v1",
+            schema_fingerprint="b" * 64,
+        )
 
     statements = "\n".join(engine.connection.statements)
     assert publication.inserted is True
     assert "INSERT INTO sector_eod_snapshot" in statements
     assert "INSERT INTO sector_eod_quote" in statements
     assert "INSERT INTO sector_eod_quality_result" in statements
-    assert "INSERT INTO dataset_publication" in statements
+    assert "INSERT INTO dataset_publication" not in statements
     assert "sector_daily_bar" not in statements
+    assert execution.checkpoint_kind == "data-version"
+    assert execution.checkpoint_position == str(publication.snapshot.data_version)
+    assert publication.snapshot.data_version == data_version
+    assert release_bridge.call_args.kwargs["quality_status"] == "passed"
 
 
 def test_ranked_read_uses_only_controlled_sort_expression_and_stable_position() -> None:
@@ -437,9 +458,10 @@ def test_ranked_read_uses_only_controlled_sort_expression_and_stable_position() 
 def test_publish_reuses_current_revision_when_normalized_content_is_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """同内容重跑必须新增来源观察但复用已发布 dataVersion，避免制造伪修订。"""
+    """同内容重跑复用已发布 dataVersion，并把该真实版本交给 fenced 控制面。"""
     quote = _quote("BK0001")
     data_version = uuid4()
+    release_bridge = _release_bridge(data_version=data_version, reused_publication=True)
     existing = {
         "snapshot_id": uuid4(),
         "data_version": data_version,
@@ -459,23 +481,36 @@ def test_publish_reuses_current_revision_when_normalized_content_is_unchanged(
         "record_source_observation",
         _record_source_observation,
     )
-
-    publication = _repository(engine).publish_snapshot(
-        scheme=SectorScheme.EASTMONEY_INDUSTRY,
-        trade_date=date(2026, 7, 27),
-        source_cutoff_at=datetime(2026, 7, 27, 8, 15, tzinfo=UTC),
-        observed_at=datetime(2026, 7, 27, 8, 20, tzinfo=UTC),
-        quotes=(quote,),
-        provider_id="test-provider",
-        source_payload_sha256="a" * 64,
-        raw_uri="s3://test/raw.json",
-        adapter_version="test-v1",
-        schema_fingerprint="b" * 64,
+    monkeypatch.setattr(sector_eod_repository, "publish_legacy_snapshot", release_bridge)
+    database = FakeDatabase(engine.connection)
+    repository = SqlAlchemySectorEodRepository(cast(DatabaseClient, database))
+    execution = FencedExecution(
+        database=cast(DatabaseClient, database),
+        run_id=uuid4(),
+        fencing_token=1,
+        finalizer=_ignore_fenced_finalizer,
     )
+
+    with fenced_execution(execution):
+        publication = repository.publish_snapshot(
+            scheme=SectorScheme.EASTMONEY_INDUSTRY,
+            trade_date=date(2026, 7, 27),
+            source_cutoff_at=datetime(2026, 7, 27, 8, 15, tzinfo=UTC),
+            observed_at=datetime(2026, 7, 27, 8, 20, tzinfo=UTC),
+            quotes=(quote,),
+            provider_id="test-provider",
+            source_payload_sha256="a" * 64,
+            raw_uri="s3://test/raw.json",
+            adapter_version="test-v1",
+            schema_fingerprint="b" * 64,
+        )
 
     assert publication.inserted is False
     assert publication.snapshot.data_version == data_version
+    assert execution.checkpoint_kind == "data-version"
+    assert execution.checkpoint_position == str(data_version)
     assert "INSERT INTO sector_eod_snapshot" not in "\n".join(engine.connection.statements)
+    assert release_bridge.call_args.kwargs["quality_status"] == "passed"
 
 
 def test_repository_reads_exact_snapshot_and_single_quote() -> None:
@@ -657,44 +692,9 @@ def test_shadow_candidate_keeps_consumer_publication_unchanged() -> None:
     assert not _has_parameter(engine.connection, "superseded")
 
 
-def test_rollback_atomically_restores_a_superseded_passed_revision() -> None:
-    """publication rollback 只能恢复历史通过版本，并保留当前错误 revision 与全部证据。"""
-    current = {
-        "snapshot_id": uuid4(),
-        "data_version": uuid4(),
-        "scheme": "eastmoney.industry",
-        "trade_date": date(2026, 7, 27),
-        "source_cutoff_at": datetime(2026, 7, 27, 8, 15, tzinfo=UTC),
-        "observed_at": datetime(2026, 7, 27, 8, 30, tzinfo=UTC),
-        "finality": "post_close_observation",
-        "quality_status": "passed",
-        "published_at": datetime(2026, 7, 27, 8, 31, tzinfo=UTC),
-        "normalizer_version": "sector-eod-v1",
-        "content_sha256": b"a" * 32,
-    }
-    target = {
-        **current,
-        "snapshot_id": uuid4(),
-        "data_version": uuid4(),
-        "observed_at": datetime(2026, 7, 27, 8, 20, tzinfo=UTC),
-        "published_at": datetime(2026, 7, 27, 8, 21, tzinfo=UTC),
-        "content_sha256": b"b" * 32,
-    }
-    engine = FakeEngine([current, target])
-
-    restored = _repository(engine).rollback_published_snapshot(
-        scheme=SectorScheme.EASTMONEY_INDUSTRY,
-        trade_date=date(2026, 7, 27),
-        revision=1,
-    )
-
-    statements = "\n".join(engine.connection.statements)
-    assert restored.snapshot_id == target["snapshot_id"]
-    assert restored.data_version == target["data_version"]
-    assert _has_parameter(engine.connection, "superseded")
-    assert _has_parameter(engine.connection, "published")
-    assert "UPDATE dataset_publication" in statements
-    assert "DELETE" not in statements
+def test_repository_does_not_expose_unsupported_publication_rollback() -> None:
+    """历史 release 不可重新激活，仓储不能暴露绕过统一发布与 fencing 的 rollback。"""
+    assert not hasattr(SqlAlchemySectorEodRepository, "rollback_published_snapshot")
 
 
 def test_list_queued_runs_returns_only_recoverable_partition_identity() -> None:
@@ -717,9 +717,81 @@ def test_list_queued_runs_returns_only_recoverable_partition_identity() -> None:
     assert _has_parameter(engine.connection, "queued")
 
 
+def test_same_content_legacy_snapshot_creates_bound_replacement_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """旧无 release 的同内容快照升级时必须新建绑定真实 dataVersion 的 revision。"""
+    quote = _quote("BK0001")
+    old_version = uuid4()
+    new_version = uuid4()
+    existing = {
+        "snapshot_id": uuid4(),
+        "data_version": old_version,
+        "scheme": "eastmoney.industry",
+        "trade_date": date(2026, 7, 27),
+        "source_cutoff_at": datetime(2026, 7, 27, 8, 15, tzinfo=UTC),
+        "observed_at": datetime(2026, 7, 27, 8, 20, tzinfo=UTC),
+        "finality": "post_close_observation",
+        "quality_status": "warned",
+        "published_at": datetime(2026, 7, 27, 8, 20, tzinfo=UTC),
+        "normalizer_version": "sector-eod-v1",
+        "content_sha256": sector_eod_repository._snapshot_content_hash((quote,)),
+    }
+    engine = FakeEngine(
+        [
+            [{"sector_key": 1, "sector_code": "BK0001"}],
+            existing,
+            2,
+        ]
+    )
+    monkeypatch.setattr(
+        sector_eod_repository,
+        "record_source_observation",
+        _record_source_observation,
+    )
+    release_bridge = _release_bridge(data_version=new_version)
+    monkeypatch.setattr(sector_eod_repository, "publish_legacy_snapshot", release_bridge)
+
+    publication = _repository(engine).publish_snapshot(
+        scheme=SectorScheme.EASTMONEY_INDUSTRY,
+        trade_date=date(2026, 7, 27),
+        source_cutoff_at=datetime(2026, 7, 27, 8, 15, tzinfo=UTC),
+        observed_at=datetime(2026, 7, 27, 8, 20, tzinfo=UTC),
+        quotes=(quote,),
+        provider_id="test-provider",
+        source_payload_sha256="a" * 64,
+        raw_uri="s3://test/raw.json",
+        adapter_version="test-v1",
+        schema_fingerprint="b" * 64,
+        quality_status="warned",
+    )
+
+    assert publication.inserted is True
+    assert publication.snapshot.data_version == new_version
+    assert "INSERT INTO sector_eod_snapshot" in "\n".join(engine.connection.statements)
+    assert release_bridge.call_args.kwargs["quality_status"] == "warned"
+
+
+def _release_bridge(*, data_version: UUID, reused_publication: bool = False) -> Mock:
+    """返回正规 release 发布结果替身，使仓储测试验证 snapshot 与版本绑定。"""
+    return Mock(
+        return_value=PublishedCanonicalRelease(
+            release_id=uuid4(),
+            data_version=data_version,
+            reused_release=reused_publication,
+            reused_publication=reused_publication,
+            published_at=datetime(2026, 7, 27, 8, 20, tzinfo=UTC),
+        )
+    )
+
+
 def _repository(engine: FakeEngine) -> SqlAlchemySectorEodRepository:
     """将本地引擎替身适配为仓储需要的数据库客户端。"""
     return SqlAlchemySectorEodRepository(cast(DatabaseClient, FakeDatabase(engine.connection)))
+
+
+def _ignore_fenced_finalizer(_session: Session, _execution: FencedExecution) -> None:
+    """为仓储单测提供不写控制面状态的最小终态回调。"""
 
 
 def _statement_parameters(statement: object) -> object:

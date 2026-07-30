@@ -10,11 +10,13 @@ import pytest
 
 from service_data_sync.domain.stock_connect import (
     StockConnectActiveSecurity,
+    StockConnectChannel,
     StockConnectMarketDaily,
 )
 from service_data_sync.infrastructure.database.models.market import StockConnectDisclosureRegime
 from service_data_sync.infrastructure.persistence.stock_connect_market_data_repository import (
     _active_hash,
+    _resolve_active_instrument,
     _validate_regime_value,
 )
 
@@ -63,3 +65,48 @@ def test_active_hash_changes_when_bound_market_release_changes() -> None:
     second = _active_hash(value, instrument_id, uuid4())
 
     assert first != second
+
+
+class _EmptyScalarResult:
+    """模拟没有任何稳定身份候选的数据库结果。"""
+
+    def scalars(self) -> _EmptyScalarResult:
+        """返回自身以匹配 SQLAlchemy scalar result 链。"""
+        return self
+
+    def all(self) -> list[object]:
+        """返回真实空候选集合。"""
+        return []
+
+
+class _EmptyIdentitySession:
+    """仅实现身份解析测试需要的只读查询。"""
+
+    def execute(self, statement: object) -> _EmptyScalarResult:
+        """忽略已验证查询结构并返回空身份候选。"""
+        del statement
+        return _EmptyScalarResult()
+
+
+def test_recent_source_identity_gap_degrades_without_blocking_fact() -> None:
+    """近期港股主档缺件也应保留来源代码并返回空 entity，而不是阻断真实榜单事实。"""
+    value = StockConnectActiveSecurity(
+        source_instrument_code="00700",
+        source_instrument_name="腾讯控股",
+        trade_date=date.today(),
+        rank_no=1,
+        buy_amount=Decimal("120000"),
+        sell_amount=Decimal("110000"),
+        turnover_amount=Decimal("230000"),
+        currency="HKD",
+    )
+
+    resolved = _resolve_active_instrument(
+        _EmptyIdentitySession(),  # type: ignore[arg-type]
+        channel=StockConnectChannel("SH", "SOUTHBOUND"),
+        value=value,
+    )
+
+    assert resolved is None
+    assert value.source_instrument_code == "00700"
+    assert value.source_instrument_name == "腾讯控股"

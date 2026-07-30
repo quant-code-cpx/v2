@@ -149,7 +149,11 @@ def test_repository_reads_only_rows_pinned_by_release_manifest() -> None:
     repository = _repository(connection)
 
     sectors = repository.list_active_sectors(scheme=SectorScheme.EASTMONEY_INDUSTRY)
-    release = repository.get_release(scheme=SectorScheme.EASTMONEY_INDUSTRY, as_of=None)
+    release = repository.get_release(
+        scheme=SectorScheme.EASTMONEY_INDUSTRY,
+        as_of=None,
+        data_version=data_version,
+    )
     release_sector = repository.get_release_sector(
         release_id=release_id,
         identifier=sector.identifier,
@@ -161,10 +165,11 @@ def test_repository_reads_only_rows_pinned_by_release_manifest() -> None:
         after_symbol=None,
         limit=2,
     )
-    equity = repository.get_release_equity(
-        release_id=release_id,
+    equity = repository.resolve_equity_identity(
         exchange=Exchange.SSE,
         symbol="600000",
+        identity_as_of=date(1999, 11, 10),
+        known_at=timestamp,
     )
     memberships = repository.list_equity_memberships(
         release_id=release_id,
@@ -179,6 +184,12 @@ def test_repository_reads_only_rows_pinned_by_release_manifest() -> None:
     assert constituents[0].instrument_id == instrument_id
     assert equity is not None and equity.exchange is Exchange.SSE
     assert memberships[0].sector.identifier == sector.identifier
+    release_sql = str(connection.executions[1][0])
+    identity_sql = str(connection.executions[4][0])
+    assert "sector_membership_release.data_version =" in release_sql
+    assert "equity_identifier_version.effective_from <=" in identity_sql
+    assert "equity_identifier_version.known_from <=" in identity_sql
+    assert "sector_membership_release.release_as_of" not in identity_sql
 
 
 def test_publish_snapshot_advances_intervals_only_for_fully_verified_quality_pass(
@@ -503,6 +514,7 @@ def test_publish_release_warns_for_warned_component_and_pins_manifest(
     first_snapshot = _snapshot_row(date(2026, 7, 27), "passed")
     second_snapshot = _snapshot_row(date(2026, 7, 27), "warned")
     published: list[tuple[SectorScheme, str]] = []
+    timeline: list[str] = []
 
     def lock(*arguments: object, **keywords: object) -> None:
         """接受 scheme 级事务锁调用。"""
@@ -527,7 +539,12 @@ def test_publish_release_warns_for_warned_component_and_pins_manifest(
     def publish(*arguments: object, **keywords: object) -> None:
         """记录数据集指针写入时的 release 质量状态。"""
         del arguments
+        timeline.append("publication")
         published.append((cast(SectorScheme, keywords["scheme"]), str(keywords["quality_status"])))
+
+    def arm_terminal() -> None:
+        """记录控制面终态只在 reducer 已通过全部质量门后武装。"""
+        timeline.append("arm")
 
     monkeypatch.setattr(repository, "_lock_scheme", lock)
     monkeypatch.setattr(repository, "_active_sectors_on_connection", active)
@@ -538,12 +555,14 @@ def test_publish_release_warns_for_warned_component_and_pins_manifest(
     result = repository.publish_release(
         scheme=SectorScheme.EASTMONEY_INDUSTRY,
         observation_date=date(2026, 7, 27),
+        before_final_publication=arm_terminal,
     )
 
     assert result is not None
     assert result.quality_status == "warned"
     assert result.fresh_sector_count == 2
     assert published == [(SectorScheme.EASTMONEY_INDUSTRY, "warned")]
+    assert timeline == ["arm", "publication"]
     assert len(connection.executions) == 3
 
 

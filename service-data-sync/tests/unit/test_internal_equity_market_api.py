@@ -52,6 +52,13 @@ class FakeMarketRepository:
             name="贵州茅台",
             listing_status="LISTED",
         )
+        self.historical_instrument = StoredEquityInstrument(
+            security_id=2,
+            instrument_id=UUID("20000000-0000-4000-8000-000000000002"),
+            identifier=identifier,
+            name="历史公司",
+            listing_status="DELISTED",
+        )
         self.missing_dataset: str | None = None
         self.identity_conflict = False
         self.identity_requests: list[tuple[date | None, date | None]] = []
@@ -74,7 +81,11 @@ class FakeMarketRepository:
         self.identity_requests.append((fact_start, fact_end))
         if self.identity_conflict:
             raise EquityIdentityReadConflictError("test identity boundary")
-        return self.instrument if identifier == self.instrument.identifier else None
+        if identifier != self.instrument.identifier:
+            return None
+        if fact_start is not None and fact_start == fact_end and fact_start < date(2024, 1, 1):
+            return self.historical_instrument
+        return self.instrument
 
     def get_current_publication(
         self,
@@ -83,7 +94,7 @@ class FakeMarketRepository:
         instrument: StoredEquityInstrument,
     ) -> EquityDatasetPublication | None:
         """按数据集返回当前发布，并验证永久证券分区。"""
-        assert instrument.security_id == 1
+        assert instrument.security_id in {1, 2}
         return None if dataset == self.missing_dataset else self.publications.get(dataset)
 
     def get_daily_bar_availability(
@@ -105,10 +116,12 @@ class FakeMarketRepository:
         period: EquityBarPeriod,
         start: date,
         end: date,
+        known_at: datetime | None = None,
     ) -> tuple[StoredEquityBar, ...]:
         """返回窗口内两条上游原生周线。"""
         assert security_id == 1
         assert period is EquityBarPeriod.WEEK_1
+        assert known_at == self.publications["equity.bar.1w.raw"].published_at
         rows = (
             _stored_weekly_bar(date(2025, 12, 26), Decimal("10")),
             _stored_weekly_bar(date(2026, 7, 24), Decimal("20")),
@@ -122,9 +135,11 @@ class FakeMarketRepository:
         *,
         security_id: int,
         end: date,
+        known_at: datetime | None = None,
     ) -> tuple[StoredAdjustmentFactor, ...]:
         """返回截止锚点前的稀疏累计因子。"""
         assert security_id == 1
+        assert known_at == self.publications["equity.adjustment_factor"].published_at
         rows = (
             StoredAdjustmentFactor(
                 factor=EquityAdjustmentFactor(
@@ -151,10 +166,12 @@ class FakeMarketRepository:
         security_id: int,
         start: date | None,
         end: date | None,
+        known_at: datetime | None = None,
     ) -> tuple[StoredCorporateAction, ...]:
         """返回一条实施完成的现金分红事件。"""
         del start, end
         assert security_id == 1
+        assert known_at == self.publications["equity.corporate_action"].published_at
         return (
             StoredCorporateAction(
                 action_id=UUID("30000000-0000-4000-8000-000000000001"),
@@ -173,12 +190,20 @@ class FakeMarketRepository:
             ),
         )
 
-    def get_company_profile(self, *, security_id: int) -> StoredCompanyProfile | None:
+    def get_company_profile(
+        self,
+        *,
+        security_id: int,
+        known_at: datetime | None = None,
+    ) -> StoredCompanyProfile | None:
         """返回当前公司概况。"""
-        assert security_id == 1
+        assert security_id in {1, 2}
+        assert known_at == self.publications["equity.profile"].published_at
         return StoredCompanyProfile(
             profile=EquityCompanyProfile(
-                company_name="贵州茅台酒股份有限公司",
+                company_name=(
+                    "贵州茅台酒股份有限公司" if security_id == 1 else "历史公司股份有限公司"
+                ),
                 english_name=None,
                 industry="白酒",
                 legal_representative=None,
@@ -204,7 +229,8 @@ def test_bars_use_direct_weekly_rows_adjustment_and_conditional_etag(
     client, headers, repository = _client()
     endpoint = (
         "/internal/v1/equities/SSE/600519/bars"
-        "?period=1w&start=2025-01-01&end=2026-07-28&adjust=qfq&limit=10"
+        f"?period=1w&start=2025-01-01&end=2026-07-28&adjust=qfq&limit=10"
+        f"&dataVersion={_BAR_VERSION}&factorDataVersion={_FACTOR_VERSION}"
     )
 
     response = client.get(endpoint, headers=headers)
@@ -236,7 +262,8 @@ def test_bar_pages_use_signed_cursor_bound_to_snapshot_and_query(
     del configured_environment
     client, headers, repository = _client()
     endpoint = (
-        "/internal/v1/equities/SSE/600519/bars?period=1w&start=2025-01-01&end=2026-07-28&limit=1"
+        "/internal/v1/equities/SSE/600519/bars"
+        f"?period=1w&start=2025-01-01&end=2026-07-28&limit=1&dataVersion={_BAR_VERSION}"
     )
 
     first = client.get(endpoint, headers=headers)
@@ -246,7 +273,8 @@ def test_bar_pages_use_signed_cursor_bound_to_snapshot_and_query(
     changed_query = client.get(
         (
             "/internal/v1/equities/SSE/600519/bars"
-            f"?period=1w&start=2026-01-01&end=2026-07-28&limit=1&cursor={cursor}"
+            f"?period=1w&start=2026-01-01&end=2026-07-28&limit=1"
+            f"&dataVersion={_BAR_VERSION}&cursor={cursor}"
         ),
         headers=headers,
     )
@@ -269,15 +297,16 @@ def test_factor_action_and_profile_routes_return_published_contracts(
     client, headers, repository = _client()
 
     factors = client.get(
-        "/internal/v1/equities/SSE/600519/adjustment-factors?end=2026-07-28",
+        "/internal/v1/equities/SSE/600519/adjustment-factors"
+        f"?end=2026-07-28&dataVersion={_FACTOR_VERSION}",
         headers=headers,
     )
     actions = client.get(
-        "/internal/v1/equities/SSE/600519/corporate-actions",
+        f"/internal/v1/equities/SSE/600519/corporate-actions?dataVersion={_ACTION_VERSION}",
         headers=headers,
     )
     profile = client.get(
-        "/internal/v1/equities/SSE/600519/company-profile",
+        f"/internal/v1/equities/SSE/600519/company-profile?dataVersion={_PROFILE_VERSION}",
         headers=headers,
     )
 
@@ -295,6 +324,44 @@ def test_factor_action_and_profile_routes_return_published_contracts(
     assert profile_window[0] is not None and profile_window[0] == profile_window[1]
 
 
+def test_company_profile_as_of_resolves_code_reuse_and_binds_representation(
+    configured_environment: None,
+) -> None:
+    """同代码历史与当前身份必须按 `asOf` 分流，且日期选择进入正文和强 ETag。"""
+    del configured_environment
+    client, headers, repository = _client()
+    endpoint = f"/internal/v1/equities/SSE/600519/company-profile?dataVersion={_PROFILE_VERSION}"
+
+    historical = client.get(f"{endpoint}&asOf=2020-01-02", headers=headers)
+    current_first = client.get(f"{endpoint}&asOf=2026-07-29", headers=headers)
+    current_second = client.get(
+        f"{endpoint}&asOf=2026-07-30",
+        headers={**headers, "If-None-Match": current_first.headers["etag"]},
+    )
+    historical_not_modified = client.get(
+        f"{endpoint}&asOf=2020-01-02",
+        headers={**headers, "If-None-Match": historical.headers["etag"]},
+    )
+
+    assert historical.status_code == 200
+    assert historical.json()["identityAsOf"] == "2020-01-02"
+    assert historical.json()["profile"]["companyName"] == "历史公司股份有限公司"
+    assert current_first.status_code == 200
+    assert current_first.json()["profile"]["companyName"] == "贵州茅台酒股份有限公司"
+    assert current_second.status_code == 200
+    assert current_second.json()["identityAsOf"] == "2026-07-30"
+    assert current_second.headers["etag"] != current_first.headers["etag"]
+    assert historical.headers["etag"] != current_first.headers["etag"]
+    assert historical_not_modified.status_code == 304
+    assert historical_not_modified.headers["x-data-version"] == str(_PROFILE_VERSION)
+    assert repository.identity_requests == [
+        (date(2020, 1, 2), date(2020, 1, 2)),
+        (date(2026, 7, 29), date(2026, 7, 29)),
+        (date(2026, 7, 30), date(2026, 7, 30)),
+        (date(2020, 1, 2), date(2020, 1, 2)),
+    ]
+
+
 def test_market_routes_reject_identity_windows_crossing_code_reuse(
     configured_environment: None,
 ) -> None:
@@ -304,7 +371,8 @@ def test_market_routes_reject_identity_windows_crossing_code_reuse(
     repository.identity_conflict = True
 
     response = client.get(
-        "/internal/v1/equities/SSE/600519/bars?period=1w&start=2020-01-01&end=2026-07-28",
+        "/internal/v1/equities/SSE/600519/bars"
+        f"?period=1w&start=2020-01-01&end=2026-07-28&dataVersion={_BAR_VERSION}",
         headers=headers,
     )
 
@@ -312,54 +380,56 @@ def test_market_routes_reject_identity_windows_crossing_code_reuse(
     assert response.json()["code"] == "identity-boundary-conflict"
 
 
-def test_market_routes_fail_closed_for_auth_validation_and_missing_publication(
+def test_market_routes_fail_closed_for_auth_validation_and_expired_publication(
     configured_environment: None,
 ) -> None:
-    """内部凭据、倒置日期和缺 publication 分别返回 401、400、503。"""
+    """内部凭据、倒置日期和已切换 publication 分别返回 401、400、409。"""
     del configured_environment
     client, headers, repository = _client()
     missing_auth = client.get(
         "/internal/v1/equities/SSE/600519/company-profile",
     )
     bad_range = client.get(
-        "/internal/v1/equities/SSE/600519/bars?period=1w&start=2026-07-28&end=2026-01-01",
+        "/internal/v1/equities/SSE/600519/bars"
+        f"?period=1w&start=2026-07-28&end=2026-01-01&dataVersion={_BAR_VERSION}",
         headers=headers,
     )
     repository.missing_dataset = "equity.bar.1w.raw"
     unpublished = client.get(
-        "/internal/v1/equities/SSE/600519/bars?period=1w&start=2026-01-01&end=2026-07-28",
+        "/internal/v1/equities/SSE/600519/bars"
+        f"?period=1w&start=2026-01-01&end=2026-07-28&dataVersion={_BAR_VERSION}",
         headers=headers,
     )
 
     assert missing_auth.status_code == 401
     assert bad_range.status_code == 400
-    assert unpublished.status_code == 503
-    assert unpublished.headers["retry-after"] == "5"
+    assert unpublished.status_code == 409
+    assert unpublished.json()["code"] == "snapshot-expired"
 
 
-def test_market_routes_return_successful_empty_page_for_recorded_availability(
+def test_market_routes_bind_recorded_empty_window_to_expected_publication(
     configured_environment: None,
 ) -> None:
-    """首次 publication 尚未建立时，可用性观测必须被 API 映射为空页而非 503。"""
+    """合法空窗口必须仍绑定调用方指定的当前 publication。"""
     del configured_environment
     client, headers, repository = _client()
-    repository.missing_dataset = "equity.bar.1w.raw"
     repository.availability = EquityAvailabilityObservation(
-        availability="source_unavailable",
-        reason_code="unavailable",
+        availability="empty",
+        reason_code="no_session",
         observed_at=datetime(2026, 7, 29, 12, tzinfo=UTC),
     )
 
     response = client.get(
-        "/internal/v1/equities/SSE/600519/bars?period=1w&start=2026-01-01&end=2026-07-28",
+        "/internal/v1/equities/SSE/600519/bars"
+        f"?period=1w&start=2026-01-01&end=2026-07-28&dataVersion={_BAR_VERSION}",
         headers=headers,
     )
 
     assert response.status_code == 200
-    assert response.json()["availability"] == "SOURCE_UNAVAILABLE"
-    assert response.json()["dataVersion"] is None
+    assert response.json()["availability"] == "EMPTY"
+    assert response.json()["dataVersion"] == str(_BAR_VERSION)
     assert response.json()["items"] == []
-    assert "x-data-version" not in response.headers
+    assert response.headers["x-data-version"] == str(_BAR_VERSION)
 
 
 def test_market_routes_keep_last_publication_when_source_becomes_unavailable(
@@ -375,7 +445,8 @@ def test_market_routes_keep_last_publication_when_source_becomes_unavailable(
     )
 
     response = client.get(
-        "/internal/v1/equities/SSE/600519/bars?period=1w&start=2026-01-01&end=2026-07-28",
+        "/internal/v1/equities/SSE/600519/bars"
+        f"?period=1w&start=2026-01-01&end=2026-07-28&dataVersion={_BAR_VERSION}",
         headers=headers,
     )
 
@@ -383,6 +454,32 @@ def test_market_routes_keep_last_publication_when_source_becomes_unavailable(
     assert response.json()["availability"] == "SOURCE_UNAVAILABLE"
     assert response.json()["stale"] is True
     assert response.json()["dataVersion"] == str(_BAR_VERSION)
+
+
+def test_market_routes_reject_mismatched_bar_and_factor_versions(
+    configured_environment: None,
+) -> None:
+    """行情与复权因子任一版本漂移都必须稳定返回 `snapshot-expired`。"""
+    del configured_environment
+    client, headers, _repository = _client()
+    wrong_version = UUID("10000000-0000-4000-8000-000000000099")
+
+    wrong_bar = client.get(
+        "/internal/v1/equities/SSE/600519/bars"
+        f"?period=1w&start=2026-01-01&end=2026-07-28&dataVersion={wrong_version}",
+        headers=headers,
+    )
+    wrong_factor = client.get(
+        "/internal/v1/equities/SSE/600519/bars"
+        f"?period=1w&start=2026-01-01&end=2026-07-28&adjust=qfq"
+        f"&dataVersion={_BAR_VERSION}&factorDataVersion={wrong_version}",
+        headers=headers,
+    )
+
+    assert wrong_bar.status_code == 409
+    assert wrong_bar.json()["code"] == "snapshot-expired"
+    assert wrong_factor.status_code == 409
+    assert wrong_factor.json()["code"] == "snapshot-expired"
 
 
 def _client() -> tuple[TestClient, dict[str, str], FakeMarketRepository]:

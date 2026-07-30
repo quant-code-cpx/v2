@@ -127,6 +127,17 @@ describe("auth session", () => {
     expect(authSession.getSnapshot().status).toBe("anonymous");
   });
 
+  /** 清理会话时移除 ETF typed market-data 缓存，避免受保护数据跨账号残留。 */
+  it("clears protected ETF market-data queries with the session", () => {
+    queryClient.setQueryData(["market-data", "etf", "profiles"], { records: ["protected"] });
+    queryClient.setQueryData(["public-reference"], { value: "retained" });
+
+    authSession.clear();
+
+    expect(queryClient.getQueryData(["market-data", "etf", "profiles"])).toBeUndefined();
+    expect(queryClient.getQueryData(["public-reference"])).toEqual({ value: "retained" });
+  });
+
   /** 上抛 refresh 403，同时保留非敏感身份与用户缓存状态。 */
   it("reports refresh 403 while retaining cached identity", async () => {
     const retainedUser = currentUserPayload();

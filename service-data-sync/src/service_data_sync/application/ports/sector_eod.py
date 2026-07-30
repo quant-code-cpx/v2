@@ -244,12 +244,6 @@ class SectorEodRepository(Protocol):
         """读取最新或精确交易日的 published 快照，绝不回退指定日期。"""
         ...
 
-    def rollback_published_snapshot(
-        self, *, scheme: SectorScheme, trade_date: date, revision: int
-    ) -> SectorEodSnapshot:
-        """将当前 consumer publication 原子指回指定已 superseded 的通过版本，不删除任何证据。"""
-        ...
-
     def list_ranked_quotes(
         self,
         *,

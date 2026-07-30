@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 
@@ -38,6 +38,9 @@ class StockConnectMarketDaily:
     quota_balance: Decimal | None
     currency: str
     availability_status: str
+    trade_count: int | None = None
+    etf_turnover_amount: Decimal | None = None
+    field_availability: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         """校验金额边界和披露状态，净买允许负值而成交、买卖和额度不能为负。"""
@@ -46,6 +49,7 @@ class StockConnectMarketDaily:
             self.sell_amount,
             self.turnover_amount,
             self.quota_balance,
+            self.etf_turnover_amount,
         )
         if any(
             value is not None and (not value.is_finite() or value < 0) for value in non_negative
@@ -69,9 +73,23 @@ class StockConnectMarketDaily:
                 self.turnover_amount,
                 self.net_buy_amount,
                 self.quota_balance,
+                self.trade_count,
+                self.etf_turnover_amount,
             )
         ):
             raise ValueError("unavailable stock-connect disclosure must not contain amounts")
+        if self.trade_count is not None and self.trade_count < 0:
+            raise ValueError("stock-connect trade count must be non-negative")
+        availability = dict(self.field_availability)
+        if len(availability) != len(self.field_availability):
+            raise ValueError("stock-connect field availability contains duplicate fields")
+        if not set(availability.values()) <= {
+            "REPORTED",
+            "NOT_DISCLOSED_BY_REGIME",
+            "SOURCE_MISSING",
+            "NOT_APPLICABLE",
+        }:
+            raise ValueError("stock-connect field availability is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +103,8 @@ class StockConnectActiveSecurity:
     sell_amount: Decimal | None
     turnover_amount: Decimal | None
     currency: str
+    source_instrument_name: str | None = None
+    field_availability: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         """校验排行榜粒度与金额，不能以证券代码跨市场静默合并或把缺失额填零。"""
@@ -105,3 +125,113 @@ class StockConnectActiveSecurity:
             or not self.currency.isascii()
         ):
             raise ValueError("stock-connect active security currency must be an ISO uppercase code")
+        if self.source_instrument_name is not None and not self.source_instrument_name.strip():
+            raise ValueError("stock-connect active security source name must not be blank")
+        availability = dict(self.field_availability)
+        if len(availability) != len(self.field_availability):
+            raise ValueError("stock-connect active availability contains duplicate fields")
+        if not set(availability.values()) <= {
+            "REPORTED",
+            "NOT_DISCLOSED_BY_REGIME",
+            "SOURCE_MISSING",
+            "NOT_APPLICABLE",
+        }:
+            raise ValueError("stock-connect active availability is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class StockConnectCalendarDay:
+    """表示 HKEX 官方互联互通日历的一天，不用工作日规则推测开闭市。"""
+
+    calendar_date: date
+    northbound_trading: bool
+    southbound_trading: bool
+    hong_kong_state: str
+    mainland_state: str
+
+
+@dataclass(frozen=True, slots=True)
+class StockConnectInstrumentMaster:
+    """表示 HKEX Securities Master 中可用于解析港股通事实的最小证券身份。"""
+
+    source_security_id: str | None
+    source_instrument_code: str
+    display_name: str
+    effective_from: date
+
+    def __post_init__(self) -> None:
+        """校验官方稳定 ID、代码和名称；稳定 ID 缺失时保留可降级记录。"""
+        if self.source_security_id is not None and (
+            self.source_security_id != self.source_security_id.strip()
+            or not 1 <= len(self.source_security_id) <= 64
+        ):
+            raise ValueError("HKEX source security id is invalid")
+        if (
+            not self.source_instrument_code.isdigit()
+            or not 1 <= len(self.source_instrument_code) <= 6
+        ):
+            raise ValueError("HKEX instrument code is invalid")
+        if not self.display_name.strip():
+            raise ValueError("HKEX instrument name must not be blank")
+
+
+@dataclass(frozen=True, slots=True)
+class StockConnectChannelStatus:
+    """表示一个通道方向的官方日终状态与 CNY 额度事实。"""
+
+    trade_date: date
+    channel: str
+    direction: str
+    trading_day: bool
+    session_state: str
+    session_availability: str
+    buy_order_accepted: bool | None
+    sell_order_accepted: bool | None
+    quota_state: str
+    quota_balance: Decimal | None
+    quota_currency: str
+    observed_at: datetime
+    source_code: str
+    product_name: str
+    source_publication_at: datetime | None
+    source_file_sha256: str | None
+
+    def __post_init__(self) -> None:
+        """校验日终状态、额度和来源时间，禁止把“额度充足”的空余额写成零。"""
+        StockConnectChannel(channel=self.channel, direction=self.direction)
+        if self.session_state not in {"OPEN", "CLOSED", "HALTED", "NOT_OPEN", "UNKNOWN"}:
+            raise ValueError("stock-connect session state is invalid")
+        if self.session_availability not in {"DERIVED", "REPORTED", "SOURCE_MISSING"}:
+            raise ValueError("stock-connect session availability is invalid")
+        if self.session_availability == "SOURCE_MISSING" and self.session_state != "UNKNOWN":
+            raise ValueError("missing stock-connect session evidence requires UNKNOWN")
+        if self.quota_state not in {
+            "SUFFICIENT",
+            "ACTUAL_REPORTED",
+            "EXHAUSTED",
+            "NOT_APPLICABLE",
+            "SOURCE_MISSING",
+        }:
+            raise ValueError("stock-connect quota state is invalid")
+        if self.quota_balance is not None and (
+            not self.quota_balance.is_finite() or self.quota_balance < 0
+        ):
+            raise ValueError("stock-connect quota balance must be finite and non-negative")
+        if self.quota_currency != "CNY":
+            raise ValueError("stock-connect quota currency must be CNY")
+        if self.quota_state == "ACTUAL_REPORTED" and self.quota_balance is None:
+            raise ValueError("actual stock-connect quota requires a balance")
+        if self.quota_state == "EXHAUSTED" and self.quota_balance != Decimal("0"):
+            raise ValueError("exhausted stock-connect quota must be zero")
+        if self.quota_state in {"SUFFICIENT", "NOT_APPLICABLE", "SOURCE_MISSING"} and (
+            self.quota_balance is not None
+        ):
+            raise ValueError("non-numeric stock-connect quota state must not contain a balance")
+        if self.observed_at.tzinfo is None or (
+            self.source_publication_at is not None and self.source_publication_at.tzinfo is None
+        ):
+            raise ValueError("stock-connect status timestamps must include timezone")
+        if self.source_file_sha256 is not None and self.source_publication_at is None:
+            raise ValueError("stock-connect status source digest requires publication time")
+        if self.source_file_sha256 is not None and len(self.source_file_sha256) != 64:
+            raise ValueError("stock-connect status source digest is invalid")

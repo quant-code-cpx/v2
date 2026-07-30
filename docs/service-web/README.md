@@ -36,3 +36,6 @@ reduced-motion 均须覆盖。
 - [0004：React 页面架构与静默 Token 刷新方案](0004-react-page-architecture-and-silent-token-refresh/index.html) — Implemented
 - [0005：个人中心、安全审计与平台工作台方案](0005-account-security-and-workspace/index.html) — Implemented
 - [0006：数据运维工作台方案](0006-data-operations-console/index.html) — Proposed
+- [0010：沪深港通与跨境互联互通中心](0010-stock-connect-center/index.html) — Proposed；
+  同目录同时给出 service-data-sync、service-api、service-web 三服务可评审方案、双层契约链接与
+  1440×900 桌面原型。

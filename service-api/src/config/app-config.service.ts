@@ -138,14 +138,72 @@ export class AppConfigService {
     return this.config.getOrThrow('DATA_SYNC_INTERNAL_BASE_URL', { infer: true });
   }
 
-  /** 返回仅用于 API 服务到同步服务的独立 Bearer 凭据。 */
+  /** 返回既有内部 API 的服务身份；数据运维不能复用该凭据。 */
   public get dataSyncInternalBearerToken(): string {
-    return this.config.getOrThrow('DATA_SYNC_INTERNAL_BEARER_TOKEN', { infer: true });
+    return this.config.getOrThrow('DATA_SYNC_INTERNAL_API_BEARER_TOKEN', { infer: true });
+  }
+
+  /** 返回只允许查询 0022 数据运维资源的最小权限服务身份。 */
+  public get dataSyncInternalReadApiBearerToken(): string {
+    return this.config.getOrThrow('DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN', { infer: true });
+  }
+
+  /** 返回只允许投递 0022 数据运维写操作的最小权限服务身份。 */
+  public get dataSyncInternalOperationsApiBearerToken(): string {
+    return this.config.getOrThrow('DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN', {
+      infer: true,
+    });
   }
 
   /** 返回下游内部读取请求的有界超时毫秒数。 */
   public get dataSyncInternalRequestTimeoutMs(): number {
     return this.config.getOrThrow('DATA_SYNC_INTERNAL_REQUEST_TIMEOUT_MS', { infer: true });
+  }
+
+  /** 返回全窗 Provider 预检专用的单次内部请求总预算。 */
+  public get dataSyncInternalPreflightTimeoutMs(): number {
+    return this.config.getOrThrow('DATA_SYNC_INTERNAL_PREFLIGHT_TIMEOUT_MS', { infer: true });
+  }
+
+  /** 返回沪深港通公开路由是否已完成真实链路验收并允许启用。 */
+  public get stockConnectApiEnabled(): boolean {
+    return this.config.getOrThrow('STOCK_CONNECT_API_ENABLED', { infer: true });
+  }
+
+  /** 返回沪深港通内部 API 基地址；未拆分部署时复用统一 data-sync 地址。 */
+  public get dataSyncStockConnectBaseUrl(): string {
+    return (
+      this.config.get('DATA_SYNC_STOCK_CONNECT_BASE_URL', { infer: true }) ??
+      this.dataSyncInternalBaseUrl
+    );
+  }
+
+  /** 返回沪深港通最小只读服务身份；未单独配置时复用内部只读身份。 */
+  public get dataSyncStockConnectBearerToken(): string {
+    return (
+      this.config.get('DATA_SYNC_STOCK_CONNECT_API_BEARER_TOKEN', { infer: true }) ??
+      this.dataSyncInternalReadApiBearerToken
+    );
+  }
+
+  /** 返回互联互通内部读取的单次逻辑请求总预算。 */
+  public get dataSyncStockConnectTimeoutMs(): number {
+    return this.config.getOrThrow('DATA_SYNC_STOCK_CONNECT_TIMEOUT_MS', { infer: true });
+  }
+
+  /** 返回一个连续故障窗口内打开互联互通断路器的失败阈值。 */
+  public get dataSyncStockConnectCircuitFailures(): number {
+    return this.config.getOrThrow('DATA_SYNC_STOCK_CONNECT_CIRCUIT_FAILURES', { infer: true });
+  }
+
+  /** 返回互联互通断路器统计连续失败的时间窗口。 */
+  public get dataSyncStockConnectCircuitWindowMs(): number {
+    return this.config.getOrThrow('DATA_SYNC_STOCK_CONNECT_CIRCUIT_WINDOW_MS', { infer: true });
+  }
+
+  /** 返回互联互通断路器打开后拒绝普通流量的冷却时间。 */
+  public get dataSyncStockConnectCircuitOpenMs(): number {
+    return this.config.getOrThrow('DATA_SYNC_STOCK_CONNECT_CIRCUIT_OPEN_MS', { infer: true });
   }
 
   /** Return optional one-time super-administrator account from deployment configuration. */

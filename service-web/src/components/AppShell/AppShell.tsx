@@ -54,7 +54,7 @@ export function AppShell() {
         bgcolor: "background.default",
       }}
     >
-      <AppSidebar pathname={location.pathname} hasPermission={hasPermission} />
+      <AppSidebar pathname={location.pathname} role={user.role} hasPermission={hasPermission} />
       <Box
         sx={{
           minWidth: 0,

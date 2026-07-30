@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -31,6 +32,7 @@ from service_data_sync.domain.etf import EtfIdentifier, EtfNav
 _CAPABILITY = "fund.etf.nav.1d.reported"
 _DATASET = "fund.etf.nav.1d.reported"
 _SCHEMA = "quant-v2.etf-nav.v1"
+_UNSUPPORTED_NAV_REASON = "NAV_SEMANTICS_UNSUPPORTED_MONEY_MARKET"
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +44,8 @@ class EtfNavSyncResult:
     inserted_count: int
     unchanged_count: int
     availability: str = "available"
+    reason_code: str | None = None
+    retryable: bool = False
 
 
 class EtfNavSyncService:
@@ -61,7 +65,14 @@ class EtfNavSyncService:
         self._raw_payload_store = raw_payload_store
         self._availability_repository = availability_repository
 
-    async def sync(self, *, etf: EtfIdentifier, start: date, end: date) -> EtfNavSyncResult:
+    async def sync(
+        self,
+        *,
+        etf: EtfIdentifier,
+        start: date,
+        end: date,
+        before_final_publication: Callable[[], None] | None = None,
+    ) -> EtfNavSyncResult:
         """同步包含边界的 NAV 窗口；来源不可用或合法空集按成功空结果返回。"""
         if start > end:
             raise ValueError("start must not be after end")
@@ -87,6 +98,14 @@ class EtfNavSyncService:
                 )
             )
         except ProviderError as error:
+            if error.code is ProviderErrorCode.CURRENTLY_UNSUPPORTED:
+                return self.mark_currently_unsupported(
+                    etf=etf,
+                    start=start,
+                    end=end,
+                    reason_code=_UNSUPPORTED_NAV_REASON,
+                    observed_at=datetime.now(UTC),
+                )
             if error.code not in {
                 ProviderErrorCode.UNAVAILABLE,
                 ProviderErrorCode.RATE_LIMITED,
@@ -100,6 +119,7 @@ class EtfNavSyncService:
                 end=end,
                 availability="source_unavailable",
                 reason_code=error.code.value,
+                retryable=error.retryable,
                 provider_id=self._source.provider_id,
                 observed_at=datetime.now(UTC),
             )
@@ -114,6 +134,8 @@ class EtfNavSyncService:
                 provider_id=batch.provider_id,
                 observed_at=batch.observed_at,
             )
+        if before_final_publication is not None:
+            before_final_publication()
         published = self._repository.publish_navs(
             etf=etf,
             navs=navs,
@@ -140,6 +162,7 @@ class EtfNavSyncService:
         end: date,
         availability: str,
         reason_code: str,
+        retryable: bool = False,
         provider_id: str | None,
         observed_at: datetime,
     ) -> EtfNavSyncResult:
@@ -152,6 +175,9 @@ class EtfNavSyncService:
                 reason_code=reason_code,
                 provider_id=provider_id,
                 observed_at=observed_at,
+                entity_partition=f"etf:{etf.qualified_key}",
+                coverage_from=start,
+                coverage_to=end,
             )
         return EtfNavSyncResult(
             etf=etf,
@@ -159,6 +185,28 @@ class EtfNavSyncService:
             inserted_count=0,
             unchanged_count=0,
             availability=availability,
+            reason_code=reason_code,
+            retryable=retryable,
+        )
+
+    def mark_currently_unsupported(
+        self,
+        *,
+        etf: EtfIdentifier,
+        start: date,
+        end: date,
+        reason_code: str = _UNSUPPORTED_NAV_REASON,
+        observed_at: datetime | None = None,
+    ) -> EtfNavSyncResult:
+        """记录来源明确属于收益口径的 ETF，不能把万份收益或七日年化伪装成单位 NAV。"""
+        return self._availability_result(
+            etf=etf,
+            start=start,
+            end=end,
+            availability="currently_unsupported",
+            reason_code=reason_code,
+            provider_id=self._source.provider_id,
+            observed_at=observed_at or datetime.now(UTC),
         )
 
 

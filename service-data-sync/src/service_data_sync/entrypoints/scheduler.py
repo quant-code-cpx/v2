@@ -22,8 +22,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     settings = load_settings()
     configure_logging(settings, process_role="scheduler")
     app = create_worker_app(settings)
-    # 只添加 Celery 子命令和服务配置；额外参数由运维显式传入，便于复现实例行为。
-    scheduler_arguments = ["beat", f"--loglevel={settings.log_level.lower()}"]
+    # `beat` 的状态可从权威命令重建，固定写入 tmpfs 才能兼容容器只读根文件系统。
+    scheduler_arguments = [
+        "beat",
+        f"--loglevel={settings.log_level.lower()}",
+        "--schedule=/tmp/celerybeat-schedule",
+    ]
     if argv is not None:
         scheduler_arguments.extend(argv)
     app.start(scheduler_arguments)

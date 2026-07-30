@@ -7,10 +7,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Protocol
 from uuid import UUID
 
+from service_data_sync.domain.equity import EquityIdentifier
 from service_data_sync.domain.trading_events import BlockTrade, DragonTigerEvent
 
 
@@ -41,6 +42,7 @@ class PublishedTradingEvents:
     data_version: UUID
     inserted_count: int
     unchanged_count: int
+    excluded_count: int = 0
 
 
 class DragonTigerRepository(Protocol):
@@ -51,8 +53,11 @@ class DragonTigerRepository(Protocol):
         *,
         events: Sequence[DragonTigerEvent],
         source: TradingEventsSourceObservation,
+        start: date,
+        end: date,
+        identifier: EquityIdentifier | None = None,
     ) -> PublishedTradingEvents:
-        """发布一个有界龙虎榜窗口，禁止将机构聚合或事后排行混入原始事件。"""
+        """发布有界龙虎榜窗口及逐证券覆盖；合法空窗同样产生零记录 manifest。"""
         ...
 
 
@@ -64,6 +69,9 @@ class BlockTradeRepository(Protocol):
         *,
         trades: Sequence[BlockTrade],
         source: TradingEventsSourceObservation,
+        start: date,
+        end: date,
+        identifier: EquityIdentifier | None = None,
     ) -> PublishedTradingEvents:
-        """发布大宗逐笔成交，保留同经济字段但 occurrence 不同的合法重复成交。"""
+        """发布大宗逐笔窗口及逐证券覆盖；单证券任务必须同时约束交易所身份。"""
         ...

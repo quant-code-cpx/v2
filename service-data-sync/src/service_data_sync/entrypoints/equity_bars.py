@@ -1,37 +1,31 @@
-"""用于同步 A 股上游直取日、周、月未复权行情的有界运维 CLI。
+"""提交 A 股日、周、月未复权行情 command 的兼容运维 CLI。
 
-三种周期各自请求并写入独立 canonical 数据集，周/月线绝不由日线聚合生成；日期窗口
-和证券身份均由调用方明确给出，便于回填、重跑与来源异常排查。
+CLI 只把明确证券、周期与日期窗口转换为严格 selector 和 SyncTarget；实际抓取、发布、
+checkpoint 与终态均由统一 dispatcher 在 PostgreSQL fencing 边界内完成。
 """
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 from collections.abc import Sequence
 from datetime import date, timedelta
 
-from service_data_sync.application.equity.daily_bar_sync import EquityDailyBarSyncService
-from service_data_sync.application.equity.market_extension_sync import EquityPeriodBarSyncService
 from service_data_sync.bootstrap.container import build_container
 from service_data_sync.bootstrap.logging import configure_logging
 from service_data_sync.bootstrap.settings import load_settings
 from service_data_sync.domain.equity import EquityBarPeriod, EquityIdentifier
-from service_data_sync.infrastructure.object_storage.raw_payload_store import (
-    FailureEvidenceDataSource,
-    S3RawPayloadStore,
-    retain_failure_evidence,
+from service_data_sync.infrastructure.data_operations.control_plane import (
+    DataOperationsControlPlane,
+    build_catalog,
 )
-from service_data_sync.infrastructure.persistence.equity_market_data_repository import (
-    SqlAlchemyEquityMarketDataRepository,
-)
+from service_data_sync.infrastructure.data_operations.legacy_submission import submit_system_command
 
 _HISTORY_START = date(1990, 12, 19)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """同步一只证券的包含端日期窗口；可显式执行首轮完整历史回填。"""
+    """提交一只证券的 command；可显式请求首轮完整历史回填但不在当前进程执行。"""
     arguments = _parse_args(argv)
     identifier = EquityIdentifier.parse(arguments.instrument)
     period = EquityBarPeriod(arguments.period)
@@ -51,48 +45,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(settings, process_role="equity-bars-cli")
     container = build_container(settings)
     try:
-        sources = container.source_registry.for_capability(period.capability)
-        # 一次运行使用多个供应商会使同一发布版本的来源归属不明确。
-        if len(sources) != 1:
-            raise SystemExit("exactly one approved provider must be enabled for the period")
-        repository = SqlAlchemyEquityMarketDataRepository(container.database)
-        raw_payload_store = S3RawPayloadStore(container.object_storage)
-        if period is EquityBarPeriod.DAY_1:
-            result = retain_failure_evidence(
-                raw_payload_store,
-                # 同一执行边界仅在同步异常时将暂存来源字节固化为排障证据。
-                lambda: asyncio.run(
-                    EquityDailyBarSyncService(
-                        source=FailureEvidenceDataSource(sources[0], raw_payload_store),
-                        repository=repository,
-                        raw_payload_store=raw_payload_store,
-                    ).sync(identifier=identifier, start=start, end=end)
-                ),
-            )
-        else:
-            result = retain_failure_evidence(
-                raw_payload_store,
-                # 同一执行边界仅在同步异常时将暂存来源字节固化为排障证据。
-                lambda: asyncio.run(
-                    EquityPeriodBarSyncService(
-                        source=FailureEvidenceDataSource(sources[0], raw_payload_store),
-                        repository=repository,
-                        raw_payload_store=raw_payload_store,
-                    ).sync(identifier=identifier, period=period, start=start, end=end)
-                ),
-            )
+        control_plane = DataOperationsControlPlane(
+            database=container.database,
+            catalog=build_catalog(settings, container.source_registry),
+            source_registry=container.source_registry,
+            trading_calendar=container.trading_calendar,
+        )
+        target = {
+            "datasetCode": period.capability,
+            "mode": "FULL" if arguments.full_history else "DATE_RANGE",
+            "selector": {
+                "kind": "INSTRUMENT",
+                "exchange": identifier.exchange.value,
+                "symbol": identifier.symbol,
+            },
+            "dateFrom": None if arguments.full_history else start.isoformat(),
+            "dateTo": None if arguments.full_history else end.isoformat(),
+            "observationDate": None,
+        }
+        receipt = submit_system_command(
+            control_plane,
+            target=target,
+            reason="兼容个股行情 CLI 提交",
+            request_prefix="legacy-equity-bars-cli",
+        )
     finally:
         container.close()
     print(
         json.dumps(
-            {
-                "instrument": result.instrument.qualified_symbol,
-                "period": period.value,
-                "data_version": None if result.data_version is None else str(result.data_version),
-                "inserted_count": result.inserted_count,
-                "unchanged_count": result.unchanged_count,
-                "availability": result.availability,
-            },
+            receipt,
             separators=(",", ":"),
         )
     )

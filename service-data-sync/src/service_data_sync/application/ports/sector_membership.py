@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Protocol
@@ -166,15 +166,23 @@ class SectorMembershipRepository(Protocol):
         ...
 
     def publish_release(
-        self, *, scheme: SectorScheme, observation_date: date
+        self,
+        *,
+        scheme: SectorScheme,
+        observation_date: date,
+        before_final_publication: Callable[[], None] | None = None,
     ) -> PublishedSectorMembershipRelease | None:
-        """以完整快照或受限 carry-forward 原子发布 scheme 级固定清单。"""
+        """以完整快照或受限 carry-forward 原子发布，并可在同事务武装控制面终态。"""
         ...
 
     def get_release(
-        self, *, scheme: SectorScheme, as_of: datetime | None
+        self,
+        *,
+        scheme: SectorScheme,
+        as_of: datetime | None,
+        data_version: UUID | None = None,
     ) -> StoredSectorMembershipRelease | None:
-        """选择当前或不晚于请求时刻的已发布清单，不读取未发布快照。"""
+        """按精确数据版本、当前指针或历史时刻选择已发布清单，不读取未发布快照。"""
         ...
 
     def get_release_sector(
@@ -195,14 +203,15 @@ class SectorMembershipRepository(Protocol):
         """按交易所和代码稳定分页读取 release 固定快照中的已确认成分。"""
         ...
 
-    def get_release_equity(
+    def resolve_equity_identity(
         self,
         *,
-        release_id: UUID,
         exchange: Exchange,
         symbol: str,
+        identity_as_of: date | None,
+        known_at: datetime | None,
     ) -> StoredMembershipEquity | None:
-        """按 release 固定知识视图解析一只已确认证券，用于反向读取。"""
+        """独立于成分 release 按业务时间和知识时间解析永久证券身份。"""
         ...
 
     def list_equity_memberships(

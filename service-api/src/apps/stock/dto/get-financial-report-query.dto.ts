@@ -9,6 +9,7 @@ import {
   IsISO8601,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Matches,
   Max,
@@ -20,6 +21,10 @@ import { DATE_ONLY_PATTERN, OFFSET_DATE_TIME_PATTERN } from './temporal-patterns
 
 /** 约束单份财务报表详情的字段筛选、双时态与分页范围。 */
 export class GetFinancialReportQueryDto {
+  /** 绑定报告列表返回的精确财务 publication。 */
+  @IsUUID()
+  public readonly dataVersion!: string;
+
   /** 可选筛选一至一百个治理字段代码。 */
   @IsOptional()
   @Transform(toFinancialArray)

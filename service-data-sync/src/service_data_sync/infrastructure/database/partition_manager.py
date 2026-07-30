@@ -30,12 +30,12 @@ def ensure_financial_year_partitions(connection: Session, partition_date: date) 
         ("financial_report_revision", "financial_report_id WITH ="),
         (
             "provider_financial_metric_revision",
-            "security_id WITH =, metric_id WITH =, methodology_id WITH =, "
+            "report_period WITH =, security_id WITH =, metric_id WITH =, methodology_id WITH =, "
             "period_basis WITH =, statement_scope WITH =",
         ),
         (
             "derived_financial_metric_revision",
-            "security_id WITH =, metric_id WITH =, methodology_id WITH =, "
+            "report_period WITH =, security_id WITH =, metric_id WITH =, methodology_id WITH =, "
             "period_basis WITH =, statement_scope WITH =, formula_version WITH =",
         ),
     )

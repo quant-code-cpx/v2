@@ -118,6 +118,12 @@ paths:
         The operation is side-effect-free and retry-safe; idempotency follows from
         the normalized body, the explicit or selected dataVersion, and the stable
         cursor. It does not create a server-side idempotency record.
+
+        ETF schemaVersion 2 is a deliberately narrower first-phase contract:
+        businessScope is ETF, identity is forbidden, visibility is exactly
+        `{mode: CURRENT}`, and selection accepts only qualityStatuses plus an
+        optional exact dataVersion. ETF identity and venue are expressed only by
+        the dataset-specific filters.
       parameters:
         - $ref: '#/components/parameters/RequestId'
       requestBody:
@@ -163,17 +169,12 @@ paths:
                   page:
                     limit: 200
               etfNavLatest:
-                summary: Query current ETF NAV publication
+                summary: Query a current ETF schema 2 NAV publication
                 value:
                   dataset:
                     code: fund.etf.nav.1d.reported
-                    schemaVersion: 1
-                  businessScope: FUND
-                  identity:
-                    identifiers:
-                      - scheme: exchange_symbol
-                        venue: XSHG
-                        value: '510300'
+                    schemaVersion: 2
+                  businessScope: ETF
                   time:
                     dimension: TRADE_DATE
                     from: '2026-07-01'
@@ -181,21 +182,30 @@ paths:
                   visibility:
                     mode: CURRENT
                   selection:
-                    methodology:
-                      code: official-unit-nav
-                      version: '1'
                     qualityStatuses:
                       - PASSED
                       - WARNED
                   fields:
-                    - tradeDate
-                    - unitNav
-                    - accumulatedNav
+                    - navDate
+                    - etfEntityRef
+                    - navKind
+                    - nav
+                    - currency
+                    - finality
+                  filters:
+                    - field: etfEntityRef
+                      operator: EQ
+                      values:
+                        - 7ce0f18a-9f4d-4b3a-ae69-d0ff1707df91
+                    - field: navKind
+                      operator: EQ
+                      values:
+                        - UNIT
                   sort:
-                    - field: tradeDate
+                    - field: navDate
                       direction: DESC
                   page:
-                    limit: 100
+                    limit: 366
       responses:
         '200':
           description: A page from one selected canonical publication
@@ -574,7 +584,9 @@ components:
       properties:
         requestId:
           type: string
-          format: uuid
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$'
         contractVersion:
           type: string
           const: 1.0.0
@@ -842,6 +854,40 @@ components:
             $ref: '#/components/schemas/Sort'
         page:
           $ref: '#/components/schemas/PageRequest'
+      allOf:
+        - if:
+            properties:
+              dataset:
+                type: object
+                required:
+                  - code
+                  - schemaVersion
+                properties:
+                  code:
+                    enum:
+                      - fund.etf.profile.reported
+                      - fund.etf.bar.1d.reported
+                      - fund.etf.nav.1d.reported
+                      - fund.etf.trading_state.reported
+                  schemaVersion:
+                    const: 2
+            required:
+              - dataset
+          then:
+            description: |
+              ETF schemaVersion 2 is CURRENT-only. It uses dataset-specific
+              filters for exchange, symbol or etfEntityRef and does not execute
+              the generic identity selector, knownDataVersion, or methodology.
+            properties:
+              businessScope:
+                const: ETF
+              visibility:
+                $ref: '#/components/schemas/EtfV2CurrentVisibility'
+              selection:
+                $ref: '#/components/schemas/EtfV2PublicationSelection'
+            not:
+              required:
+                - identity
 
     DatasetRef:
       type: object
@@ -908,6 +954,7 @@ components:
         - MARKET
         - SECURITY
         - INDEX
+        - ETF
         - FUND
         - CHANNEL
         - REPORT
@@ -1077,6 +1124,32 @@ components:
         - PUBLIC_PIT
         - OPERATIONAL_REPLAY
 
+    EtfV2CurrentVisibility:
+      type: object
+      additionalProperties: false
+      required:
+        - mode
+      properties:
+        mode:
+          type: string
+          const: CURRENT
+
+    EtfV2PublicationSelection:
+      type: object
+      additionalProperties: false
+      required:
+        - qualityStatuses
+      properties:
+        dataVersion:
+          $ref: '#/components/schemas/DataVersion'
+        qualityStatuses:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/SelectableQualityStatus'
+
     PublicationSelection:
       type: object
       additionalProperties: false
@@ -1167,6 +1240,8 @@ components:
       enum:
         - EQ
         - IN
+        - PREFIX
+        - CONTAINS
         - GTE
         - LTE
         - RANGE
@@ -1240,7 +1315,9 @@ components:
       properties:
         requestId:
           type: string
-          format: uuid
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$'
         contractVersion:
           type: string
           const: 1.0.0
@@ -1269,11 +1346,14 @@ components:
       description: |
         AVAILABLE has a canonical publication. EMPTY is a successful, zero-record
         observation. SOURCE_UNAVAILABLE is a successful consumer fallback for an
-        enabled capability whose Provider could not be reached; records must be empty.
+        enabled capability whose Provider could not be reached. CURRENTLY_UNSUPPORTED
+        means the source semantics are known but cannot safely map to the frozen typed
+        contract. All non-AVAILABLE states require empty records.
       enum:
         - AVAILABLE
         - EMPTY
         - SOURCE_UNAVAILABLE
+        - CURRENTLY_UNSUPPORTED
 
     EmptyResultMetadata:
       type: object
@@ -1296,6 +1376,7 @@ components:
             - PROVIDER_UNAVAILABLE
             - CAPABILITY_NOT_CONFIGURED
             - PUBLICATION_NOT_AVAILABLE
+            - NAV_SEMANTICS_UNSUPPORTED_MONEY_MARKET
       description: |
         Metadata for a successful empty response. It never substitutes for a
         canonical fact release and intentionally has no dataVersion.
@@ -1722,6 +1803,66 @@ components:
       additionalProperties: false
       minProperties: 1
       properties:
+        etfEntityRef:
+          type: string
+          format: uuid
+        exchange:
+          type: string
+          enum:
+            - SSE
+            - SZSE
+        symbol:
+          type: string
+          pattern: '^[0-9]{6}$'
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 160
+        etfType:
+          type: string
+          minLength: 1
+          maxLength: 80
+        managementMode:
+          type: string
+          minLength: 1
+          maxLength: 80
+        managerName:
+          type:
+            - string
+            - 'null'
+          maxLength: 160
+        custodianName:
+          type:
+            - string
+            - 'null'
+          maxLength: 160
+        listedOn:
+          type:
+            - string
+            - 'null'
+          format: date
+        delistedOn:
+          type:
+            - string
+            - 'null'
+          format: date
+        listingStatus:
+          type: string
+          enum:
+            - LISTED
+            - SUSPENDED
+            - DELISTED
+            - UNKNOWN
+        quoteCurrency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        navCurrency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        sourceTimePrecision:
+          type: string
+          minLength: 1
+          maxLength: 40
         fundEntityRef:
           type: string
           format: uuid
@@ -1746,6 +1887,16 @@ components:
             - string
             - 'null'
           format: date
+        navDate:
+          type: string
+          format: date
+        navKind:
+          type: string
+          enum:
+            - UNIT
+            - ACCUMULATED
+        nav:
+          $ref: '#/components/schemas/DecimalString'
         open:
           oneOf:
             - $ref: '#/components/schemas/DecimalString'
@@ -1762,6 +1913,54 @@ components:
           oneOf:
             - $ref: '#/components/schemas/DecimalString'
             - type: 'null'
+        volume:
+          $ref: '#/components/schemas/DecimalString'
+        volumeUnit:
+          type: string
+          minLength: 1
+          maxLength: 40
+        amount:
+          $ref: '#/components/schemas/DecimalString'
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        tradeStatus:
+          type:
+            - string
+            - 'null'
+          maxLength: 80
+        adjustment:
+          type: string
+          const: UNADJUSTED
+        finality:
+          type: string
+          enum:
+            - FINAL
+            - PROVISIONAL
+            - UNKNOWN
+        stateDimension:
+          type: string
+          enum:
+            - TRADING
+            - SUBSCRIPTION
+            - REDEMPTION
+        state:
+          type: string
+          minLength: 1
+          maxLength: 80
+        effectiveFrom:
+          type: string
+          format: date
+        effectiveTo:
+          type:
+            - string
+            - 'null'
+          format: date
+        reason:
+          type:
+            - string
+            - 'null'
+          maxLength: 500
         volumeShares:
           oneOf:
             - $ref: '#/components/schemas/DecimalString'
@@ -2366,7 +2565,9 @@ components:
           format: uri-reference
         requestId:
           type: string
-          format: uuid
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$'
         retryable:
           type: boolean
         retryAfterSeconds:

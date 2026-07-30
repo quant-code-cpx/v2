@@ -1,0 +1,2465 @@
+openapi: 3.1.0
+x-http-method-policy: post-only
+info:
+  title: quant-v2 市场概览与行业板块公开业务 API
+  version: 1.0.0
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+  x-contract-status: Accepted
+  description: >-
+    service-web 使用的市场概览、股票摘要排行、东财板块排行和申万行业详情公开合同。
+    全部应用路由只声明 POST，响应只来自 service-data-sync 已完成并通过质量门的不可变
+    publication；不以指数成分观察伪造指数行情，不以板块 EOD 推导全市场宽度，也不把
+    供应商资金流标签描述为统一市场事实。本文档自包含当前公开 DTO 与严格响应边界。
+servers:
+  - url: /api/v1
+security:
+  - accessToken: []
+paths:
+  /market/overview:
+    post:
+      operationId: getMarketOverview
+      summary: 查询市场首页原子完整包
+      description: >-
+        读取 latest complete bundle 或精确历史交易日 publication。响应中的指数、成交额、
+        宽度、涨跌停、资金流、股票排行、板块排行和质量证据属于同一 dataVersion。
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+      requestBody:
+        $ref: "#/components/requestBodies/MarketOverviewQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/MarketOverview"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "424":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /market/indices/{indexId}/bars:
+    post:
+      operationId: listMarketIndexBars
+      summary: 查询主要指数日 K 线
+      description: 只读取四个稳定指数身份的来源日行情，不接受供应商自由代码。
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+        - $ref: "#/components/parameters/MarketIndexId"
+      requestBody:
+        $ref: "#/components/requestBodies/MarketIndexBarsQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/MarketIndexBars"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "424":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /market/equities/rankings:
+    post:
+      operationId: listMarketEquityRankings
+      summary: 查询全市场股票摘要排行
+      description: >-
+        排名来自同一冻结沪深 A 股横截面，只提供市场摘要和股票中心深链接所需身份。
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+      requestBody:
+        $ref: "#/components/requestBodies/MarketEquityRankingsQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/MarketEquityRankings"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "424":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /market/money-flow/equity-rankings:
+    post:
+      operationId: listMarketEquityMoneyFlowRankings
+      summary: 查询供应商订单规模口径股票资金流排行
+      description: >-
+        direction 明确区分净流入与净流出；methodology 和 source 是响应事实的一部分，
+        该口径不得与其他供应商或其他资金流语义直接合并。
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+      requestBody:
+        $ref: "#/components/requestBodies/MarketEquityMoneyFlowRankingsQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/MarketEquityMoneyFlowRankings"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "424":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /market/calendar/query:
+    post:
+      operationId: queryMarketCalendar
+      summary: 查询沪深交易日历和会话日程
+      description: 返回 Asia/Shanghai 下的来源交易日历和版本化会话时段。
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+      requestBody:
+        $ref: "#/components/requestBodies/MarketCalendarQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/MarketCalendar"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "424":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /market/sectors/strength:
+    post:
+      operationId: listMarketSectorStrength
+      summary: 查询东财板块强弱与持续性排行
+      description: >-
+        行业与概念按各自 scheme 独立发布和排名。1、5、20 日窗口由同步服务物化，
+        API 请求线程不临时扫描或聚合 EOD 数据。
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+      requestBody:
+        $ref: "#/components/requestBodies/MarketSectorStrengthQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/MarketSectorStrength"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "424":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /market/sectors/money-flow-rankings:
+    post:
+      operationId: listMarketSectorMoneyFlowRankings
+      summary: 查询东财来源板块资金流排行
+      description: >-
+        只按来源直报 canonical_net_amount 排名；价格强弱不会被替代为资金方向。
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+      requestBody:
+        $ref: "#/components/requestBodies/MarketSectorMoneyFlowRankingsQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/MarketSectorMoneyFlowRankings"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "424":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /market/industries/sw/{code}/bars:
+    post:
+      operationId: listSwIndustryBars
+      summary: 查询申万行业日、周、月 K 线
+      description: >-
+        周月 K 线必须是同步阶段已物化并结束的周期，不能由公开 API 请求临时聚合。
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+        - $ref: "#/components/parameters/SwIndustryCode"
+      requestBody:
+        $ref: "#/components/requestBodies/SwIndustryBarsQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/SwIndustryBars"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "424":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /market/industries/sw/{code}/constituents:
+    post:
+      operationId: listSwIndustryConstituents
+      summary: 查询申万行业正式成分页
+      description: >-
+        historyMode 固定为 latest_revision_effective_interval。成员有效区间是观察到的
+        最新 revision 语义，不宣称为申万正式调入调出公告日期。
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+        - $ref: "#/components/parameters/SwIndustryCode"
+      requestBody:
+        $ref: "#/components/requestBodies/SwIndustryConstituentsQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/SwIndustryConstituents"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "424":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /market/industries/sw/{code}/valuation:
+    post:
+      operationId: getSwIndustryValuation
+      summary: 查询申万行业逐字段估值
+      description: >-
+        PE、PB 仅在来源报告时返回值；PE TTM 与股息率等来源未报告字段显式标记
+        source_not_reported，禁止补零或跨方法学填充。
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+        - $ref: "#/components/parameters/SwIndustryCode"
+      requestBody:
+        $ref: "#/components/requestBodies/SwIndustryValuationQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/SwIndustryValuation"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "424":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+components:
+  securitySchemes:
+    accessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: 可选调用方关联标识；缺省时由 API 生成。
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      description: 上次 200 响应的强 ETag；命中同一请求维度与 publication 时返回 204。
+      schema:
+        type: string
+        minLength: 3
+        maxLength: 254
+        pattern: '^"[^"\r\n]{1,252}"$'
+    MarketIndexId:
+      name: indexId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/MarketIndexId"
+    SwIndustryCode:
+      name: code
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/SwIndustryCode"
+  headers:
+    RequestId:
+      description: 本次请求的关联标识；与服务间调用保持一致。
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+    DataVersion:
+      description: 当前不可变 publication 的 UUID；必须与 200 响应体 dataVersion 相同。
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    EntityTag:
+      description: service-data-sync 返回并由 service-api 原样保留的强 ETag。
+      required: true
+      schema:
+        type: string
+        minLength: 3
+        maxLength: 254
+        pattern: '^"[^"\r\n]{1,252}"$'
+    SuccessCacheControl:
+      description: POST 条件读取只允许用户私有缓存并要求重验证。
+      required: true
+      schema:
+        const: "private, max-age=0, must-revalidate"
+    ProblemCacheControl:
+      description: 错误响应不得缓存。
+      required: true
+      schema:
+        const: no-store
+    RetryAfter:
+      description: 仅在服务明确提供重试窗口时返回，单位为秒。
+      schema:
+        type: integer
+        minimum: 1
+  requestBodies:
+    MarketOverviewQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MarketOverviewQuery"
+    MarketIndexBarsQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MarketIndexBarsQuery"
+    MarketEquityRankingsQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MarketEquityRankingsQuery"
+    MarketEquityMoneyFlowRankingsQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MarketEquityMoneyFlowRankingsQuery"
+    MarketCalendarQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MarketCalendarQuery"
+    MarketSectorStrengthQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MarketSectorStrengthQuery"
+    MarketSectorMoneyFlowRankingsQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MarketSectorMoneyFlowRankingsQuery"
+    SwIndustryBarsQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SwIndustryBarsQuery"
+    SwIndustryConstituentsQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SwIndustryConstituentsQuery"
+    SwIndustryValuationQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SwIndustryValuationQuery"
+  responses:
+    MarketOverview:
+      description: 单一 publication 市场首页完整包
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/SuccessCacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MarketOverview"
+    MarketIndexBars:
+      description: 主要指数日 K 线 publication 页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/SuccessCacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MarketIndexBarPage"
+    MarketEquityRankings:
+      description: 冻结沪深 A 股横截面排行 publication 页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/SuccessCacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MarketEquityRankingPage"
+    MarketEquityMoneyFlowRankings:
+      description: Tushare 订单规模语义股票资金流排行 publication 页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/SuccessCacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MarketEquityMoneyFlowRankingPage"
+    MarketCalendar:
+      description: 沪深交易日历与会话日程 publication
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/SuccessCacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MarketCalendarPage"
+    MarketSectorStrength:
+      description: 单一东财体系和完整窗口的板块强弱 publication 页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/SuccessCacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MarketSectorStrengthPage"
+    MarketSectorMoneyFlowRankings:
+      description: 单一东财体系的来源资金流 publication 页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/SuccessCacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MarketSectorMoneyFlowRankingPage"
+    SwIndustryBars:
+      description: 申万行业已物化 K 线 publication 页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/SuccessCacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SwIndustryBarPage"
+    SwIndustryConstituents:
+      description: 申万行业最新 revision 有效区间成分页
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/SuccessCacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SwIndustryConstituentPage"
+    SwIndustryValuation:
+      description: 申万行业逐字段可解释估值 publication
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/SuccessCacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SwIndustryValuation"
+    NotModified:
+      description: If-None-Match 命中；公开 POST 返回 204 且响应体为空。
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/SuccessCacheControl"
+    Problem:
+      description: >-
+        当前实现实际可达的 RFC 9457 Problem Details。只包括 400、401、404、
+        409、424、503；具体路由仅声明其可达状态。client 对下游 429 的防御映射
+        不代表当前内部读取路由或本模块公开路由存在限流器。
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        Cache-Control:
+          $ref: "#/components/headers/ProblemCacheControl"
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+    DateOnly:
+      type: string
+      format: date
+      pattern: '^\d{4}-\d{2}-\d{2}$'
+    OffsetDateTime:
+      type: string
+      format: date-time
+      description: 必须显式携带 UTC 标识或时区偏移。
+    DecimalString:
+      type: string
+      pattern: '^-?(?:0|[1-9]\d*)(?:\.\d+)?$'
+      description: 规范十进制字符串；禁止 JSON number 造成金额、点位或百分比精度丢失。
+    UnitIntervalDecimalString:
+      type: string
+      pattern: '^(?:-?0(?:\.0+)?|0\.\d+|1(?:\.0+)?)$'
+      description: 包含端区间 0 至 1 的规范十进制字符串；与运行时一致保留负零表示。
+    MarketIndexId:
+      enum: [sse-composite, szse-component, csi-300, chinext]
+    SwIndustryCode:
+      type: string
+      pattern: '^[0-9]{6}\.SI$'
+    MarketScheme:
+      enum: [eastmoney.industry, eastmoney.concept]
+    MarketOverviewQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        asOf:
+          $ref: "#/components/schemas/DateOnly"
+    MarketIndexBarsQuery:
+      type: object
+      additionalProperties: false
+      required: [start, end]
+      properties:
+        start:
+          $ref: "#/components/schemas/DateOnly"
+        end:
+          $ref: "#/components/schemas/DateOnly"
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 250
+        period:
+          const: 1d
+          default: 1d
+    MarketEquityRankingsQuery:
+      type: object
+      additionalProperties: false
+      required: [metric, order]
+      properties:
+        asOf:
+          $ref: "#/components/schemas/DateOnly"
+        metric:
+          enum: [changePercent, amountCny, turnoverPercent]
+        order:
+          enum: [asc, desc]
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+    MarketEquityMoneyFlowRankingsQuery:
+      type: object
+      additionalProperties: false
+      required: [direction]
+      properties:
+        asOf:
+          $ref: "#/components/schemas/DateOnly"
+        direction:
+          enum: [inflow, outflow]
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+    MarketCalendarQuery:
+      type: object
+      additionalProperties: false
+      required: [venues, start, end]
+      properties:
+        venues:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            enum: [SSE, SZSE]
+        start:
+          $ref: "#/components/schemas/DateOnly"
+        end:
+          $ref: "#/components/schemas/DateOnly"
+    MarketSectorStrengthQuery:
+      type: object
+      additionalProperties: false
+      required: [scheme, window, order]
+      properties:
+        scheme:
+          $ref: "#/components/schemas/MarketScheme"
+        asOf:
+          $ref: "#/components/schemas/DateOnly"
+        window:
+          type: integer
+          enum: [1, 5, 20]
+        order:
+          enum: [asc, desc]
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+    MarketSectorMoneyFlowRankingsQuery:
+      type: object
+      additionalProperties: false
+      required: [scheme, order]
+      properties:
+        scheme:
+          $ref: "#/components/schemas/MarketScheme"
+        asOf:
+          $ref: "#/components/schemas/DateOnly"
+        order:
+          enum: [asc, desc]
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+    SwIndustryBarsQuery:
+      type: object
+      additionalProperties: false
+      required: [start, end, period]
+      properties:
+        start:
+          $ref: "#/components/schemas/DateOnly"
+        end:
+          $ref: "#/components/schemas/DateOnly"
+        period:
+          enum: [1d, 1w, 1mo]
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 250
+    SwIndustryConstituentsQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        asOf:
+          $ref: "#/components/schemas/DateOnly"
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+    SwIndustryValuationQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        asOf:
+          $ref: "#/components/schemas/DateOnly"
+    MarketSource:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          provider,
+          upstreamSource,
+          sourceDataset,
+          observedAt,
+          adapterVersion,
+          schemaFingerprint,
+        ]
+      properties:
+        provider:
+          const: tushare-pro
+        upstreamSource:
+          type: string
+          minLength: 1
+          maxLength: 128
+        sourceDataset:
+          type: string
+          minLength: 1
+          maxLength: 128
+        observedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+        adapterVersion:
+          type: string
+          minLength: 1
+          maxLength: 64
+        schemaFingerprint:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+    ExternalSourceBinding:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          role,
+          component,
+          provider,
+          upstreamSource,
+          sourceDataset,
+          observedAt,
+          adapterVersion,
+          schemaFingerprint,
+        ]
+      properties:
+        role:
+          const: external
+        component:
+          type: string
+          minLength: 1
+          maxLength: 128
+        provider:
+          const: tushare-pro
+        upstreamSource:
+          type: string
+          minLength: 1
+          maxLength: 128
+        sourceDataset:
+          type: string
+          minLength: 1
+          maxLength: 128
+        observedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+        adapterVersion:
+          type: string
+          minLength: 1
+          maxLength: 64
+        schemaFingerprint:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+    DerivedSourceBinding:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          role,
+          component,
+          provider,
+          upstreamSource,
+          sourceDataset,
+          observedAt,
+          adapterVersion,
+          schemaFingerprint,
+          methodology,
+        ]
+      properties:
+        role:
+          const: derived
+        component:
+          type: string
+          minLength: 1
+          maxLength: 128
+        provider:
+          const: quant-v2-derivation
+        upstreamSource:
+          type: string
+          minLength: 1
+          maxLength: 128
+        sourceDataset:
+          type: string
+          minLength: 1
+          maxLength: 128
+        observedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+        adapterVersion:
+          type: string
+          minLength: 1
+          maxLength: 64
+        schemaFingerprint:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        methodology:
+          type: object
+          additionalProperties: false
+          required: [id, version, status]
+          properties:
+            id:
+              type: string
+              minLength: 1
+              maxLength: 128
+            version:
+              type: string
+              minLength: 1
+              maxLength: 64
+            status:
+              const: platform_derived
+    MarketSourceBinding:
+      oneOf:
+        - $ref: "#/components/schemas/ExternalSourceBinding"
+        - $ref: "#/components/schemas/DerivedSourceBinding"
+      discriminator:
+        propertyName: role
+    MarketQualityCheck:
+      type: object
+      additionalProperties: false
+      required: [code, status, actual, expected]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 128
+        status:
+          const: passed
+        actual:
+          type: string
+          maxLength: 256
+        expected:
+          type: string
+          maxLength: 256
+    MarketEquityRankItem:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          exchange,
+          symbol,
+          name,
+          rank,
+          close,
+          changePercent,
+          amountCny,
+          turnoverPercent,
+        ]
+      properties:
+        exchange:
+          enum: [SSE, SZSE]
+        symbol:
+          type: string
+          pattern: "^[0-9]{6}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        rank:
+          type: integer
+          minimum: 1
+        close:
+          $ref: "#/components/schemas/DecimalString"
+        changePercent:
+          $ref: "#/components/schemas/DecimalString"
+        amountCny:
+          $ref: "#/components/schemas/DecimalString"
+        turnoverPercent:
+          oneOf:
+            - $ref: "#/components/schemas/DecimalString"
+            - type: "null"
+    MoneyFlowRankItem:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          exchange,
+          symbol,
+          name,
+          rank,
+          netAmountCny,
+          buyLargeAmountCny,
+          sellLargeAmountCny,
+          changePercent,
+        ]
+      properties:
+        exchange:
+          enum: [SSE, SZSE]
+        symbol:
+          type: string
+          pattern: "^[0-9]{6}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        rank:
+          type: integer
+          minimum: 1
+        netAmountCny:
+          $ref: "#/components/schemas/DecimalString"
+        buyLargeAmountCny:
+          oneOf:
+            - $ref: "#/components/schemas/DecimalString"
+            - type: "null"
+        sellLargeAmountCny:
+          oneOf:
+            - $ref: "#/components/schemas/DecimalString"
+            - type: "null"
+        changePercent:
+          oneOf:
+            - $ref: "#/components/schemas/DecimalString"
+            - type: "null"
+    SectorRankItem:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          rank,
+          sectorCode,
+          name,
+          changePercent,
+          turnoverPercent,
+          amountCny,
+          leadingEquity,
+          validSamples,
+        ]
+      properties:
+        rank:
+          type: integer
+          minimum: 1
+        sectorCode:
+          type: string
+          minLength: 1
+          maxLength: 64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        changePercent:
+          $ref: "#/components/schemas/DecimalString"
+        turnoverPercent:
+          oneOf:
+            - $ref: "#/components/schemas/DecimalString"
+            - type: "null"
+        amountCny:
+          oneOf:
+            - $ref: "#/components/schemas/DecimalString"
+            - type: "null"
+        leadingEquity:
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [exchange, symbol, name, changePercent]
+              properties:
+                exchange:
+                  enum: [SSE, SZSE]
+                symbol:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                changePercent:
+                  $ref: "#/components/schemas/DecimalString"
+            - type: "null"
+        validSamples:
+          type: integer
+          minimum: 1
+    AttentionSignal:
+      type: object
+      additionalProperties: false
+      required: [signalId, ruleId, rulesVersion, severity, title, evidence]
+      properties:
+        signalId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        ruleId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        rulesVersion:
+          const: "1"
+        severity:
+          enum: [info, warning]
+        title:
+          type: string
+          minLength: 1
+          maxLength: 256
+        evidence:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items:
+            type: object
+            additionalProperties: false
+            required: [metric, currentValue, threshold, unit]
+            properties:
+              metric:
+                type: string
+                minLength: 1
+                maxLength: 128
+              currentValue:
+                $ref: "#/components/schemas/DecimalString"
+              threshold:
+                $ref: "#/components/schemas/DecimalString"
+              unit:
+                type: string
+                minLength: 1
+                maxLength: 64
+    IndustryIdentity:
+      type: object
+      additionalProperties: false
+      required: [code, name, level, parentCode]
+      properties:
+        code:
+          $ref: "#/components/schemas/SwIndustryCode"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        level:
+          type: integer
+          minimum: 1
+          maximum: 3
+        parentCode:
+          oneOf:
+            - $ref: "#/components/schemas/SwIndustryCode"
+            - type: "null"
+    MarketOverview:
+      type: object
+      additionalProperties: false
+      description: >-
+        运行时还严格校验：首页四个稳定指数恰好各出现一次；宽度分项与 eligible 对账；
+        complete bundle 的组件、来源绑定和通过数量一致；历史快照状态自洽；资金流流入项
+        净额严格为正、流出项净额严格为负。
+      required:
+        [
+          dataVersion,
+          tradeDate,
+          publishedAt,
+          finality,
+          status,
+          indices,
+          turnover,
+          breadth,
+          limits,
+          marketMoneyFlow,
+          equityMoneyFlowRankings,
+          equityRankings,
+          sectorRankings,
+          attentionSignals,
+          quality,
+        ]
+      properties:
+        dataVersion:
+          $ref: "#/components/schemas/Uuid"
+        tradeDate:
+          $ref: "#/components/schemas/DateOnly"
+        publishedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+        finality:
+          const: final
+        status:
+          type: object
+          additionalProperties: false
+          required:
+            [
+              marketState,
+              marketStateAsOf,
+              marketStateMethodology,
+              freshness,
+              latestEligibleTradeDate,
+              latestAttemptedTradeDate,
+              lagTradingDays,
+              eodEligibilityScheduleVersion,
+              freshnessReason,
+              quality,
+            ]
+          properties:
+            marketState:
+              enum: [pre_open, trading, lunch_break, closed, non_trading_day]
+            marketStateAsOf:
+              $ref: "#/components/schemas/OffsetDateTime"
+            marketStateMethodology:
+              const: calendar_schedule_derived
+            freshness:
+              enum: [current, stale]
+            latestEligibleTradeDate:
+              $ref: "#/components/schemas/DateOnly"
+            latestAttemptedTradeDate:
+              oneOf:
+                - $ref: "#/components/schemas/DateOnly"
+                - type: "null"
+            lagTradingDays:
+              type: integer
+              minimum: 0
+            eodEligibilityScheduleVersion:
+              const: cn-a-eod-eligibility-2026-v1
+            freshnessReason:
+              enum:
+                [
+                  latest_eligible_complete,
+                  latest_eligible_bundle_incomplete,
+                  latest_eligible_bundle_unavailable,
+                  publication_rollback,
+                  historical_snapshot,
+                ]
+            quality:
+              const: passed
+        indices:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              [
+                indexId,
+                name,
+                point,
+                previousClose,
+                change,
+                changePercent,
+                open,
+                high,
+                low,
+                volume,
+                volumeUnit,
+                amountCny,
+                source,
+              ]
+            properties:
+              indexId:
+                $ref: "#/components/schemas/MarketIndexId"
+              name:
+                type: string
+                minLength: 1
+                maxLength: 128
+              point:
+                $ref: "#/components/schemas/DecimalString"
+              previousClose:
+                $ref: "#/components/schemas/DecimalString"
+              change:
+                $ref: "#/components/schemas/DecimalString"
+              changePercent:
+                $ref: "#/components/schemas/DecimalString"
+              open:
+                $ref: "#/components/schemas/DecimalString"
+              high:
+                $ref: "#/components/schemas/DecimalString"
+              low:
+                $ref: "#/components/schemas/DecimalString"
+              volume:
+                oneOf:
+                  - $ref: "#/components/schemas/DecimalString"
+                  - type: "null"
+              volumeUnit:
+                const: lot
+              amountCny:
+                oneOf:
+                  - $ref: "#/components/schemas/DecimalString"
+                  - type: "null"
+              source:
+                $ref: "#/components/schemas/MarketSource"
+        turnover:
+          type: object
+          additionalProperties: false
+          required:
+            [
+              label,
+              universe,
+              methodologyId,
+              sseAmountCny,
+              szseAmountCny,
+              totalAmountCny,
+              previousTotalAmountCny,
+              changeAmountCny,
+              changePercent,
+            ]
+          properties:
+            label:
+              const: 沪深 A 股成交额
+            universe:
+              const: CN-A-SSE-SZSE
+            methodologyId:
+              const: sum-tushare-daily-a-share-amount-cny-v1
+            sseAmountCny:
+              $ref: "#/components/schemas/DecimalString"
+            szseAmountCny:
+              $ref: "#/components/schemas/DecimalString"
+            totalAmountCny:
+              $ref: "#/components/schemas/DecimalString"
+            previousTotalAmountCny:
+              $ref: "#/components/schemas/DecimalString"
+            changeAmountCny:
+              $ref: "#/components/schemas/DecimalString"
+            changePercent:
+              $ref: "#/components/schemas/DecimalString"
+        breadth:
+          type: object
+          additionalProperties: false
+          required: [eligible, advancing, flat, declining, suspended, unknown]
+          properties:
+            eligible:
+              type: integer
+              minimum: 0
+            advancing:
+              type: integer
+              minimum: 0
+            flat:
+              type: integer
+              minimum: 0
+            declining:
+              type: integer
+              minimum: 0
+            suspended:
+              type: integer
+              minimum: 0
+            unknown:
+              const: 0
+        limits:
+          type: object
+          additionalProperties: false
+          required: [limitUp, limitDown, rulesVersion]
+          properties:
+            limitUp:
+              type: integer
+              minimum: 0
+            limitDown:
+              type: integer
+              minimum: 0
+            rulesVersion:
+              type: string
+              minLength: 1
+              maxLength: 64
+        marketMoneyFlow:
+          type: object
+          additionalProperties: false
+          required: [source, methodologyId, methodologyVersion, netAmountCny]
+          properties:
+            source:
+              $ref: "#/components/schemas/MarketSource"
+            methodologyId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            methodologyVersion:
+              type: string
+              minLength: 1
+              maxLength: 64
+            netAmountCny:
+              $ref: "#/components/schemas/DecimalString"
+        equityMoneyFlowRankings:
+          type: object
+          additionalProperties: false
+          required:
+            [
+              source,
+              methodologyId,
+              methodologyVersion,
+              universe,
+              coverage,
+              inflow,
+              outflow,
+            ]
+          properties:
+            source:
+              $ref: "#/components/schemas/MarketSource"
+            methodologyId:
+              const: tushare-order-size-flow
+            methodologyVersion:
+              const: "1"
+            universe:
+              const: CN-A-SSE-SZSE-TRADED
+            coverage:
+              $ref: "#/components/schemas/UnitIntervalDecimalString"
+            inflow:
+              type: array
+              maxItems: 50
+              description: 每项 netAmountCny 运行时严格大于零。
+              items:
+                $ref: "#/components/schemas/MoneyFlowRankItem"
+            outflow:
+              type: array
+              maxItems: 50
+              description: 每项 netAmountCny 运行时严格小于零，零与负零均被拒绝。
+              items:
+                $ref: "#/components/schemas/MoneyFlowRankItem"
+        equityRankings:
+          type: object
+          additionalProperties: false
+          required: [gainers, losers, amount, turnover]
+          properties:
+            gainers:
+              type: array
+              maxItems: 50
+              items:
+                $ref: "#/components/schemas/MarketEquityRankItem"
+            losers:
+              type: array
+              maxItems: 50
+              items:
+                $ref: "#/components/schemas/MarketEquityRankItem"
+            amount:
+              type: array
+              maxItems: 50
+              items:
+                $ref: "#/components/schemas/MarketEquityRankItem"
+            turnover:
+              type: array
+              maxItems: 50
+              items:
+                $ref: "#/components/schemas/MarketEquityRankItem"
+        sectorRankings:
+          type: object
+          additionalProperties: false
+          required: [eastmoneyIndustry, eastmoneyConcept]
+          properties:
+            eastmoneyIndustry:
+              $ref: "#/components/schemas/SectorRankingSides"
+            eastmoneyConcept:
+              $ref: "#/components/schemas/SectorRankingSides"
+        attentionSignals:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/AttentionSignal"
+        quality:
+          type: object
+          additionalProperties: false
+          required:
+            [
+              componentCount,
+              passedCount,
+              universeVersion,
+              sourceBindings,
+              checks,
+            ]
+          properties:
+            componentCount:
+              type: integer
+              minimum: 1
+            passedCount:
+              type: integer
+              minimum: 1
+            universeVersion:
+              type: string
+              minLength: 1
+              maxLength: 128
+            sourceBindings:
+              type: array
+              minItems: 1
+              maxItems: 128
+              items:
+                $ref: "#/components/schemas/MarketSourceBinding"
+            checks:
+              type: array
+              minItems: 1
+              maxItems: 256
+              items:
+                $ref: "#/components/schemas/MarketQualityCheck"
+    SectorRankingSides:
+      type: object
+      additionalProperties: false
+      required: [strongest, weakest]
+      properties:
+        strongest:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/SectorRankItem"
+        weakest:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/SectorRankItem"
+    MarketIndexBarPage:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          dataVersion,
+          publishedAt,
+          index,
+          period,
+          volumeUnit,
+          source,
+          inputDataVersions,
+          items,
+          nextCursor,
+        ]
+      properties:
+        dataVersion:
+          $ref: "#/components/schemas/Uuid"
+        publishedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+        index:
+          type: object
+          additionalProperties: false
+          required: [indexId, name]
+          properties:
+            indexId:
+              $ref: "#/components/schemas/MarketIndexId"
+            name:
+              type: string
+              minLength: 1
+              maxLength: 128
+        period:
+          const: 1d
+        volumeUnit:
+          const: lot
+        source:
+          $ref: "#/components/schemas/MarketSource"
+        inputDataVersions:
+          type: array
+          minItems: 1
+          maxItems: 7500
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/Uuid"
+        items:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/MarketIndexBar"
+        nextCursor:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 2048
+            - type: "null"
+    MarketIndexBar:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          tradeDate,
+          open,
+          high,
+          low,
+          close,
+          previousClose,
+          change,
+          changePercent,
+          volume,
+          amountCny,
+          finality,
+        ]
+      properties:
+        tradeDate:
+          $ref: "#/components/schemas/DateOnly"
+        open:
+          $ref: "#/components/schemas/DecimalString"
+        high:
+          $ref: "#/components/schemas/DecimalString"
+        low:
+          $ref: "#/components/schemas/DecimalString"
+        close:
+          $ref: "#/components/schemas/DecimalString"
+        previousClose:
+          $ref: "#/components/schemas/DecimalString"
+        change:
+          $ref: "#/components/schemas/DecimalString"
+        changePercent:
+          $ref: "#/components/schemas/DecimalString"
+        volume:
+          oneOf:
+            - $ref: "#/components/schemas/DecimalString"
+            - type: "null"
+        amountCny:
+          oneOf:
+            - $ref: "#/components/schemas/DecimalString"
+            - type: "null"
+        finality:
+          const: final
+    MarketEquityRankingPage:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          dataVersion,
+          tradeDate,
+          publishedAt,
+          source,
+          metric,
+          order,
+          universe,
+          coverage,
+          finality,
+          quality,
+          items,
+          nextCursor,
+        ]
+      properties:
+        dataVersion:
+          $ref: "#/components/schemas/Uuid"
+        tradeDate:
+          $ref: "#/components/schemas/DateOnly"
+        publishedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+        source:
+          $ref: "#/components/schemas/MarketSource"
+        metric:
+          enum: [changePercent, amountCny, turnoverPercent]
+        order:
+          enum: [asc, desc]
+        universe:
+          const: CN-A-SSE-SZSE-ELIGIBLE
+        coverage:
+          $ref: "#/components/schemas/UnitIntervalDecimalString"
+        finality:
+          const: final
+        quality:
+          type: object
+          additionalProperties: false
+          required: [status, universeVersion, checks]
+          properties:
+            status:
+              const: passed
+            universeVersion:
+              type: string
+              minLength: 1
+              maxLength: 128
+            checks:
+              type: array
+              minItems: 1
+              maxItems: 128
+              items:
+                $ref: "#/components/schemas/MarketQualityCheck"
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/MarketEquityRankItem"
+        nextCursor:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 2048
+            - type: "null"
+    MarketEquityMoneyFlowRankingPage:
+      type: object
+      additionalProperties: false
+      description: >-
+        运行时按 direction 校验每项 netAmountCny：inflow 严格为正，outflow 严格为负；
+        零与负零都不进入排行。
+      required:
+        [
+          dataVersion,
+          tradeDate,
+          publishedAt,
+          source,
+          direction,
+          methodology,
+          universe,
+          coverage,
+          items,
+          finality,
+          quality,
+          nextCursor,
+        ]
+      properties:
+        dataVersion:
+          $ref: "#/components/schemas/Uuid"
+        tradeDate:
+          $ref: "#/components/schemas/DateOnly"
+        publishedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+        source:
+          $ref: "#/components/schemas/MarketSource"
+        direction:
+          enum: [inflow, outflow]
+        methodology:
+          type: object
+          additionalProperties: false
+          required: [id, version, semanticFamily, status]
+          properties:
+            id:
+              const: tushare-order-size-flow
+            version:
+              const: "1"
+            semanticFamily:
+              const: order_size_flow
+            status:
+              const: source_reported
+        universe:
+          const: CN-A-SSE-SZSE-TRADED
+        coverage:
+          $ref: "#/components/schemas/UnitIntervalDecimalString"
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/MoneyFlowRankItem"
+        finality:
+          const: final
+        quality:
+          type: object
+          additionalProperties: false
+          required: [status, checks]
+          properties:
+            status:
+              const: passed
+            checks:
+              type: array
+              minItems: 1
+              maxItems: 128
+              items:
+                $ref: "#/components/schemas/MarketQualityCheck"
+        nextCursor:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 2048
+            - type: "null"
+    MarketCalendarPage:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          dataVersion,
+          publishedAt,
+          timezone,
+          sessionScheduleVersion,
+          source,
+          quality,
+          items,
+        ]
+      properties:
+        dataVersion:
+          $ref: "#/components/schemas/Uuid"
+        publishedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+        timezone:
+          const: Asia/Shanghai
+        sessionScheduleVersion:
+          type: string
+          minLength: 1
+          maxLength: 64
+        source:
+          $ref: "#/components/schemas/MarketSource"
+        quality:
+          type: object
+          additionalProperties: false
+          required: [status, checks]
+          properties:
+            status:
+              const: passed
+            checks:
+              type: array
+              minItems: 1
+              maxItems: 128
+              items:
+                $ref: "#/components/schemas/MarketQualityCheck"
+        items:
+          type: array
+          maxItems: 1500
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              [venue, tradeDate, isTradingDay, previousTradingDate, sessions]
+            properties:
+              venue:
+                enum: [SSE, SZSE]
+              tradeDate:
+                $ref: "#/components/schemas/DateOnly"
+              isTradingDay:
+                type: boolean
+              previousTradingDate:
+                oneOf:
+                  - $ref: "#/components/schemas/DateOnly"
+                  - type: "null"
+              sessions:
+                type: array
+                maxItems: 16
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [name, start, end]
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                      maxLength: 64
+                    start:
+                      type: string
+                      pattern: '^\d{2}:\d{2}:\d{2}$'
+                    end:
+                      type: string
+                      pattern: '^\d{2}:\d{2}:\d{2}$'
+    MarketSectorStrengthPage:
+      type: object
+      additionalProperties: false
+      description: >-
+        运行时严格校验 inputDataVersions 数量与 window 相等、每项 validSamples 与 window
+        相等、validUniverseCount 覆盖所有返回项；因此部分窗口不会越过公开边界。
+      required:
+        [
+          dataVersion,
+          tradeDate,
+          publishedAt,
+          scheme,
+          window,
+          order,
+          methodologyVersion,
+          source,
+          inputDataVersions,
+          quality,
+          items,
+          nextCursor,
+        ]
+      properties:
+        dataVersion:
+          $ref: "#/components/schemas/Uuid"
+        tradeDate:
+          $ref: "#/components/schemas/DateOnly"
+        publishedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+        scheme:
+          $ref: "#/components/schemas/MarketScheme"
+        window:
+          type: integer
+          enum: [1, 5, 20]
+        order:
+          enum: [asc, desc]
+        methodologyVersion:
+          type: string
+          minLength: 1
+          maxLength: 64
+        source:
+          $ref: "#/components/schemas/MarketSource"
+        inputDataVersions:
+          type: array
+          minItems: 1
+          maxItems: 252
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/Uuid"
+        quality:
+          type: object
+          additionalProperties: false
+          required: [status, validUniverseCount, checks]
+          properties:
+            status:
+              const: passed
+            validUniverseCount:
+              type: integer
+              minimum: 1
+            checks:
+              type: array
+              minItems: 1
+              maxItems: 128
+              items:
+                $ref: "#/components/schemas/MarketQualityCheck"
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              [
+                rank,
+                sectorCode,
+                name,
+                changePercent,
+                turnoverPercent,
+                amountCny,
+                cumulativeReturn,
+                upDays,
+                medianRank,
+                validSamples,
+                coverage,
+              ]
+            properties:
+              rank:
+                type: integer
+                minimum: 1
+              sectorCode:
+                type: string
+                minLength: 1
+                maxLength: 64
+              name:
+                type: string
+                minLength: 1
+                maxLength: 128
+              changePercent:
+                $ref: "#/components/schemas/DecimalString"
+              turnoverPercent:
+                oneOf:
+                  - $ref: "#/components/schemas/DecimalString"
+                  - type: "null"
+              amountCny:
+                oneOf:
+                  - $ref: "#/components/schemas/DecimalString"
+                  - type: "null"
+              cumulativeReturn:
+                $ref: "#/components/schemas/DecimalString"
+              upDays:
+                type: integer
+                minimum: 0
+              medianRank:
+                oneOf:
+                  - $ref: "#/components/schemas/DecimalString"
+                  - type: "null"
+              validSamples:
+                type: integer
+                minimum: 1
+              coverage:
+                const: "1"
+        nextCursor:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 2048
+            - type: "null"
+    MarketSectorMoneyFlowRankingPage:
+      type: object
+      additionalProperties: false
+      description: validUniverseCount 运行时必须覆盖所有返回项。
+      required:
+        [
+          dataVersion,
+          tradeDate,
+          publishedAt,
+          scheme,
+          order,
+          source,
+          methodology,
+          coverage,
+          finality,
+          quality,
+          items,
+          nextCursor,
+        ]
+      properties:
+        dataVersion:
+          $ref: "#/components/schemas/Uuid"
+        tradeDate:
+          $ref: "#/components/schemas/DateOnly"
+        publishedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+        scheme:
+          $ref: "#/components/schemas/MarketScheme"
+        order:
+          enum: [asc, desc]
+        source:
+          $ref: "#/components/schemas/MarketSource"
+        methodology:
+          type: object
+          additionalProperties: false
+          required: [id, version, semanticFamily, status, rankingBasis]
+          properties:
+            id:
+              const: eastmoney-sector-flow-dc
+            version:
+              const: unknown
+            semanticFamily:
+              const: trade_direction_flow
+            status:
+              const: source_reported
+            rankingBasis:
+              const: canonical_net_amount
+        coverage:
+          const: "1"
+        finality:
+          const: final
+        quality:
+          type: object
+          additionalProperties: false
+          required: [status, validUniverseCount, checks]
+          properties:
+            status:
+              const: passed
+            validUniverseCount:
+              type: integer
+              minimum: 1
+            checks:
+              type: array
+              minItems: 1
+              maxItems: 128
+              items:
+                $ref: "#/components/schemas/MarketQualityCheck"
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              [rank, sectorCode, name, close, changePercent, netAmountCny]
+            properties:
+              rank:
+                type: integer
+                minimum: 1
+              sectorCode:
+                type: string
+                minLength: 1
+                maxLength: 64
+              name:
+                type: string
+                minLength: 1
+                maxLength: 128
+              close:
+                $ref: "#/components/schemas/DecimalString"
+              changePercent:
+                $ref: "#/components/schemas/DecimalString"
+              netAmountCny:
+                $ref: "#/components/schemas/DecimalString"
+        nextCursor:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 2048
+            - type: "null"
+    SwIndustryBarPage:
+      type: object
+      additionalProperties: false
+      description: >-
+        运行时按 period 校验方法学组合：1d 必须 source-reported-daily-bar；
+        1w/1mo 必须 calendar-bounded-ohlcv-aggregation。每项周期与页面周期一致，
+        日线起止日相同，所有周期均已结束。
+      required:
+        [
+          dataVersion,
+          publishedAt,
+          industry,
+          period,
+          volumeUnit,
+          source,
+          methodology,
+          inputDataVersions,
+          finality,
+          items,
+          nextCursor,
+        ]
+      properties:
+        dataVersion:
+          $ref: "#/components/schemas/Uuid"
+        publishedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+        industry:
+          $ref: "#/components/schemas/IndustryIdentity"
+        period:
+          enum: [1d, 1w, 1mo]
+        volumeUnit:
+          const: provider_native
+        source:
+          $ref: "#/components/schemas/MarketSource"
+        methodology:
+          oneOf:
+            - $ref: "#/components/schemas/SwDailyBarMethodology"
+            - $ref: "#/components/schemas/SwAggregatedBarMethodology"
+        inputDataVersions:
+          type: array
+          minItems: 1
+          maxItems: 7500
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/Uuid"
+        finality:
+          const: final
+        items:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/SwIndustryBar"
+        nextCursor:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 2048
+            - type: "null"
+    SwDailyBarMethodology:
+      type: object
+      additionalProperties: false
+      required: [id, version, status, inputDataset, previousClose]
+      properties:
+        id:
+          const: source-reported-daily-bar
+        version:
+          const: "1"
+        status:
+          const: source_reported
+        inputDataset:
+          const: sw.market-data
+        previousClose:
+          type: object
+          additionalProperties: false
+          required: [kind, id, version, inputs]
+          properties:
+            kind:
+              const: derived
+            id:
+              const: sw-previous-close-from-close-change
+            version:
+              const: "1"
+            inputs:
+              type: array
+              prefixItems:
+                - const: close
+                - const: change
+              minItems: 2
+              maxItems: 2
+    SwAggregatedBarMethodology:
+      type: object
+      additionalProperties: false
+      required: [id, version, status, inputDataset, previousClose]
+      properties:
+        id:
+          const: calendar-bounded-ohlcv-aggregation
+        version:
+          const: "1"
+        status:
+          const: platform_derived
+        inputDataset:
+          const: sw.market-data
+        previousClose:
+          type: object
+          additionalProperties: false
+          required: [kind, id, version, inputs]
+          properties:
+            kind:
+              const: derived
+            id:
+              const: period-opening-previous-close-from-daily
+            version:
+              const: "1"
+            inputs:
+              type: array
+              prefixItems:
+                - const: daily.previousClose
+              minItems: 1
+              maxItems: 1
+    SwIndustryBar:
+      type: object
+      additionalProperties: false
+      description: periodStart 不晚于 periodEnd；日线两者必须相等。
+      required:
+        [
+          period,
+          periodKey,
+          periodStart,
+          periodEnd,
+          open,
+          high,
+          low,
+          close,
+          change,
+          changePercent,
+          volume,
+          amountCny,
+          previousClose,
+          amplitudePercent,
+          turnoverPercent,
+          isFinal,
+        ]
+      properties:
+        period:
+          enum: [1d, 1w, 1mo]
+        periodKey:
+          type: string
+          minLength: 1
+          maxLength: 32
+        periodStart:
+          $ref: "#/components/schemas/DateOnly"
+        periodEnd:
+          $ref: "#/components/schemas/DateOnly"
+        open:
+          $ref: "#/components/schemas/DecimalString"
+        high:
+          $ref: "#/components/schemas/DecimalString"
+        low:
+          $ref: "#/components/schemas/DecimalString"
+        close:
+          $ref: "#/components/schemas/DecimalString"
+        change:
+          $ref: "#/components/schemas/DecimalString"
+        changePercent:
+          $ref: "#/components/schemas/DecimalString"
+        volume:
+          oneOf:
+            - $ref: "#/components/schemas/DecimalString"
+            - type: "null"
+        amountCny:
+          oneOf:
+            - $ref: "#/components/schemas/DecimalString"
+            - type: "null"
+        previousClose:
+          $ref: "#/components/schemas/DecimalString"
+        amplitudePercent:
+          $ref: "#/components/schemas/DecimalString"
+        turnoverPercent:
+          oneOf:
+            - $ref: "#/components/schemas/DecimalString"
+            - type: "null"
+        isFinal:
+          const: true
+    SwIndustryConstituentPage:
+      type: object
+      additionalProperties: false
+      description: >-
+        inputDataVersions 必须是两个不重复 UUID。运行时校验每个有效成员的半开区间
+        [inDate, outDate) 包含 snapshotDate，且同时存在时 inDate 严格早于 outDate。
+      required:
+        [
+          dataVersion,
+          snapshotDate,
+          publishedAt,
+          historyMode,
+          knowledgeCutoff,
+          observedAt,
+          industry,
+          source,
+          methodology,
+          inputDataVersions,
+          items,
+          nextCursor,
+        ]
+      properties:
+        dataVersion:
+          $ref: "#/components/schemas/Uuid"
+        snapshotDate:
+          $ref: "#/components/schemas/DateOnly"
+        publishedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+        historyMode:
+          const: latest_revision_effective_interval
+        knowledgeCutoff:
+          $ref: "#/components/schemas/OffsetDateTime"
+        observedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+        industry:
+          $ref: "#/components/schemas/IndustryIdentity"
+        source:
+          $ref: "#/components/schemas/MarketSource"
+        methodology:
+          type: object
+          additionalProperties: false
+          required: [id, version, status, temporalSemantics]
+          properties:
+            id:
+              const: quant-v2.sw-membership.v1
+            version:
+              const: "1"
+            status:
+              const: source_reported
+            temporalSemantics:
+              const: latest_revision_effective_interval
+        inputDataVersions:
+          type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/Uuid"
+        items:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [exchange, symbol, name, inDate, outDate, isActive]
+            properties:
+              exchange:
+                enum: [SSE, SZSE, BSE]
+              symbol:
+                type: string
+                pattern: "^[0-9]{6}$"
+              name:
+                type: string
+                minLength: 1
+                maxLength: 128
+              inDate:
+                oneOf:
+                  - $ref: "#/components/schemas/DateOnly"
+                  - type: "null"
+              outDate:
+                oneOf:
+                  - $ref: "#/components/schemas/DateOnly"
+                  - type: "null"
+              isActive:
+                const: true
+        nextCursor:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 2048
+            - type: "null"
+    SwIndustryValuation:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          dataVersion,
+          tradeDate,
+          publishedAt,
+          industry,
+          source,
+          methodology,
+          inputDataVersions,
+          valuation,
+          finality,
+        ]
+      properties:
+        dataVersion:
+          $ref: "#/components/schemas/Uuid"
+        tradeDate:
+          $ref: "#/components/schemas/DateOnly"
+        publishedAt:
+          $ref: "#/components/schemas/OffsetDateTime"
+        industry:
+          $ref: "#/components/schemas/IndustryIdentity"
+        source:
+          $ref: "#/components/schemas/MarketSource"
+        methodology:
+          type: object
+          additionalProperties: false
+          required: [id, version, owner, status]
+          properties:
+            id:
+              const: sw-source-reported-valuation
+            version:
+              const: "1"
+            owner:
+              const: Shenwan
+            status:
+              const: mixed_per_field
+        inputDataVersions:
+          type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/Uuid"
+        valuation:
+          type: object
+          additionalProperties: false
+          required: [pe, peTtm, pb, dividendYield]
+          properties:
+            pe:
+              $ref: "#/components/schemas/SwPeMetric"
+            peTtm:
+              $ref: "#/components/schemas/SwUnavailableMetric"
+            pb:
+              $ref: "#/components/schemas/SwPbMetric"
+            dividendYield:
+              $ref: "#/components/schemas/SwUnavailableMetric"
+        finality:
+          const: final
+    SwPeMetric:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [value, availability, methodology]
+          properties:
+            value:
+              $ref: "#/components/schemas/DecimalString"
+            availability:
+              const: available
+            methodology:
+              type: object
+              additionalProperties: false
+              required: [kind, sourceField]
+              properties:
+                kind:
+                  const: source_reported
+                sourceField:
+                  const: pe
+        - $ref: "#/components/schemas/SwUnavailableMetric"
+    SwPbMetric:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [value, availability, methodology]
+          properties:
+            value:
+              $ref: "#/components/schemas/DecimalString"
+            availability:
+              const: available
+            methodology:
+              type: object
+              additionalProperties: false
+              required: [kind, sourceField]
+              properties:
+                kind:
+                  const: source_reported
+                sourceField:
+                  const: pb
+        - $ref: "#/components/schemas/SwUnavailableMetric"
+    SwUnavailableMetric:
+      type: object
+      additionalProperties: false
+      required: [value, availability, methodology]
+      properties:
+        value:
+          type: "null"
+        availability:
+          const: source_not_reported
+        methodology:
+          type: "null"
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail, instance, requestId, code]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          enum: [400, 401, 404, 409, 424, 503]
+        detail:
+          type: string
+        instance:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        code:
+          enum:
+            [
+              validation-error,
+              VALIDATION_FAILED,
+              unauthorized,
+              publication-not-found,
+              resource-not-found,
+              cursor-mismatch,
+              required-component-unavailable,
+              dataset-unavailable,
+            ]

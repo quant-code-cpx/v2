@@ -123,6 +123,14 @@ def test_load_inputs_uses_publication_cutoff_and_maps_complete_lineage() -> None
     }
     connection = RecordingConnection(
         (
+            StubResult(
+                rows=(
+                    {
+                        "security_id": snapshot.security_id,
+                        "identity_state": "CONFIRMED",
+                    },
+                )
+            ),
             StubResult(one=publication_row),
             StubResult(rows=(fact_row,)),
         )
@@ -135,15 +143,20 @@ def test_load_inputs_uses_publication_cutoff_and_maps_complete_lineage() -> None
 
     assert loaded == replace(snapshot, facts=(fact,))
     assert "equity_identifier_version" in str(connection.executed[0])
-    assert "financial_publication" in str(connection.executed[0])
-    assert "financial_statement_fact" in str(connection.executed[1])
-    assert "financial_metric_definition" in str(connection.executed[1])
+    assert "financial_publication" in str(connection.executed[1])
+    assert "financial_statement_fact" in str(connection.executed[2])
+    assert "financial_metric_definition" in str(connection.executed[2])
     assert connection.responses == []
 
 
 def test_load_inputs_rejects_missing_current_report_publication() -> None:
     """没有当前已验证报表 publication 时不得从未发布 revision 偷读输入。"""
-    connection = RecordingConnection((StubResult(one=None),))
+    connection = RecordingConnection(
+        (
+            StubResult(rows=({"security_id": 7, "identity_state": "CONFIRMED"},)),
+            StubResult(one=None),
+        )
+    )
     target = repository.SqlAlchemyFinancialDerivationRepository(
         cast(DatabaseClient, StubDatabase(connection))
     )
@@ -151,7 +164,7 @@ def test_load_inputs_rejects_missing_current_report_publication() -> None:
     with pytest.raises(FinancialDerivationUnavailable, match="inputs are unavailable"):
         target.load_inputs(exchange=Exchange.SZSE, symbol="000001")
 
-    assert len(connection.executed) == 1
+    assert len(connection.executed) == 2
 
 
 def test_publish_orchestrates_guards_partitions_revisions_and_atomic_pointer(
@@ -263,6 +276,21 @@ def test_publish_orchestrates_guards_partitions_revisions_and_atomic_pointer(
         calls.append(("publish", changed_count))
         return data_version
 
+    def finish_run(
+        _connection: Session,
+        *,
+        derivation_run_id: UUID,
+        finished_at: datetime,
+    ) -> None:
+        """记录派生账本与 publication 在同一事务内成功收敛。"""
+        assert derivation_run_id == run_id
+        assert finished_at == computed_at
+        calls.append(("finish", derivation_run_id))
+
+    def arm_terminal() -> None:
+        """记录控制面回调发生在 publication SQL 之前。"""
+        calls.append(("arm", run_id))
+
     metrics_to_publish = metrics
     monkeypatch.setattr(repository, "_require_current_input_publication", require_input)
     monkeypatch.setattr(repository, "_require_derivation_run", require_run)
@@ -272,6 +300,7 @@ def test_publish_orchestrates_guards_partitions_revisions_and_atomic_pointer(
     monkeypatch.setattr(repository, "_close_removed_metrics", close_removed)
     monkeypatch.setattr(repository, "_write_metric", write_metric)
     monkeypatch.setattr(repository, "_publish", publish_pointer)
+    monkeypatch.setattr(repository, "_finish_derivation_run", finish_run)
     target = repository.SqlAlchemyFinancialDerivationRepository(
         cast(DatabaseClient, StubDatabase(connection))
     )
@@ -281,6 +310,7 @@ def test_publish_orchestrates_guards_partitions_revisions_and_atomic_pointer(
         metrics=metrics,
         derivation_run_id=run_id,
         computed_at=computed_at,
+        before_final_publication=arm_terminal,
     )
 
     assert publication.data_version == data_version
@@ -293,7 +323,11 @@ def test_publish_orchestrates_guards_partitions_revisions_and_atomic_pointer(
         ("methodology", methodology_id),
         ("partition", date(2025, 1, 1)),
     ]
-    assert calls[-1] == ("publish", 2)
+    assert calls[-3:] == [
+        ("arm", run_id),
+        ("publish", 2),
+        ("finish", run_id),
+    ]
 
 
 def test_publish_rejects_naive_computation_time_before_opening_transaction() -> None:
@@ -334,6 +368,21 @@ def test_publish_guards_require_current_source_running_ledger_and_seeded_methodo
     )
     with pytest.raises(FinancialDerivationUnavailable, match="run is unavailable"):
         repository._require_derivation_run(cast(Session, wrong_run_connection), run_id)
+
+    finished_at = datetime(2026, 7, 28, 9, tzinfo=UTC)
+    finish_connection = RecordingConnection((StubResult(scalar=run_id),))
+    repository._finish_derivation_run(
+        cast(Session, finish_connection),
+        derivation_run_id=run_id,
+        finished_at=finished_at,
+    )
+    missing_finish = RecordingConnection((StubResult(scalar=None),))
+    with pytest.raises(FinancialDerivationUnavailable, match="could not be finalized"):
+        repository._finish_derivation_run(
+            cast(Session, missing_finish),
+            derivation_run_id=run_id,
+            finished_at=finished_at,
+        )
 
     methodology_connection = RecordingConnection((StubResult(scalar=methodology_id),))
     assert (

@@ -9,7 +9,11 @@ describe('SwIndustryController', () => {
   /** 验证内部 GET 304 被映射为公开 POST 204。 */
   it('maps downstream 304 to public 204', async () => {
     const service = {
-      listIndustries: vi.fn().mockResolvedValue({ status: 304, etag: '"sw-v1"' }),
+      listIndustries: vi.fn().mockResolvedValue({
+        status: 304,
+        etag: '"sw-v1"',
+        dataVersion: '00000000-0000-4000-8000-000000000001',
+      }),
     };
     const controller = new SwIndustryController(service as unknown as SwIndustryService);
     const output = response();
@@ -25,6 +29,10 @@ describe('SwIndustryController', () => {
 
     expect(output.status).toHaveBeenCalledWith(204);
     expect(output.send).toHaveBeenCalledOnce();
+    expect(output.setHeader).toHaveBeenCalledWith(
+      'X-Data-Version',
+      '00000000-0000-4000-8000-000000000001',
+    );
   });
 
   /** 验证成功页复制 ETag 与 release dataVersion，不暴露内部凭据。 */
@@ -33,6 +41,7 @@ describe('SwIndustryController', () => {
       listIndustries: vi.fn().mockResolvedValue({
         status: 200,
         etag: '"sw-v2"',
+        dataVersion: '00000000-0000-4000-8000-000000000001',
         body: {
           release: { dataVersion: '00000000-0000-4000-8000-000000000001' },
         },

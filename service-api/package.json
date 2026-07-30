@@ -26,7 +26,9 @@
     "prepare:legacy-accounts": "prisma generate && nest build && node dist/scripts/prepare-legacy-accounts.js",
     "promote:super-admin": "prisma generate && nest build && node dist/scripts/promote-existing-admin.js",
     "audit:index-gate": "prisma generate && nest build && node dist/scripts/check-audit-index-migration.js",
-    "audit:retention": "prisma generate && nest build && node dist/scripts/prune-audit-logs.js"
+    "audit:retention": "prisma generate && nest build && node dist/scripts/prune-audit-logs.js",
+    "data-operations:dispatch": "prisma generate && nest build && node dist/scripts/dispatch-data-operations.js",
+    "data-operations:replay-dead-letter": "prisma generate && nest build && node dist/scripts/replay-data-operation-outbox.js"
   },
   "dependencies": {
     "@nestjs/common": "11.1.28",

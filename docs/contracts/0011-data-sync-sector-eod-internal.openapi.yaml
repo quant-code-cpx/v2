@@ -371,8 +371,8 @@ components:
           $ref: '#/components/schemas/NullableNonNegativeDecimalString'
         marketValueUnit:
           type: string
-          const: provider_native
-          description: Currency and scaling remain pending source verification.
+          const: CNY
+          description: Tushare `dc_index.total_mv` 的万元原值已在同步边界精确换算为人民币元。
         turnoverPercent:
           $ref: '#/components/schemas/NullableNonNegativeDecimalString'
         advancers:
@@ -403,6 +403,7 @@ components:
         - qualityStatus
         - dataVersion
         - publishedAt
+        - inputDataVersions
         - sort
         - order
         - items
@@ -430,6 +431,15 @@ components:
         publishedAt:
           type: string
           format: date-time
+        inputDataVersions:
+          type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          description: 东财 EOD 报价与板块强弱输入 publication 的有序版本。
+          items:
+            type: string
+            format: uuid
         sort:
           $ref: '#/components/schemas/SectorEodSort'
         order:
@@ -456,6 +466,7 @@ components:
         - qualityStatus
         - dataVersion
         - publishedAt
+        - inputDataVersions
         - latestValue
         - latestValueUnit
         - changeValue
@@ -501,6 +512,15 @@ components:
         publishedAt:
           type: string
           format: date-time
+        inputDataVersions:
+          type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          description: 东财 EOD 报价与板块强弱输入 publication 的有序版本。
+          items:
+            type: string
+            format: uuid
         latestValue:
           $ref: '#/components/schemas/NullableNonNegativeDecimalString'
         latestValueUnit:
@@ -514,7 +534,7 @@ components:
           $ref: '#/components/schemas/NullableNonNegativeDecimalString'
         marketValueUnit:
           type: string
-          const: provider_native
+          const: CNY
         turnoverPercent:
           $ref: '#/components/schemas/NullableNonNegativeDecimalString'
         advancers:

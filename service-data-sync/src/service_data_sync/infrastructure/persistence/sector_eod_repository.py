@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -18,6 +19,10 @@ from sqlalchemy import case, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.orm import Session
 
+from service_data_sync.application.ports.canonical_release import (
+    CanonicalLineageRecord,
+    PublishedCanonicalRelease,
+)
 from service_data_sync.application.ports.sector_eod import (
     SECTOR_EOD_QUALITY_POLICY_VERSION,
     ArchivedSectorEodObservation,
@@ -40,12 +45,10 @@ from service_data_sync.domain.sector import (
     sector_eod_snapshot_content_sha256,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.fenced_execution import current_fenced_execution
 from service_data_sync.infrastructure.database.models.execution.sync_partition import SyncPartition
 from service_data_sync.infrastructure.database.models.execution.sync_run import SyncRun
 from service_data_sync.infrastructure.database.models.provenance.source_batch import SourceBatch
-from service_data_sync.infrastructure.database.models.publication.dataset_publication import (
-    DatasetPublication,
-)
 from service_data_sync.infrastructure.database.models.sector.catalog.sector_entity import (
     SectorEntity,
 )
@@ -61,12 +64,19 @@ from service_data_sync.infrastructure.database.models.sector.eod.sector_eod_snap
 from service_data_sync.infrastructure.database.models.sector.eod.sector_eod_sync_partition import (
     SectorEodSyncPartition,
 )
+from service_data_sync.infrastructure.persistence.canonical_release_repository import (
+    SqlAlchemyCanonicalReleaseRepository,
+)
+from service_data_sync.infrastructure.persistence.legacy_canonical_release_bridge import (
+    publish_legacy_snapshot,
+)
 from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 
 _DATASET = "sector.quote.eod.snapshot"
 _CAPABILITY = "sector.quote.eod.snapshot.raw"
 _NORMALIZER_VERSION = "sector-eod-v1"
 _LEASE_DURATION = timedelta(minutes=5)
+_RELEASE_MAPPING_VERSION = "sector-eod-release-bridge-v1"
 
 
 class SqlAlchemySectorEodRepository(SectorEodRepository):
@@ -75,6 +85,7 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
     def __init__(self, database: DatabaseClient) -> None:
         """接收组合根创建的数据库客户端，不直接读取环境配置。"""
         self._database = database
+        self._release_repository = SqlAlchemyCanonicalReleaseRepository(database)
 
     def start_run(
         self, *, scheme: SectorScheme, trade_date: date, reuse_archived_raw: bool
@@ -661,18 +672,29 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
             existing = _current_snapshot_for_update(
                 connection, scheme=scheme, trade_date=trade_date
             )
+            release = self._publish_release(
+                connection,
+                scheme=scheme,
+                trade_date=trade_date,
+                quotes=quotes,
+                source_batch_id=source_batch_id,
+                quality_status=quality_status,
+                published_at=observed_at,
+            )
             if (
                 existing is not None
                 and bytes(existing["content_sha256"]) == content_sha256
                 and str(existing["normalizer_version"]) == _NORMALIZER_VERSION
+                and UUID(str(existing["data_version"])) == release.data_version
             ):
                 _record_noop_quality(connection, snapshot_id=UUID(str(existing["snapshot_id"])))
+                _record_fenced_publication_checkpoint(release.data_version)
                 if run is not None:
                     _complete_run(connection, run=run, now=observed_at)
                 return PublishedSectorEodSnapshot(snapshot=_snapshot(existing), inserted=False)
             revision = _next_revision(connection, scheme=scheme, trade_date=trade_date)
             snapshot_id = uuid4()
-            data_version = uuid4()
+            data_version = release.data_version
             published_at = observed_at
             if existing is not None:
                 _supersede_current_snapshot(
@@ -718,14 +740,7 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
                 record_count=len(quotes),
                 expected_count=len(active_sectors),
             )
-            _publish_dataset(
-                connection,
-                scheme=scheme,
-                trade_date=trade_date,
-                data_version=data_version,
-                published_at=published_at,
-                quality_status=quality_status,
-            )
+            _record_fenced_publication_checkpoint(data_version)
             if run is not None:
                 _complete_run(connection, run=run, now=published_at)
             return PublishedSectorEodSnapshot(
@@ -742,6 +757,41 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
                 ),
                 inserted=True,
             )
+
+    def _publish_release(
+        self,
+        connection: Session,
+        *,
+        scheme: SectorScheme,
+        trade_date: date,
+        quotes: Sequence[SectorEodQuote],
+        source_batch_id: UUID,
+        quality_status: str,
+        published_at: datetime,
+    ) -> PublishedCanonicalRelease:
+        """用完整 EOD 横截面和真实来源观察在同一事务中切换 canonical release。"""
+        return publish_legacy_snapshot(
+            connection,
+            release_repository=self._release_repository,
+            dataset_code=_DATASET,
+            partition_key=_partition_key(scheme, trade_date),
+            domain="sector",
+            grain="sector scheme + trade-date EOD snapshot",
+            semantic_family="reported-sector-eod-snapshot",
+            mapping_version=_RELEASE_MAPPING_VERSION,
+            source_batch_id=source_batch_id,
+            records=_release_records(
+                scheme=scheme,
+                trade_date=trade_date,
+                quotes=quotes,
+                source_batch_id=source_batch_id,
+            ),
+            fact_min=trade_date,
+            fact_max=trade_date,
+            now=published_at,
+            quality_status=quality_status,
+            publication_effective_as_of=trade_date,
+        )
 
     def store_shadow_snapshot(
         self,
@@ -878,73 +928,6 @@ class SqlAlchemySectorEodRepository(SectorEodRepository):
         with self._database.session() as connection:
             row = connection.execute(statement.limit(1)).mappings().one_or_none()
         return None if row is None else _snapshot(row)
-
-    def rollback_published_snapshot(
-        self, *, scheme: SectorScheme, trade_date: date, revision: int
-    ) -> SectorEodSnapshot:
-        """原子恢复指定通过 revision；candidate、quarantine、raw 与较新历史一律保留。"""
-        if revision < 1:
-            raise ValueError("sector eod rollback revision must be positive")
-        now = datetime.now(UTC)
-        with self._database.transaction() as connection:
-            current = _current_snapshot_for_update(
-                connection,
-                scheme=scheme,
-                trade_date=trade_date,
-            )
-            if current is None:
-                raise ValueError("sector eod rollback requires a current published snapshot")
-            target = (
-                connection.execute(
-                    select(
-                        SectorEodSnapshotModel.snapshot_id,
-                        SectorEodSnapshotModel.data_version,
-                        SectorEodSnapshotModel.scheme,
-                        SectorEodSnapshotModel.trade_date,
-                        SectorEodSnapshotModel.source_cutoff_at,
-                        SectorEodSnapshotModel.observed_at,
-                        SectorEodSnapshotModel.finality,
-                        SectorEodSnapshotModel.quality_status,
-                        SectorEodSnapshotModel.published_at,
-                        SectorEodSnapshotModel.normalizer_version,
-                        SectorEodSnapshotModel.content_sha256,
-                    )
-                    .where(
-                        SectorEodSnapshotModel.scheme == scheme.value,
-                        SectorEodSnapshotModel.trade_date == trade_date,
-                        SectorEodSnapshotModel.revision == revision,
-                        SectorEodSnapshotModel.state == "superseded",
-                        SectorEodSnapshotModel.quality_status.in_(["passed", "warned"]),
-                    )
-                    .with_for_update()
-                )
-                .mappings()
-                .one_or_none()
-            )
-            if target is None:
-                raise ValueError("sector eod rollback target is not a superseded passed revision")
-            _supersede_current_snapshot(
-                connection,
-                existing_snapshot_id=UUID(str(current["snapshot_id"])),
-                scheme=scheme,
-                trade_date=trade_date,
-                superseded_at=now,
-            )
-            connection.execute(
-                update(SectorEodSnapshotModel)
-                .where(SectorEodSnapshotModel.snapshot_id == target["snapshot_id"])
-                .values(state="published", superseded_at=None)
-            )
-            connection.execute(
-                update(DatasetPublication)
-                .where(
-                    DatasetPublication.dataset == _DATASET,
-                    DatasetPublication.partition_key == _partition_key(scheme, trade_date),
-                    DatasetPublication.data_version == target["data_version"],
-                )
-                .values(superseded_at=None)
-            )
-        return _snapshot(target)
 
     def list_ranked_quotes(
         self,
@@ -1332,20 +1315,11 @@ def _supersede_current_snapshot(
     trade_date: date,
     superseded_at: datetime,
 ) -> None:
-    """关闭旧快照和旧 publication；错误 revision 与 raw 均保留供审计和回滚。"""
+    """关闭旧 EOD 快照；统一 release 发布器已经在同一事务替换 publication。"""
     connection.execute(
         update(SectorEodSnapshotModel)
         .where(SectorEodSnapshotModel.snapshot_id == existing_snapshot_id)
         .values(state="superseded", superseded_at=superseded_at)
-    )
-    connection.execute(
-        update(DatasetPublication)
-        .where(
-            DatasetPublication.dataset == _DATASET,
-            DatasetPublication.partition_key == _partition_key(scheme, trade_date),
-            DatasetPublication.superseded_at.is_(None),
-        )
-        .values(superseded_at=superseded_at)
     )
 
 
@@ -1450,43 +1424,38 @@ def _record_noop_quality(connection: Session, *, snapshot_id: UUID) -> None:
     )
 
 
-def _publish_dataset(
-    connection: Session,
-    *,
-    scheme: SectorScheme,
-    trade_date: date,
-    data_version: UUID,
-    published_at: datetime,
-    quality_status: str,
-) -> None:
-    """推进当前 dataset publication，使消费者只读到完整的新 EOD 版本。"""
-    connection.execute(
-        update(DatasetPublication)
-        .where(
-            DatasetPublication.dataset == _DATASET,
-            DatasetPublication.partition_key == _partition_key(scheme, trade_date),
-            DatasetPublication.superseded_at.is_(None),
-        )
-        .values(superseded_at=published_at)
-    )
-    connection.execute(
-        insert(DatasetPublication).values(
-            publication_id=uuid4(),
-            dataset=_DATASET,
-            partition_key=_partition_key(scheme, trade_date),
-            data_version=data_version,
-            quality_status=quality_status,
-            published_at=published_at,
-            superseded_at=None,
-            effective_as_of=trade_date,
-            knowledge_cutoff=published_at,
-        )
-    )
+def _record_fenced_publication_checkpoint(data_version: UUID) -> None:
+    """把 EOD 消费者实际 `dataVersion` 交给当前 fenced 控制面同事务完成 run。"""
+    execution = current_fenced_execution()
+    if execution is not None:
+        execution.record_checkpoint(kind="data-version", position=str(data_version))
 
 
 def _partition_key(scheme: SectorScheme, trade_date: date) -> str:
     """生成 dataset publication 和运维日志共用的稳定 EOD 分区键。"""
     return f"{scheme.value}:{trade_date.isoformat()}"
+
+
+def _release_records(
+    *,
+    scheme: SectorScheme,
+    trade_date: date,
+    quotes: Sequence[SectorEodQuote],
+    source_batch_id: UUID,
+) -> tuple[CanonicalLineageRecord, ...]:
+    """以全覆盖 EOD 输入的行级摘要和本次来源批次构建不可变 release 血缘。"""
+    return tuple(
+        CanonicalLineageRecord(
+            record_key_hash=hashlib.sha256(
+                f"sector:{_DATASET}:{scheme.value}:{trade_date.isoformat()}:"
+                f"{quote.identifier.code}".encode()
+            ).hexdigest(),
+            content_hash=_quote_content_hash(quote).hex(),
+            source_batch_id=source_batch_id,
+            transform_hash=hashlib.sha256(_RELEASE_MAPPING_VERSION.encode()).hexdigest(),
+        )
+        for quote in sorted(quotes, key=lambda item: item.identifier.code)
+    )
 
 
 def _snapshot(row: Mapping[Any, Any]) -> SectorEodSnapshot:

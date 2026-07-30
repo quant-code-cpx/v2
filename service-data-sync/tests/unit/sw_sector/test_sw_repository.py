@@ -7,10 +7,13 @@ from contextlib import AbstractContextManager
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import cast
-from uuid import NAMESPACE_URL, UUID, uuid5
+from unittest.mock import Mock
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import pytest
+from sqlalchemy.orm import Session
 
+from service_data_sync.application.ports.canonical_release import PublishedCanonicalRelease
 from service_data_sync.application.ports.sw_sector import SwSourceObservation
 from service_data_sync.domain.sw_sector import (
     SwIndustryLevel,
@@ -20,6 +23,10 @@ from service_data_sync.domain.sw_sector import (
     SwMethodology,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.fenced_execution import (
+    FencedExecution,
+    fenced_execution,
+)
 from service_data_sync.infrastructure.persistence import sw_sector_repository
 from service_data_sync.infrastructure.persistence.sw_sector_repository import (
     SqlAlchemySwSectorRepository,
@@ -111,8 +118,16 @@ def test_repository_publishes_new_snapshot_with_revisions_quality_and_checkpoint
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """首次快照应写入全部节点与估值、闭包、双发布、质量和 checkpoint。"""
-    connection = FakeConnection(_empty_results(15))
+    connection = FakeConnection(_empty_results(13))
     repository = _repository(connection)
+    taxonomy_version = uuid4()
+    valuation_version = uuid4()
+    release_bridge = Mock(
+        side_effect=(
+            _release_result(data_version=taxonomy_version),
+            _release_result(data_version=valuation_version),
+        )
+    )
 
     def record_source(*arguments: object, **keywords: object) -> UUID:
         """以固定来源批次隔离通用来源表实现。"""
@@ -120,6 +135,7 @@ def test_repository_publishes_new_snapshot_with_revisions_quality_and_checkpoint
         return _SOURCE_BATCH_ID
 
     monkeypatch.setattr(sw_sector_repository, "record_source_observation", record_source)
+    monkeypatch.setattr(sw_sector_repository, "publish_legacy_snapshot", release_bridge)
 
     result = repository.publish_snapshot(snapshot=_snapshot(), source=_source())
 
@@ -127,7 +143,8 @@ def test_repository_publishes_new_snapshot_with_revisions_quality_and_checkpoint
     assert result.valuation.inserted_count == 3
     assert result.taxonomy.unchanged_count == 0
     assert result.valuation.unchanged_count == 0
-    assert result.taxonomy.data_version != result.valuation.data_version
+    assert result.taxonomy.data_version == taxonomy_version
+    assert result.valuation.data_version == valuation_version
     assert connection.select_results == []
     assert any(
         isinstance(parameters, list)
@@ -135,6 +152,13 @@ def test_repository_publishes_new_snapshot_with_revisions_quality_and_checkpoint
         and isinstance(parameters[0], dict)
         and "ancestor_code" in parameters[0]
         for _statement, parameters in connection.executions
+    )
+    assert release_bridge.call_args_list[0].kwargs["dataset_code"] == "sector.sw.taxonomy"
+    assert release_bridge.call_args_list[1].kwargs["dataset_code"] == "sector.sw.valuation"
+    assert len(release_bridge.call_args_list[0].kwargs["records"]) > len(_snapshot().nodes)
+    assert not any(
+        "INSERT INTO dataset_publication" in str(statement)
+        for statement, _parameters in connection.executions
     )
     assert any(
         isinstance(parameters, list)
@@ -148,7 +172,7 @@ def test_repository_publishes_new_snapshot_with_revisions_quality_and_checkpoint
 def test_repository_reuses_unchanged_revisions_and_publications(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """内容完全相同时应复用 revision 与 dataVersion，且不重写冻结闭包。"""
+    """内容完全相同时复用 taxonomy dataVersion，并把它交给 fenced 控制面。"""
     snapshot = _snapshot()
     responses = [
         FakeResult([_methodology_row()]),
@@ -180,22 +204,6 @@ def test_repository_reuses_unchanged_revisions_and_publications(
             )
             for valuation in snapshot.valuations
         ],
-        FakeResult(
-            [
-                _published_row(
-                    data_version=_TAXONOMY_VERSION,
-                    content_sha256=snapshot.taxonomy_sha256(),
-                )
-            ]
-        ),
-        FakeResult(
-            [
-                _published_row(
-                    data_version=_VALUATION_VERSION,
-                    content_sha256=snapshot.valuation_sha256(),
-                )
-            ]
-        ),
     ]
     connection = FakeConnection(responses)
     repository = _repository(connection)
@@ -206,8 +214,27 @@ def test_repository_reuses_unchanged_revisions_and_publications(
         return _SOURCE_BATCH_ID
 
     monkeypatch.setattr(sw_sector_repository, "record_source_observation", record_source)
+    monkeypatch.setattr(
+        sw_sector_repository,
+        "publish_legacy_snapshot",
+        Mock(
+            side_effect=(
+                _release_result(data_version=_TAXONOMY_VERSION, reused_publication=True),
+                _release_result(data_version=_VALUATION_VERSION, reused_publication=True),
+            )
+        ),
+    )
+    database = FakeDatabase(connection)
+    repository = SqlAlchemySwSectorRepository(cast(DatabaseClient, database))
+    execution = FencedExecution(
+        database=cast(DatabaseClient, database),
+        run_id=uuid5(NAMESPACE_URL, "quant-v2:sw-fenced-test"),
+        fencing_token=1,
+        finalizer=_ignore_fenced_finalizer,
+    )
 
-    result = repository.publish_snapshot(snapshot=snapshot, source=_source())
+    with fenced_execution(execution):
+        result = repository.publish_snapshot(snapshot=snapshot, source=_source())
 
     assert result.taxonomy.data_version == _TAXONOMY_VERSION
     assert result.valuation.data_version == _VALUATION_VERSION
@@ -215,6 +242,8 @@ def test_repository_reuses_unchanged_revisions_and_publications(
     assert result.taxonomy.unchanged_count == 3
     assert result.valuation.inserted_count == 0
     assert result.valuation.unchanged_count == 3
+    assert execution.checkpoint_kind == "data-version"
+    assert execution.checkpoint_position == str(_TAXONOMY_VERSION)
     assert connection.select_results == []
     assert not any(
         isinstance(parameters, list)
@@ -245,26 +274,6 @@ def test_repository_closes_changed_knowledge_and_supersedes_publications(
                 FakeResult([1]),
             ]
         )
-    responses.extend(
-        [
-            FakeResult(
-                [
-                    _published_row(
-                        data_version=_TAXONOMY_VERSION,
-                        content_sha256="2" * 64,
-                    )
-                ]
-            ),
-            FakeResult(
-                [
-                    _published_row(
-                        data_version=_VALUATION_VERSION,
-                        content_sha256="3" * 64,
-                    )
-                ]
-            ),
-        ]
-    )
     connection = FakeConnection(responses)
     repository = _repository(connection)
 
@@ -274,6 +283,16 @@ def test_repository_closes_changed_knowledge_and_supersedes_publications(
         return _SOURCE_BATCH_ID
 
     monkeypatch.setattr(sw_sector_repository, "record_source_observation", record_source)
+    monkeypatch.setattr(
+        sw_sector_repository,
+        "publish_legacy_snapshot",
+        Mock(
+            side_effect=(
+                _release_result(data_version=uuid4()),
+                _release_result(data_version=uuid4()),
+            )
+        ),
+    )
 
     result = repository.publish_snapshot(snapshot=snapshot, source=_source())
 
@@ -472,6 +491,19 @@ def _methodology_row() -> dict[str, object]:
     }
 
 
+def _release_result(
+    *, data_version: UUID, reused_publication: bool = False
+) -> PublishedCanonicalRelease:
+    """构造统一 canonical 发布器的真实版本结果替身。"""
+    return PublishedCanonicalRelease(
+        release_id=uuid4(),
+        data_version=data_version,
+        reused_release=reused_publication,
+        reused_publication=reused_publication,
+        published_at=_OBSERVED_AT,
+    )
+
+
 def _published_row(*, data_version: UUID, content_sha256: str) -> dict[str, object]:
     """构造一个仍有效的消费者发布查询行。"""
     return {
@@ -585,3 +617,7 @@ def _source_values() -> dict[str, object]:
 def _source() -> SwSourceObservation:
     """构造时区完整的来源观察。"""
     return SwSourceObservation(**_source_values())  # type: ignore[arg-type]
+
+
+def _ignore_fenced_finalizer(_session: Session, _execution: FencedExecution) -> None:
+    """为仓储单测提供不写控制面状态的最小终态回调。"""

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -29,7 +30,7 @@ from service_data_sync.application.ports.financial_sync import (
     FinancialSyncRepository,
     FinancialValuationInput,
 )
-from service_data_sync.application.ports.market_data import RawPayload, RawPayloadStore
+from service_data_sync.application.ports.market_data import RawPayloadStore
 from service_data_sync.domain.equity import Exchange
 
 _STATEMENT_CAPABILITY = "financial.statement.raw"
@@ -61,12 +62,19 @@ class FinancialSyncService:
         repository: FinancialSyncRepository,
         raw_payload_store: RawPayloadStore,
     ) -> None:
-        """接收唯一 provider-neutral 来源、财务持久化端口和不可变 raw evidence 存储。"""
+        """接收来源与财务仓储；失败 evidence 由外层来源包装器和传入存储协同处理。"""
         self._source = source
         self._repository = repository
-        self._raw_payload_store = raw_payload_store
+        # 保留构造参数以维持现有装配接口；成功路径不能直接使用它写入 payload。
+        del raw_payload_store
 
-    async def sync_security(self, *, exchange: Exchange, symbol: str) -> FinancialSyncResult:
+    async def sync_security(
+        self,
+        *,
+        exchange: Exchange,
+        symbol: str,
+        before_final_publication: Callable[[], None] | None = None,
+    ) -> FinancialSyncResult:
         """下载并发布一只证券的三类财务数据；任一能力失败时不伪造部分成功。"""
         _validate_symbol(symbol)
         required = (_STATEMENT_CAPABILITY, _METRIC_CAPABILITY, _VALUATION_CAPABILITY)
@@ -91,26 +99,120 @@ class FinancialSyncService:
         )
         valuations_source = self._archive(valuations_batch)
         valuations = _decode_valuations(valuations_batch.payload, exchange=exchange, symbol=symbol)
-        return FinancialSyncResult(
-            reports=self._repository.publish_reports(
-                exchange=exchange,
-                symbol=symbol,
-                reports=reports,
-                source=reports_source,
-            ),
-            provider_metrics=self._repository.publish_provider_metrics(
-                exchange=exchange,
-                symbol=symbol,
-                metrics=metrics,
-                source=metrics_source,
-            ),
-            valuations=self._repository.publish_valuations(
-                exchange=exchange,
-                symbol=symbol,
-                valuations=valuations,
-                source=valuations_source,
-            ),
+        metrics_result = self._repository.publish_provider_metrics(
+            exchange=exchange,
+            symbol=symbol,
+            metrics=metrics,
+            source=metrics_source,
         )
+        valuations_result = self._repository.publish_valuations(
+            exchange=exchange,
+            symbol=symbol,
+            valuations=valuations,
+            source=valuations_source,
+        )
+        if before_final_publication is not None:
+            # 控制面 dataset 是 `financial.report`；必须让终态事务绑定该真实消费者版本，
+            # 不能把 valuation dataVersion 误当作 report publication。
+            before_final_publication()
+        reports_result = self._repository.publish_reports(
+            exchange=exchange,
+            symbol=symbol,
+            reports=reports,
+            source=reports_source,
+        )
+        return FinancialSyncResult(
+            reports=reports_result,
+            provider_metrics=metrics_result,
+            valuations=valuations_result,
+        )
+
+    async def sync_reports(
+        self,
+        *,
+        exchange: Exchange,
+        symbol: str,
+        before_publication: Callable[[], None] | None = None,
+    ) -> FinancialPublicationResult:
+        """独立抓取并发布三表，使控制面只绑定 `financial.report` 一个真实版本。"""
+        _validate_symbol(symbol)
+        self._require_capability(_STATEMENT_CAPABILITY)
+        batch = await self._fetch(
+            exchange=exchange,
+            symbol=symbol,
+            capability=_STATEMENT_CAPABILITY,
+        )
+        reports = _decode_reports(batch.payload, exchange=exchange, symbol=symbol)
+        source = self._archive(batch)
+        if before_publication is not None:
+            before_publication()
+        return self._repository.publish_reports(
+            exchange=exchange,
+            symbol=symbol,
+            reports=reports,
+            source=source,
+        )
+
+    async def sync_provider_metrics(
+        self,
+        *,
+        exchange: Exchange,
+        symbol: str,
+        before_publication: Callable[[], None] | None = None,
+    ) -> FinancialPublicationResult:
+        """独立抓取并发布供应商指标，不在报表 run 内产生旁路 publication。"""
+        _validate_symbol(symbol)
+        self._require_capability(_METRIC_CAPABILITY)
+        batch = await self._fetch(
+            exchange=exchange,
+            symbol=symbol,
+            capability=_METRIC_CAPABILITY,
+        )
+        metrics = _decode_metrics(batch.payload, exchange=exchange, symbol=symbol)
+        source = self._archive(batch)
+        if before_publication is not None:
+            before_publication()
+        return self._repository.publish_provider_metrics(
+            exchange=exchange,
+            symbol=symbol,
+            metrics=metrics,
+            source=source,
+        )
+
+    async def sync_valuations(
+        self,
+        *,
+        exchange: Exchange,
+        symbol: str,
+        before_publication: Callable[[], None] | None = None,
+    ) -> FinancialPublicationResult:
+        """独立抓取并发布日频估值，使失败和重试不影响报表或供应商指标。"""
+        _validate_symbol(symbol)
+        self._require_capability(_VALUATION_CAPABILITY)
+        batch = await self._fetch(
+            exchange=exchange,
+            symbol=symbol,
+            capability=_VALUATION_CAPABILITY,
+        )
+        valuations = _decode_valuations(batch.payload, exchange=exchange, symbol=symbol)
+        source = self._archive(batch)
+        if before_publication is not None:
+            before_publication()
+        return self._repository.publish_valuations(
+            exchange=exchange,
+            symbol=symbol,
+            valuations=valuations,
+            source=source,
+        )
+
+    def _require_capability(self, capability: str) -> None:
+        """在发起任何外部请求前确认当前来源仍声明目标财务能力。"""
+        if capability not in self._source.capabilities():
+            raise ProviderError(
+                ProviderErrorCode.INVALID_REQUEST,
+                "provider does not support requested financial capability",
+                retryable=False,
+            )
 
     async def _fetch(self, *, exchange: Exchange, symbol: str, capability: str) -> ProviderBatch:
         """通过来源端口请求一个明确能力，应用层不知晓任何 SDK、URL 或供应商字段。"""
@@ -122,20 +224,12 @@ class FinancialSyncService:
         )
 
     def _archive(self, batch: ProviderBatch) -> FinancialSourceObservation:
-        """暂存来源字节并将摘要和血缘交给 canonical 写入；仅失败时固化证据。"""
+        """仅生成来源摘要与未留存标记，成功路径绝不写入 raw 对象存储。"""
         raw_payload = batch.raw_payload if batch.raw_payload is not None else batch.payload
         raw_digest = hashlib.sha256(raw_payload).hexdigest()
-        raw_uri = self._raw_payload_store.put(
-            RawPayload(
-                object_key=(
-                    f"raw/{batch.capability}/{batch.provider_id}/{batch.observed_at:%Y/%m/%d}/"
-                    f"{raw_digest}.json"
-                ),
-                content_sha256=raw_digest,
-                content_type=batch.raw_content_type or batch.content_type,
-                payload=raw_payload,
-            )
-        )
+        # dispatcher 使用 `FailureEvidenceDataSource` 在解码前短暂暂存批次，并由
+        # `retain_failure_evidence` 仅在异常时持久化。这里不能再次写成功 payload。
+        raw_uri = f"unretained://sha256/{raw_digest}"
         return FinancialSourceObservation(
             provider_id=batch.provider_id,
             capability=batch.capability,

@@ -101,7 +101,7 @@ class FakeDatabase:
 
 
 def test_repository_selects_only_date_aware_current_validated_publication() -> None:
-    """选择器必须按发布双时间解析代码，再绑定能力、方法学和当前 `data_version`。"""
+    """选择器按请求双时间锁定证券，再绑定能力、方法学和当前 `data_version`。"""
     engine = FakeEngine([_publication_row()])
     repository = _repository(engine)
 
@@ -111,6 +111,8 @@ def test_repository_selects_only_date_aware_current_validated_publication() -> N
         capability="financial.report",
         methodology_code="eastmoney.reported",
         methodology_version=2,
+        as_of=date(2026, 7, 27),
+        known_at=datetime(2026, 7, 28, 8, tzinfo=UTC),
     )
 
     assert publication is not None
@@ -125,15 +127,13 @@ def test_repository_selects_only_date_aware_current_validated_publication() -> N
     assert "financial_methodology" in statement
     assert "equity_instrument" in statement
     assert "equity_identifier_version" in statement
-    assert (
-        "equity_identifier_version.effective_range @> financial_publication.effective_as_of"
-        in statement
-    )
-    assert (
-        "equity_identifier_version.knowledge_range @> financial_publication.knowledge_cutoff"
-        in statement
-    )
+    assert "effective_range @> financial_publication.effective_as_of" not in statement
+    assert "knowledge_range @> financial_publication.knowledge_cutoff" not in statement
     assert "equity_identifier_version.identity_state = :identity_state_1" in statement
+    assert "equity_identifier_version.effective_from <= :effective_from_1" in statement
+    assert "equity_identifier_version.effective_to > :effective_to_1" in statement
+    assert "equity_identifier_version.known_from <= :known_from_1" in statement
+    assert "equity_identifier_version.known_to > :known_to_1" in statement
     assert "equity_instrument.exchange =" not in statement
     assert "equity_instrument.symbol =" not in statement
     assert "dataset_publication.superseded_at IS NULL" in statement
@@ -173,14 +173,8 @@ def test_repository_resolves_report_reference_to_its_current_publication() -> No
     statement = engine.connection.statements[0]
     assert "financial_report.report_ref" in statement
     assert "financial_publication.capability" in statement
-    assert (
-        "equity_identifier_version.effective_range @> financial_publication.effective_as_of"
-        in statement
-    )
-    assert (
-        "equity_identifier_version.knowledge_range @> financial_publication.knowledge_cutoff"
-        in statement
-    )
+    assert "effective_range @> financial_publication.effective_as_of" not in statement
+    assert "knowledge_range @> financial_publication.knowledge_cutoff" not in statement
 
 
 def test_repository_maps_storage_failure_to_fail_closed_port_error() -> None:

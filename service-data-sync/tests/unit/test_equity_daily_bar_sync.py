@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
+
+import pytest
 
 from service_data_sync.application.equity.daily_bar_sync import EquityDailyBarSyncService
 from service_data_sync.application.ports.data_source import (
@@ -17,6 +20,7 @@ from service_data_sync.application.ports.data_source import (
 )
 from service_data_sync.application.ports.market_data import (
     EquityAvailabilityObservation,
+    EquitySourceObservation,
     PublishedDailyBars,
     RawPayload,
     StoredEquityInstrument,
@@ -62,6 +66,9 @@ class FakeSource:
             raw_payload=b'{"raw":true}',
             raw_content_type="application/json",
             observed_at=datetime(2026, 7, 1, tzinfo=UTC),
+            upstream_source="upstream-test",
+            adapter_version="fake-v1",
+            schema_fingerprint="a" * 64,
         )
 
 
@@ -88,16 +95,24 @@ class FakeRepository:
     def __init__(self) -> None:
         """初始化保存替身最近一次发布请求的存储。"""
         self.bars: tuple[EquityDailyBar, ...] = ()
-        self.availability: EquityAvailabilityObservation | None = None
         self.availability_cleared = False
+        self.source: EquitySourceObservation | None = None
+        self.start: date | None = None
+        self.end: date | None = None
 
     def publish_daily_bars(self, **kwargs: object) -> PublishedDailyBars:
-        """保存标准化日线，并返回最小的当前证券发布结果。"""
+        """保存标准化日线并模拟与发布同事务的旧空集清理。"""
         identifier = kwargs["identifier"]
         assert isinstance(identifier, EquityIdentifier)
         bars = kwargs["bars"]
         assert isinstance(bars, tuple)
         self.bars = bars
+        source = kwargs["source"]
+        assert isinstance(source, EquitySourceObservation)
+        self.source = source
+        self.start = kwargs["start"] if isinstance(kwargs["start"], date) else None
+        self.end = kwargs["end"] if isinstance(kwargs["end"], date) else None
+        self.availability_cleared = self.start is not None and self.end is not None
         instrument = StoredEquityInstrument(
             security_id=1,
             instrument_id=uuid4(),
@@ -110,19 +125,14 @@ class FakeRepository:
             inserted_count=len(bars),
             unchanged_count=0,
             instrument=instrument,
+            coverage_version=uuid4(),
+            source_batch_id=uuid4(),
+            publication_kind="DATA" if bars else "ZERO_RECORD_COVERAGE",
         )
 
     def record_daily_bar_availability(self, **kwargs: object) -> EquityAvailabilityObservation:
-        """记录空集或来源不可用结果，验证用例不把它伪装成日线事实。"""
-        assert kwargs["availability"] in {"empty", "source_unavailable"}
-        observed_at = kwargs["observed_at"]
-        assert isinstance(observed_at, datetime)
-        self.availability = EquityAvailabilityObservation(
-            availability=str(kwargs["availability"]),
-            reason_code=str(kwargs["reason_code"]),
-            observed_at=observed_at,
-        )
-        return self.availability
+        """保留旧诊断端口形状；成功同步若误调用它则立即让测试失败。"""
+        raise AssertionError(f"unexpected availability success write: {kwargs!r}")
 
     def clear_daily_bar_availability(self, **kwargs: object) -> None:
         """记录成功发布已终结同窗口旧空状态，保持替身端口完整。"""
@@ -176,10 +186,15 @@ def test_sync_archives_raw_evidence_before_publishing_normalized_daily_bars() ->
     assert raw_store.payloads[0].payload == b'{"raw":true}'
     assert repository.bars[0].close_price == Decimal("10.5")
     assert repository.availability_cleared is True
+    assert repository.source is not None
+    assert repository.source.upstream_source == "upstream-test"
+    assert repository.source.adapter_version == "fake-v1"
+    assert repository.source.schema_fingerprint == "a" * 64
+    assert repository.source.raw_payload_sha256 == hashlib.sha256(b'{"raw":true}').hexdigest()
 
 
-def test_sync_records_empty_observation_without_persisting_success_payload() -> None:
-    """合法空集必须完成同步并记录元数据，不能写入全空 canonical 日线。"""
+def test_sync_publishes_legal_empty_window_with_real_source_evidence() -> None:
+    """合法空集必须携带真实来源对象并形成零记录 publication 与 coverage。"""
     raw_store = FakeRawPayloadStore()
     repository = FakeRepository()
     identifier = EquityIdentifier.parse("SSE.600519")
@@ -189,32 +204,36 @@ def test_sync_records_empty_observation_without_persisting_success_payload() -> 
         ).sync(identifier=identifier, start=date(2026, 7, 1), end=date(2026, 7, 29))
     )
 
-    assert result.data_version is None
+    assert result.data_version is not None
     assert result.availability == "empty"
+    assert result.publication_kind == "ZERO_RECORD_COVERAGE"
+    assert result.coverage_version is not None
+    assert result.source_batch_id is not None
     assert repository.bars == ()
-    assert repository.availability is not None
-    assert repository.availability.reason_code == "no_matching_facts"
-    assert raw_store.payloads == []
+    assert repository.source is not None
+    assert repository.start == date(2026, 7, 1)
+    assert repository.end == date(2026, 7, 29)
+    assert len(raw_store.payloads) == 2
 
 
-def test_sync_records_source_unavailable_as_successful_empty_state() -> None:
-    """AKShare 暂不可用不能中断个人使用链路，也不应产生失败 raw 对象。"""
+def test_sync_propagates_source_unavailable_without_false_success() -> None:
+    """来源不可用必须让任务失败并可重试，不能形成零记录成功或来源对象。"""
     raw_store = FakeRawPayloadStore()
     repository = FakeRepository()
-    result = asyncio.run(
-        EquityDailyBarSyncService(
-            source=UnavailableSource(), repository=repository, raw_payload_store=raw_store
-        ).sync(
-            identifier=EquityIdentifier.parse("SSE.600519"),
-            start=date(2026, 7, 1),
-            end=date(2026, 7, 29),
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(
+            EquityDailyBarSyncService(
+                source=UnavailableSource(), repository=repository, raw_payload_store=raw_store
+            ).sync(
+                identifier=EquityIdentifier.parse("SSE.600519"),
+                start=date(2026, 7, 1),
+                end=date(2026, 7, 29),
+            )
         )
-    )
 
-    assert result.data_version is None
-    assert result.availability == "source_unavailable"
-    assert repository.availability is not None
-    assert repository.availability.reason_code == "unavailable"
+    assert captured.value.code is ProviderErrorCode.UNAVAILABLE
+    assert captured.value.retryable is True
+    assert repository.source is None
     assert raw_store.payloads == []
 
 
@@ -236,6 +255,11 @@ class EmptySource(FakeSource):
                 separators=(",", ":"),
             ).encode(),
             observed_at=datetime(2026, 7, 29, tzinfo=UTC),
+            raw_payload=b'{"records":[]}',
+            raw_content_type="application/json",
+            upstream_source="upstream-test",
+            adapter_version="fake-v1",
+            schema_fingerprint="a" * 64,
         )
 
 

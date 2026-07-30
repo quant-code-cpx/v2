@@ -57,6 +57,8 @@ describe('EquityMarketDataClient', () => {
     const result = await client.listBars({
       exchange: 'SSE',
       symbol: '600519',
+      dataVersion: publication.dataVersion,
+      factorDataVersion: '00000000-0000-4000-8000-000000000002',
       period: '1w',
       start: '2026-01-01',
       end: '2026-07-28',
@@ -73,7 +75,9 @@ describe('EquityMarketDataClient', () => {
     const [target, init] = fetcher.mock.calls[0] ?? [];
     const url = requestedUrl(target);
     expect(url.pathname).toBe('/internal/v1/equities/SSE/600519/bars');
-    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+    expect(Object.fromEntries(Array.from(url.searchParams.entries()))).toMatchObject({
+      dataVersion: publication.dataVersion,
+      factorDataVersion: '00000000-0000-4000-8000-000000000002',
       period: '1w',
       adjust: 'qfq',
       adjustAsOf: '2026-07-28',
@@ -122,6 +126,7 @@ describe('EquityMarketDataClient', () => {
       }),
       jsonResponse({
         ...publication,
+        identityAsOf: '2026-07-28',
         revision: 1,
         profile: {
           companyName: '贵州茅台酒股份有限公司',
@@ -150,6 +155,7 @@ describe('EquityMarketDataClient', () => {
     const factors = await client.listAdjustmentFactors({
       exchange: 'SSE',
       symbol: '600519',
+      dataVersion: publication.dataVersion,
       start: '2026-01-01',
       end: '2026-07-28',
       limit: 500,
@@ -158,23 +164,28 @@ describe('EquityMarketDataClient', () => {
     const actions = await client.listCorporateActions({
       exchange: 'SSE',
       symbol: '600519',
+      dataVersion: publication.dataVersion,
       limit: 100,
       requestId: 'req-actions',
     });
     const profile = await client.getCompanyProfile({
       exchange: 'SSE',
       symbol: '600519',
+      dataVersion: publication.dataVersion,
+      asOf: '2026-07-28',
       requestId: 'req-profile',
     });
 
     expect(factors.status === 200 && factors.body.items[0]?.cumulativeFactor).toBe('2');
     expect(actions.status === 200 && actions.body.items[0]?.status).toBe('实施');
     expect(profile.status === 200 && profile.body.profile.industry).toBe('白酒');
-    expect(requestedUrl(fetcher.mock.calls[2]?.[0]).pathname).toContain('company-profile');
+    const profileUrl = requestedUrl(fetcher.mock.calls[2]?.[0]);
+    expect(profileUrl.pathname).toContain('company-profile');
+    expect(profileUrl.searchParams.get('asOf')).toBe('2026-07-28');
   });
 
-  /** 验证没有 canonical 事实时仍把内部成功空页透传给公开领域服务。 */
-  it('accepts a successful empty bar page', async () => {
+  /** 验证缺少技术 publication 的成功空页失败关闭，页面应以 data-status 表达无 publication。 */
+  it('rejects an unversioned empty bar page', async () => {
     const client = new EquityMarketDataClient(
       config,
       vi.fn<typeof fetch>().mockResolvedValue(
@@ -199,40 +210,48 @@ describe('EquityMarketDataClient', () => {
       ),
     );
 
-    const result = await client.listBars({
-      exchange: 'SSE',
-      symbol: '600519',
-      period: '1d',
-      start: '2026-07-01',
-      end: '2026-07-29',
-      adjust: 'none',
-      limit: 100,
-      requestId: 'req-empty',
-    });
-
-    expect(result.status).toBe(200);
-    expect(result.status === 200 && result.body).toMatchObject({
-      availability: 'SOURCE_UNAVAILABLE',
-      dataVersion: null,
-      items: [],
+    await expect(
+      client.listBars({
+        exchange: 'SSE',
+        symbol: '600519',
+        dataVersion: publication.dataVersion,
+        period: '1d',
+        start: '2026-07-01',
+        end: '2026-07-29',
+        adjust: 'none',
+        limit: 100,
+        requestId: 'req-empty',
+      }),
+    ).rejects.toMatchObject({
+      status: HttpStatus.SERVICE_UNAVAILABLE,
+      response: { code: 'dependency-unavailable' },
     });
   });
 
-  /** 验证 304 保留 ETag，供公开 POST 映射为 204。 */
+  /** 验证 304 保留 ETag 与 publication，供公开 POST 映射为可复验 204。 */
   it('preserves conditional not modified responses', async () => {
-    const fetcher = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(new Response(null, { status: 304, headers: { ETag: '"current"' } }));
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(null, {
+        status: 304,
+        headers: { ETag: '"current"', 'X-Data-Version': publication.dataVersion },
+      }),
+    );
     const client = new EquityMarketDataClient(config, fetcher);
 
     const result = await client.getCompanyProfile({
       exchange: 'SSE',
       symbol: '600519',
+      dataVersion: publication.dataVersion,
+      asOf: '2026-07-28',
       ifNoneMatch: '"current"',
       requestId: 'req-profile-cache',
     });
 
-    expect(result).toEqual({ status: 304, etag: '"current"' });
+    expect(result).toEqual({
+      status: 304,
+      etag: '"current"',
+      dataVersion: publication.dataVersion,
+    });
   });
 
   /** 验证复权覆盖冲突、未知冲突和合同漂移都不会泄漏内部详情。 */
@@ -255,6 +274,8 @@ describe('EquityMarketDataClient', () => {
       adjustmentClient.listBars({
         exchange: 'SSE',
         symbol: '600519',
+        dataVersion: publication.dataVersion,
+        factorDataVersion: '00000000-0000-4000-8000-000000000002',
         period: '1mo',
         start: '2026-01-01',
         end: '2026-07-28',
@@ -270,6 +291,7 @@ describe('EquityMarketDataClient', () => {
       invalidClient.getCompanyProfile({
         exchange: 'SSE',
         symbol: '600519',
+        dataVersion: publication.dataVersion,
         requestId: 'req-invalid',
       }),
     ).rejects.toMatchObject({
@@ -301,6 +323,7 @@ describe('EquityMarketDataClient', () => {
     const query = {
       exchange: 'SSE',
       symbol: '600519',
+      dataVersion: publication.dataVersion,
       start: '2026-01-01',
       end: '2026-07-28',
       limit: 100,
@@ -322,7 +345,11 @@ describe('EquityMarketDataClient', () => {
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
-    headers: { 'Content-Type': 'application/json', ETag: '"v1"' },
+    headers: {
+      'Content-Type': 'application/json',
+      ETag: '"v1"',
+      'X-Data-Version': publication.dataVersion,
+    },
   });
 }
 

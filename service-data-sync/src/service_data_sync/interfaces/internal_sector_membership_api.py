@@ -10,8 +10,9 @@ import base64
 import hashlib
 import json
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Any
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, Path, Query, Request
 from fastapi.responses import Response
@@ -111,6 +112,7 @@ def register_sector_membership_routes(
                 cursor or "first",
                 str(limit),
             ),
+            data_version=release.data_version,
             body=body,
         )
 
@@ -123,23 +125,40 @@ def register_sector_membership_routes(
         exchange: str,
         symbol: Annotated[str, Path(pattern="^[0-9]{6}$")],
         scheme: Annotated[str, Query(min_length=1)],
+        data_version: Annotated[UUID, Query(alias="dataVersion")],
+        identity_as_of: Annotated[date, Query(alias="identityAsOf")],
         as_of: Annotated[datetime | None, Query(alias="asOf")] = None,
+        known_at: Annotated[datetime | None, Query(alias="knownAt")] = None,
         cursor: Annotated[str | None, Query(max_length=1024)] = None,
         limit: Annotated[int, Query(ge=1, le=500)] = 200,
         if_none_match: Annotated[str | None, Header()] = None,
     ) -> Response:
-        """返回一只 confirmed 证券在单一 release 中的板块归属，已知无归属返回空页。"""
+        """按独立身份锚和精确 release 返回板块归属，已知无归属返回空页。"""
         sector_scheme = _scheme_or_problem(scheme)
         equity_exchange = _exchange_or_problem(exchange)
         requested_as_of = _as_of_or_problem(as_of)
-        release = _release_or_problem(repository, scheme=sector_scheme, as_of=requested_as_of)
-        equity = repository.get_release_equity(
-            release_id=release.release_id,
+        requested_known_at = _known_at_or_problem(known_at)
+        if data_version is not None and requested_as_of is not None:
+            raise InternalProblem(
+                status=400,
+                code="validation-error",
+                detail="dataVersion and asOf must not be combined",
+            )
+        # 路由代码只负责找到永久证券；成分 release 的业务时点绝不能反向改写证券身份。
+        equity = repository.resolve_equity_identity(
             exchange=equity_exchange,
             symbol=symbol,
+            identity_as_of=identity_as_of,
+            known_at=requested_known_at,
         )
         if equity is None:
             raise InternalProblem(status=404, code="not-found", detail="Equity is not found")
+        release = _release_or_problem(
+            repository,
+            scheme=sector_scheme,
+            as_of=requested_as_of,
+            data_version=data_version,
+        )
         after_sector_code = _equity_cursor_or_problem(
             cursor,
             release=release,
@@ -147,6 +166,9 @@ def register_sector_membership_routes(
             exchange=equity_exchange,
             symbol=symbol,
             requested_as_of=requested_as_of,
+            identity_as_of=identity_as_of,
+            known_at=requested_known_at,
+            instrument_id=equity.instrument_id,
         )
         rows = repository.list_equity_memberships(
             release_id=release.release_id,
@@ -162,6 +184,9 @@ def register_sector_membership_routes(
                 exchange=equity_exchange,
                 symbol=symbol,
                 requested_as_of=requested_as_of,
+                identity_as_of=identity_as_of,
+                known_at=requested_known_at,
+                instrument_id=equity.instrument_id,
                 sector_code=page_rows[-1].sector.identifier.code,
             )
             if len(rows) > limit and page_rows
@@ -176,6 +201,8 @@ def register_sector_membership_routes(
                 "listingStatus": equity.listing_status,
             },
             "scheme": sector_scheme.value,
+            "identityAsOf": identity_as_of.isoformat(),
+            "dataVersion": str(release.data_version),
             "release": _release_resource(release),
             "items": [
                 {
@@ -201,10 +228,14 @@ def register_sector_membership_routes(
                 sector_scheme.value,
                 equity_exchange.value,
                 symbol,
+                str(equity.instrument_id),
                 requested_as_of.isoformat() if requested_as_of is not None else "current",
+                identity_as_of.isoformat(),
+                _timestamp(requested_known_at) if requested_known_at is not None else "current",
                 cursor or "first",
                 str(limit),
             ),
+            data_version=release.data_version,
             body=body,
         )
 
@@ -252,15 +283,39 @@ def _as_of_or_problem(value: datetime | None) -> datetime | None:
     return value.astimezone(UTC)
 
 
+def _known_at_or_problem(value: datetime | None) -> datetime | None:
+    """要求身份知识时刻带偏移量，防止部署时区改变双时态解析结果。"""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        raise InternalProblem(
+            status=400,
+            code="validation-error",
+            detail="knownAt must include an offset",
+        )
+    return value.astimezone(UTC)
+
+
 def _release_or_problem(
     repository: SectorMembershipRepository,
     *,
     scheme: SectorScheme,
     as_of: datetime | None,
+    data_version: UUID | None = None,
 ) -> StoredSectorMembershipRelease:
     """选择已发布清单；没有当前或历史覆盖时返回 404，绝不伪造空集合。"""
-    release = repository.get_release(scheme=scheme, as_of=as_of)
+    release = repository.get_release(
+        scheme=scheme,
+        as_of=as_of,
+        data_version=data_version,
+    )
     if release is None:
+        if data_version is not None:
+            raise InternalProblem(
+                status=409,
+                code="snapshot-expired",
+                detail="Published membership snapshot changed",
+            )
         raise InternalProblem(
             status=404, code="not-found", detail="Membership release is not found"
         )
@@ -332,11 +387,20 @@ def _equity_cursor_or_problem(
     exchange: Exchange,
     symbol: str,
     requested_as_of: datetime | None,
+    identity_as_of: date,
+    known_at: datetime | None,
+    instrument_id: UUID,
 ) -> str | None:
     """解码并验证证券反向分页游标，筛选变化或版本失效均不能继续分页。"""
     if cursor is None:
         return None
     decoded = _decode_cursor(cursor)
+    if decoded.get("u") != str(instrument_id):
+        raise InternalProblem(
+            status=409,
+            code="snapshot-expired",
+            detail="Resolved equity identity changed",
+        )
     _validate_cursor(
         decoded,
         release=release,
@@ -346,6 +410,8 @@ def _equity_cursor_or_problem(
             "x": exchange.value,
             "y": symbol,
             "a": _cursor_as_of(requested_as_of),
+            "i": _cursor_identity_as_of(identity_as_of),
+            "k": _cursor_known_at(known_at),
         },
     )
     sector_code = decoded.get("c")
@@ -382,6 +448,9 @@ def _encode_equity_cursor(
     exchange: Exchange,
     symbol: str,
     requested_as_of: datetime | None,
+    identity_as_of: date,
+    known_at: datetime | None,
+    instrument_id: UUID,
     sector_code: str,
 ) -> str:
     """编码证券反向页的 release 和代码边界，公开结果不会含 instrument UUID。"""
@@ -392,7 +461,10 @@ def _encode_equity_cursor(
             "s": scheme.value,
             "x": exchange.value,
             "y": symbol,
+            "u": str(instrument_id),
             "a": _cursor_as_of(requested_as_of),
+            "i": _cursor_identity_as_of(identity_as_of),
+            "k": _cursor_known_at(known_at),
             "c": sector_code,
         }
     )
@@ -438,6 +510,16 @@ def _decode_cursor(value: str) -> dict[str, Any]:
 
 def _cursor_as_of(value: datetime | None) -> str | None:
     """把可空 API 选择时刻规范化为游标可比较 UTC 文本。"""
+    return None if value is None else _timestamp(value)
+
+
+def _cursor_identity_as_of(value: date) -> str:
+    """把必填身份业务日规范化为游标维度，阻止代码复用身份跨页混用。"""
+    return value.isoformat()
+
+
+def _cursor_known_at(value: datetime | None) -> str | None:
+    """把可空身份知识时刻规范化为游标维度，阻止更正前后知识视图混用。"""
     return None if value is None else _timestamp(value)
 
 

@@ -31,6 +31,12 @@ def test_decoder_keeps_active_rank_separate_from_market_statistics() -> None:
                     "sellAmount": "900",
                     "turnoverAmount": "1900",
                     "currency": "HKD",
+                    "fieldAvailability": {
+                        "buyAmount": "REPORTED",
+                        "sellAmount": "REPORTED",
+                        "turnoverAmount": "REPORTED",
+                        "netBuyAmount": "NOT_APPLICABLE",
+                    },
                 }
             ],
         }

@@ -19,6 +19,7 @@ from sqlalchemy import and_, desc, func, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from service_data_sync.application.ports.canonical_release import CanonicalLineageRecord
 from service_data_sync.application.ports.sw_sector import (
     SwCapability,
     SwCheckpoint,
@@ -38,6 +39,7 @@ from service_data_sync.domain.sw_sector import (
     SwMethodology,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.fenced_execution import current_fenced_execution
 from service_data_sync.infrastructure.database.models.publication.dataset_publication import (
     DatasetPublication,
 )
@@ -62,12 +64,19 @@ from service_data_sync.infrastructure.database.models.sector.sw.sw_sector_qualit
 from service_data_sync.infrastructure.database.models.sector.sw.sw_sector_sync_checkpoint import (
     SwSectorSyncCheckpoint,
 )
+from service_data_sync.infrastructure.persistence.canonical_release_repository import (
+    SqlAlchemyCanonicalReleaseRepository,
+)
+from service_data_sync.infrastructure.persistence.legacy_canonical_release_bridge import (
+    publish_legacy_snapshot,
+)
 from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 
 _RAW_CAPABILITY = "sector.sw.snapshot.raw"
 _TAXONOMY_CAPABILITY: SwCapability = "sector.sw.taxonomy"
 _VALUATION_CAPABILITY: SwCapability = "sector.sw.valuation"
 _PARTITION_PREFIX = "sw.industry"
+_RELEASE_MAPPING_VERSION = "sw-sector-release-bridge-v1"
 
 
 class SqlAlchemySwSectorRepository(SwSectorRepository):
@@ -76,6 +85,7 @@ class SqlAlchemySwSectorRepository(SwSectorRepository):
     def __init__(self, database: DatabaseClient) -> None:
         """保存服务自有短生命周期 Session 工厂。"""
         self._database = database
+        self._release_repository = SqlAlchemyCanonicalReleaseRepository(database)
 
     def publish_snapshot(
         self, *, snapshot: SwIndustrySnapshot, source: SwSourceObservation
@@ -123,6 +133,8 @@ class SqlAlchemySwSectorRepository(SwSectorRepository):
                 capability=_TAXONOMY_CAPABILITY,
                 snapshot_date=snapshot.snapshot_date,
                 methodology_id=methodology_id,
+                snapshot=snapshot,
+                source_batch_id=source_batch_id,
                 content_sha256=snapshot.taxonomy_sha256(),
                 row_count=len(snapshot.nodes),
                 inserted_count=node_inserted,
@@ -147,6 +159,8 @@ class SqlAlchemySwSectorRepository(SwSectorRepository):
                 capability=_VALUATION_CAPABILITY,
                 snapshot_date=snapshot.snapshot_date,
                 methodology_id=methodology_id,
+                snapshot=snapshot,
+                source_batch_id=source_batch_id,
                 content_sha256=snapshot.valuation_sha256(),
                 row_count=len(snapshot.valuations),
                 inserted_count=valuation_inserted,
@@ -168,6 +182,7 @@ class SqlAlchemySwSectorRepository(SwSectorRepository):
                 taxonomy=taxonomy,
                 now=now,
             )
+            _record_fenced_publication_checkpoint(taxonomy.data_version)
         return SwPublishResult(taxonomy=taxonomy, valuation=valuation)
 
     def get_checkpoint(self, *, snapshot_date: date) -> SwCheckpoint | None:
@@ -620,97 +635,63 @@ class SqlAlchemySwSectorRepository(SwSectorRepository):
         capability: SwCapability,
         snapshot_date: date,
         methodology_id: UUID,
+        snapshot: SwIndustrySnapshot,
+        source_batch_id: UUID,
         content_sha256: str,
         row_count: int,
         inserted_count: int,
         unchanged_count: int,
         now: datetime,
     ) -> tuple[SwPublishedCapability, bool]:
-        """按 capability 与观测日切换通用发布，并在内容未变时复用版本。"""
+        """以完整当前快照经统一 release 发布器切换 capability 的消费者版本。"""
         partition_key = _partition_key(snapshot_date)
-        existing = (
-            connection.execute(
-                select(
-                    SwSectorPublication.data_version,
-                    SwSectorPublication.published_at,
-                    SwSectorPublication.row_count,
-                    SwSectorPublication.content_sha256,
-                )
-                .join(
-                    DatasetPublication,
-                    DatasetPublication.data_version == SwSectorPublication.data_version,
-                )
-                .where(
-                    SwSectorPublication.capability == capability,
-                    SwSectorPublication.snapshot_date == snapshot_date,
-                    DatasetPublication.dataset == capability,
-                    DatasetPublication.partition_key == partition_key,
-                    DatasetPublication.superseded_at.is_(None),
-                )
-            )
-            .mappings()
-            .one_or_none()
+        published = publish_legacy_snapshot(
+            connection,
+            release_repository=self._release_repository,
+            dataset_code=capability,
+            partition_key=partition_key,
+            domain="sector",
+            grain="SW industry snapshot + capability-native current fact",
+            semantic_family="reported-sw-sector-data",
+            mapping_version=f"{_RELEASE_MAPPING_VERSION}:{capability}",
+            source_batch_id=source_batch_id,
+            records=_release_records(
+                capability=capability,
+                snapshot=snapshot,
+                methodology_id=methodology_id,
+                source_batch_id=source_batch_id,
+            ),
+            fact_min=snapshot_date,
+            fact_max=snapshot_date,
+            now=now,
+            publication_effective_as_of=snapshot_date,
         )
-        if existing is not None and str(existing["content_sha256"]) == content_sha256:
-            return (
-                SwPublishedCapability(
-                    capability=capability,
-                    data_version=UUID(str(existing["data_version"])),
-                    snapshot_date=snapshot_date,
-                    published_at=cast(datetime, existing["published_at"]),
-                    inserted_count=0,
-                    unchanged_count=row_count,
-                    row_count=int(existing["row_count"]),
-                    content_sha256=content_sha256,
-                ),
-                False,
-            )
+        data_version = published.data_version
         connection.execute(
-            update(DatasetPublication)
-            .where(
-                DatasetPublication.dataset == capability,
-                DatasetPublication.partition_key == partition_key,
-                DatasetPublication.superseded_at.is_(None),
-            )
-            .values(superseded_at=now)
-        )
-        data_version = uuid4()
-        connection.execute(
-            insert(DatasetPublication).values(
-                publication_id=uuid4(),
-                dataset=capability,
-                partition_key=partition_key,
-                data_version=data_version,
-                quality_status="passed",
-                published_at=now,
-                superseded_at=None,
-                effective_as_of=snapshot_date,
-                knowledge_cutoff=now,
-            )
-        )
-        connection.execute(
-            insert(SwSectorPublication).values(
+            pg_insert(SwSectorPublication)
+            .values(
                 data_version=data_version,
                 capability=capability,
                 snapshot_date=snapshot_date,
                 methodology_id=methodology_id,
                 row_count=row_count,
                 content_sha256=content_sha256,
-                published_at=now,
+                published_at=published.published_at,
             )
+            .on_conflict_do_nothing(index_elements=(SwSectorPublication.data_version,))
         )
         return (
             SwPublishedCapability(
                 capability=capability,
                 data_version=data_version,
                 snapshot_date=snapshot_date,
-                published_at=now,
-                inserted_count=inserted_count,
-                unchanged_count=unchanged_count,
+                published_at=published.published_at,
+                inserted_count=0 if published.reused_publication else inserted_count,
+                unchanged_count=row_count if published.reused_publication else unchanged_count,
                 row_count=row_count,
                 content_sha256=content_sha256,
             ),
-            True,
+            not published.reused_publication,
         )
 
     def _write_quality_results(
@@ -821,6 +802,75 @@ class SqlAlchemySwSectorRepository(SwSectorRepository):
         return 1 if current is None else int(current) + 1
 
 
+def _release_records(
+    *,
+    capability: SwCapability,
+    snapshot: SwIndustrySnapshot,
+    methodology_id: UUID,
+    source_batch_id: UUID,
+) -> tuple[CanonicalLineageRecord, ...]:
+    """从完整 SW 快照派生 capability 当前事实的行级内容和来源血缘。"""
+    transform_hash = hashlib.sha256(f"{_RELEASE_MAPPING_VERSION}:{capability}".encode()).hexdigest()
+    if capability == _TAXONOMY_CAPABILITY:
+        node_records = tuple(
+            CanonicalLineageRecord(
+                record_key_hash=_release_record_key(
+                    capability=capability,
+                    snapshot_date=snapshot.snapshot_date,
+                    native_key=f"node:{node.code}",
+                ),
+                content_hash=_node_sha256(node, methodology_id=methodology_id),
+                source_batch_id=source_batch_id,
+                transform_hash=transform_hash,
+            )
+            for node in sorted(snapshot.nodes, key=lambda item: item.code)
+        )
+        closure_records = tuple(
+            CanonicalLineageRecord(
+                record_key_hash=_release_record_key(
+                    capability=capability,
+                    snapshot_date=snapshot.snapshot_date,
+                    native_key=(
+                        f"closure:{edge.ancestor_code}:{edge.descendant_code}:{edge.depth}"
+                    ),
+                ),
+                content_hash=_sha256(
+                    {
+                        "ancestorCode": edge.ancestor_code,
+                        "descendantCode": edge.descendant_code,
+                        "depth": edge.depth,
+                    }
+                ),
+                source_batch_id=source_batch_id,
+                transform_hash=transform_hash,
+            )
+            for edge in snapshot.closure()
+        )
+        return (*node_records, *closure_records)
+    if capability == _VALUATION_CAPABILITY:
+        return tuple(
+            CanonicalLineageRecord(
+                record_key_hash=_release_record_key(
+                    capability=capability,
+                    snapshot_date=snapshot.snapshot_date,
+                    native_key=f"valuation:{valuation.code}",
+                ),
+                content_hash=_valuation_sha256(valuation, methodology_id=methodology_id),
+                source_batch_id=source_batch_id,
+                transform_hash=transform_hash,
+            )
+            for valuation in sorted(snapshot.valuations, key=lambda item: item.code)
+        )
+    raise ValueError("SW capability is not supported by the canonical release bridge")
+
+
+def _release_record_key(*, capability: SwCapability, snapshot_date: date, native_key: str) -> str:
+    """以 capability、观测日和强类型事实键生成稳定 release 记录键摘要。"""
+    return hashlib.sha256(
+        f"sector:{capability}:{snapshot_date.isoformat()}:{native_key}".encode()
+    ).hexdigest()
+
+
 def _publication(row: Mapping[Any, Any]) -> SwPublication:
     """把发布、通用指针和方法学连接行投影为中立读取对象。"""
     return SwPublication(
@@ -884,6 +934,13 @@ def _stored_valuation(row: Mapping[Any, Any], *, snapshot_date: date) -> SwStore
 def _node_id(code: str) -> UUID:
     """从 scheme 与来源代码生成跨快照稳定 UUID。"""
     return uuid5(NAMESPACE_URL, f"quant-v2:sw-industry:{code}")
+
+
+def _record_fenced_publication_checkpoint(data_version: UUID) -> None:
+    """把 taxonomy 消费者实际 `dataVersion` 交给当前 fenced 控制面同事务完成 run。"""
+    execution = current_fenced_execution()
+    if execution is not None:
+        execution.record_checkpoint(kind="data-version", position=str(data_version))
 
 
 def _partition_key(snapshot_date: date) -> str:

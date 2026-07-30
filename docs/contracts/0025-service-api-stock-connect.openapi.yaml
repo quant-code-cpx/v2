@@ -1,0 +1,455 @@
+openapi: 3.1.0
+x-http-method-policy: post-only
+info:
+  title: quant-v2 沪深港通公开业务 API
+  version: 1.0.0
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+  x-contract-status: Accepted
+  description: >-
+    service-web 使用的沪深港通业务合同。全部应用路由仅声明 POST。所有成功响应
+    要么来自 service-data-sync 已批准 publication，要么来自独立版本化的 readiness
+    持久化证据快照；官方未披露字段以 availability 表达，不以零、估算值、查询时钟
+    或模拟数据替代。
+servers:
+  - url: /api/v1
+security:
+  - accessToken: []
+paths:
+  /market/stock-connect/overview/query:
+    post:
+      operationId: queryStockConnectOverview
+      summary: 查询互联互通总览
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+      requestBody:
+        $ref: "#/components/requestBodies/OverviewQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/Overview"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /market/stock-connect/readiness/query:
+    post:
+      operationId: queryStockConnectReadiness
+      summary: 查询所选通道的官方日历、数据交付与发布就绪证据
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+      requestBody:
+        $ref: "#/components/requestBodies/ReadinessQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/Readiness"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /market/stock-connect/channels/query:
+    post:
+      operationId: queryStockConnectChannel
+      summary: 查询单条互联互通通道
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+      requestBody:
+        $ref: "#/components/requestBodies/ChannelQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/Channel"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /market/stock-connect/active-securities/query:
+    post:
+      operationId: queryStockConnectActiveSecurities
+      summary: 查询官方活跃证券榜与可用的榜内净额排序
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+      requestBody:
+        $ref: "#/components/requestBodies/ActiveSecurityQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/ActiveSecurityPage"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /market/stock-connect/securities/context/query:
+    post:
+      operationId: queryStockConnectSecurityContext
+      summary: 查询证券的互联互通上下文
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IfNoneMatch"
+      requestBody:
+        $ref: "#/components/requestBodies/SecurityContextQuery"
+      responses:
+        "200":
+          $ref: "#/components/responses/SecurityContext"
+        "204":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+components:
+  securitySchemes:
+    accessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      description: 上次成功响应的标准 ETag；须保留双引号。
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 160
+        pattern: '^"[A-Za-z0-9._:-]{1,158}"$'
+  headers:
+    RequestId:
+      description: 请求关联标识
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    DataVersion:
+      description: >-
+        不可变 publication 版本或 readiness 规范快照 SHA-256；客户端缓存键仍使用
+        同响应的标准 ETag。
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 160
+    EntityTag:
+      description: >-
+        由 operationId、规范化请求体与不可变 dataVersion 共同生成的强 ETag；
+        不同路由、筛选或分页不得只因 dataVersion 相同而共享 ETag。
+      schema:
+        type: string
+        maxLength: 160
+        pattern: '^"[A-Za-z0-9._:-]{1,158}"$'
+    CacheControl:
+      description: 仅允许私有浏览器缓存，不允许共享缓存跨用户复用
+      schema:
+        const: "private, no-cache"
+  requestBodies:
+    OverviewQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OverviewQuery"
+    ReadinessQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ReadinessQuery"
+    ChannelQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ChannelQuery"
+    ActiveSecurityQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ActiveSecurityQuery"
+    SecurityContextQuery:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SecurityContextQuery"
+  responses:
+    Overview:
+      description: 互联互通总览
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/CacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "0024-data-sync-stock-connect-internal.openapi.yaml#/components/schemas/OverviewResponse"
+    Readiness:
+      description: 独立于业务 publication 的持久化就绪证据快照
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/CacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "0024-data-sync-stock-connect-internal.openapi.yaml#/components/schemas/ReadinessResponse"
+    Channel:
+      description: 单通道详情
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/CacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "0024-data-sync-stock-connect-internal.openapi.yaml#/components/schemas/ChannelResponse"
+    ActiveSecurityPage:
+      description: 活跃证券分页；rankingScope 恒为来源活跃证券范围
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/CacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "0024-data-sync-stock-connect-internal.openapi.yaml#/components/schemas/ActiveSecurityPage"
+    SecurityContext:
+      description: 证券互联互通上下文
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/CacheControl"
+      content:
+        application/json:
+          schema:
+            $ref: "0024-data-sync-stock-connect-internal.openapi.yaml#/components/schemas/SecurityContextResponse"
+    NotModified:
+      description: If-None-Match 命中；响应体为空
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-Data-Version:
+          $ref: "#/components/headers/DataVersion"
+        ETag:
+          $ref: "#/components/headers/EntityTag"
+        Cache-Control:
+          $ref: "#/components/headers/CacheControl"
+    Problem:
+      description: RFC 9457 Problem Details
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    DateSelection:
+      $ref: "0024-data-sync-stock-connect-internal.openapi.yaml#/components/schemas/DateSelection"
+    ChannelCode:
+      $ref: "0024-data-sync-stock-connect-internal.openapi.yaml#/components/schemas/ChannelCode"
+    OverviewQuery:
+      type: object
+      additionalProperties: false
+      required: [date, channels, trendTradingDays]
+      properties:
+        date:
+          $ref: "#/components/schemas/DateSelection"
+        channels:
+          type: array
+          minItems: 1
+          maxItems: 4
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ChannelCode"
+        trendTradingDays:
+          type: integer
+          minimum: 1
+          maximum: 250
+    ReadinessQuery:
+      $ref: "0024-data-sync-stock-connect-internal.openapi.yaml#/components/schemas/ReadinessQuery"
+    ChannelQuery:
+      type: object
+      additionalProperties: false
+      required: [date, channel, trendTradingDays]
+      properties:
+        date:
+          $ref: "#/components/schemas/DateSelection"
+        channel:
+          $ref: "#/components/schemas/ChannelCode"
+        trendTradingDays:
+          type: integer
+          minimum: 1
+          maximum: 250
+    ActiveSecurityQuery:
+      type: object
+      additionalProperties: false
+      required:
+        [date, channel, ranking, parentPublicationDataVersion, cursor, limit]
+      properties:
+        date:
+          $ref: "#/components/schemas/DateSelection"
+        channel:
+          $ref: "#/components/schemas/ChannelCode"
+        ranking:
+          enum: [SOURCE_ACTIVE, NET_BUY, NET_SELL]
+        parentPublicationDataVersion:
+          type: string
+          minLength: 1
+          maxLength: 160
+          pattern: "^[^\\u0000-\\u001F\\u007F]+$"
+          description: >-
+            页面当前展示的父 publication 版本。总览页传 overview publication
+            dataVersion，通道页传 channel bundle dataVersion；API 原样向下游传递。
+            若父 publication 已变化，返回 409 PARENT_PUBLICATION_MISMATCH，
+            禁止把旧统计与新榜单拼接。
+        cursor:
+          type: [string, "null"]
+          maxLength: 1024
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+    SecurityContextQuery:
+      type: object
+      additionalProperties: false
+      required: [instrumentEntityRef, date, channel, historyTradingDays]
+      properties:
+        instrumentEntityRef:
+          type: string
+          minLength: 1
+          maxLength: 160
+        date:
+          $ref: "#/components/schemas/DateSelection"
+        channel:
+          oneOf:
+            - $ref: "#/components/schemas/ChannelCode"
+            - type: "null"
+        historyTradingDays:
+          type: integer
+          minimum: 1
+          maximum: 250
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail, instance, code, requestId]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 500
+        instance:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        code:
+          enum:
+            [
+              VALIDATION_FAILED,
+              AUTHENTICATION_FAILED,
+              AUTHORIZATION_FAILED,
+              EXACT_DATE_NOT_PUBLISHED,
+              PUBLICATION_NOT_READY,
+              READINESS_NOT_OBSERVED,
+              PARENT_PUBLICATION_MISMATCH,
+              CURSOR_VERSION_MISMATCH,
+              RATE_LIMITED,
+              UPSTREAM_UNAVAILABLE,
+              SECURITY_CONTEXT_NOT_FOUND,
+            ]
+        requestId:
+          type: string
+          maxLength: 128

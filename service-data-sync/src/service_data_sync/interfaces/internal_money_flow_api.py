@@ -11,6 +11,7 @@ import json
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Annotated, Literal
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -50,6 +51,7 @@ def register_money_flow_routes(
     not_found_problem: Callable[[], Exception],
     validation_problem: Callable[[str], Exception],
     conflict_problem: Callable[[str], Exception],
+    snapshot_problem: Callable[[], Exception],
     repository: MoneyFlowReadRepository | None,
 ) -> None:
     """注册 0015 的五条只读路径，并统一签名游标和条件响应语义。"""
@@ -131,6 +133,7 @@ def register_money_flow_routes(
         bucket: Annotated[str, Query(pattern=r"^[a-z][a-z0-9_-]{0,63}$")],
         start: date,
         end: date,
+        data_version: Annotated[UUID, Query(alias="dataVersion")],
         known_at: Annotated[datetime | None, Query(alias="knownAt")] = None,
         cursor: Annotated[str | None, Query(min_length=1, max_length=2048)] = None,
         limit: Annotated[int, Query(ge=1, le=500)] = 200,
@@ -150,6 +153,7 @@ def register_money_flow_routes(
             bucket=bucket,
             start=start,
             end=end,
+            expected_data_version=data_version,
             known_at=known_at,
             cursor=cursor,
             limit=limit,
@@ -158,6 +162,7 @@ def register_money_flow_routes(
             not_found_problem=not_found_problem,
             validation_problem=validation_problem,
             conflict_problem=conflict_problem,
+            snapshot_problem=snapshot_problem,
         )
 
     @app.get(
@@ -206,6 +211,7 @@ def register_money_flow_routes(
             bucket=bucket,
             start=start,
             end=end,
+            expected_data_version=None,
             known_at=known_at,
             cursor=cursor,
             limit=limit,
@@ -214,6 +220,7 @@ def register_money_flow_routes(
             not_found_problem=not_found_problem,
             validation_problem=validation_problem,
             conflict_problem=conflict_problem,
+            snapshot_problem=snapshot_problem,
         )
 
     @app.get(
@@ -266,6 +273,7 @@ def register_money_flow_routes(
             bucket=bucket,
             start=start,
             end=end,
+            expected_data_version=None,
             known_at=known_at,
             cursor=cursor,
             limit=limit,
@@ -274,6 +282,7 @@ def register_money_flow_routes(
             not_found_problem=not_found_problem,
             validation_problem=validation_problem,
             conflict_problem=conflict_problem,
+            snapshot_problem=snapshot_problem,
         )
 
     @app.get(
@@ -369,6 +378,7 @@ def _daily_response(
     bucket: str,
     start: date,
     end: date,
+    expected_data_version: UUID | None,
     known_at: datetime | None,
     cursor: str | None,
     limit: int,
@@ -377,6 +387,7 @@ def _daily_response(
     not_found_problem: Callable[[], Exception],
     validation_problem: Callable[[str], Exception],
     conflict_problem: Callable[[str], Exception],
+    snapshot_problem: Callable[[], Exception],
 ) -> Response:
     """执行三类日序列共有的校验、错误映射和条件响应。"""
     if repository is None:
@@ -404,7 +415,11 @@ def _daily_response(
     except MoneyFlowReadUnavailable as error:
         raise unavailable_problem() from error
     if page is None:
+        if expected_data_version is not None:
+            raise snapshot_problem()
         raise not_found_problem()
+    if expected_data_version is not None and page.data_version != expected_data_version:
+        raise snapshot_problem()
     body = _daily_page_body(page)
     return _conditional_response(
         request=request,
@@ -418,6 +433,7 @@ def _daily_response(
             "bucket": bucket,
             "start": start.isoformat(),
             "end": end.isoformat(),
+            "dataVersion": (None if expected_data_version is None else str(expected_data_version)),
             "knownAt": (None if known_at is None else known_at.isoformat()),
             "cursor": cursor,
             "limit": limit,

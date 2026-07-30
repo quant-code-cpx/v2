@@ -424,14 +424,14 @@ def _approved_source(
 
 
 def _ensure_dataset(session: Session, *, code: str, domain: str, now: datetime) -> UUID:
-    """幂等登记 ETF dataset，只有 candidate/production 状态可进入受控 release 流程。"""
-    dataset_id = uuid5(NAMESPACE_URL, f"quant-v2:canonical-dataset:{code}:1")
+    """幂等登记 ETF schema v2 dataset，避免新 publication 落入旧 v1 身份。"""
+    dataset_id = uuid5(NAMESPACE_URL, f"quant-v2:canonical-dataset:{code}:2")
     session.execute(
         pg_insert(CanonicalDataset)
         .values(
             dataset_id=dataset_id,
             code=code,
-            schema_version=1,
+            schema_version=2,
             domain=domain,
             grain="ETF listing + dated reported fact",
             status="candidate",
@@ -443,7 +443,10 @@ def _ensure_dataset(session: Session, *, code: str, domain: str, now: datetime) 
     return UUID(
         str(
             session.execute(
-                select(CanonicalDataset.dataset_id).where(CanonicalDataset.code == code)
+                select(CanonicalDataset.dataset_id).where(
+                    CanonicalDataset.code == code,
+                    CanonicalDataset.schema_version == 2,
+                )
             ).scalar_one()
         )
     )

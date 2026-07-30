@@ -5,6 +5,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Matches,
   Max,
@@ -19,6 +20,15 @@ import { DATE_ONLY_PATTERN } from './temporal-patterns.js';
 
 /** 约束个股行情周期、日期、复权模式和页上限。 */
 export class ListEquityBarsQueryDto {
+  /** 绑定 data-status 返回的精确行情 publication，禁止状态与叶子数据静默混版。 */
+  @IsUUID()
+  public readonly dataVersion!: string;
+
+  /** 复权时绑定 data-status 返回的精确因子 publication。 */
+  @IsOptional()
+  @IsUUID()
+  public readonly factorDataVersion?: string;
+
   /** 选择一个上游独立物理周期。 */
   @IsOptional()
   @IsIn(EQUITY_BAR_PERIODS)

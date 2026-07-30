@@ -3,13 +3,33 @@
 财经与股票基础数据同步服务。当前包含工程基础设施、个股日/周/月独立行情、复权因子、公司行动、公司概况、
 行业/概念板块三周期行情、申万三级行业与估值、A 股证券主数据和显式上市生命周期、财务与估值、日频资金流。
 各链路经 provider-neutral port、独立 adapter、S3 失败排障证据、PostgreSQL canonical revision、
-publication、CLI 与 Celery 任务闭环。
+publication 与统一 command 控制面闭环。
 
 技术方案见 [0001：同步服务工程基础设施](../docs/service-data-sync/0001-data-sync-foundation/index.html)。
 板块跨服务读取与 API 路径见
 [0003：板块行情 API 访问技术方案](../docs/service-api/0003-sector-market-data-access/index.html)（已实现内部与公开读取路由）。
 
 ## 当前边界
+
+### 数据运维控制面
+
+所有新同步、取消、重试、主动健康检查和自动计划都必须通过数据运维 `command` 账本。标准运行路径只有
+内部 0022 HTTP 路由提交的 command，以及 `service_data_sync.data_operations.dispatch`、
+`service_data_sync.data_operations.reap`、`service_data_sync.data_operations.health_dispatch` 和
+`service_data_sync.data_operations.scheduler_tick` 四个 worker 任务；全局 `ExecutionSlot`、lease 与
+fencing token 由 PostgreSQL 权威维护。任何 CLI、beat、恢复或重试均不得直接调用同步 use case、发布
+canonical 数据或推进 checkpoint。
+
+兼容清单中的 18 个历史 CLI 和 5 个历史 Celery task 已安全拒绝执行，错误码为
+`data-operations-legacy-entrypoint-unavailable`，以避免在未注册 fenced executor 的数据集上绕过全局槽。
+仍保留的个股行情、参考数据和财务兼容入口只会转换受限业务参数并提交 `SYSTEM` command；它们不会在本进程
+访问 Provider、写入 canonical 数据或取得执行槽。
+
+既有内部读取 API 继续只接受 `DATA_SYNC_INTERNAL_API_BEARER_TOKEN`。0022 数据运维读取路由使用
+`DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN`，有副作用的提交、取消、重试、健康检查与计划路由使用
+`DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN`。LOCAL/TEST 环境在两枚数据运维 token 都未配置时，才会
+回退到既有 token；STAGING/PRODUCTION 必须同时配置既有 token 和读、写两枚数据运维 token，且既有 token
+不能访问已拆分的数据运维路由。
 
 - **仅失败留证：** 成功 AKShare 同步不再写入 raw 或 normalized S3 对象，只保存 canonical 数据、来源摘要和
   不可回放标记；适配器返回后的字节只在内存中暂存，发生获取后解析、质量或发布失败时才写入私有
@@ -38,7 +58,7 @@ publication、CLI 与 Celery 任务闭环。
   `sector_daily_bar`、`sector_weekly_bar`、`sector_monthly_bar`，绝不由日线计算。除 `DATA_SYNC_AKSHARE_ENABLED=true`
   外，还必须显式设置 `DATA_SYNC_SECTOR_ENABLED=true`。
 - 已实现行业/概念目录 CLI；目录快照的成功路径只保留来源摘要后会激活带名称的 `ACTIVE` 身份。行情先创建的 `PENDING` 身份会保留 UUID 后升级；已实现板块成分当前快照、观测区间、固定 release、双向 internal 读取与手动 CLI。
-- 已实现行业/概念板块 EOD 完整横截面 adapter、失败证据、revision、质量门、内部读取、受控手工 CLI、shadow scheduler、租约 reaper、publication rollback、结构化任务日志与 2026 沪深公告交易日历。它只保存 `post_close_observation`，不宣称官方终态；全部 EOD 开关默认关闭。2026 年以外日期安全阻断，且单位对账、连续探针与生产观测验收仍未完成；仓内未选择或引入监控平台。
+- 已实现行业/概念板块 EOD 完整横截面 adapter、失败证据、revision、质量门、内部读取、受控手工 CLI、shadow scheduler、租约 reaper、旧 rollback 安全停用、结构化任务日志与 2026 沪深公告交易日历。它只保存 `post_close_observation`，不宣称官方终态；全部 EOD 开关默认关闭。2026 年以外日期安全阻断，且单位对账、连续探针与生产观测验收仍未完成；仓内未选择或引入监控平台。
 - 个股行情 CLI 默认拉最近 31 个自然日；传 `--full-history` 从 1990-12-19 回填。`--period 1w` 和
   `--period 1mo` 始终走上游独立周期接口。
 - 已实现证券目录、双时间身份/名称/上市状态、交易所独立 publication、全市场稳定聚合、内部读取和公开 API
@@ -61,6 +81,98 @@ publication、CLI 与 Celery 任务闭环。
   固定版本在线探针未通过完整性门禁的方法学保持 research，production 读取统一 fail-closed。
 - 所有未来外部数据只能通过 provider-neutral port 与独立 adapter 获取。
 - application、task、质量、持久化代码禁止直接调用数据源 SDK、HTTP 或具体 adapter。
+
+## 市场概览与行业板块完整包
+
+`market.overview-and-sectors.bundle` 是市场首页、东财行业/概念和申万详情共同依赖的原子 EOD
+publication。生产启用前必须同时提供：
+
+- `DATA_SYNC_MARKET_OVERVIEW_ENABLED=true`
+- `DATA_SYNC_TUSHARE_ENABLED=true`
+- `DATA_SYNC_TUSHARE_TOKEN`
+- `DATA_SYNC_MARKET_DATA_LICENSE_SCOPE=commercial-redistribution-approved`
+- `DATA_SYNC_MARKET_DATA_LICENSE_REFERENCE`
+
+启动与每次人工提交前的 `market.source.preflight` 会真实探测日历、A 股日行情、上市证券目录、
+换手与市值、停牌、涨跌停核验、四个指数、个股与市场资金流、东财目录/行情/成分/资金流和
+申万 taxonomy/成分/行情权限及 schema。全量端点恰达供应商行上限时按潜在截断失败，不能用
+部分结果推进 bundle 指针；`stock_basic` 的 `L`、`D`、`P` 三个状态在实际同步中分别检查，
+preflight 至少在线验证必需的 `L` 分区。
+
+17:20 只表示当天满足 EOD eligibility，不表示所有来源已更新。Tushare 个股 `moneyflow`
+在交易日 19:00 后更新，因此数据运维控制面只接受以下唯一计划：`INCREMENTAL`、沪深共同
+交易日历、`Asia/Shanghai` 19:20。其他 mode、policy、日历、时区或时间均返回
+`market-overview-schedule-invalid`（400），避免把 17:20 误配为完整包抓取时刻。
+
+首次创建计划时，通过 0022 内部运维写路由提交以下模板；`${...}` 必须在调用前替换为本次真实
+UUID、内部主体引用和运维凭据。同一数据集只允许一个持久化计划，后续修改必须先读取当前
+`scheduleId` 与 `version`，再以 `expectedVersion` 乐观锁更新。
+
+```json
+{
+  "submissionId": "${SUBMISSION_ID}",
+  "scheduleId": null,
+  "datasetCode": "market.overview-and-sectors.bundle",
+  "mode": "INCREMENTAL",
+  "selector": {"kind": "GLOBAL"},
+  "targetPolicy": {"policyVersion": 1, "dateResolution": "NONE"},
+  "frequency": {
+    "kind": "TRADING_DAY",
+    "timezone": "Asia/Shanghai",
+    "localTime": "19:20",
+    "dayOfWeek": null,
+    "dayOfMonth": null,
+    "intervalMinutes": null,
+    "calendarCode": "SSE-SZSE"
+  },
+  "misfirePolicy": "RUN_ONCE",
+  "coalesce": true,
+  "enabled": true,
+  "expectedVersion": null,
+  "actor": {
+    "actorRef": "${ACTOR_REF}",
+    "role": "SYSTEM",
+    "reason": "启用市场概览交易日完整包计划"
+  }
+}
+```
+
+请求使用 `POST /internal/v1/data-operations/schedules/upsert`，携带
+`Authorization: Bearer ${DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN}`、
+每次操作唯一且网络重试时稳定复用的 `Idempotency-Key` 和 `X-Request-Id`。scheduler tick 只把
+19:20 fire 写入同一 command 队列，dispatcher 取得全局 slot 与 fencing token 后才执行同步；
+不存在绕过 command 账本的 beat 直写。
+
+同一运行内仅对可重试网络失败最多做三次有界 adapter 重试，不存在 19:35、19:50 或每 15 分钟的
+自动补跑。交易日 20:00 前必须核对：
+
+1. 对应 command/run 已到 `SUCCEEDED`，且没有 `PARTIAL`、`FAILED` 或死信投递；
+2. `GET /internal/v1/market/overview-bundles/latest` 的 `tradeDate` 等于当日共同交易日；
+3. `status.freshness=current`、`lagTradingDays=0`，并存在强 `ETag` 与相同
+   `X-Data-Version`。
+
+20:00 仍未满足时立即告警，并对失败 command 或 run 调用
+`POST /internal/v1/data-operations/commands/retry`。重试请求必须引用真实失败资源，不重新猜日期：
+
+```json
+{
+  "submissionId": "${RETRY_SUBMISSION_ID}",
+  "target": {
+    "resourceType": "RUN",
+    "resourceId": "${FAILED_RUN_ID}"
+  },
+  "actor": {
+    "actorRef": "${ACTOR_REF}",
+    "role": "SYSTEM",
+    "reason": "市场概览完整包在 20:00 前未成功，按失败运行重试"
+  }
+}
+```
+
+该请求同样使用运维写 bearer、独立 `Idempotency-Key` 与 `X-Request-Id`。失败不会推进 active
+bundle；旧完整版本继续可读并明确标为 stale。次日正常 `INCREMENTAL` 会检查最近 25 个共同
+交易日并升序补洞；若发现 current pointer 之后已有发布而中间仍有历史 active 缺口，则安全停止并
+要求受控 chain replay，不会把历史修补伪装成当天成功。
 
 ## 数据模型导览
 
@@ -245,7 +357,8 @@ docker compose -f compose.yaml -f compose.dev.yaml --env-file .env --profile dat
 docker compose -f compose.yaml -f compose.dev.yaml --env-file .env --profile data-sync-infra --profile data-sync-worker run --rm --no-deps data-sync-worker data-sync-diagnostics --format console
 ~~~
 
-诊断成功后启动空载 worker：
+诊断成功后启动真实 worker 与 scheduler；scheduler 会按固定 beat 唤醒 dispatcher，worker 取得全局
+execution slot 与 fencing token 后执行已提交或已到期的同步 run：
 
 ~~~sh
 docker compose -f compose.yaml -f compose.dev.yaml --env-file .env --profile data-sync-infra --profile data-sync-worker up -d
@@ -351,28 +464,202 @@ data-sync-derivative-bars --contract CFFEX.IF2608 --start 2026-07-28 --end 2026-
 
 连续探测、正式质量门、定时任务、历史回放与受控消费仍须完成方案 0019 的后续门禁后另行启用。
 
-## ETF、两融、港通、公告与交易公开信息 P0
+## ETF、两融、公告与交易公开信息 P0
 
-这些 P0 CLI 默认使用个人内部研究 AKShare 元数据和禁止再分发范围；可按参数覆盖真实上游。设置
-`DATA_SYNC_AKSHARE_ENABLED=true` 后，组合根注册唯一 `provider_id=akshare` 的统一 P0 adapter，目录、状态、
-日线、净值、两融、港通、公告、龙虎榜、大宗交易和真实合约日线均按独立 capability 发布；一个任务不会用另一个
-dataset 补齐字段。未开启 AKShare 时命令仍写入 <code>source_unavailable</code> 观测并成功返回空结果，不会阻断 API 消费。
+这些 P0 能力使用个人内部研究 AKShare 元数据和禁止再分发范围。设置
+`DATA_SYNC_AKSHARE_ENABLED=true` 后，组合根注册 `provider_id=akshare` 的研究 adapter，ETF、两融、公告、
+龙虎榜、大宗交易和真实合约日线仍按独立 capability 发布；一个任务不会用另一个 dataset 补齐字段。
+沪深港通不属于这条 AKShare 链路，任何同名 capability 都不能替换已批准的官方来源。
 
-AKShare 没有“官方成交活跃前十”接口，不能把持股或估算增持排行混入该 dataset；该 capability 当前返回合法空数组。
-AKShare 也没有上交所两融标的名单接口，上交所资格 capability 返回合法空数组。ETF 目录只支持当日快照；请求历史
-目录日期同样返回空数组。上述空值均会由 API 投影为空列表或空字段，不构成同步失败。
+AKShare 没有上交所两融标的名单接口，上交所资格 capability 返回合法空数组。ETF profile 实际读取
+上交所 `commonQuery` 的 `F100` 当前 ETF 目录与官方类别树，以及深交所官方基金 XLSX 中
+`基金类别=ETF` 的行；`akshare` 只是内部 adapter/权利审批标签，公开来源仍分别标识交易所。两端都只有
+当前快照：跨日旧 fire 会在任何 Provider 请求前不可重试失败并留脱敏证据，目录空响应按来源不可用处理，
+均不会解释为零产品或退市。上述研究能力的空值不会被解释为沪深港通官方数据。
 
 ```bash
-data-sync-etf --operation master --venue SSE --observation-date 2026-07-29
-
 data-sync-margin --operation market --venue SSE --start 2026-07-28 --end 2026-07-28
-
-data-sync-stock-connect --operation market --channel SH --direction NORTHBOUND \
-  --start 2026-07-28 --end 2026-07-28
 ```
+
+`data-sync-etf` 旧入口已故意拒绝执行，ETF 只能通过带 fencing 的 Data Operations 链路运行：
+
+1. 启动 `data-sync-worker` 与 `data-sync-scheduler`；scheduler 每十秒唤醒 dispatcher，二者必须使用同一
+   immutable service-data-sync image。
+2. 对 `fund.etf.profile.reported` 以 `OBSERVATION_DATE` 和
+   `{"kind":"ETF","operation":"MASTER","scope":"ALL_VENUES","venue":null,"etf":null}`
+   调用 `POST /internal/v1/data-operations/commands/preflight`，再使用新的幂等键调用
+   `POST /internal/v1/data-operations/commands/submit`。只有 SSE、SZSE 两个 publication 都成功后才能继续。
+3. 对日线、NAV、状态分别选择 `BARS`、`NAV`、`STATUS` 之一；以下三个 selector 都可直接复制，一次预检只提交
+   其中一个：
+
+   ```json
+   {"kind":"ETF","operation":"BARS","venue":null,"scope":"ALL_ETFS","etf":null,"profileDataVersions":null}
+   {"kind":"ETF","operation":"NAV","venue":null,"scope":"ALL_ETFS","etf":null,"profileDataVersions":null}
+   {"kind":"ETF","operation":"STATUS","venue":null,"scope":"ALL_ETFS","etf":null,"profileDataVersions":null}
+   ```
+
+   服务端会冻结两市 exact profile dataVersion、全集数量和摘要，submit 不接收调用方伪造版本。官方
+   profile 类型为 `交易型货币基金` 或 `货币市场基金` 的成员会以
+   `NAV_SEMANTICS_UNSUPPORTED_MONEY_MARKET` 记录 `SKIPPED` 和审计摘要，不请求 NAV Provider；若运行时
+   仍观察到混合 `NAVTYPE`，同样返回 `CURRENTLY_UNSUPPORTED`，绝不把万份收益或七日年化冒充单位净值。
+4. 自动计划先配置双市场 profile current-snapshot 计划，再配置下游 ALL_ETFS 计划。全集逐实体请求使用
+   `DATA_SYNC_ETF_PROVIDER_MIN_INTERVAL_SECONDS` 节流；可重试熔断按
+   `DATA_SYNC_ETF_AUTO_RETRY_BASE_SECONDS`/`MAX_SECONDS` 有界退避，并在
+   `DATA_SYNC_ETF_AUTO_RETRY_MAX_ATTEMPTS` 内续跑同一冻结 run、继承成功分区。超过上限才进入终态失败。
 
 `data-sync-corporate-events`、`data-sync-trading-events` 也可无来源参数运行；前者只接收
 `--start/--end`，后者另需 `--operation dragon-tiger|block-trade`。这些命令默认仅供受控手工运行，未配置自动调度。
+
+## 沪深港通官方完整包
+
+`market.stock_connect.overview.bundle` 只接受 `provider_id=official-stock-connect`，原子串联 HKEX 官方日历、
+Data Marketplace licensed 日统计与活跃证券、摘要钉住的 fixed-length Securities Master，以及 OMD-C、
+SSE MDGW、SZSE STEP 日终状态 landing。缺 Daily Statistics 授权、运营边界内缺状态 sidecar、缺
+`END_OF_DAY_FINAL`、已声明 profile 的 schema 漂移或部分通道失败均阻断对应 publication；单日
+Securities Master 缺件或单证券无法映射只把该行标为 `SOURCE_UNRESOLVED`，保留来源代码和来源名称，
+不生成 `instrumentEntityRef`，不会阻断真实成交与来源活跃榜。系统不会回退 AKShare、制造空榜或从成交额
+推导净买入。OMD-C Msg80 不报告会话，北向 `CLOSED` 仅在官方开放日与最终性证据同时存在时标为
+`DERIVED`，买卖委托接受标志保持空。
+
+内部 Stock Connect API 另提供
+`POST /internal/v1/stock-connect/readiness/query`。它只读取由官方日历、entitlement/delivery、
+preflight、execution 和 publication 持久化事件形成的独立快照；候选日与全部所选通道就绪日分别返回。
+正文删除顶层 `dataVersion` 后按合同规范序列化并计算 SHA-256，响应头必须一致；无快照返回
+`READINESS_NOT_OBSERVED`，查询时间不参与状态或版本。
+
+上线前应先在只读容器内离线校验四类清单；该命令不访问网络或数据库，成功返回 `0`，schema、摘要、
+覆盖边界或分页 root 不合法返回 `2`：
+
+```bash
+data-sync-stock-connect-manifests validate-all \
+  --calendar /run/quant-v2/stock-connect-config/hkex-calendar-manifest.json \
+  --sftp /run/quant-v2/stock-connect-config/hkex-sftp-delivery-manifest.json \
+  --status /run/quant-v2/stock-connect-config/stock-connect-status-manifest.json \
+  --status-required-from 2020-01-01 \
+  --master /run/quant-v2/stock-connect-config/hkex-securities-master-fixed-length-profile.json \
+  --master-sha256 "${DATA_SYNC_HKEX_SECURITIES_MASTER_PROFILE_MANIFEST_SHA256}"
+```
+
+分页 SFTP 清单变更评审时可单独重算 canonical root：
+
+```bash
+data-sync-stock-connect-manifests calculate-sftp-root \
+  --path /run/quant-v2/stock-connect-config/hkex-sftp-delivery-manifest.json
+```
+
+正式 preflight 持久化 immutable delivery manifest 后，使用其真实 UUID 与 root hash 做六阶段全量覆盖审计：
+
+```bash
+data-sync-stock-connect-coverage-audit \
+  --manifest-id "${STOCK_CONNECT_DELIVERY_MANIFEST_ID}" \
+  --root-hash "${STOCK_CONNECT_DELIVERY_ROOT_HASH}"
+```
+
+审计只读取 PostgreSQL，依次核对 entitlement、对象版本、状态、市场统计、来源活跃榜和原子 bundle；全部
+通过返回 `0`，存在 coverage 缺口返回 `3`，输入或依赖失败返回 `2`。生产状态边界只读取已持久化
+`stock_connect_status_coverage_boundary_lock`，不会采信临时环境变量。
+
+回滚只接受精确通道、交易日和已经存在的历史完整包，不提供隐式 latest。首次执行前生成一个永久
+operation UUID；命令输出丢失或进程恢复时必须复用同一 UUID 和完全相同的审计参数：
+
+```bash
+data-sync-stock-connect-rollback \
+  --operation-id "${STOCK_CONNECT_ROLLBACK_OPERATION_ID}" \
+  --channel SH_NORTHBOUND \
+  --trade-date 2026-07-29 \
+  --target-bundle-release-id "${STOCK_CONNECT_TARGET_BUNDLE_RELEASE_ID}" \
+  --actor-ref "operator:stock-connect" \
+  --reason "生产完整包出现数据质量回归，回滚到已验证历史版本" \
+  --request-id "incident:stock-connect:20260729"
+```
+
+该入口使用权威 command/run、全局 execution slot 和单调 fencing token；bundle 指针、全部受影响 overview
+子集、不可变回滚审计及成功终态在同一事务提交。旧 token、跨日/跨通道目标、残缺 bundle、残缺 overview
+图或并发占槽全部 fail-closed。成功或同 operation 重放返回 `0`，业务拒绝返回 `3`，输入或依赖失败返回
+`2`；换 operation UUID 不能把已回滚目标伪装成同一次幂等重放。
+
+启用前至少配置：
+
+- `DATA_SYNC_STOCK_CONNECT_ENABLED=true`
+- `DATA_SYNC_STOCK_CONNECT_LICENSE_SCOPE`
+- `DATA_SYNC_HKEX_SFTP_USERNAME`
+- `DATA_SYNC_HKEX_SH_DAILY_PATH_TEMPLATE`、`DATA_SYNC_HKEX_SZ_DAILY_PATH_TEMPLATE`
+- `DATA_SYNC_HKEX_SECURITIES_MASTER_PATH_TEMPLATE`，必须使用 `{issued_date}` 或 `{issued_iso_date}`
+- `DATA_SYNC_HKEX_SECURITIES_MASTER_PROFILE_MANIFEST_SHA256`
+- `DATA_SYNC_HKEX_CALENDAR_MANIFEST_PATH`
+- `DATA_SYNC_HKEX_SFTP_DELIVERY_MANIFEST_PATH`
+- `DATA_SYNC_STOCK_CONNECT_STATUS_MANIFEST_PATH`
+- `DATA_SYNC_STOCK_CONNECT_STATUS_REQUIRED_FROM`
+- `DATA_SYNC_STOCK_CONNECT_CURSOR_HMAC_SECRET`，至少 32 字节
+
+默认连接 `sftp.data.hkex.com.hk:22`，可用 `DATA_SYNC_HKEX_SFTP_HOST` 和
+`DATA_SYNC_HKEX_SFTP_PORT` 覆盖；公开日历只允许
+`DATA_SYNC_HKEX_CALENDAR_URL_TEMPLATE` 指定的 HTTPS 地址。容器必须只读挂载：
+
+- OpenSSH 私钥到 Compose 固定的
+  `/run/quant-v2/stock-connect-config/hkex-sftp-private-key`
+- 严格 known-hosts 到 Compose 固定的
+  `/run/quant-v2/stock-connect-config/known_hosts`
+- licensed fixed-length profile manifest 到 Compose 固定的
+  `/run/quant-v2/stock-connect-config/hkex-securities-master-fixed-length-profile.json`
+- 逐年度官方日历摘要清单到
+  `/run/quant-v2/stock-connect-config/hkex-calendar-manifest.json`
+- 分页 SFTP 历史订单/保留期清单到
+  `/run/quant-v2/stock-connect-config/hkex-sftp-delivery-manifest.json`
+- 状态覆盖清单到
+  `/run/quant-v2/stock-connect-config/stock-connect-status-manifest.json`
+- OMD-C、SSE MDGW、SZSE STEP 最终文件及同名 `.manifest.json` 到
+  `/var/lib/quant-v2/stock-connect-status`
+
+Compose 将 `data_sync_stock_connect_config` 与 `data_sync_stock_connect_status` 两个 named volume
+分别只读挂载到上述配置根和状态根；生产部署必须在启动 worker/scheduler 前由受控交付流程填充它们，
+不能依赖镜像内默认文件。
+
+状态相对路径可分别由 `DATA_SYNC_HKEX_OMDC_STATUS_PATH_TEMPLATE`、
+`DATA_SYNC_SSE_MDGW_STATUS_PATH_TEMPLATE` 和 `DATA_SYNC_SZSE_STEP_STATUS_PATH_TEMPLATE` 配置。
+OMD-C 模板必须含 `{channel}`，默认值为
+`hkex-omdc/{channel}/{year}/{trade_date}.bin`，确保沪、深北向文件及 sidecar 不会互相覆盖。每次人工
+preflight 都会在总 deadline 内枚举请求窗口的全部官方开放日。日历必须逐年出现在摘要清单中；历史本地
+官方归档使用 `sourceKind=LOCAL_ARCHIVE`，历史在线文件使用带精确 `url` 的
+`sourceKind=HTTPS_OBJECT`；`HTTPS_TEMPLATE` 只允许清单中的当前公开年份，不能为 2014 等历史年份猜
+`{year}` URL。所有对象都先校验 SHA-256，缺中间年份、404 或摘要漂移不会改用第三方日历。Securities
+Master profile manifest 必须是互不重叠的生效区间集合，缺布局区间时拒绝解析，不能用当前列宽猜历史文件。
+SH Daily Statistics 全量边界为官方 back issues 覆盖的 `2014-11-17`，SZ 边界为 `2016-12-05`；
+DATE_RANGE 早于对应边界时直接拒绝，不把连接开通日、抓取时间或当前订阅日冒充产品交付边界。
+Daily Statistics 在 2024-08-19 北向披露变更前后使用不同制度 profile：变更前买卖额缺失是 schema
+错误，变更后保持空值和 `NOT_DISCLOSED_BY_REGIME`，绝不写零。
+
+SFTP 每个 Daily Statistics 对象必须出现在分页 entitlement 清单，逐对象携带 `orderReference` 与
+`availableUntil`；Securities Master 清单项存在时同样逐对象校验，缺项或单日文件不可用时仅进入身份降级。
+preflight 会用
+`DATA_SYNC_STOCK_CONNECT_MIN_PARTITIONS_PER_MINUTE`（默认每分钟 20 个日包）和
+`DATA_SYNC_STOCK_CONNECT_DELIVERY_EXPIRY_SAFETY_SECONDS`（默认 3600 秒）估算安全完成时刻；无法在最早
+保留截止前完成时 `eligible=false`、零 command/run。目录批量核验后，每个产品组首尾对象另做精确 stat。
+
+状态只校验 coverage manifest 明确声明的 landing；`DATA_SYNC_STOCK_CONNECT_STATUS_REQUIRED_FROM`
+及之后的官方开放日必须逐日声明、逐一解析并校验 sidecar 摘要与 `END_OF_DAY_FINAL`，缺件立即阻断。该运营
+边界之前没有参与者历史归档的日期仍可发布真实成交事实，但状态固定为
+`sessionAvailability=SOURCE_MISSING`、`quotaState=SOURCE_MISSING`、无 publication，并带
+`STATUS_SOURCE_NOT_AVAILABLE_HISTORICAL` 警告，不制造额度或会话值。
+
+通过后，控制面把全窗证据拆成每页最多 20 个交易日、256 个目标的 PostgreSQL 不可变页面，header 冻结
+`manifestId`、root hash、目标/页计数和 `availableUntil`；preflight JSONB 与 run intent 只保存小型引用，
+不复制万级对象清单。任一中间日必需交付缺件或按剩余保留期无法完成时 `eligible=false`，submit 返回
+`preflight-rejected`，不会创建 command/run。页面和页内交易日均按日期降序冻结，FULL/DATE_RANGE
+优先形成最近 publication；执行器按 header 水位只加载一个页面，每次只复核并消费最多五个最新待处理
+完整业务日后自动让出全局 slot；同一 run 的成功日包分区可在 worker loss 后续跑，不重新下载成功
+前缀，也不要求用户手工拆日期。正常 `YIELDED` 不消耗三次 worker-loss 恢复预算。
+
+交付读取默认上限分别为 64 MiB、manifest 256 KiB、ZIP 压缩比 100，可通过
+`DATA_SYNC_STOCK_CONNECT_MAX_DELIVERY_BYTES`、`DATA_SYNC_STOCK_CONNECT_MAX_MANIFEST_BYTES`、
+`DATA_SYNC_STOCK_CONNECT_MAX_ZIP_COMPRESSION_RATIO` 调整。原始字节留存默认
+`DATA_SYNC_STOCK_CONNECT_RAW_RETENTION_MODE=MANIFEST_ONLY`；只有显式设置
+`LICENSED_RAW_ALLOWED`，并同时提供 `DATA_SYNC_STOCK_CONNECT_RAW_RETENTION_LICENSE_REFERENCE` 与
+`DATA_SYNC_STOCK_CONNECT_RAW_KMS_KEY_ID` 时，来源字节才可进入许可暂存路径；成功与失败共用同一
+许可引用和 KMS 门禁，任何路径都不能绕过。当前成功 publication 会主动丢弃暂存字节，只保存摘要和
+不可回放引用；失败诊断才会把许可字节与 manifest 一起加密写入私有桶。许可引用同时写入失败 manifest
+的 `rightsEvidenceRef` 和 canonical `DataSource.rights_evidence_ref`；`MANIFEST_ONLY` 在成功、失败两条
+路径均不持久化来源字节。
 
 ## 申万行业与日频资金流
 

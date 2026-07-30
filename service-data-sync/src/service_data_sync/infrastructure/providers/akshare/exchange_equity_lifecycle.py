@@ -10,11 +10,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import akshare as ak
+import requests
 
 from service_data_sync.application.ports.data_source import (
     ProviderBatch,
@@ -26,8 +28,49 @@ from service_data_sync.domain.equity import Exchange
 
 _CAPABILITY = "equity.lifecycle.explicit"
 _SCHEMA = "quant-v2.equity-lifecycle-explicit.v1"
-_ADAPTER_VERSION = "akshare-1.18.78-official-exchange-lifecycle-v1"
+_ADAPTER_VERSION = "akshare-1.18.78-official-exchange-lifecycle-v2"
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
+_SSE_URL = "https://query.sse.com.cn/commonQuery.do"
+_SSE_HEADERS = {
+    "Accept": "*/*",
+    "Accept-Encoding": "gzip, deflate",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "Host": "query.sse.com.cn",
+    "Pragma": "no-cache",
+    "Referer": "https://www.sse.com.cn/",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/97.0.4692.71 Safari/537.36"
+    ),
+}
+_SSE_PARAMS = {
+    "sqlId": "COMMON_SSE_CP_GPJCTPZ_GPLB_GP_L",
+    "isPagination": "true",
+    "STOCK_CODE": "",
+    "CSRC_CODE": "",
+    "REG_PROVINCE": "",
+    "STOCK_TYPE": "1,8",
+    "COMPANY_STATUS": "3",
+    "type": "inParams",
+    "pageHelp.cacheSize": "1",
+    "pageHelp.beginPage": "1",
+    "pageHelp.pageSize": "500",
+    "pageHelp.pageNo": "1",
+    "pageHelp.endPage": "1",
+}
+_SSE_REQUIRED_FIELDS = frozenset(
+    {
+        "A_STOCK_CODE",
+        "B_STOCK_CODE",
+        "STOCK_TYPE",
+        "COMPANY_ABBR",
+        "LIST_DATE",
+        "DELIST_DATE",
+    }
+)
 
 
 class AkshareExchangeEquityLifecycleAdapter:
@@ -38,10 +81,17 @@ class AkshareExchangeEquityLifecycleAdapter:
 
     provider_id = "akshare-official-exchange-equity-lifecycle"
 
-    def __init__(self, *, request_timeout_seconds: int, client: Any = ak) -> None:
-        """保存固定 AKShare client 与单次阻塞请求墙钟预算，便于 fixture 注入。"""
+    def __init__(
+        self,
+        *,
+        request_timeout_seconds: int,
+        client: Any = ak,
+        sse_http_client: Any = requests,
+    ) -> None:
+        """保存固定上游 client 与单次阻塞请求墙钟预算，便于 fixture 注入。"""
         self._request_timeout_seconds = request_timeout_seconds
         self._client = client
+        self._sse_http_client = sse_http_client
 
     def capabilities(self) -> frozenset[str]:
         """声明唯一显式生命周期能力。"""
@@ -68,7 +118,10 @@ class AkshareExchangeEquityLifecycleAdapter:
             )
         try:
             async with asyncio.timeout(self._request_timeout_seconds):
-                frame = await asyncio.to_thread(self._fetch_frame, exchange)
+                raw_records, raw_payload = await asyncio.to_thread(
+                    self._fetch_records,
+                    exchange,
+                )
         except TimeoutError as error:
             raise ProviderError(
                 ProviderErrorCode.UNAVAILABLE,
@@ -83,14 +136,7 @@ class AkshareExchangeEquityLifecycleAdapter:
                 "provider request failed",
                 retryable=True,
             ) from error
-        if frame.empty:
-            raise ProviderError(
-                ProviderErrorCode.SCHEMA,
-                "provider returned an empty lifecycle dataset",
-                retryable=False,
-            )
         try:
-            raw_records = frame.to_dict(orient="records")
             entries = _normalize_entries(raw_records, exchange=exchange)
         except (KeyError, TypeError, ValueError) as error:
             raise ProviderError(
@@ -113,12 +159,6 @@ class AkshareExchangeEquityLifecycleAdapter:
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode()
-        raw_payload = json.dumps(
-            {"records": raw_records},
-            ensure_ascii=False,
-            default=_json_default,
-            separators=(",", ":"),
-        ).encode()
         return ProviderBatch(
             provider_id=self.provider_id,
             capability=_CAPABILITY,
@@ -132,15 +172,149 @@ class AkshareExchangeEquityLifecycleAdapter:
             schema_fingerprint=_schema_fingerprint(raw_records, exchange=exchange),
         )
 
-    def _fetch_frame(self, exchange: Exchange) -> Any:
-        """在 adapter 内选择固定版本真实函数及参数，禁止调用方感知 SDK 名称。"""
+    def _fetch_records(self, exchange: Exchange) -> tuple[list[dict[str, Any]], bytes]:
+        """在 adapter 内冻结真实端点，并把完整原始响应留给证据归档。"""
         if exchange is Exchange.SSE:
-            # 1.18.78 源码查询 `COMPANY_STATUS=3` 的终止上市集合，但误把
-            # `DELIST_DATE` 重命名为“暂停上市日期”；适配器按原字段语义映射退市。
-            return self._client.stock_info_sh_delist("全部")
+            return self._fetch_sse_records()
         if exchange is Exchange.SZSE:
-            return self._client.stock_info_sz_delist("终止上市公司")
-        return self._client.stock_info_bj_name_code()
+            frame = self._client.stock_info_sz_delist("终止上市公司")
+        else:
+            frame = self._client.stock_info_bj_name_code()
+        if frame.empty:
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "provider returned an empty lifecycle dataset",
+                retryable=False,
+            )
+        records = frame.to_dict(orient="records")
+        raw_payload = json.dumps(
+            {"records": records},
+            ensure_ascii=False,
+            default=_json_default,
+            separators=(",", ":"),
+        ).encode()
+        return records, raw_payload
+
+    def _fetch_sse_records(self) -> tuple[list[dict[str, Any]], bytes]:
+        """直读上交所原始 JSON，保留 A/B 证券字段并只请求 A 股与科创板类型。
+
+        AKShare 1.18.78 的包装函数会裁掉 `STOCK_TYPE`、`A_STOCK_CODE` 和
+        `B_STOCK_CODE`，随后错误使用公司代码，无法区分同一公司的 A/B 股。
+        因此这里冻结其官方底层端点和查询参数，语义字段缺失时直接隔离。
+        """
+        documents: list[Mapping[str, Any]] = []
+        records: list[dict[str, Any]] = []
+        expected_total: int | None = None
+        page_count: int | None = None
+        page_number = 1
+        while page_count is None or page_number <= page_count:
+            document, page_records, total, page_count = self._fetch_sse_page(page_number)
+            if expected_total is None:
+                expected_total = total
+            elif expected_total != total:
+                raise ProviderError(
+                    ProviderErrorCode.SCHEMA,
+                    "SSE lifecycle pagination total changed during fetch",
+                    retryable=True,
+                )
+            documents.append(document)
+            records.extend(page_records)
+            page_number += 1
+        if expected_total is None or len(records) != expected_total:
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "SSE lifecycle pagination is incomplete",
+                retryable=False,
+            )
+        raw_payload = json.dumps(
+            {"pages": documents},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+        return records, raw_payload
+
+    def _fetch_sse_page(
+        self,
+        page_number: int,
+    ) -> tuple[Mapping[str, Any], list[dict[str, Any]], int, int]:
+        """读取并校验一页上交所 JSON，防止页数增长后静默截断历史。"""
+        params = dict(_SSE_PARAMS)
+        params["pageHelp.beginPage"] = str(page_number)
+        params["pageHelp.endPage"] = str(page_number)
+        params["pageHelp.pageNo"] = str(page_number)
+        response = self._sse_http_client.get(
+            _SSE_URL,
+            params=params,
+            headers=_SSE_HEADERS,
+            timeout=self._request_timeout_seconds,
+        )
+        response.raise_for_status()
+        if not bytes(response.content):
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "SSE lifecycle raw response is empty",
+                retryable=False,
+            )
+        document = response.json()
+        if not isinstance(document, Mapping):
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "SSE lifecycle response must be a JSON object",
+                retryable=False,
+            )
+        result = document.get("result")
+        if not isinstance(result, list) or not result:
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "SSE lifecycle response has no result rows",
+                retryable=False,
+            )
+        page_help = document.get("pageHelp")
+        if not isinstance(page_help, Mapping):
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "SSE lifecycle pagination metadata is unavailable",
+                retryable=False,
+            )
+        try:
+            total = int(page_help["total"])
+            page_count = int(page_help["pageCount"])
+            actual_page = int(page_help["pageNo"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "SSE lifecycle pagination metadata changed",
+                retryable=False,
+            ) from error
+        if total <= 0 or page_count <= 0 or page_count > 100 or actual_page != page_number:
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "SSE lifecycle pagination metadata is inconsistent",
+                retryable=False,
+            )
+        records: list[dict[str, Any]] = []
+        for raw_record in result:
+            if not isinstance(raw_record, Mapping):
+                raise ProviderError(
+                    ProviderErrorCode.SCHEMA,
+                    "SSE lifecycle result row must be a JSON object",
+                    retryable=False,
+                )
+            record = dict(raw_record)
+            if not _SSE_REQUIRED_FIELDS.issubset(record):
+                raise ProviderError(
+                    ProviderErrorCode.SCHEMA,
+                    "SSE lifecycle semantic fields are unavailable",
+                    retryable=False,
+                )
+            if str(record["STOCK_TYPE"]).strip() not in {"1", "8"}:
+                raise ProviderError(
+                    ProviderErrorCode.SCHEMA,
+                    "SSE lifecycle response escaped the A-share type filter",
+                    retryable=False,
+                )
+            records.append(record)
+        return document, records, total, page_count
 
 
 def _request_values(request: SourceRequest) -> tuple[Exchange, date]:
@@ -175,9 +349,10 @@ def _normalize_entries(
         entries = [
             _delisting_entry(
                 record,
-                symbol_key="公司代码",
-                listed_on_key="上市日期",
-                delisted_on_key="暂停上市日期",
+                symbol_key="A_STOCK_CODE",
+                name_key="COMPANY_ABBR",
+                listed_on_key="LIST_DATE",
+                delisted_on_key="DELIST_DATE",
             )
             for record in records
         ]
@@ -186,6 +361,7 @@ def _normalize_entries(
             _delisting_entry(
                 record,
                 symbol_key="证券代码",
+                name_key="证券简称",
                 listed_on_key="上市日期",
                 delisted_on_key="终止上市日期",
             )
@@ -208,6 +384,7 @@ def _delisting_entry(
     record: dict[str, Any],
     *,
     symbol_key: str,
+    name_key: str,
     listed_on_key: str,
     delisted_on_key: str,
 ) -> dict[str, str | None]:
@@ -217,6 +394,7 @@ def _delisting_entry(
     delisted_on = _required_date(record[delisted_on_key])
     return {
         "symbol": symbol,
+        "name": _required_name(record[name_key]),
         "status": "DELISTED",
         "effectiveOn": delisted_on.isoformat(),
         "evidenceKind": "EXPLICIT_DELISTING",
@@ -231,6 +409,7 @@ def _bse_listing_entry(record: dict[str, Any]) -> dict[str, str | None]:
     listed_on = _required_date(record["上市日期"])
     return {
         "symbol": _symbol(record["证券代码"]),
+        "name": _required_name(record["证券简称"]),
         "status": "LISTED",
         "effectiveOn": listed_on.isoformat(),
         "evidenceKind": "EXPLICIT_LISTING",
@@ -249,6 +428,14 @@ def _symbol(value: object) -> str:
     if len(symbol) != 6 or not symbol.isdigit():
         raise ValueError("invalid equity symbol")
     return symbol
+
+
+def _required_name(value: object) -> str:
+    """读取交易所官方证券简称，历史身份禁止使用代码或空白占位。"""
+    name = str(value).strip()
+    if not name or name.lower() in {"nan", "nat", "none"}:
+        raise ValueError("lifecycle identity name is missing")
+    return name
 
 
 def _required_date(value: object) -> date:
@@ -270,6 +457,8 @@ def _optional_date(value: object | None) -> date | None:
     text = str(value).strip()
     if not text or text.lower() in {"nan", "nat", "none"}:
         return None
+    if len(text) == 8 and text.isdecimal():
+        return date(int(text[:4]), int(text[4:6]), int(text[6:8]))
     return date.fromisoformat(text[:10])
 
 

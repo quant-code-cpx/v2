@@ -29,12 +29,14 @@ type FetchLike = typeof fetch;
 
 type NotModified = {
   status: 304;
-  etag: string | undefined;
+  etag: string;
+  dataVersion: string;
 };
 
 type UpstreamSuccess<T> = {
   status: 200;
-  etag: string | undefined;
+  etag: string;
+  dataVersion: string;
   body: T;
 };
 
@@ -56,6 +58,7 @@ export class SectorMarketDataClient {
     cursor?: string | undefined;
     limit: number;
     ifNoneMatch?: string | undefined;
+    requestId: string;
   }): Promise<UpstreamResponse<SectorPage>> {
     const parameters = new URLSearchParams({ scheme: input.scheme, limit: String(input.limit) });
     if (input.query !== undefined) parameters.set('query', input.query);
@@ -63,13 +66,14 @@ export class SectorMarketDataClient {
     return this.request(
       `/internal/v1/sectors?${parameters.toString()}`,
       input.ifNoneMatch,
+      input.requestId,
       internalSectorPageSchema,
     ).then((response) =>
       response.status === 304 ? response : { ...response, body: publicSectorPage(response.body) },
     );
   }
 
-  /** 读取一个板块的直接上游物理周期 K 线页，不从日线推导周线或月线。 */
+  /** 读取同步期已物化的正式周期 K 线页，API 请求线程不执行跨日聚合。 */
   public listBars(input: {
     scheme: string;
     code: string;
@@ -79,6 +83,7 @@ export class SectorMarketDataClient {
     cursor?: string | undefined;
     limit: number;
     ifNoneMatch?: string | undefined;
+    requestId: string;
   }): Promise<UpstreamResponse<SectorBarPage>> {
     const parameters = new URLSearchParams({
       period: input.period,
@@ -90,6 +95,7 @@ export class SectorMarketDataClient {
     return this.request(
       `/internal/v1/sectors/${encodeURIComponent(input.scheme)}/${encodeURIComponent(input.code)}/bars?${parameters.toString()}`,
       input.ifNoneMatch,
+      input.requestId,
       internalSectorBarPageSchema,
     ).then((response) =>
       response.status === 304
@@ -107,6 +113,7 @@ export class SectorMarketDataClient {
     cursor?: string | undefined;
     limit: number;
     ifNoneMatch?: string | undefined;
+    requestId: string;
   }): Promise<UpstreamResponse<SectorEodPage>> {
     const parameters = new URLSearchParams({
       scheme: input.scheme,
@@ -119,6 +126,7 @@ export class SectorMarketDataClient {
     return this.request(
       `/internal/v1/sectors/eod-snapshots?${parameters.toString()}`,
       input.ifNoneMatch,
+      input.requestId,
       internalSectorEodPageSchema,
     ).then((response) =>
       response.status === 304
@@ -133,6 +141,7 @@ export class SectorMarketDataClient {
     code: string;
     asOf?: string | undefined;
     ifNoneMatch?: string | undefined;
+    requestId: string;
   }): Promise<UpstreamResponse<SectorEodResource>> {
     const parameters = new URLSearchParams();
     if (input.asOf !== undefined) parameters.set('asOf', input.asOf);
@@ -140,6 +149,7 @@ export class SectorMarketDataClient {
     return this.request(
       `/internal/v1/sectors/${encodeURIComponent(input.scheme)}/${encodeURIComponent(input.code)}/eod-snapshot${suffix}`,
       input.ifNoneMatch,
+      input.requestId,
       internalSectorEodResourceSchema,
     ).then((response) =>
       response.status === 304
@@ -156,13 +166,16 @@ export class SectorMarketDataClient {
     cursor?: string | undefined;
     limit: number;
     ifNoneMatch?: string | undefined;
+    requestId: string;
   }): Promise<UpstreamResponse<SectorConstituentPage>> {
     const parameters = new URLSearchParams({ limit: String(input.limit) });
-    if (input.asOf !== undefined) parameters.set('asOf', input.asOf);
+    const normalizedAsOf = normalizeMembershipAsOf(input.asOf);
+    if (normalizedAsOf !== undefined) parameters.set('asOf', normalizedAsOf);
     if (input.cursor !== undefined) parameters.set('cursor', input.cursor);
     return this.request(
       `/internal/v1/sectors/${encodeURIComponent(input.scheme)}/${encodeURIComponent(input.code)}/constituents?${parameters.toString()}`,
       input.ifNoneMatch,
+      input.requestId,
       internalSectorConstituentPageSchema,
     ).then((response) =>
       response.status === 304
@@ -172,39 +185,60 @@ export class SectorMarketDataClient {
   }
 
   /** 读取一只证券在固定 release 中的板块观测归属，并删除服务内 UUID。 */
-  public listEquitySectors(input: {
+  public async listEquitySectors(input: {
     exchange: string;
     symbol: string;
     scheme: string;
-    asOf?: string | undefined;
+    dataVersion: string;
+    identityAsOf: string;
+    knownAt?: string | undefined;
     cursor?: string | undefined;
     limit: number;
     ifNoneMatch?: string | undefined;
+    requestId: string;
   }): Promise<UpstreamResponse<EquitySectorPage>> {
-    const parameters = new URLSearchParams({ scheme: input.scheme, limit: String(input.limit) });
-    if (input.asOf !== undefined) parameters.set('asOf', input.asOf);
+    const parameters = new URLSearchParams({
+      scheme: input.scheme,
+      dataVersion: input.dataVersion,
+      identityAsOf: input.identityAsOf,
+      limit: String(input.limit),
+    });
+    if (input.knownAt !== undefined) parameters.set('knownAt', input.knownAt);
     if (input.cursor !== undefined) parameters.set('cursor', input.cursor);
-    return this.request(
+    const response = await this.request(
       `/internal/v1/equities/${encodeURIComponent(input.exchange)}/${encodeURIComponent(input.symbol)}/sectors?${parameters.toString()}`,
       input.ifNoneMatch,
+      input.requestId,
       internalEquitySectorPageSchema,
-    ).then((response) =>
-      response.status === 304
-        ? response
-        : { ...response, body: publicEquitySectorPage(response.body) },
+      input.dataVersion,
     );
+    if (response.status === 304) return response;
+    if (
+      response.body.dataVersion !== input.dataVersion ||
+      response.body.identityAsOf !== input.identityAsOf ||
+      response.body.scheme !== input.scheme ||
+      response.body.equity.exchange !== input.exchange ||
+      response.body.equity.symbol !== input.symbol
+    ) {
+      throw dependencyUnavailable();
+    }
+    return { ...response, body: publicEquitySectorPage(response.body) };
   }
 
   /** 发起有认证、超时和严格合同校验的只读下游请求。 */
   private async request<T>(
     path: string,
     ifNoneMatch: string | undefined,
+    requestId: string,
     schema: ZodType<T>,
+    expectedDataVersion?: string,
   ): Promise<UpstreamResponse<T>> {
+    if (!validRequestId(requestId)) throw dependencyUnavailable();
     const url = new URL(path, this.config.dataSyncInternalBaseUrl);
     const headers: Record<string, string> = {
       Accept: 'application/json',
       Authorization: `Bearer ${this.config.dataSyncInternalBearerToken}`,
+      'X-Request-Id': requestId,
     };
     if (ifNoneMatch !== undefined) headers['If-None-Match'] = ifNoneMatch;
     let response: Response;
@@ -217,11 +251,36 @@ export class SectorMarketDataClient {
     } catch {
       throw dependencyUnavailable();
     }
-    const etag = response.headers.get('etag') ?? undefined;
-    if (response.status === 304) return { status: 304, etag };
+    const etag = response.headers.get('etag');
+    const dataVersion = response.headers.get('x-data-version');
+    if (response.headers.get('x-request-id') !== requestId) {
+      await response.body?.cancel();
+      throw dependencyUnavailable();
+    }
+    // 调用方指定 publication 时，304 与 200 都必须回到同一版本，禁止缓存命中掩盖快照漂移。
+    if (response.status === 304) {
+      if (
+        !validEtag(etag) ||
+        !validDataVersion(dataVersion) ||
+        (expectedDataVersion !== undefined && dataVersion !== expectedDataVersion)
+      ) {
+        throw dependencyUnavailable();
+      }
+      return { status: 304, etag, dataVersion };
+    }
     if (!response.ok) throw upstreamProblem(response.status, response.headers.get('retry-after'));
     try {
-      return { status: 200, etag, body: schema.parse(await response.json()) };
+      const body = schema.parse(await response.json());
+      const bodyDataVersion = sectorBodyDataVersion(body);
+      if (
+        !validEtag(etag) ||
+        !validDataVersion(dataVersion) ||
+        bodyDataVersion !== dataVersion ||
+        (expectedDataVersion !== undefined && dataVersion !== expectedDataVersion)
+      ) {
+        throw dependencyUnavailable();
+      }
+      return { status: 200, etag, dataVersion, body };
     } catch {
       throw dependencyUnavailable();
     }
@@ -300,6 +359,8 @@ function publicEquitySectorPage(input: InternalEquitySectorPage): EquitySectorPa
       listingStatus: input.equity.listingStatus,
     },
     scheme: input.scheme,
+    identityAsOf: input.identityAsOf,
+    dataVersion: input.dataVersion,
     release: input.release,
     items: input.items.map((item) => ({
       scheme: item.scheme,
@@ -319,6 +380,48 @@ function publicSector(input: InternalSectorPage['items'][number]): Sector {
   const sector = { ...input } as Record<string, string>;
   delete sector.sectorId;
   return sector as Sector;
+}
+
+/** 从板块顶层 publication 或 membership release 中读取稳定数据版本。 */
+function sectorBodyDataVersion(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  if ('dataVersion' in value && typeof value.dataVersion === 'string') {
+    return value.dataVersion;
+  }
+  if (
+    'release' in value &&
+    typeof value.release === 'object' &&
+    value.release !== null &&
+    'dataVersion' in value.release &&
+    typeof value.release.dataVersion === 'string'
+  ) {
+    return value.release.dataVersion;
+  }
+  return undefined;
+}
+
+/** 把页面 date-only 快照规范为上海日末，完整 RFC3339 时间则保持原样。 */
+function normalizeMembershipAsOf(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T23:59:59+08:00` : value;
+}
+
+/** 校验内部板块读端返回不含换行的强 ETag。 */
+function validEtag(value: string | null): value is string {
+  return value !== null && /^"[^"\r\n]{1,252}"$/.test(value);
+}
+
+/** 校验内部板块读端 publication 使用 UUID。 */
+function validDataVersion(value: string | null): value is string {
+  return (
+    value !== null &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  );
+}
+
+/** 校验关联标识采用 UUID 或受限稳定字符集，禁止换行和空白进入服务间请求头。 */
+function validRequestId(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(value);
 }
 
 /** 将下游不可用、鉴权异常或合同漂移统一为公开 503。 */

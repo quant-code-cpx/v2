@@ -1,0 +1,1844 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1440, initial-scale=1" />
+    <title>股票中心桌面原型</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --neutral-50: #fcfdfd;
+        --neutral-100: #f9fafb;
+        --neutral-200: #f4f6f8;
+        --neutral-300: #dfe3e8;
+        --neutral-400: #c4cdd5;
+        --neutral-500: #919eab;
+        --neutral-600: #637381;
+        --neutral-700: #454f5b;
+        --neutral-800: #1c252e;
+        --neutral-900: #141a21;
+        --primary-lighter: #f0eeff;
+        --primary-light: #a99ef7;
+        --primary: #6d5ce7;
+        --primary-dark: #4f46b8;
+        --secondary: #2f6bff;
+        --info: #008fb3;
+        --success: #22c55e;
+        --warning: #d99118;
+        --error: #ff5630;
+        --divider: rgb(145 158 171 / 20%);
+        --shadow: 0 0 2px 0 rgb(145 158 171 / 20%), 0 12px 24px -4px rgb(145 158 171 / 12%);
+        --font-sans:
+          "Public Sans Variable", "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui,
+          -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --font-display:
+          Barlow, "Public Sans Variable", "PingFang SC", "Microsoft YaHei", ui-sans-serif,
+          system-ui, sans-serif;
+        --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1440px;
+        min-width: 1440px;
+        height: 900px;
+        min-height: 900px;
+        margin: 0;
+        overflow: hidden;
+        background: #ffffff;
+        color: var(--neutral-800);
+        font-family: var(--font-sans);
+        font-variant-numeric: tabular-nums;
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      a:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 3px rgb(109 92 231 / 28%);
+      }
+
+      .screen {
+        display: none;
+        width: 1440px;
+        height: 900px;
+      }
+
+      .screen.is-active {
+        display: flex;
+      }
+
+      .sidebar {
+        width: 300px;
+        height: 900px;
+        flex: 0 0 300px;
+        border-right: 1px solid var(--divider);
+        background: #ffffff;
+      }
+
+      .brand {
+        height: 72px;
+        padding: 0 24px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border-bottom: 1px solid var(--divider);
+      }
+
+      .brand-mark {
+        width: 36px;
+        height: 36px;
+        display: grid;
+        place-items: center;
+        border-radius: 10px;
+        background: var(--primary);
+        color: #ffffff;
+        font-family: var(--font-display);
+        font-weight: 800;
+        letter-spacing: -0.04em;
+      }
+
+      .brand-name {
+        font-family: var(--font-display);
+        font-size: 17px;
+        font-weight: 800;
+        line-height: 1.2;
+      }
+
+      .brand-subtitle {
+        margin-top: 2px;
+        color: var(--neutral-500);
+        font-size: 11px;
+      }
+
+      .nav {
+        padding: 18px 16px;
+      }
+
+      .nav-label {
+        padding: 0 12px;
+        margin: 10px 0 8px;
+        color: var(--neutral-500);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+
+      .nav-item {
+        width: 100%;
+        height: 44px;
+        padding: 0 12px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border-radius: 8px;
+        color: var(--neutral-600);
+        font-size: 14px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .nav-item + .nav-item {
+        margin-top: 4px;
+      }
+
+      .nav-item.is-active {
+        background: var(--primary-lighter);
+        color: var(--primary-dark);
+      }
+
+      .nav-icon {
+        width: 20px;
+        color: currentColor;
+        text-align: center;
+        font-size: 17px;
+      }
+
+      .main-shell {
+        width: 1140px;
+        height: 900px;
+        background: var(--neutral-200);
+      }
+
+      .appbar {
+        height: 72px;
+        padding: 0 32px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--divider);
+        background: #ffffff;
+      }
+
+      .breadcrumb {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--neutral-500);
+        font-size: 13px;
+      }
+
+      .breadcrumb strong {
+        color: var(--neutral-700);
+        font-weight: 700;
+      }
+
+      .appbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .prototype-badge {
+        height: 28px;
+        padding: 0 10px;
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--divider);
+        border-radius: 6px;
+        color: var(--neutral-600);
+        background: #ffffff;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .avatar {
+        width: 36px;
+        height: 36px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--primary-lighter);
+        color: var(--primary-dark);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .content {
+        height: 828px;
+        padding: 24px 32px;
+        overflow: hidden;
+      }
+
+      .page-heading {
+        height: 58px;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-family: var(--font-display);
+        font-size: 26px;
+        line-height: 34px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+
+      .page-subtitle {
+        margin-top: 2px;
+        color: var(--neutral-600);
+        font-size: 13px;
+      }
+
+      .updated {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--neutral-600);
+        font-size: 12px;
+      }
+
+      .quality-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--success);
+      }
+
+      .toolbar {
+        height: 72px;
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: #ffffff;
+        border-radius: 16px;
+        box-shadow: var(--shadow);
+      }
+
+      .search {
+        width: 278px;
+        height: 44px;
+        padding: 0 14px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        border: 1px solid var(--divider);
+        border-radius: 8px;
+        background: #ffffff;
+      }
+
+      .search input {
+        width: 100%;
+        border: 0;
+        outline: 0;
+        color: var(--neutral-700);
+        background: transparent;
+        font-size: 13px;
+      }
+
+      .search-icon {
+        color: var(--neutral-500);
+      }
+
+      .field-button {
+        height: 44px;
+        padding: 0 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        border: 1px solid var(--divider);
+        border-radius: 8px;
+        background: #ffffff;
+        color: var(--neutral-700);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .field-button.exchange {
+        min-width: 112px;
+      }
+
+      .field-button.lifecycle {
+        min-width: 116px;
+      }
+
+      .field-button.industry {
+        min-width: 128px;
+      }
+
+      .toolbar-spacer {
+        flex: 1;
+      }
+
+      .outline-button,
+      .primary-button {
+        height: 40px;
+        padding: 0 13px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .outline-button {
+        border: 1px solid var(--divider);
+        color: var(--neutral-700);
+        background: #ffffff;
+      }
+
+      .primary-button {
+        border: 1px solid var(--primary);
+        color: #ffffff;
+        background: var(--primary);
+      }
+
+      .active-filter-row {
+        height: 42px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .result-count {
+        margin-right: 4px;
+        color: var(--neutral-600);
+        font-size: 12px;
+      }
+
+      .chip {
+        height: 24px;
+        padding: 0 8px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 6px;
+        background: var(--primary-lighter);
+        color: var(--primary-dark);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .chip.neutral {
+        background: var(--neutral-200);
+        color: var(--neutral-600);
+      }
+
+      .table-card {
+        height: 584px;
+        overflow: hidden;
+        border-radius: 16px;
+        background: #ffffff;
+        box-shadow: var(--shadow);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+
+      th {
+        height: 48px;
+        padding: 0 12px;
+        background: var(--neutral-300);
+        color: var(--neutral-700);
+        font-size: 12px;
+        font-weight: 700;
+        text-align: left;
+      }
+
+      td {
+        height: 52px;
+        padding: 0 12px;
+        border-bottom: 1px dashed var(--divider);
+        color: var(--neutral-700);
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      th.is-number,
+      td.is-number {
+        text-align: right;
+      }
+
+      tbody tr:hover {
+        background: rgb(145 158 171 / 8%);
+      }
+
+      .stock-name {
+        color: var(--neutral-800);
+        font-weight: 700;
+      }
+
+      .stock-code {
+        margin-left: 6px;
+        color: var(--neutral-500);
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+
+      .exchange-tag,
+      .status-tag {
+        height: 22px;
+        padding: 0 7px;
+        display: inline-flex;
+        align-items: center;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .exchange-tag {
+        background: #eaf0ff;
+        color: #1d4ed8;
+      }
+
+      .status-tag.listed {
+        background: rgb(34 197 94 / 12%);
+        color: #128640;
+      }
+
+      .status-tag.suspended {
+        background: rgb(217 145 24 / 12%);
+        color: #a56300;
+      }
+
+      .market-up {
+        color: var(--error);
+        font-weight: 700;
+      }
+
+      .market-down {
+        color: var(--success);
+        font-weight: 700;
+      }
+
+      .market-flat {
+        color: var(--neutral-600);
+        font-weight: 700;
+      }
+
+      .source-note {
+        color: var(--neutral-500);
+        font-size: 10px;
+      }
+
+      .table-footer {
+        height: 64px;
+        padding: 0 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--neutral-600);
+        font-size: 12px;
+      }
+
+      .pager {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .page-button {
+        min-width: 32px;
+        height: 32px;
+        border: 1px solid var(--divider);
+        border-radius: 8px;
+        color: var(--neutral-700);
+        background: #ffffff;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .page-button.is-current {
+        border-color: var(--primary);
+        color: #ffffff;
+        background: var(--primary);
+      }
+
+      .detail-content {
+        height: 828px;
+        padding: 20px 32px 24px;
+        overflow: hidden;
+      }
+
+      .security-header {
+        height: 98px;
+        padding: 14px 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-radius: 16px;
+        background: #ffffff;
+        box-shadow: var(--shadow);
+      }
+
+      .security-main {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+
+      .security-symbol {
+        width: 58px;
+        height: 58px;
+        display: grid;
+        place-items: center;
+        border-radius: 14px;
+        background: var(--primary-lighter);
+        color: var(--primary-dark);
+        font-family: var(--font-display);
+        font-size: 18px;
+        font-weight: 800;
+      }
+
+      .security-name-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .security-name {
+        font-family: var(--font-display);
+        font-size: 22px;
+        font-weight: 800;
+      }
+
+      .security-meta {
+        margin-top: 5px;
+        color: var(--neutral-600);
+        font-size: 12px;
+      }
+
+      .security-quote {
+        display: flex;
+        align-items: flex-end;
+        gap: 12px;
+      }
+
+      .quote-price {
+        color: var(--error);
+        font-family: var(--font-display);
+        font-size: 31px;
+        font-weight: 800;
+        line-height: 1;
+      }
+
+      .quote-change {
+        color: var(--error);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .quote-caption {
+        margin-top: 4px;
+        color: var(--neutral-500);
+        font-size: 10px;
+        text-align: right;
+      }
+
+      .release-summary {
+        display: grid;
+        grid-template-columns: repeat(3, auto);
+        gap: 22px;
+      }
+
+      .release-item {
+        min-width: 86px;
+      }
+
+      .release-label {
+        color: var(--neutral-500);
+        font-size: 10px;
+      }
+
+      .release-value {
+        margin-top: 4px;
+        color: var(--neutral-700);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .tabs {
+        height: 50px;
+        display: flex;
+        align-items: flex-end;
+        gap: 24px;
+        border-bottom: 1px solid var(--divider);
+      }
+
+      .tab {
+        height: 42px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        color: var(--neutral-600);
+        background: transparent;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .tab.is-active {
+        border-bottom-color: var(--primary);
+        color: var(--primary-dark);
+      }
+
+      .detail-grid {
+        height: 610px;
+        padding-top: 16px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 286px;
+        gap: 16px;
+      }
+
+      .chart-card,
+      .side-card {
+        border-radius: 16px;
+        background: #ffffff;
+        box-shadow: var(--shadow);
+      }
+
+      .chart-card {
+        min-width: 0;
+        height: 594px;
+        overflow: hidden;
+      }
+
+      .chart-toolbar {
+        height: 60px;
+        padding: 0 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-bottom: 1px solid var(--divider);
+      }
+
+      .chart-title {
+        margin-right: 8px;
+        color: var(--neutral-800);
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .segmented {
+        height: 32px;
+        padding: 3px;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        border-radius: 8px;
+        background: var(--neutral-200);
+      }
+
+      .segment {
+        height: 26px;
+        padding: 0 9px;
+        display: inline-flex;
+        align-items: center;
+        border: 0;
+        border-radius: 6px;
+        color: var(--neutral-600);
+        background: transparent;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .segment.is-active {
+        color: var(--primary-dark);
+        background: #ffffff;
+        box-shadow: 0 1px 3px rgb(145 158 171 / 20%);
+      }
+
+      .engine-tag {
+        margin-left: auto;
+        color: var(--neutral-500);
+        font-family: var(--font-mono);
+        font-size: 10px;
+      }
+
+      #kline-chart {
+        width: 100%;
+        height: 500px;
+      }
+
+      .detail-side {
+        display: grid;
+        grid-template-rows: 206px 180px 176px;
+        gap: 16px;
+      }
+
+      .side-card {
+        padding: 16px;
+        overflow: hidden;
+      }
+
+      .side-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--neutral-800);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .side-link {
+        color: var(--primary-dark);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .quote-grid {
+        margin-top: 13px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px 16px;
+      }
+
+      .metric-label {
+        color: var(--neutral-500);
+        font-size: 10px;
+      }
+
+      .metric-value {
+        margin-top: 2px;
+        color: var(--neutral-700);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .metric-value.up {
+        color: var(--error);
+      }
+
+      #valuation-chart {
+        width: 100%;
+        height: 126px;
+        margin-top: 4px;
+      }
+
+      .event-list {
+        margin-top: 10px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .event {
+        padding-left: 10px;
+        border-left: 2px solid var(--primary-light);
+      }
+
+      .event-date {
+        color: var(--neutral-500);
+        font-size: 9px;
+      }
+
+      .event-title {
+        margin-top: 2px;
+        color: var(--neutral-700);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .state-content {
+        height: 828px;
+        padding: 24px 32px;
+        overflow: hidden;
+      }
+
+      .state-heading {
+        height: 70px;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+      }
+
+      .evidence-badge {
+        height: 34px;
+        padding: 0 12px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 8px;
+        background: rgb(255 86 48 / 10%);
+        color: #c63a1b;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .state-grid {
+        height: 710px;
+        display: grid;
+        grid-template-columns: 1.12fr 0.88fr;
+        grid-template-rows: 330px 364px;
+        gap: 16px;
+      }
+
+      .state-card {
+        border-radius: 16px;
+        background: #ffffff;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .state-card-header {
+        height: 54px;
+        padding: 0 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--divider);
+      }
+
+      .state-card-title {
+        color: var(--neutral-800);
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .state-index {
+        width: 24px;
+        height: 24px;
+        display: inline-grid;
+        place-items: center;
+        margin-right: 8px;
+        border-radius: 6px;
+        background: var(--primary-lighter);
+        color: var(--primary-dark);
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .state-pill {
+        height: 22px;
+        padding: 0 7px;
+        display: inline-flex;
+        align-items: center;
+        border-radius: 6px;
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      .state-pill.unavailable {
+        background: rgb(255 86 48 / 12%);
+        color: #c63a1b;
+      }
+
+      .state-pill.partial {
+        background: rgb(217 145 24 / 12%);
+        color: #9a6009;
+      }
+
+      .state-pill.stale {
+        background: rgb(0 143 179 / 12%);
+        color: #00718d;
+      }
+
+      .state-pill.denied {
+        background: var(--neutral-200);
+        color: var(--neutral-600);
+      }
+
+      .no-publication {
+        height: 276px;
+        padding: 22px;
+        display: grid;
+        grid-template-columns: 190px 1fr;
+        gap: 24px;
+        align-items: center;
+      }
+
+      .empty-illustration {
+        height: 150px;
+        display: grid;
+        place-items: center;
+        border: 1px dashed var(--neutral-400);
+        border-radius: 16px;
+        background: var(--neutral-50);
+      }
+
+      .empty-stack {
+        width: 92px;
+        height: 88px;
+        position: relative;
+      }
+
+      .empty-stack span {
+        position: absolute;
+        left: 0;
+        width: 92px;
+        height: 34px;
+        border: 2px solid var(--neutral-400);
+        border-radius: 8px;
+        background: #ffffff;
+      }
+
+      .empty-stack span:nth-child(1) {
+        top: 0;
+      }
+
+      .empty-stack span:nth-child(2) {
+        top: 26px;
+      }
+
+      .empty-stack span:nth-child(3) {
+        top: 52px;
+        border-color: var(--error);
+      }
+
+      .empty-copy h2 {
+        font-size: 17px;
+        line-height: 26px;
+      }
+
+      .empty-copy p {
+        margin-top: 8px;
+        color: var(--neutral-600);
+        font-size: 12px;
+        line-height: 20px;
+      }
+
+      .empty-actions {
+        margin-top: 16px;
+        display: flex;
+        gap: 8px;
+      }
+
+      .evidence-line {
+        margin-top: 14px;
+        padding: 9px 10px;
+        border-radius: 8px;
+        background: var(--neutral-200);
+        color: var(--neutral-600);
+        font-family: var(--font-mono);
+        font-size: 10px;
+      }
+
+      .partial-body {
+        padding: 16px;
+      }
+
+      .identity-strip {
+        height: 56px;
+        padding: 0 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-radius: 10px;
+        background: rgb(34 197 94 / 8%);
+      }
+
+      .identity-strip strong {
+        font-size: 12px;
+      }
+
+      .identity-strip span {
+        color: #128640;
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      .panel-statuses {
+        margin-top: 12px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .panel-status {
+        min-height: 52px;
+        padding: 9px 10px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        border: 1px solid var(--divider);
+        border-radius: 10px;
+      }
+
+      .panel-status strong {
+        display: block;
+        color: var(--neutral-700);
+        font-size: 11px;
+      }
+
+      .panel-status small {
+        display: block;
+        margin-top: 3px;
+        color: var(--neutral-500);
+        font-size: 9px;
+      }
+
+      .retry-link {
+        color: var(--primary-dark);
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      .stale-layout {
+        height: 310px;
+        padding: 16px;
+        display: grid;
+        grid-template-columns: 1fr 184px;
+        gap: 14px;
+      }
+
+      .stale-chart {
+        min-width: 0;
+        padding: 12px;
+        border: 1px solid var(--divider);
+        border-radius: 12px;
+      }
+
+      .stale-banner {
+        height: 44px;
+        padding: 0 11px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 8px;
+        background: rgb(0 143 179 / 10%);
+        color: #006b84;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      .mini-kline {
+        height: 190px;
+        margin-top: 12px;
+        position: relative;
+        border: 1px solid var(--divider);
+        border-bottom: 1px solid var(--divider);
+        background: var(--neutral-50);
+      }
+
+      .mini-kline::after {
+        content: "历史发布缓存 · 仅查看";
+        position: absolute;
+        right: 8px;
+        bottom: 8px;
+        color: var(--neutral-500);
+        font-size: 9px;
+      }
+
+      .mini-bars {
+        position: absolute;
+        inset: 24px 18px 28px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .mini-bar {
+        width: 7px;
+        border-radius: 2px;
+        background: var(--error);
+      }
+
+      .mini-bar.down {
+        background: var(--success);
+      }
+
+      .stale-meta {
+        display: grid;
+        align-content: start;
+        gap: 10px;
+      }
+
+      .meta-box {
+        padding: 10px;
+        border-radius: 10px;
+        background: var(--neutral-200);
+      }
+
+      .meta-box strong {
+        display: block;
+        color: var(--neutral-700);
+        font-size: 10px;
+      }
+
+      .meta-box span {
+        display: block;
+        margin-top: 4px;
+        color: var(--neutral-500);
+        font-family: var(--font-mono);
+        font-size: 9px;
+        line-height: 15px;
+        overflow-wrap: anywhere;
+      }
+
+      .permission-body {
+        height: 310px;
+        padding: 18px;
+      }
+
+      .permission-panel {
+        height: 128px;
+        padding: 18px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        border: 1px solid var(--divider);
+        border-radius: 12px;
+      }
+
+      .lock {
+        width: 46px;
+        height: 46px;
+        display: grid;
+        place-items: center;
+        border-radius: 12px;
+        background: var(--neutral-200);
+        color: var(--neutral-600);
+        font-size: 22px;
+      }
+
+      .permission-copy strong {
+        font-size: 13px;
+      }
+
+      .permission-copy p {
+        margin-top: 5px;
+        color: var(--neutral-600);
+        font-size: 10px;
+        line-height: 17px;
+      }
+
+      .retry-policy {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .retry-item {
+        min-height: 108px;
+        padding: 12px;
+        border-radius: 10px;
+        background: var(--neutral-200);
+      }
+
+      .retry-item strong {
+        color: var(--neutral-700);
+        font-size: 11px;
+      }
+
+      .retry-item p {
+        margin-top: 5px;
+        color: var(--neutral-500);
+        font-size: 9px;
+        line-height: 15px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="screen-list" class="screen">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <div class="brand-mark">A</div>
+          <div>
+            <div class="brand-name">Apex 数据智能</div>
+            <div class="brand-subtitle">QUANT V2</div>
+          </div>
+        </div>
+        <nav class="nav">
+          <div class="nav-label">工作区</div>
+          <a class="nav-item" href="#"><span class="nav-icon">⌂</span>平台工作台</a>
+          <a class="nav-item is-active" href="?view=list"
+            ><span class="nav-icon">▦</span>股票中心</a
+          >
+          <div class="nav-label">数据管理</div>
+          <a class="nav-item" href="#"><span class="nav-icon">◎</span>数据运维</a>
+          <div class="nav-label">个人</div>
+          <a class="nav-item" href="#"><span class="nav-icon">○</span>我的账户</a>
+          <div class="nav-label">系统管理</div>
+          <a class="nav-item" href="#"><span class="nav-icon">◇</span>用户管理</a>
+          <a class="nav-item" href="#"><span class="nav-icon">□</span>安全审计</a>
+        </nav>
+      </aside>
+      <section class="main-shell">
+        <header class="appbar">
+          <div class="breadcrumb"><span>市场</span><span>/</span><strong>股票中心</strong></div>
+          <div class="appbar-actions">
+            <span class="prototype-badge">真实历史来源快照 · 界面评审</span>
+            <span class="avatar">CP</span>
+          </div>
+        </header>
+        <main class="content">
+          <div class="page-heading">
+            <div>
+              <h1>股票中心</h1>
+              <p class="page-subtitle">统一发现沪、深、北交所 A 股证券</p>
+            </div>
+            <div class="updated">
+              <span class="quality-dot"></span>
+              <span>AKShare / 腾讯历史日线探测 · 2024-04-03 · 尚未形成 publication</span>
+            </div>
+          </div>
+          <section class="toolbar" aria-label="股票筛选">
+            <label class="search">
+              <span class="search-icon">⌕</span>
+              <input value="" placeholder="股票代码、名称、交易所" aria-label="股票代码、名称、交易所搜索" />
+            </label>
+            <button class="field-button exchange">全部交易所 <span>⌄</span></button>
+            <button class="field-button lifecycle">上市 <span>⌄</span></button>
+            <button class="field-button industry">申万一级行业 <span>⌄</span></button>
+            <div class="toolbar-spacer"></div>
+            <button class="outline-button">重置</button>
+            <button class="primary-button">筛选</button>
+          </section>
+          <div class="active-filter-row">
+            <span class="result-count">8 条真实历史行情 · 1 条来源不可用</span>
+            <span class="chip">交易日：2024-04-03 ×</span>
+            <span class="chip neutral">来源探测顺序</span>
+          </div>
+          <section class="table-card">
+            <table aria-label="股票列表">
+              <colgroup>
+                <col style="width: 186px" />
+                <col style="width: 76px" />
+                <col style="width: 76px" />
+                <col style="width: 104px" />
+                <col style="width: 74px" />
+                <col style="width: 92px" />
+                <col style="width: 92px" />
+                <col style="width: 82px" />
+                <col style="width: 88px" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>证券</th>
+                  <th>交易所</th>
+                  <th>状态</th>
+                  <th>申万一级</th>
+                  <th class="is-number">收盘价</th>
+                  <th class="is-number">涨跌幅 ↕</th>
+                  <th class="is-number">成交额 ↕</th>
+                  <th class="is-number">换手率</th>
+                  <th class="is-number">市盈率 TTM</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="stock-name">宁德时代</span><span class="stock-code">300750</span></td>
+                  <td><span class="exchange-tag">SZSE</span></td>
+                  <td><span class="status-tag listed">上市</span></td>
+                  <td>—</td>
+                  <td class="is-number">197.65</td>
+                  <td class="is-number market-down">↓ -1.03%</td>
+                  <td class="is-number">46.36 亿</td>
+                  <td class="is-number">—</td>
+                  <td class="is-number">—</td>
+                </tr>
+                <tr>
+                  <td><span class="stock-name">比亚迪</span><span class="stock-code">002594</span></td>
+                  <td><span class="exchange-tag">SZSE</span></td>
+                  <td><span class="status-tag listed">上市</span></td>
+                  <td>—</td>
+                  <td class="is-number">208.16</td>
+                  <td class="is-number market-down">↓ -1.97%</td>
+                  <td class="is-number">17.47 亿</td>
+                  <td class="is-number">—</td>
+                  <td class="is-number">—</td>
+                </tr>
+                <tr>
+                  <td><span class="stock-name">阳光电源</span><span class="stock-code">300274</span></td>
+                  <td><span class="exchange-tag">SZSE</span></td>
+                  <td><span class="status-tag listed">上市</span></td>
+                  <td>—</td>
+                  <td class="is-number">104.88</td>
+                  <td class="is-number market-down">↓ -2.07%</td>
+                  <td class="is-number">13.45 亿</td>
+                  <td class="is-number">—</td>
+                  <td class="is-number">—</td>
+                </tr>
+                <tr>
+                  <td><span class="stock-name">隆基绿能</span><span class="stock-code">601012</span></td>
+                  <td><span class="exchange-tag">SSE</span></td>
+                  <td><span class="status-tag listed">上市</span></td>
+                  <td>—</td>
+                  <td class="is-number">19.85</td>
+                  <td class="is-number market-down">↓ -1.00%</td>
+                  <td class="is-number">11.70 亿</td>
+                  <td class="is-number">—</td>
+                  <td class="is-number">—</td>
+                </tr>
+                <tr>
+                  <td><span class="stock-name">天齐锂业</span><span class="stock-code">002466</span></td>
+                  <td><span class="exchange-tag">SZSE</span></td>
+                  <td><span class="status-tag listed">上市</span></td>
+                  <td>—</td>
+                  <td class="is-number">51.01</td>
+                  <td class="is-number market-up">↑ +0.77%</td>
+                  <td class="is-number">16.66 亿</td>
+                  <td class="is-number">—</td>
+                  <td class="is-number">—</td>
+                </tr>
+                <tr>
+                  <td><span class="stock-name">亿纬锂能</span><span class="stock-code">300014</span></td>
+                  <td><span class="exchange-tag">SZSE</span></td>
+                  <td><span class="status-tag listed">上市</span></td>
+                  <td>—</td>
+                  <td class="is-number">40.47</td>
+                  <td class="is-number market-down">↓ -1.77%</td>
+                  <td class="is-number">8.21 亿</td>
+                  <td class="is-number">—</td>
+                  <td class="is-number">—</td>
+                </tr>
+                <tr>
+                  <td><span class="stock-name">北方稀土</span><span class="stock-code">600111</span></td>
+                  <td><span class="exchange-tag">SSE</span></td>
+                  <td><span class="status-tag listed">上市</span></td>
+                  <td>—</td>
+                  <td class="is-number">20.79</td>
+                  <td class="is-number market-up">↑ +3.18%</td>
+                  <td class="is-number">20.82 亿</td>
+                  <td class="is-number">—</td>
+                  <td class="is-number">—</td>
+                </tr>
+                <tr>
+                  <td><span class="stock-name">先导智能</span><span class="stock-code">300450</span></td>
+                  <td><span class="exchange-tag">SZSE</span></td>
+                  <td><span class="status-tag listed">上市</span></td>
+                  <td>—</td>
+                  <td class="is-number">25.05</td>
+                  <td class="is-number market-up">↑ +0.40%</td>
+                  <td class="is-number">10.20 亿</td>
+                  <td class="is-number">—</td>
+                  <td class="is-number">—</td>
+                </tr>
+                <tr>
+                  <td><span class="stock-name">贝特瑞</span><span class="stock-code">835185</span></td>
+                  <td><span class="exchange-tag">BSE</span></td>
+                  <td><span class="status-tag listed">上市</span></td>
+                  <td>—</td>
+                  <td class="is-number">—</td>
+                  <td class="is-number market-flat">来源不可用</td>
+                  <td class="is-number">—</td>
+                  <td class="is-number">—</td>
+                  <td class="is-number">—</td>
+                </tr>
+              </tbody>
+            </table>
+            <footer class="table-footer">
+              <span>真实来源探测，不代表可消费 publication · 金额单位人民币 · 缺失字段不推断</span>
+              <div class="pager">
+                <button class="page-button">‹</button>
+                <button class="page-button is-current">1</button>
+                <button class="page-button">›</button>
+              </div>
+            </footer>
+          </section>
+        </main>
+      </section>
+    </div>
+
+    <div id="screen-detail" class="screen">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <div class="brand-mark">A</div>
+          <div>
+            <div class="brand-name">Apex 数据智能</div>
+            <div class="brand-subtitle">QUANT V2</div>
+          </div>
+        </div>
+        <nav class="nav">
+          <div class="nav-label">工作区</div>
+          <a class="nav-item" href="#"><span class="nav-icon">⌂</span>平台工作台</a>
+          <a class="nav-item is-active" href="?view=list"
+            ><span class="nav-icon">▦</span>股票中心</a
+          >
+          <div class="nav-label">数据管理</div>
+          <a class="nav-item" href="#"><span class="nav-icon">◎</span>数据运维</a>
+          <div class="nav-label">个人</div>
+          <a class="nav-item" href="#"><span class="nav-icon">○</span>我的账户</a>
+          <div class="nav-label">系统管理</div>
+          <a class="nav-item" href="#"><span class="nav-icon">◇</span>用户管理</a>
+          <a class="nav-item" href="#"><span class="nav-icon">□</span>安全审计</a>
+        </nav>
+      </aside>
+      <section class="main-shell">
+        <header class="appbar">
+          <div class="breadcrumb">
+            <span>市场</span><span>/</span><span>股票中心</span><span>/</span
+            ><strong>SSE · 600519</strong>
+          </div>
+          <div class="appbar-actions">
+            <span class="prototype-badge">真实历史来源快照 · 界面评审</span>
+            <span class="avatar">CP</span>
+          </div>
+        </header>
+        <main class="detail-content">
+          <section class="security-header">
+            <div class="security-main">
+              <div class="security-symbol">茅台</div>
+              <div>
+                <div class="security-name-row">
+                  <span class="security-name">贵州茅台</span>
+                  <span class="exchange-tag">SSE</span>
+                  <span class="status-tag listed">上市</span>
+                </div>
+                <div class="security-meta">600519 · 食品饮料 · 贵州省 · 2001-08-27 上市</div>
+              </div>
+              <div>
+                <div class="security-quote">
+                  <span class="quote-price">1,715.11</span>
+                  <span class="quote-change">↑ +1.12 · +0.07%</span>
+                </div>
+                <div class="quote-caption">真实历史来源探测 · 非实时行情</div>
+              </div>
+            </div>
+            <div class="release-summary">
+              <div class="release-item">
+                <div class="release-label">行情日期</div>
+                <div class="release-value">2024-04-03</div>
+              </div>
+              <div class="release-item">
+                <div class="release-label">证据状态</div>
+                <div class="release-value">真实 adapter 探测</div>
+              </div>
+              <div class="release-item">
+                <div class="release-label">dataVersion</div>
+                <div class="release-value">— · 尚未发布</div>
+              </div>
+            </div>
+          </section>
+          <nav class="tabs" aria-label="个股详情页签">
+            <button class="tab is-active">行情</button>
+            <button class="tab">公司</button>
+            <button class="tab">财务</button>
+            <button class="tab">估值</button>
+            <button class="tab">资金流</button>
+            <button class="tab">行业概念</button>
+            <button class="tab">事件</button>
+            <button class="tab">数据说明</button>
+          </nav>
+          <div class="detail-grid">
+            <section class="chart-card">
+              <div class="chart-toolbar">
+                <span class="chart-title">价格与成交量</span>
+                <div class="segmented">
+                  <button class="segment is-active">日线</button>
+                  <button class="segment">周线</button>
+                  <button class="segment">月线</button>
+                </div>
+                <div class="segmented">
+                  <button class="segment is-active">未复权</button>
+                  <button class="segment">前复权</button>
+                  <button class="segment">后复权</button>
+                </div>
+                <div class="segmented">
+                  <button class="segment">近 1 年</button>
+                  <button class="segment is-active">近 3 年</button>
+                  <button class="segment">全部</button>
+                </div>
+                <span class="engine-tag">KLineChart · Asia/Shanghai</span>
+              </div>
+              <div id="kline-chart" aria-label="贵州茅台未复权日线 K 线"></div>
+            </section>
+            <aside class="detail-side">
+              <section class="side-card">
+                <div class="side-title"><span>本期行情</span><span class="side-link">数据说明</span></div>
+                <div class="quote-grid">
+                  <div><div class="metric-label">开盘</div><div class="metric-value">1,734.00</div></div>
+                  <div><div class="metric-label">最高</div><div class="metric-value up">1,739.44 ↑</div></div>
+                  <div><div class="metric-label">最低</div><div class="metric-value">1,710.02</div></div>
+                  <div><div class="metric-label">收盘</div><div class="metric-value up">1,715.11 ↑</div></div>
+                  <div><div class="metric-label">成交量</div><div class="metric-value">290.46 万股</div></div>
+                  <div><div class="metric-label">成交额</div><div class="metric-value">50.02 亿元</div></div>
+                  <div><div class="metric-label">换手率</div><div class="metric-value">— · 来源未提供</div></div>
+                  <div><div class="metric-label">来源</div><div class="metric-value">AKShare / 腾讯</div></div>
+                </div>
+              </section>
+              <section class="side-card">
+                <div class="side-title"><span>近 6 日成交额</span><span class="engine-tag">ECharts</span></div>
+                <div id="valuation-chart" aria-label="近六个交易日成交额趋势"></div>
+              </section>
+              <section class="side-card">
+                <div class="side-title"><span>近期事件</span><span class="side-link">全部事件</span></div>
+                <div class="event-list">
+                  <div class="event">
+                    <div class="event-date">事件 publication 尚未建立</div>
+                    <div class="event-title">NO_PUBLICATION · 不补演示事件</div>
+                  </div>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </main>
+      </section>
+    </div>
+
+    <div id="screen-states" class="screen">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <div class="brand-mark">A</div>
+          <div>
+            <div class="brand-name">Apex 数据智能</div>
+            <div class="brand-subtitle">QUANT V2</div>
+          </div>
+        </div>
+        <nav class="nav">
+          <div class="nav-label">工作区</div>
+          <a class="nav-item" href="#"><span class="nav-icon">⌂</span>平台工作台</a>
+          <a class="nav-item is-active" href="?view=list"
+            ><span class="nav-icon">▦</span>股票中心</a
+          >
+          <div class="nav-label">数据管理</div>
+          <a class="nav-item" href="#"><span class="nav-icon">◎</span>数据运维</a>
+          <div class="nav-label">个人</div>
+          <a class="nav-item" href="#"><span class="nav-icon">○</span>我的账户</a>
+        </nav>
+      </aside>
+      <section class="main-shell">
+        <header class="appbar">
+          <div class="breadcrumb"><span>股票中心</span><span>/</span><strong>复杂状态规范</strong></div>
+          <div class="appbar-actions">
+            <span class="prototype-badge">评审原型 · 状态不叠加</span>
+            <span class="avatar">CP</span>
+          </div>
+        </header>
+        <main class="state-content">
+          <div class="state-heading">
+            <div>
+              <h1>加载、发布与局部失败</h1>
+              <p class="page-subtitle">各数据集独立呈现 availability、stale、partial 与权限状态</p>
+            </div>
+            <div class="evidence-badge"><span>!</span>开发库核验：publication 总数 0</div>
+          </div>
+          <div class="state-grid">
+            <section class="state-card">
+              <header class="state-card-header">
+                <div class="state-card-title"><span class="state-index">01</span>无 publication</div>
+                <span class="state-pill unavailable">SOURCE_UNAVAILABLE</span>
+              </header>
+              <div class="no-publication">
+                <div class="empty-illustration">
+                  <div class="empty-stack"><span></span><span></span><span></span></div>
+                </div>
+                <div class="empty-copy">
+                  <h2>股票目录尚未发布</h2>
+                  <p>
+                    当前没有可供用户消费的冻结版本。页面不展示 fixture、不回退到数据库“最新行”，也不猜测实时数据。
+                  </p>
+                  <div class="empty-actions">
+                    <button class="primary-button">重新检查</button>
+                    <button class="outline-button">查看数据状态</button>
+                  </div>
+                  <div class="evidence-line">publication: null · dataVersion: null · retry: manual</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="state-card">
+              <header class="state-card-header">
+                <div class="state-card-title"><span class="state-index">02</span>详情局部失败</div>
+                <span class="state-pill partial">PARTIAL</span>
+              </header>
+              <div class="partial-body">
+                <div class="identity-strip">
+                  <strong>贵州茅台 · SSE.600519 · 上市</strong><span>身份可用</span>
+                </div>
+                <div class="panel-statuses">
+                  <div class="panel-status">
+                    <div>
+                      <strong>K 线暂不可用</strong><small>dependency-unavailable · 保留其他页签</small>
+                    </div>
+                    <span class="retry-link">重试</span>
+                  </div>
+                  <div class="panel-status">
+                    <div>
+                      <strong>财务报告可用</strong><small>精确 dataVersion 与报告期由响应回显</small>
+                    </div>
+                    <span class="state-pill stale">STALE</span>
+                  </div>
+                  <div class="panel-status">
+                    <div>
+                      <strong>资金流无合格方法学</strong><small>不使用另一供应商静默回填</small>
+                    </div>
+                    <span class="state-pill unavailable">不可用</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="state-card">
+              <header class="state-card-header">
+                <div class="state-card-title"><span class="state-index">03</span>陈旧但可复验</div>
+                <span class="state-pill stale">STALE · READ ONLY</span>
+              </header>
+              <div class="stale-layout">
+                <div class="stale-chart">
+                  <div class="stale-banner">ⓘ 新 publication 检查失败，暂保留最后一次成功版本</div>
+                  <div class="mini-kline">
+                    <div class="mini-bars">
+                      <span class="mini-bar" style="height: 62px"></span>
+                      <span class="mini-bar down" style="height: 44px"></span>
+                      <span class="mini-bar" style="height: 79px"></span>
+                      <span class="mini-bar" style="height: 96px"></span>
+                      <span class="mini-bar down" style="height: 68px"></span>
+                      <span class="mini-bar down" style="height: 55px"></span>
+                      <span class="mini-bar" style="height: 82px"></span>
+                      <span class="mini-bar" style="height: 108px"></span>
+                      <span class="mini-bar down" style="height: 74px"></span>
+                      <span class="mini-bar" style="height: 91px"></span>
+                      <span class="mini-bar down" style="height: 64px"></span>
+                      <span class="mini-bar" style="height: 102px"></span>
+                    </div>
+                  </div>
+                </div>
+                <div class="stale-meta">
+                  <div class="meta-box">
+                    <strong>publishedAt</strong><span>服务端返回的精确时间</span>
+                  </div>
+                  <div class="meta-box">
+                    <strong>knowledgeCutoff</strong><span>服务端返回的证据截点</span>
+                  </div>
+                  <div class="meta-box">
+                    <strong>dataVersion</strong><span>服务端返回的完整 UUID</span>
+                  </div>
+                  <button class="outline-button">按面板重试</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="state-card">
+              <header class="state-card-header">
+                <div class="state-card-title"><span class="state-index">04</span>权限与重试边界</div>
+                <span class="state-pill denied">AUTH / RETRY</span>
+              </header>
+              <div class="permission-body">
+                <div class="permission-panel">
+                  <div class="lock">▣</div>
+                  <div class="permission-copy">
+                    <strong>登录失效，未继续请求行情数据</strong>
+                    <p>保留当前 URL，重新认证后恢复；403 不自动重试，也不展示后台权限名称。</p>
+                  </div>
+                  <button class="primary-button">重新登录</button>
+                </div>
+                <div class="retry-policy">
+                  <div class="retry-item">
+                    <strong>429 / Retry-After</strong>
+                    <p>按服务端时间禁用刷新；倒计时结束后允许用户手动重试，不并发放大请求。</p>
+                  </div>
+                  <div class="retry-item">
+                    <strong>409 / snapshot-expired</strong>
+                    <p>清空旧 cursor，从第一页和新 dataVersion 重启；不拼接两个 publication。</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </main>
+      </section>
+    </div>
+
+    <script src="../../../service-web/node_modules/klinecharts/dist/umd/klinecharts.min.js"></script>
+    <script src="../../../service-web/node_modules/echarts/dist/echarts.min.js"></script>
+    <script>
+      /** 根据查询参数只展示一个固定桌面原型画面。 */
+      function selectPrototypeScreen() {
+        const view = new URLSearchParams(window.location.search).get("view") || "list";
+        const target = document.getElementById(`screen-${view}`);
+        const fallback = document.getElementById("screen-list");
+        (target || fallback).classList.add("is-active");
+        return view;
+      }
+
+      /** 返回经仓库腾讯日线 adapter 于 2026-07-30 实际探测的 SSE.600519 历史记录。 */
+      function createHistoricalCandles() {
+        const sourceRows = [
+          ["2024-03-01", 1690, 1694.97, 1676.68, 1685.06, 2686800, 4526845400],
+          ["2024-03-04", 1679, 1680.99, 1670.05, 1676.3, 2648500, 4434401000],
+          ["2024-03-05", 1670.81, 1697, 1666.68, 1695.1, 3623800, 6102136600],
+          ["2024-03-06", 1691, 1695, 1678.02, 1680.55, 2214200, 3725582800],
+          ["2024-03-07", 1680, 1689.8, 1678, 1683.63, 2159900, 3633934800],
+          ["2024-03-08", 1680.56, 1686.68, 1670.05, 1671.43, 2215600, 3710678500],
+          ["2024-03-11", 1675, 1698.88, 1673.18, 1694.49, 2989500, 5048394300],
+          ["2024-03-12", 1693.94, 1749.1, 1690.5, 1745, 5422700, 9393309100],
+          ["2024-03-13", 1739.97, 1748, 1720.1, 1727.45, 2650000, 4588879400],
+          ["2024-03-14", 1719, 1734.84, 1711.5, 1716.63, 1940500, 3338768300],
+          ["2024-03-15", 1712.5, 1732.4, 1712, 1717.49, 1783400, 3066692400],
+          ["2024-03-18", 1715, 1719.85, 1699, 1708.26, 2605500, 4446059100],
+          ["2024-03-19", 1703, 1719.94, 1693.11, 1708.02, 2394800, 4093701300],
+          ["2024-03-20", 1703.36, 1713.68, 1700.23, 1709.6, 1524900, 2604543900],
+          ["2024-03-21", 1708.1, 1719, 1704.5, 1709, 1659600, 2839332600],
+          ["2024-03-22", 1705.03, 1708.99, 1688, 1701.35, 2545600, 4318592800],
+          ["2024-03-25", 1698.54, 1698.77, 1680.58, 1689.01, 2447300, 4131446200],
+          ["2024-03-26", 1687.46, 1712.8, 1687.46, 1709.29, 2806900, 4782899100],
+          ["2024-03-27", 1705, 1712, 1699, 1701, 1811300, 3087793000],
+          ["2024-03-28", 1695, 1718, 1693.2, 1701.64, 2464200, 4201857100],
+          ["2024-03-29", 1701.64, 1710.99, 1698.1, 1702.9, 1345700, 2290584400],
+          ["2024-04-01", 1709.99, 1734, 1708.7, 1721.33, 2713100, 4679371000],
+          ["2024-04-02", 1722, 1724.99, 1705.05, 1713.99, 2544900, 4360973700],
+          ["2024-04-03", 1734, 1739.44, 1710.02, 1715.11, 2904600, 5002390000],
+        ];
+        return sourceRows.map(
+          ([tradeDate, open, high, low, close, volume, turnover]) => ({
+            timestamp: Date.parse(`${tradeDate}T00:00:00+08:00`),
+            open,
+            high,
+            low,
+            close,
+            volume,
+            turnover,
+          }),
+        );
+      }
+
+      /** 使用仓库已安装的 KLineChart 绘制详情页 K 线与成交量。 */
+      function initializeKlineChart() {
+        const element = document.getElementById("kline-chart");
+        if (!element || !window.klinecharts) return;
+        const chart = window.klinecharts.init(element);
+        if (!chart) return;
+        chart.setStyles({
+          candle: {
+            bar: {
+              upColor: "#FF5630",
+              downColor: "#22C55E",
+              noChangeColor: "#637381",
+              upBorderColor: "#FF5630",
+              downBorderColor: "#22C55E",
+              noChangeBorderColor: "#637381",
+              upWickColor: "#FF5630",
+              downWickColor: "#22C55E",
+              noChangeWickColor: "#637381",
+            },
+          },
+          grid: {
+            horizontal: { color: "rgb(145 158 171 / 20%)" },
+            vertical: { color: "rgb(145 158 171 / 20%)" },
+          },
+          xAxis: { tickText: { color: "#637381" } },
+          yAxis: { tickText: { color: "#637381" } },
+        });
+        const candles = createHistoricalCandles();
+        chart.setSymbol({ ticker: "SSE.600519", pricePrecision: 2, volumePrecision: 0 });
+        chart.setPeriod({ span: 1, type: "day" });
+        chart.setDataLoader({
+          /** 一次返回原型全部日线，并声明没有更多前后页。 */
+          getBars: ({ callback }) => callback(candles, { forward: false, backward: false }),
+        });
+        chart.createIndicator("MA", true);
+        chart.createIndicator("VOL");
+      }
+
+      /** 使用 ECharts 绘制真实成交额趋势，保持非 K 线分析的引擎职责分离。 */
+      function initializeAmountChart() {
+        const element = document.getElementById("valuation-chart");
+        if (!element || !window.echarts) return;
+        const chart = window.echarts.init(element, null, { renderer: "canvas" });
+        chart.setOption({
+          animation: false,
+          aria: { enabled: true, description: "贵州茅台近六个交易日成交额，单位亿元" },
+          grid: { left: 4, right: 6, top: 18, bottom: 12, containLabel: true },
+          xAxis: {
+            type: "category",
+            data: ["03-27", "03-28", "03-29", "04-01", "04-02", "04-03"],
+            axisLine: { lineStyle: { color: "rgb(145 158 171 / 24%)" } },
+            axisTick: { show: false },
+            axisLabel: { color: "#919EAB", fontSize: 9 },
+          },
+          yAxis: {
+            type: "value",
+            min: 0,
+            max: 60,
+            splitNumber: 3,
+            axisLabel: { color: "#919EAB", fontSize: 9, formatter: "{value} 亿" },
+            splitLine: { lineStyle: { color: "rgb(145 158 171 / 18%)" } },
+          },
+          series: [
+            {
+              type: "bar",
+              data: [30.88, 42.02, 22.91, 46.79, 43.61, 50.02],
+              itemStyle: { color: "#6D5CE7" },
+            },
+          ],
+        });
+      }
+
+      /** 初始化当前原型画面，并仅加载该画面需要的图表。 */
+      function initializePrototype() {
+        const view = selectPrototypeScreen();
+        if (view === "detail") {
+          initializeKlineChart();
+          initializeAmountChart();
+        }
+      }
+
+      window.addEventListener("load", initializePrototype);
+    </script>
+  </body>
+</html>

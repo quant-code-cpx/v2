@@ -1,0 +1,1337 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>0008 市场概览与行业板块｜技术方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f4f6f8;
+      --paper: #ffffff;
+      --subtle: #f9fafb;
+      --line: #dfe3e8;
+      --text: #1c252e;
+      --muted: #637381;
+      --primary: #6d5ce7;
+      --primary-soft: #f0edff;
+      --up: #ff5630;
+      --up-soft: #fff1ed;
+      --down: #22c55e;
+      --down-soft: #eafaf0;
+      --warn: #b76e00;
+      --warn-soft: #fff7e6;
+      --blocked: #b42318;
+      --blocked-soft: #fff1f0;
+      --info: #0b63ce;
+      --info-soft: #eaf3ff;
+      --shadow: 0 8px 24px rgba(28, 37, 46, 0.07);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--text);
+      font: 14px/1.72 Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    a { color: #5848c9; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      padding: 2px 6px;
+      border: 1px solid #e7e4fb;
+      border-radius: 6px;
+      background: #f7f5ff;
+      color: #4d3fb2;
+      font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .shell {
+      display: grid;
+      grid-template-columns: 272px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      padding: 28px 22px;
+      border-right: 1px solid var(--line);
+      background: var(--paper);
+    }
+    .brand {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 26px;
+      font-size: 16px;
+      font-weight: 800;
+    }
+    .brand i {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 10px;
+      background: var(--primary);
+      color: #fff;
+      font-style: normal;
+    }
+    nav a {
+      display: block;
+      padding: 7px 10px;
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    nav a:hover { background: var(--subtle); color: var(--text); text-decoration: none; }
+    nav .group {
+      margin: 17px 0 5px;
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .08em;
+    }
+    main { min-width: 0; padding: 36px 42px 80px; }
+    article { max-width: 1420px; margin: 0 auto; }
+    header.hero {
+      padding: 36px 40px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+    .eyebrow {
+      margin-bottom: 10px;
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .08em;
+    }
+    h1 { margin: 0 0 12px; font-size: 36px; line-height: 1.22; letter-spacing: -.02em; }
+    h2 { margin: 0 0 18px; font-size: 24px; line-height: 1.3; }
+    h3 { margin: 24px 0 10px; font-size: 17px; }
+    h4 { margin: 16px 0 8px; font-size: 14px; }
+    p { margin: 8px 0; }
+    .lead { max-width: 980px; color: var(--muted); font-size: 16px; }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 24px;
+    }
+    .meta div {
+      padding: 13px 15px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--subtle);
+    }
+    .meta dt { color: var(--muted); font-size: 11px; }
+    .meta dd { margin: 3px 0 0; font-weight: 750; }
+    section {
+      margin-top: 26px;
+      padding: 30px 32px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--paper);
+    }
+    .callout {
+      margin: 14px 0;
+      padding: 14px 16px;
+      border-left: 4px solid var(--primary);
+      border-radius: 8px;
+      background: var(--primary-soft);
+    }
+    .callout.warn { border-color: #f3a712; background: var(--warn-soft); }
+    .callout.blocked { border-color: var(--blocked); background: var(--blocked-soft); }
+    .callout.info { border-color: var(--info); background: var(--info-soft); }
+    .grid-2, .grid-3, .grid-4 {
+      display: grid;
+      gap: 14px;
+    }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .card {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--subtle);
+    }
+    .card strong { display: block; margin-bottom: 4px; }
+    .metric {
+      color: var(--primary);
+      font-size: 26px;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+    .up { color: var(--up); }
+    .down { color: var(--down); }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: var(--subtle);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+    .tag.direct { background: var(--down-soft); color: #147a3d; }
+    .tag.api { background: var(--info-soft); color: var(--info); }
+    .tag.sync { background: var(--warn-soft); color: var(--warn); }
+    .tag.no { background: var(--blocked-soft); color: var(--blocked); }
+    .tag.proposed { background: var(--primary-soft); color: #5848c9; }
+    .table-wrap {
+      overflow: auto;
+      margin: 14px 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      font-size: 12.5px;
+    }
+    th, td {
+      padding: 11px 12px;
+      border-bottom: 1px solid #edf0f2;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--subtle);
+      color: #454f5b;
+      font-size: 11px;
+      letter-spacing: .02em;
+    }
+    .route-table th:first-child,
+    .route-table td:first-child {
+      min-width: 106px;
+      white-space: nowrap;
+    }
+    tr:last-child td { border-bottom: 0; }
+    ul, ol { padding-left: 22px; }
+    li + li { margin-top: 5px; }
+    pre.flow {
+      margin: 14px 0;
+      padding: 18px;
+      overflow: auto;
+      border: 1px solid #d9d5f8;
+      border-radius: 12px;
+      background: #fbfaff;
+      color: #3b326b;
+      font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .decision {
+      padding: 13px 15px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+    }
+    .decision b { display: block; margin-bottom: 3px; }
+    .route {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      padding: 13px 0;
+      border-bottom: 1px solid #edf0f2;
+    }
+    .route:last-child { border-bottom: 0; }
+    .route code { min-width: 330px; }
+    .checklist li::marker { color: var(--primary); }
+    footer { padding: 28px 6px; color: var(--muted); text-align: center; }
+    @media print {
+      aside { display: none; }
+      .shell { display: block; }
+      main { padding: 0; }
+      section, header.hero { box-shadow: none; break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand"><i>Q</i><span>QUANT V2 方案</span></div>
+      <nav aria-label="文档目录">
+        <div class="group">结论</div>
+        <a href="#summary">0. 评审摘要</a>
+        <a href="#implementation">0A. 已落地实现</a>
+        <a href="#scope">1. 范围与边界</a>
+        <a href="#audit">2. 数据能力审计</a>
+        <a href="#inventory">3. 首页指标清单</a>
+        <a href="#matrix">4. 可实现性矩阵</a>
+        <div class="group">设计</div>
+        <a href="#methodology">5. 方法学与可比性</a>
+        <a href="#architecture">6. 总体架构</a>
+        <a href="#pages">7. 页面架构</a>
+        <a href="#api">8. service-api 设计</a>
+        <a href="#datasets">9. canonical 数据集</a>
+        <a href="#partial">10. 跨 publication</a>
+        <a href="#state">11. 前端状态与缓存</a>
+        <div class="group">交付</div>
+        <a href="#prototype">12. 原型说明</a>
+        <a href="#delivery">13. 分阶段实施</a>
+        <a href="#rollback">14. 降级与回滚</a>
+        <a href="#acceptance">15. 验收与测试</a>
+        <a href="#risks">16. 无卡点决策表</a>
+        <a href="#evidence">17. 证据索引</a>
+      </nav>
+    </aside>
+    <main>
+      <article>
+        <header class="hero">
+          <div class="eyebrow">SERVICE-DATA-SYNC + SERVICE-API + SERVICE-WEB · 0008 · IMPLEMENTED / DEPLOYMENT-GATED</div>
+          <h1>市场概览与行业板块</h1>
+          <p class="lead">面向中国 A 股 PC 桌面端，已经落地“真实来源采集—canonical 原子发布—POST-only 公开读取—今日市场状态—板块解释—0007 股票深链”的三服务生产代码闭环。本文件同时保留实施前现状审计，并记录真实凭证、商业再分发许可、部署 HTTPS 和真实 publication 联调门禁。</p>
+          <dl class="meta">
+            <div><dt>方案状态</dt><dd>Implemented / 环境门禁待联调</dd></div>
+            <div><dt>调研日期</dt><dd>2026-07-30</dd></div>
+            <div><dt>目标画布</dt><dd>1440 × 900，最低 1200</dd></div>
+            <div><dt>交付范围</dt><dd>三服务实现、方案、原型、验证证据</dd></div>
+          </dl>
+        </header>
+
+        <section id="summary">
+          <h2>0. 评审摘要</h2>
+          <div class="grid-4">
+            <div class="card"><strong>实施前审计基线</strong><div class="metric">5%</div><span class="muted">1 / 20 项；第 2–5、17 节保留原始证据</span></div>
+            <div class="card"><strong>当前工程覆盖</strong><div class="metric">100%</div><span class="muted">20 / 20 指标合同均有真实 publication 路径</span></div>
+            <div class="card"><strong>最大上线缺口</strong><div class="metric">1 类</div><span class="muted">商业许可 + 有权限 token + 真实回填联调</span></div>
+            <div class="card"><strong>生产来源已冻结</strong><div class="metric">1 套</div><span class="muted">Tushare Pro；AKShare 不作生产兜底</span></div>
+          </div>
+          <div class="callout">
+            <strong>落地结论：</strong>三个服务的生产代码、迁移、内部读取、公开 POST、五个 Web 路由和严格缓存边界已经实现。生产适配器固定为 Tushare Pro；以“市场完整包”作为首页唯一可见版本，只有四个指数、股票横截面、宽度/成交/涨跌停、股票排行、资金流、行业/概念排行和质量证据在同一交易日全部通过时才推进指针。缺任何必需组件时继续服务上一份完整真实 publication；从未产生 publication 时明确 unavailable，绝不补零、拼接 fixture 或静默换源。
+          </div>
+          <div class="grid-2">
+            <div class="decision">
+              <b>已冻结决策 A：一个源策略，一条发布链</b>
+              生产使用不低于 6000 积分且已获目标端点权限的 Tushare Pro token。Tushare 负责交易日历、指数、A 股 EOD、涨跌停、资金流、东财板块和申万数据；<code>upstreamSource</code> 仍保留 Eastmoney、SW 等真实语义。任何 AKShare 结果只可用于隔离探针和交叉校验，不参与 production publication。
+            </div>
+            <div class="decision">
+              <b>已冻结决策 B：完整包 + 细粒度读模型</b>
+              首页使用单一 <code>market.overview-bundle.eod</code>；板块详情和申万详情继续使用各自 publication。service-api 只做认证、校验和投影；service-web 删除市场 fixture，API 不可用就显示最近真实版本/明确不可用，不生成临时数值。
+            </div>
+          </div>
+          <h3>首页比例口径</h3>
+          <p>分母为第 3 节 20 个原子指标组。实施前 5% 是调研时“已有真实可消费 publication + 已有公开契约 + 已过生产门禁”的严格基线，继续保留用于解释为什么需要本次建设。当前工程可实现比例为 100%：20/20 都已映射到真实 provider observation、canonical/派生 publication、原子 bundle 和公开合同；但当前无合法凭据环境的生产可见比例仍为 0%（0/20），必须等商业再分发许可、有权限 token、目标环境回填和真实浏览器对账完成后再计，本文不把单元测试对象算作实盘数据。</p>
+        </section>
+
+        <section id="implementation">
+          <h2>0A. 已落地实现、真实来源门禁与最终状态</h2>
+          <div class="callout info">
+            <strong>阅读顺序：</strong>本节记录用户后续授权后的当前实现事实；第 2–5 节和第 17 节中的“缺 API / 缺同步 / Web fixture”继续作为实施前审计基线，不应再解释为当前代码缺口。仓库已具备真实全链路，但当前环境没有注入 Tushare token 和商业再分发许可，因此尚未宣称真实 Tushare production publication 或三服务实盘 HTTP E2E 已通过。
+          </div>
+          <div class="grid-4">
+            <div class="card"><strong>Web 页面</strong><div class="metric">5 / 5</div><span class="muted">受保护桌面路由全部接 service-api</span></div>
+            <div class="card"><strong>公开读取</strong><div class="metric">POST</div><span class="muted">200/204 + 强 ETag + X-Data-Version</span></div>
+            <div class="card"><strong>首页一致性</strong><div class="metric">1 包</div><span class="muted">写时组合、读时原子，不读时拼 latest</span></div>
+            <div class="card"><strong>生产假数据</strong><div class="metric">0</div><span class="muted">fixture/mock/demo/random 均不在部署路径</span></div>
+          </div>
+
+          <h3>三服务落地状态</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>服务</th><th>已落地生产能力</th><th>失败关闭边界</th><th>当前外部前置</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><strong>service-data-sync</strong></td>
+                  <td><code>market.overview-and-sectors.bundle</code> Data Operations 数据集、Tushare HTTPS adapter、真实端点 preflight、全量 EOD canonical/派生、append-only component/bundle、current pointer、历史读取、缺口回填、内部 FastAPI GET。</td>
+                  <td>token、许可、端点权限、schema、行上限、交易日、质量门或任一 required component 失败时不推进 current pointer；AKShare 不接管 production publication。</td>
+                  <td>目标环境必须提供获批许可引用、有权限 token、数据库/Redis/对象存储，并通过 0022 <code>/schedules/upsert</code> 把该 dataset 的唯一生产 schedule 配置为交易日 19:20。</td>
+                </tr>
+                <tr>
+                  <td><strong>service-api</strong></td>
+                  <td><code>MarketOverviewModule</code>、10 个新公开 POST、既有 sector/SW POST 扩展、严格 Zod/DTO、防腐 client、请求身份回显、条件读取、超时/重试/断路器和 Problem Details。</td>
+                  <td>不访问同步数据库、不调用 provider、不现场计算宽度；内部 body/header/version/请求维度任一不一致即 503，不用 API 内存假装成功。</td>
+                  <td>内部只读 Bearer、可达的 data-sync URL；生产公网必须经 HTTPS 边缘。</td>
+                </tr>
+                <tr>
+                  <td><strong>service-web</strong></td>
+                  <td>五个受保护 PC 路由、严格 Zod client、TanStack Query 条件缓存、URL 状态、KLineChart/ECharts、红涨绿跌、历史快照、局部失败和 0007 股票深链。</td>
+                  <td>200/204 之外、弱/缺 ETag、缺/错 X-Data-Version、204 缓存 miss 或 strict schema 漂移均拒绝；无 publication 显示 unavailable，不生成占位行情。</td>
+                  <td>同源或显式 <code>VITE_API_BASE_URL</code> 的 HTTPS service-api、有效用户会话。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>真实来源、许可与 HTTPS 门禁</h3>
+          <div class="callout blocked">
+            <strong>无凭证不启动市场生产链：</strong><code>DATA_SYNC_MARKET_OVERVIEW_ENABLED=true</code> 同时要求 <code>DATA_SYNC_TUSHARE_ENABLED=true</code>、<code>DATA_SYNC_TUSHARE_TOKEN</code>、不低于 6000 的 entitlement 配置和非 disabled 的 license scope；staging/production 进一步要求 <code>commercial-redistribution-approved</code> 与非空 license reference。adapter preflight 会真实调用全部 required 端点，校验目标开市日、字段 schema、全量行数和响应上限；未通过时在第一个 canonical 写入前失败。当前工作区没有合法 token/license，故没有执行也没有虚报这项实盘验证。
+          </div>
+          <ul>
+            <li>provider 出站固定 <code>https://api.tushare.pro</code>，使用系统 CA 与 hostname 校验；重定向处理器只允许 HTTPS → HTTPS，禁止 token 降级到明文。</li>
+            <li>浏览器公网入口由生产反向代理终止 HTTPS；service-api 生产环境强制 secure cookie，CORS 只允许配置的 HTTPS origin，并暴露 <code>ETag</code>、<code>X-Data-Version</code>。</li>
+            <li>本地 Compose 的 service-api → data-sync 默认基址允许私有 HTTP 以便开发。生产若跨主机、跨命名空间或经过不可信网络，必须改用 HTTPS/mTLS 或受控 service mesh；未满足时部署 readiness 失败，不能以 Bearer 代替传输加密。</li>
+          </ul>
+
+          <h3>17:20 EOD eligibility、19:20 完整包目标 schedule、断档恢复与 revision</h3>
+          <div class="grid-2">
+            <div class="card">
+              <strong>发布与补洞</strong>
+              <ul>
+                <li>只以 Tushare <code>trade_cal</code> 中 SSE/SZSE 共同开市日为资格集合；当前交易日到 Asia/Shanghai 17:20 后才具备 EOD 组件发布资格，但官方个股 <code>moneyflow</code> 在 19:00 更新，完整 bundle 不在 19:20 前启动。</li>
+                <li>Data Operations incremental run 在最近 25 个共同交易日中查找缺失 bundle，按日期升序补齐；fencing、幂等 content hash 和 terminal write 防止失租任务推进指针。</li>
+                <li>当前 Data Operations 以 <code>datasetCode</code> 唯一约束每个 dataset 只有一个持久化 schedule，仓库不 seed 默认值；部署必须通过 0022 <code>/schedules/upsert</code> 配置交易日 19:20。adapter 在同次运行内最多做 3 次有界网络重试；仍失败时由运维调用 <code>/commands/retry</code>，或由次日 incremental 的 25 交易日窗口补洞。19:35、19:50 自动二次触发不存在，20:00 未成功只触发运维告警。未配置 19:20 schedule 视为部署门禁失败。</li>
+              </ul>
+            </div>
+            <div class="card">
+              <strong>原子与历史 revision</strong>
+              <ul>
+                <li>component release、bundle 和 pointer transition 均 append-only；首页 latest 只解析 active current pointer，精确 <code>asOf</code> 读取不可变历史 bundle。</li>
+                <li>来源修订创建新 component/dataVersion 与新 bundle；rollback 只切换指针，旧内容、质量报告和 transition 保留。</li>
+                <li>指数/SW bars 的 lineage 最多 7500 个唯一输入版本；sector EOD、SW 成分和 SW 估值使用两个唯一组件生成 composite dataVersion，浏览器显示输入版本数。</li>
+              </ul>
+            </div>
+          </div>
+
+          <h3>三服务路由打通</h3>
+          <div class="table-wrap">
+            <table class="route-table">
+              <thead><tr><th>页面/能力</th><th>service-web</th><th>service-api POST</th><th>service-data-sync GET publication</th></tr></thead>
+              <tbody>
+                <tr><td>原子市场首页</td><td><code>/market</code></td><td><code>/api/v1/market/overview</code></td><td><code>/internal/v1/market/overview-bundles/{latest|date}</code></td></tr>
+                <tr><td>指数趋势</td><td><code>/market?index=…</code></td><td><code>/api/v1/market/indices/:indexId/bars</code></td><td><code>/internal/v1/market/indices/:indexId/bars</code></td></tr>
+                <tr><td>板块中心</td><td><code>/market/sectors</code></td><td><code>/api/v1/market/sectors</code>、<code>/eod-snapshots</code>、<code>/strength</code>、<code>/money-flow-rankings</code></td><td>既有 sector publication + <code>/internal/v1/market/sectors/{strength|money-flow-rankings}</code></td></tr>
+                <tr><td>板块详情</td><td><code>/market/sectors/:scheme/:sectorCode</code></td><td><code>/api/v1/market/sectors/:scheme/:sectorCode/{eod-snapshot|bars|constituents}</code></td><td>同 scheme/code 的 composite EOD、原生周期 bars 与观察成分 publication</td></tr>
+                <tr><td>申万目录/详情</td><td><code>/market/industries/sw</code><br><code>/market/industries/sw/:code</code></td><td><code>/api/v1/market/industries/sw/{list|valuations|:code}</code> 与 <code>/:code/{bars|constituents|valuation}</code></td><td><code>/internal/v1/market/industries/sw/:code/{bars|constituents|valuation}</code> + 既有 taxonomy publication</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>无 publication 与部分失败</h3>
+          <ul>
+            <li>首页只有 latest current pointer 或精确历史 bundle 两种成功来源。T 日半包不推进时继续返回 T-1 真实完整包并显示 lag/reason；从未有完整包时返回 unavailable，不用细粒度 API 现场拼首页。</li>
+            <li>板块中心、板块详情和申万详情按 publication 独立 Query。目录、EOD、强弱、资金流、K 线、估值或成分之一失败，只让对应区域失败并局部重试；其他区域保留各自 dataVersion，不宣称“全页同版”。</li>
+            <li>Web latest 根据状态条件刷新：盘前/交易中/午间 60 秒，闭市/非交易日 5 分钟；stale 在 17:20–20:00 为 15 分钟，20:00 后停止；历史 <code>asOf</code> 永不轮询且不因窗口聚焦刷新。</li>
+          </ul>
+
+          <h3>当前验证与尚未完成项</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>层级</th><th>已通过证据</th><th>不能宣称的证据</th></tr></thead>
+              <tbody>
+                <tr><td>service-web</td><td>市场匹配测试 3 files / 41 tests、全量 39 files / 153 tests 全绿；全量 <code>vp check</code> 为 250 files formatted、242 files 无 lint/type 问题；production build 通过；最终市场镜像 runtime <code>/healthz=200</code>、<code>/market=200</code>。生产扫描未发现 market fixture/mock/demo/random/补零回退。</td><td>尚未用合法 Tushare publication 做登录后浏览器数值逐字段对账。</td></tr>
+                <tr><td>service-api</td><td>最终 Docker Node 24 验证快照内全量 69 files / 341 tests；全量 ESLint、<code>tsc --noEmit</code>、Nest build 与市场目标 Prettier 通过。data-sync TestClient 导出的 10 个真实内部 200 响应全部通过当前 strict Zod，并逐条核对强 ETag、X-Data-Version、X-Request-Id；0026/0027 Redocly 为 0 error / 0 warning，AJV 2020-12 对同一批 10 个响应均通过。</td><td>并行非本模块文件持续变化，最后一次全量 Prettier 被其格式问题阻断；无合法来源 publication，因此没有可宣称的真实三服务业务数值 HTTP 部署证据。</td></tr>
+                <tr><td>service-data-sync</td><td>最终 Docker 目标集 76 tests 通过；目标 23 文件 ruff format/lint、pyright 0 error；PostgreSQL 新库 upgrade/downgrade/re-upgrade 通过，market repository DB integration 1/1 通过，覆盖原子 current pointer、历史候选、重放和 tip rollback/forward。</td><td>全量非 integration 的 4 个失败来自并行 stock-connect/equity/ETF/全局 ORM 变更，非本模块；无合法 token/license，未执行真实 Tushare preflight、生产回填、连续 20 开市日运行或 token 轮换演练。</td></tr>
+                <tr><td>全量 Web 检查</td><td>全量测试 153/153；全量格式、lint、类型检查通过。</td><td>除真实来源 publication 浏览器对账外无本模块阻断项。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="scope">
+          <h2>1. 范围、目标与非目标</h2>
+          <div class="grid-3">
+            <div class="card"><strong>用户问题</strong>市场涨跌、成交放缩、资金流向、指数/板块/股票强弱、数据是否及时可信。</div>
+            <div class="card"><strong>模块页面</strong>市场首页、板块中心、东财板块详情、申万行业目录与详情。</div>
+            <div class="card"><strong>交付物</strong>三服务生产实现、本方案、可编辑 <code>prototype.html</code>、3 张 1440×900 原型图。</div>
+          </div>
+          <h3>明确不做</h3>
+          <ul>
+            <li>不设计个股完整详情。股票排行仅显示市场摘要，并深链接到 0007 已设计的 <code>/market/equities/:exchange/:symbol</code>；身份固定为 exchange + 六位 symbol，不按代码前缀猜交易所。</li>
+            <li><del>原任务“不写生产代码”边界</del>已被用户后续明确授权替代；当前实现已覆盖 React、NestJS、Python、迁移和机器合同。本文不在 Web 复制同步或 API 业务逻辑，三个服务仍通过版本化 HTTP 边界连接。</li>
+            <li>不承诺实时、分时或 WebSocket 协议。P0 以 EOD/日频 publication 为基线；盘中能力须在来源、频率、许可和 SLA 单独冻结后再进入方案。</li>
+            <li>不把板块 EOD 的上涨/下跌数汇总为全市场股票宽度；概念重叠、行业覆盖和供应商口径均不允许这样推导。</li>
+            <li>不把指数成分观察快照转换成指数点位、涨跌幅或历史正式成分。</li>
+          </ul>
+          <div class="callout blocked"><strong>无假数据硬约束：</strong>生产、预发、跨服务 E2E 与截图验收禁止 MSW、fixture、随机数和硬编码行情。单元测试可使用最小确定性测试对象验证算法，但不得把测试对象接入任何可部署页面；上线证据必须来自真实 provider observation → publication → API → browser 全链路。</div>
+          <h3>已落地路由</h3>
+          <div class="route"><code>/market</code><span>今日市场状态、可信度与强弱摘要。</span></div>
+          <div class="route"><code>/market/sectors</code><span>东财行业/概念中心，横截面排行与筛选。</span></div>
+          <div class="route"><code>/market/sectors/:scheme/:sectorCode</code><span>东财板块详情；scheme 只允许明确枚举，不做名称猜测。</span></div>
+          <div class="route"><code>/market/industries/sw</code><span>申万一级/二级/三级 taxonomy 与估值浏览。</span></div>
+          <div class="route"><code>/market/industries/sw/:code</code><span>申万行业节点详情；P0 只展示 taxonomy/估值及数据边界。</span></div>
+        </section>
+
+        <section id="audit">
+          <h2>2. 数据能力审计（实施前基线）</h2>
+          <p class="muted">本节冻结用户授权生产实现之前的仓库基线，用于保留缺口发现和决策依据；当前落地状态以第 0A 节为准。审计同时检查 adapter、canonical 模型、publication、内部读取、service-api 公开契约、运行开关与方法学门禁。“有表”不等于“有真实 publication”，“有代码”不等于“生产可消费”。</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>能力域</th><th>同步与 canonical</th><th>publication / API</th><th>运行与质量状态</th><th>结论</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>东财行业/概念目录</td>
+                  <td><code>eastmoney.industry</code>、<code>eastmoney.concept</code>；provider-neutral canonical；目录独立发布。</td>
+                  <td><code>POST /api/v1/market/sectors</code></td>
+                  <td>实现链完整；数据是否存在仍取决于部署环境 publication。</td>
+                  <td><span class="tag direct">直接可做</span></td>
+                </tr>
+                <tr>
+                  <td>板块日/周/月 K 线</td>
+                  <td>原生 <code>1d/1w/1mo</code>，不互相派生；OHLC、成交量、成交额、振幅、涨跌、换手。</td>
+                  <td><code>POST /api/v1/market/sectors/:scheme/:sectorCode/bars</code></td>
+                  <td><code>amountCny</code> 可用；<code>volumeUnit=provider_native</code> 必须展示口径。</td>
+                  <td><span class="tag direct">直接可做</span></td>
+                </tr>
+                <tr>
+                  <td>板块成分</td>
+                  <td>当前观察快照 + observed interval + fixed release；身份覆盖质量门。</td>
+                  <td><code>POST /api/v1/market/sectors/:scheme/:sectorCode/constituents</code></td>
+                  <td><code>observedFrom/To</code> 是观察边界，不是供应商正式调入调出日。</td>
+                  <td><span class="tag direct">直接可做</span></td>
+                </tr>
+                <tr>
+                  <td>板块 EOD 横截面/排行</td>
+                  <td>完整 catalog 覆盖的不可变快照；最新值、涨跌、市值、换手、涨跌家数、领涨股。</td>
+                  <td><code>POST /api/v1/market/sectors/eod-snapshots</code> 与单板块快照 API。</td>
+                  <td>代码链完整；生产开关默认关闭，连续探针、单位与生产观察门禁未完成。</td>
+                  <td><span class="tag sync">补同步可做</span></td>
+                </tr>
+                <tr>
+                  <td>板块 EOD 成交额</td>
+                  <td>EOD canonical 没有成交额字段；K 线有单板块 <code>amountCny</code>。</td>
+                  <td>现有排行 API 无成交额排序。</td>
+                  <td>不可把分散 K 线 publication 临时拼成同截面排行。</td>
+                  <td><span class="tag sync">补同步可做</span></td>
+                </tr>
+                <tr>
+                  <td>申万 taxonomy/估值</td>
+                  <td>一级、二级、三级原子快照；父子闭包；PE/PB；TTM PE/股息率按来源未报告显式不可用；来源和方法学元数据。</td>
+                  <td><code>POST /api/v1/market/industries/sw/list</code>、<code>valuations</code>、<code>/:code</code></td>
+                  <td>当前日观察，finality 为供应商观察；估值 <code>source_reported</code>。</td>
+                  <td><span class="tag direct">直接可做</span></td>
+                </tr>
+                <tr>
+                  <td>申万成分/行情/资金流</td>
+                  <td>仅有 <code>componentCount</code>，没有正式成分列表、K 线、横截面表现或流量。</td>
+                  <td>无公开能力。</td>
+                  <td>不可用东财“行业”名称映射替代。</td>
+                  <td><span class="tag no">暂不支持</span></td>
+                </tr>
+                <tr>
+                  <td>日频资金流</td>
+                  <td>东财订单规模与同花顺交易方向两类方法学隔离存储，市场/板块/个股序列链已实现。</td>
+                  <td>方法学、市场/板块/个股序列、供应商排行 POST API 已实现。</td>
+                  <td>两个方法学均为 <code>research</code> 且 <code>production_enabled=false</code>；读取 fail-closed。</td>
+                  <td><span class="tag sync">补同步可做</span></td>
+                </tr>
+                <tr>
+                  <td>资金流股票排行</td>
+                  <td>供应商滚动排行抓取后无法证明完整分页。</td>
+                  <td>API 存在，但 canonical read repository 拒绝不完整排行。</td>
+                  <td><code>isComplete=false</code>，没有真实可发布排名。</td>
+                  <td><span class="tag no">暂不支持</span></td>
+                </tr>
+                <tr>
+                  <td>主要指数行情</td>
+                  <td>无指数 quote/bar canonical。现有仅 CSI/CNI 目录、当前成分/权重研究 shadow。</td>
+                  <td>无业务 publication、内部读取或公开 API。</td>
+                  <td>shadow 永不创建正式 release/publication；同步默认关闭。</td>
+                  <td><span class="tag no">完全缺失</span></td>
+                </tr>
+                <tr>
+                  <td>全市场股票横截面</td>
+                  <td>有证券主数据与单股日/周/月线；没有同一 cutoff、同一 universe 的市场快照。</td>
+                  <td>无公开横截面/排行 API。</td>
+                  <td>不能从各自最新 publication 聚合，版本时间和停牌/退市口径不一致。</td>
+                  <td><span class="tag no">完全缺失</span></td>
+                </tr>
+                <tr>
+                  <td>市场宽度/涨跌停/成交聚合</td>
+                  <td>无基于冻结全市场横截面的派生 publication。</td>
+                  <td>无 API。</td>
+                  <td>板块统计不可替代；涨跌停规则需按板块、ST、上市天数、交易状态版本化。</td>
+                  <td><span class="tag no">完全缺失</span></td>
+                </tr>
+                <tr>
+                  <td>交易日历/市场状态</td>
+                  <td>仅 2026 年沪深静态开闭市日历，用于同步任务 gate；无会话时段 canonical。</td>
+                  <td>无 publication/API。</td>
+                  <td>超出 2026 返回未知；无法表达盘前、连续竞价、午休、收盘。</td>
+                  <td><span class="tag sync">补同步可做</span></td>
+                </tr>
+                <tr>
+                  <td>Web 市场概览</td>
+                  <td><code>MarketOverviewView</code> 与类型存在，但 <code>getMarketOverview()</code> 直接返回 <code>demoMarketOverview</code>。</td>
+                  <td>未加入当前 router；股票链接仍指旧 <code>/instruments/:symbol</code>。</td>
+                  <td>明确写着“受控 fixture”；没有 OpenAPI client 或真实 API。</td>
+                  <td><span class="tag no">不可上线</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>为何指数成分观察快照不能替代指数行情或正式历史成分</h3>
+          <ol>
+            <li>成分观察只表达“抓取时看见哪些证券及可能的权重”，没有指数点位、前收、OHLC、成交额、除数或价格计算方法。</li>
+            <li>当前 shadow repository 明确不产生 release、publication 或 point-in-time 有效事实；业务 API 不可消费。</li>
+            <li>观察日期不是正式生效日期。用连续观察差异倒推出调样，会把抓取中断、修订与真实调样混淆。</li>
+            <li>不同管理人的指数代码、方法学和权重语义不能靠名称或代码静默合并。</li>
+          </ol>
+
+          <h3>现有板块 EOD 能支持什么</h3>
+          <div class="grid-3">
+            <div class="card"><strong>可以</strong>在相同 scheme、同一 EOD publication 内按涨跌幅、换手率、市值、上涨/下跌家数、领涨股涨幅排序。</div>
+            <div class="card"><strong>条件可以</strong>跨日做板块持续性，前提是连续历史 publication、稳定 catalog、明确缺口和版本输入；建议形成派生数据集。</div>
+            <div class="card"><strong>不可以</strong>计算全市场股票宽度、市场成交额、涨跌停数或跨 scheme 统一排行；概念板块会重叠。</div>
+          </div>
+        </section>
+
+        <section id="inventory">
+          <h2>3. 市场首页指标清单与逐项来源</h2>
+          <p>“目标数据来源”已冻结为 Tushare Pro 生产 adapter；表中 canonical 是本仓库对来源的稳定投影。页面必须展示 <code>asOf</code>、<code>finality</code>、上游来源/方法学和质量状态，禁止用页面组装时间冒充数据更新时间。</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>#</th><th>首页指标</th><th>建议展示</th><th>现状来源</th><th>目标数据来源 / canonical</th><th>状态</th></tr></thead>
+              <tbody>
+                <tr><td>1</td><td>上证指数</td><td>点位、涨跌额、涨跌幅</td><td>无</td><td>Tushare <code>index_daily(000001.SH)</code> → <code>index.quote.eod</code></td><td><span class="tag no">补同步</span></td></tr>
+                <tr><td>2</td><td>深证成指</td><td>点位、涨跌额、涨跌幅</td><td>无</td><td>Tushare <code>index_daily(399001.SZ)</code> → <code>index.quote.eod</code></td><td><span class="tag no">补同步</span></td></tr>
+                <tr><td>3</td><td>沪深300</td><td>点位、涨跌额、涨跌幅</td><td>仅成分研究 shadow，不可用</td><td>Tushare <code>index_daily(000300.SH)</code> → <code>index.quote.eod</code></td><td><span class="tag no">补同步</span></td></tr>
+                <tr><td>4</td><td>创业板指</td><td>点位、涨跌额、涨跌幅</td><td>无</td><td>Tushare <code>index_daily(399006.SZ)</code> → <code>index.quote.eod</code></td><td><span class="tag no">补同步</span></td></tr>
+                <tr><td>5</td><td>指数趋势</td><td>1D 基线微图；详情日 K</td><td>无指数 bars</td><td>同一 <code>index_daily</code> → <code>index.bar.1d</code>；不承诺盘中</td><td><span class="tag no">补同步</span></td></tr>
+                <tr><td>6</td><td>沪市成交额</td><td>亿元、交易日</td><td>无市场聚合</td><td>Tushare <code>daily</code> 按 SSE 全量求和 → <code>market.turnover.eod</code></td><td><span class="tag no">补同步</span></td></tr>
+                <tr><td>7</td><td>深市成交额</td><td>亿元、交易日</td><td>无市场聚合</td><td>Tushare <code>daily</code> 按 SZSE 全量求和 → <code>market.turnover.eod</code></td><td><span class="tag no">补同步</span></td></tr>
+                <tr><td>8</td><td>上一交易日成交对比</td><td>绝对额、百分比、可比口径</td><td>无</td><td>相邻两个已确认 <code>market.turnover.eod</code> publication</td><td><span class="tag no">补同步</span></td></tr>
+                <tr><td>9</td><td>上涨/下跌/平盘</td><td>家数与占比</td><td>无；板块 EOD 不可替代</td><td>Tushare <code>daily</code> 完整横截面 → <code>market.breadth.eod</code></td><td><span class="tag no">补同步</span></td></tr>
+                <tr><td>10</td><td>涨停/跌停</td><td>家数、规则版本</td><td>无</td><td><code>daily_basic.limit_status</code> + <code>stk_limit</code> → <code>market.limit-breadth.eod</code></td><td><span class="tag no">补同步</span></td></tr>
+                <tr><td>11</td><td>市场资金净流向</td><td>供应商 + 方法学标签 + 净额</td><td>研究链存在，读取 fail-closed</td><td>Tushare <code>moneyflow_mkt_dc</code> → DC 方法学独立 publication</td><td><span class="tag sync">补同步</span></td></tr>
+                <tr><td>12</td><td>资金流入/流出股票排行</td><td>摘要、完整性标记、深链</td><td>现有排行不完整，拒绝发布</td><td>Tushare <code>moneyflow</code> 全量沪深 A 股 → 订单规模方法学排行</td><td><span class="tag no">补同步</span></td></tr>
+                <tr><td>13</td><td>涨幅/跌幅排行</td><td>代码、名称、现价、涨跌幅</td><td>无全市场横截面</td><td><code>equity.market-snapshot.eod</code> 派生</td><td><span class="tag no">补同步</span></td></tr>
+                <tr><td>14</td><td>成交额排行</td><td>成交额、换手、价格变动</td><td>无</td><td>同一股票横截面 publication 派生</td><td><span class="tag no">补同步</span></td></tr>
+                <tr><td>15</td><td>活跃股票排行</td><td>成交额 Top N；另列换手榜</td><td>无，“活跃”未定义</td><td>本方案固定活跃=成交额；同 <code>equity.market-snapshot.eod</code> 派生</td><td><span class="tag no">补同步</span></td></tr>
+                <tr><td>16</td><td>交易状态</td><td>交易日、会话阶段、是否延迟</td><td>2026 静态日历仅供任务 gate</td><td>Tushare <code>trade_cal</code> + versioned session schedule；服务端计算</td><td><span class="tag sync">补同步</span></td></tr>
+                <tr><td>17</td><td>更新时间与可信度</td><td>各组件 asOf、observedAt、finality、quality</td><td>现有 API publication 元数据可显示</td><td>保留组件级元数据；页面汇总只做状态</td><td><span class="tag direct">直接可做</span></td></tr>
+                <tr><td>18</td><td>最强/最弱行业</td><td>涨跌、换手、领涨股、持续性</td><td>板块 EOD API，生产门禁未完成</td><td>Tushare <code>dc_daily</code> industry + 5/20 日派生</td><td><span class="tag sync">补同步</span></td></tr>
+                <tr><td>19</td><td>最强/最弱概念</td><td>涨跌、换手、领涨股、持续性</td><td>板块 EOD API，生产门禁未完成</td><td>Tushare <code>dc_daily</code> concept + 独立 5/20 日派生</td><td><span class="tag sync">补同步</span></td></tr>
+                <tr><td>20</td><td>市场异常/关注变化</td><td>规则、阈值、证据、严重度</td><td>无</td><td><code>market.attention-signal.eod</code>，版本化规则与输入</td><td><span class="tag no">补同步</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="matrix">
+          <h2>4. “直接可做 / 补 API 可做 / 补同步可做 / 暂不支持”矩阵</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>页面能力</th><th>直接可做</th><th>补 API 可做</th><th>补同步可做</th><th>暂不支持 / 原因</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>市场首页</td>
+                  <td>组件级更新时间/质量；空、错、旧状态</td>
+                  <td>现有 publication 的页面聚合 envelope</td>
+                  <td>指数、横截面、成交、宽度、日历、资金流、异常</td>
+                  <td>盘中实时状态与趋势：来源/协议/SLA 未冻结</td>
+                </tr>
+                <tr>
+                  <td>板块中心</td>
+                  <td>目录；有 publication 时的 EOD 涨跌/换手/市值/领涨股排行</td>
+                  <td>行业+概念双查询汇总、跨日持续性读取</td>
+                  <td>EOD 生产门禁；EOD 成交额字段；强弱派生</td>
+                  <td>行业与概念合成统一总榜</td>
+                </tr>
+                <tr>
+                  <td>东财板块详情</td>
+                  <td>目录、日/周/月 K 线、成分；单日 EOD</td>
+                  <td>详情首屏聚合 envelope；连续 EOD/强弱历史</td>
+                  <td>板块资金流生产门禁；EOD 成交额</td>
+                  <td>正式历史调入/调出：现有只有观察区间</td>
+                </tr>
+                <tr>
+                  <td>申万行业</td>
+                  <td>一/二/三级 taxonomy、父子关系、估值、componentCount</td>
+                  <td>目录+估值组合查询；面包屑/相邻节点</td>
+                  <td>正式成分、行情、强弱、历史估值</td>
+                  <td>用东财行业替代申万行情或成分</td>
+                </tr>
+                <tr>
+                  <td>股票摘要排行</td>
+                  <td>UI 容器、空态、0007 深链依赖</td>
+                  <td>冻结横截面后的排序/分页接口</td>
+                  <td>全市场 EOD 横截面</td>
+                  <td>现有供应商资金排行完整性无法证明</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout warn">
+            “补 API 可做”只用于 canonical/publication 已存在而公开读模型不足的情形；不能用 API 现场扫描模型表、跨 publication 猜最新值或绕过数据质量门。
+          </div>
+        </section>
+
+        <section id="methodology">
+          <h2>5. 指数、资金流与板块的方法学和可比性边界</h2>
+          <div class="grid-3">
+            <div class="card">
+              <strong>指数</strong>
+              指数点位必须来自指数行情数据集，并绑定管理人、指数身份、币种、交易日、前收与方法学版本。成分/权重仅用于解释暴露，不能计算或伪造点位。不同价格/全收益指数不得混排。
+            </div>
+            <div class="card">
+              <strong>资金流</strong>
+              卡片标题分别写“东财大盘资金流（DC）”“Tushare L2 订单规模估算”“东财板块资金流（DC）”。只在同 methodology version、同 market universe、同单位、同 finality 内比较；禁止跨来源相加、对冲或给出“统一真实资金”结论。
+            </div>
+            <div class="card">
+              <strong>板块</strong>
+              东财行业、东财概念、申万一级/二级/三级分别排行。概念可重叠，行业体系也不是一一映射；不做隐式 crosswalk。板块 EOD 最新值保留 <code>provider_native</code>，市值在同步层换算为 canonical <code>CNY</code> 后才按“亿元”展示；K 线成交量仍保留供应商原生单位。
+            </div>
+          </div>
+          <div class="callout info"><strong>涨跌停边界：</strong>生产计数以 <code>daily_basic.limit_status</code> 和 <code>stk_limit</code> 的 source-reported 事实为准；交易所规则引擎仅做复核。<code>cn-price-limit-rules@2026-07-06</code> 至少区分沪深主板 10%、科创板/创业板 20%、首次上市无涨跌幅限制窗口及当日停牌/无成交状态；规则 effective date 必须与 tradeDate 匹配。P0 首页 universe 固定为沪深 A 股，不把北交所证券混入同一宽度、成交额或排行。</div>
+          <h3>最强、最弱与持续性</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>指标</th><th>P0 定义</th><th>可比域</th><th>限制</th></tr></thead>
+              <tbody>
+                <tr><td>单日强弱</td><td>同一 scheme、同一 tradeDate、同一 EOD publication 的 <code>changePercent</code> 排名</td><td>东财行业内部或东财概念内部</td><td>不跨 scheme；不等于申万行业</td></tr>
+                <tr><td>换手热度</td><td>同一 publication 的 <code>turnoverPercent</code> 排名</td><td>同 scheme</td><td>不可与涨跌幅合成“强度分”除非另立方法学</td></tr>
+                <tr><td>持续性</td><td>展示 5/20 个已确认交易日中上涨天数、累计收益、排名中位数与有效样本数</td><td>同 sector identity + scheme + 连续历史</td><td>由新派生 publication 固定；catalog 变更与缺口显式标记</td></tr>
+                <tr><td>资金强弱</td><td>同一供应商方法学下的板块净流量/强度</td><td>同 methodology version</td><td>研究门禁未过时不展示数值</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="small muted">持续性不是“连涨天数”的单一营销分。遇到缺数、板块新建/停用、供应商 revision 或样本不足时，必须返回样本数与不可比较原因。</p>
+          <h3>市场关注信号 v1（确定性规则）</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>ruleId</th><th>触发条件</th><th>证据字段</th></tr></thead>
+              <tbody>
+                <tr><td><code>turnover-expansion-v1</code></td><td>沪深同口径成交额较上一交易日增加 ≥20%</td><td>current/previous/diff/changePercent、两份 input publication</td></tr>
+                <tr><td><code>turnover-contraction-v1</code></td><td>沪深同口径成交额较上一交易日减少 ≥20%</td><td>同上</td></tr>
+                <tr><td><code>breadth-extreme-v1</code></td><td>eligible≥1000 且上涨占比 ≥80% 或 ≤20%</td><td>advancing/flat/declining/eligible/ratio</td></tr>
+                <tr><td><code>limit-imbalance-v1</code></td><td>涨停+跌停≥20 且一侧数量至少为另一侧 3 倍；分母为 0 时由非零侧触发</td><td>limitUp/limitDown/rulesVersion</td></tr>
+                <tr><td><code>sector-persistence-v1</code></td><td>同 scheme 板块连续 3 个有效交易日位于涨幅 Top 5 或 Bottom 5</td><td>sectorId/scheme/dates/ranks/input publications</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="small muted">规则只产生“值得关注”的可复算提示，不预测原因、不生成新闻式因果。阈值修改必须新建 rulesVersion；历史不回写。</p>
+        </section>
+
+        <section id="architecture">
+          <h2>6. 总体架构与服务边界</h2>
+          <pre class="flow" aria-label="总体架构">
+Tushare Pro（固定 production adapter；token/权限启动时强校验）
+  ├─ trade_cal / index_daily / daily / daily_basic / suspend_d / stk_limit / daily_info
+  ├─ moneyflow / moneyflow_mkt_dc / moneyflow_ind_dc
+  ├─ dc_index / dc_daily / dc_member
+  └─ index_classify / index_member_all / sw_daily
+                         │ provider-neutral port；原始单位显式转换
+                         ▼
+service-data-sync
+  适配 → identity resolve → canonical stage → 质量门 → component publication
+  → market.overview-bundle.eod 原子 manifest → current pointer
+                         │ Bearer + GET internal API + ETag；只读 publication
+                         ▼
+service-api MarketOverviewModule / 既有 IndustryModule
+  鉴权 → DTO 白名单 → data-sync client schema 校验 → public projection
+  → 所有公开业务路由 POST；不查 canonical DB、不现场聚合
+                         │ OpenAPI 生成 client + 条件 POST
+                         ▼
+service-web /market、/market/sectors、/market/industries/sw
+  Router URL → TanStack Query → MUI 页面
+  KLineChart：指数/板块 K 线；ECharts：宽度/资金/排行/持续性
+          </pre>
+          <h3>6.1 已冻结的生产来源</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>业务事实</th><th>Tushare 数据集</th><th>source 语义</th><th>生产约束</th></tr></thead>
+              <tbody>
+                <tr><td>交易日历</td><td><code>trade_cal</code></td><td>交易所日历</td><td>SSE、SZSE 分场所保存；<code>pretrade_date</code> 只作一致性校验。</td></tr>
+                <tr><td>四个指数</td><td><code>index_daily</code></td><td>SSE / SZSE / CSI 管理人身份</td><td>固定 000001.SH、399001.SZ、000300.SH、399006.SZ；不由成分计算。</td></tr>
+                <tr><td>股票横截面</td><td><code>daily</code> + <code>daily_basic</code> + <code>suspend_d</code></td><td>沪深 A 股 EOD</td><td>按 trade_date 全量取数并显式过滤 SSE/SZSE；金额由千元精确转 CNY；身份必须 100% 解析，北交所不混入 P0 首页 universe。</td></tr>
+                <tr><td>沪深 A 股成交额对账</td><td><code>daily_info</code></td><td>交易所 SH_A / SZ_A 日统计</td><td>只校验同一交易日、同一 A 股 universe 的股票横截面聚合；<code>index_daily.amount</code> 仅属于对应指数，禁止替代全市场成交额或参与该质量门。</td></tr>
+                <tr><td>涨跌停</td><td><code>stk_limit</code> + <code>daily_basic.limit_status</code></td><td>source-reported 限价/状态</td><td>规则引擎只复核交易所制度，不用浮点近似制造涨跌停。</td></tr>
+                <tr><td>市场/股票资金流</td><td><code>moneyflow_mkt_dc</code> / <code>moneyflow</code></td><td>东财大盘资金流 / Tushare L2 订单规模估算</td><td>两套卡片分开标注，不相加、不互换；股票排行限定沪深可交易 A 股。</td></tr>
+                <tr><td>东财行业/概念</td><td><code>dc_index</code> / <code>dc_daily</code> / <code>dc_member</code> / <code>moneyflow_ind_dc</code></td><td><code>eastmoney.industry</code>、<code>eastmoney.concept</code></td><td>adapter provider 是 Tushare，<code>upstreamSource</code> 仍是 Eastmoney；scheme 不改名。</td></tr>
+                <tr><td>申万</td><td><code>index_classify</code> / <code>index_member_all</code> / <code>sw_daily</code></td><td>SW L1/L2/L3</td><td>保持申万代码、层级和 source-reported 估值；不映射成东财行业。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="small muted">生产部署必须提供 <code>DATA_SYNC_TUSHARE_TOKEN</code>，账户不低于 6000 积分并已开通本表全部端点；启动 preflight 逐端点验证权限、schema 和全量行上限。缺 token、权限不足或 schema 探针失败时进程 fail-fast，不能静默切换 AKShare。采购/密钥注入是明确部署前置项，不是运行时分支。</p>
+
+          <h3>6.2 service-data-sync 已落地设计</h3>
+          <h4>能力注册与任务 DAG</h4>
+          <pre class="flow" aria-label="同步任务依赖">
+目标环境唯一 schedule：交易日 19:20 Asia/Shanghai · 通过 /schedules/upsert 配置；17:20 仅建立 EOD eligibility，等待 19:00 moneyflow 更新
+  market.calendar.daily
+      ├─ index.bar.1d[T, 4 indices]
+      ├─ equity.quote.eod[T] + equity.daily-basic.eod[T] + equity.suspension.eod[T]
+      │      └─ equity.market-snapshot.eod[T]
+      │             ├─ market.breadth.eod[T]
+      │             ├─ market.turnover.eod[T]
+      │             ├─ market.limit-breadth.eod[T]
+      │             ├─ equity.market-ranking.eod[T]
+      │             └─ market.attention-signal.eod[T]
+      ├─ money-flow.market.dc.eod[T] + money-flow.equity.order-size.eod[T]
+      ├─ sector.catalog.dc + sector.bar.1d.dc[T] + sector.membership.dc[T]
+      │      ├─ sector.quote.eod.dc[T]
+      │      ├─ sector.money-flow.dc.eod[T]
+      │      └─ sector.strength.eod[T]
+      └─ sw.taxonomy + sw.membership[T] + sw.bar-valuation.1d[T]
+             ↓ 所有 required component publication 质量通过
+       market.overview-bundle.eod[T]（原子 manifest + current pointer）
+          </pre>
+          <ul>
+            <li>当前执行模型是“每 dataset 唯一 schedule + 同次 adapter 最多 3 次网络重试”：生产通过 <code>/schedules/upsert</code> 配置交易日 19:20；网络/429 可重试，鉴权/schema/单位漂移不可重试并隔离。失败后使用 <code>/commands/retry</code> 人工重试，或等待次日 incremental 25 交易日窗口补洞；不存在 19:35/19:50 自动二次触发，20:00 未成功由运维告警。</li>
+            <li>所有同步通过既有 Data Operations command/run/partition 模型提交；不另建旁路 cron。目录按 scheme，股票按 tradeDate，成员按 sectorCode 分区；每个分区持 fencing token，失租后不得提交。</li>
+            <li>adapter 仅返回 provider-neutral JSON batch，不能直接写 canonical。金额统一 Decimal CNY，百分比统一百分点，成交量保留 source unit 元数据；来源空值保持 null。</li>
+            <li>成功源载荷按现有策略只保留 digest/摘要，失败才归档限时排障证据；canonical、质量报告、lineage 与 publication manifest 长期保留。</li>
+          </ul>
+          <h4>完整性质量门</h4>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>门</th><th>阻断条件</th><th>证据</th></tr></thead>
+              <tbody>
+                <tr><td>指数</td><td>四个固定 identity 任一缺失；OHLC 关系错误；涨跌与前收不可复算；tradeDate 不一致。</td><td>index_daily 行、identity revision、provider observation。</td></tr>
+                <tr><td>股票全集</td><td><code>daily</code> 实际代码集合不等于“当日上市有效全集 − 全日停牌”；重复或 identity 未解析。</td><td>equity catalog version、suspend_d、集合差异清单，要求 0 条未解释差异。</td></tr>
+                <tr><td>横表关联</td><td>每个有成交 quote 缺 daily_basic 或 stk_limit；金额/价格为负；单位转换失败。</td><td>join coverage=100%，转换前后 Decimal 样本。</td></tr>
+                <tr><td>宽度</td><td>上涨 + 平盘 + 下跌不等于 eligible universe；unknown 非 0。</td><td>每类 securityId 清单与 input publicationId。</td></tr>
+                <tr><td>成交额</td><td>股票横截面的沪深 A 股合计与 <code>daily_info</code> SH_A/SZ_A 同口径统计偏差 &gt;1%；偏差 &gt;0.2% 告警。禁止用指数成交额校验。</td><td>分场所 sum、SH_A/SZ_A source-reported 对照、差异率与 universe 标识。</td></tr>
+                <tr><td>涨跌停</td><td>limit_status 与 stk_limit/close 偏差 &gt;0.01 元；规则版本未覆盖当日制度。</td><td>source-reported 状态、限价、交易所规则版本。</td></tr>
+                <tr><td>资金流</td><td>沪深当日有成交股票未在 <code>moneyflow</code> 返回且无来源原因；排行不完整或重复。</td><td>eligible 集合差异、coverage=100%、稳定 tie-break。</td></tr>
+                <tr><td>板块</td><td>dc_daily 未覆盖 active catalog；scheme 混入；成员 identity 未解析；同 scheme 排名缺行。</td><td>catalog/member/eod 三份 publication 及 coverage=100%。</td></tr>
+                <tr><td>完整包</td><td>任一 required component 非 production/final、非同一 T、质量为 warning/failed。</td><td>bundle manifest 列出每个 component publicationId 与 digest。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h4>补数、修订与回滚</h4>
+          <ul>
+            <li>交易日历按可得最早日期一次回填，之后每周滚动补未来 18 个月；指数和股票日数据按 tradeDate 分区回填。东财成员正式可用起点、申万历史覆盖起点按 source-reported coverage 保存，覆盖前返回 unavailable，不造历史。</li>
+            <li>同一来源修订产生新 revision/dataVersion，不 UPDATE 历史；bundle 只引用固定 component version。回滚仅切换 current pointer，旧 bundle 与质量证据保持可审计。</li>
+            <li>数据库迁移已落地 component release、bundle、bundle component、active/current pointer、pointer transition 和 derivation input pointer；历史 publication 存在时迁移拒绝破坏性回滚。每张表以 dataset/tradeDate/dataVersion 或 bundle identity 为检索边界，行表再加业务唯一约束。</li>
+          </ul>
+
+          <h3>6.3 service-api 已落地设计</h3>
+          <ul>
+            <li>已新增 <code>MarketOverviewModule</code>、<code>MarketOverviewController</code>、<code>MarketOverviewService</code>、<code>MarketOverviewClient</code> 和严格 Zod 防腐契约；复用并扩展既有 Industry/SW controllers。模块只依赖 data-sync internal API，不新增 Prisma 行情业务表。</li>
+            <li>公开路由全部 POST、需要有效会话；读权限沿用普通认证用户，Data Operations 运行/回填仍只允许既有运维权限。所有路径、query/body、If-None-Match、cursor 和 limit 白名单校验。</li>
+            <li>data-sync client 使用 Bearer、<code>X-Request-Id</code>、1.5s 超时和 ETag；读取失败映射稳定 Problem Details，不透传 provider/token/内部路径。只在发送响应头前对网络/429 做 1 次抖动重试。</li>
+            <li><code>/overview</code> 读取一个完整 bundle，不并发拼六个“最新”；细粒度页面能力读取对应 publication。公开 ETag 由 route + canonical request + dataVersion + projectionVersion 计算，内部 304 映射现有公开 204 条件 POST 语义。</li>
+            <li>排序字段固定枚举；cursor 编码 <code>dataVersion + metric + order + metricValue + identity</code>，版本变化返回 409 snapshot-changed，禁止跨版本翻页。</li>
+          </ul>
+
+          <h3>6.4 service-web 已落地设计</h3>
+          <ul>
+            <li>已新增五个受保护路由和侧栏入口；删除 <code>MarketOverviewView</code> 的受控 fixture 读取，改用只访问 service-api 的严格 Zod client。client 只接受 200/204、RFC 9110 强 ETag 和与 body 一致的 <code>X-Data-Version</code>；不保留可部署 fixture 分支。</li>
+            <li><code>/market</code> 单 query 读取完整 bundle；指数历史、板块 K 线和分页表在用户需要时独立 lazy query。失败保持组件几何并提供局部重试，但不会把其他日期/来源值填入空位。</li>
+            <li>股票排行链接固定为 <code>/market/equities/:exchange/:symbol</code>；本模块不请求个股详情。所有金额、百分比、时间、来源和 finality 由 DTO 元数据驱动，不靠字段名猜单位。</li>
+            <li>所有页面固定浅色 PC 桌面。K 线只用 KLineChart；资金流和强弱等非 K 线分析使用 ECharts；中国市场红涨绿跌并同时用符号/文本。指数成交量只按合同显示“手”，申万成交量明确显示“供应商原生单位、跨来源不可比”。</li>
+          </ul>
+
+          <h3>6.5 架构不变量</h3>
+          <ul class="checklist">
+            <li>service-web 不访问数据库、Tushare、AKShare 或第三方站点；只消费 service-api。</li>
+            <li>service-api 所有业务与运维 HTTP 路由保持 POST；出站内部读取方法不改变此规则。</li>
+            <li>service-api 负责认证、授权、参数与 page envelope，不负责在请求时扫描原始表计算市场宽度。</li>
+            <li>service-data-sync 在明确 publication 上完成同截面聚合与派生，保留输入版本、universe、规则与质量证据。</li>
+            <li>市场首页只显示一个完整包版本；详情页跨 publication 可部分成功，但每块显式保留版本，不伪造全局版本。</li>
+            <li>现有指数成分 shadow 只作研究，永不进入指数行情链；板块 EOD 永不进入股票市场宽度链。</li>
+          </ul>
+        </section>
+
+        <section id="pages">
+          <h2>7. 页面信息架构</h2>
+          <h3>7.1 市场首页 <code>/market</code></h3>
+          <ol>
+            <li><strong>首屏状态条：</strong>交易日、会话状态、总览更新时间、完整/部分/过期状态、手动刷新。首屏禁止账户、持仓或欢迎 Hero。</li>
+            <li><strong>主要指数带：</strong>4 个指数卡，点位/涨跌额/涨跌幅/微趋势；中国市场红涨绿跌，文本和符号同时表达。</li>
+            <li><strong>市场体温：</strong>沪深成交额与上一日对比、上涨/平盘/下跌、涨停/跌停；全部来自当前完整包，任一必需项缺失就继续显示上一完整包。</li>
+            <li><strong>资金与关注：</strong>来源明确的市场资金流卡；异常变化列表显示规则、证据和 asOf。资金不可用时不使用占位数字。</li>
+            <li><strong>行业/概念强弱：</strong>两个独立排行；点击进入板块详情。</li>
+            <li><strong>股票排行：</strong>涨幅、跌幅、成交额、活跃摘要切换；每项仅 5–10 条并深链 0007。</li>
+          </ol>
+          <h3>7.2 板块中心 <code>/market/sectors</code></h3>
+          <ul>
+            <li>一级页签固定为“东财行业 / 东财概念”，URL 保存 <code>scheme</code>；两套结果不合榜。</li>
+            <li>顶部显示当前 EOD tradeDate、finality、catalog 覆盖率、质量状态；异常/旧 publication 提示置于表格上方。</li>
+            <li>横截面表格列：名称、涨跌幅、最新值、成交额、换手率、市值、上涨/下跌家数、领涨股、领涨股涨幅；全部来自同一 scheme、tradeDate、publication。</li>
+            <li>排序只开放服务端可验证字段；搜索、排序、方向、日期、分页进入 URL。行点击进入详情。</li>
+            <li>持续性列与 ECharts 象限（涨跌 × 换手）使用 5/20 日派生 publication；历史覆盖不足时显示有效样本数。</li>
+          </ul>
+          <h3>7.3 板块详情 <code>/market/sectors/:scheme/:sectorCode</code></h3>
+          <ul>
+            <li>标题区明确 scheme、代码、目录状态、数据日期；不只显示名称。</li>
+            <li>首行摘要：涨跌幅、最新值、换手率、市值、上涨/下跌家数、领涨股。市值由 canonical <code>CNY</code> 换算为“亿元”；板块最新值和 K 线成交量继续明确供应商原生单位。</li>
+            <li>价格区使用 KLineChart，周期 <code>1d/1w/1mo</code> 由后端原生序列驱动；切换周期不本地聚合。</li>
+            <li>非 K 线区使用 ECharts：成交额/换手、持续性、资金流。不同 y 轴与单位不能无标记叠加。</li>
+            <li>成分表展示观察时间边界、身份与深链；“当前观察成分”不得标成“正式历史成分”。</li>
+          </ul>
+          <h3>7.4 申万行业 <code>/market/industries/sw</code> 与 <code>/:code</code></h3>
+          <ul>
+            <li>左侧/顶部级联浏览一级、二级、三级，保持代码、父级、revision、snapshotDate；目录、成分、行情和估值按同一交易日完整包选择。</li>
+            <li>目录表展示 componentCount；估值展示静态 PE、PB 及其 <code>source_reported</code> 语义。Tushare <code>sw_daily</code> 不提供 TTM PE 与股息率，这两项返回 <code>source_not_reported</code>，不得推算或补零。</li>
+            <li>详情页用面包屑表达 taxonomy，展示 SW 日 K、估值序列和正式成分；周/月只在 source 提供正式周期或经已冻结日线复算方法后开放。</li>
+            <li>不提供“切换成东财行业”的一键等价映射；未来 crosswalk 必须是独立、有证据和版本的映射数据集。</li>
+          </ul>
+        </section>
+
+        <section id="api">
+          <h2>8. service-api 查询与接口设计</h2>
+          <div class="callout info">
+            本节路径、职责、输入输出和错误语义均已落入 controller、DTO、严格 Zod contract 与内部 client；所有公开业务 HTTP 方法均为 <strong>POST</strong>，内部 publication 读取保持 GET。
+          </div>
+          <h3>8.1 内部读取：service-data-sync → service-api</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>内部 GET</th><th>请求</th><th>响应 publication</th><th>缓存</th></tr></thead>
+              <tbody>
+                <tr><td><code>/internal/v1/market/overview-bundles/{tradeDate|latest}</code></td><td>可选 components 不开放；始终读取完整包</td><td>bundle + component payloads + lineage summary</td><td>ETag=dataVersion；304</td></tr>
+                <tr><td><code>/internal/v1/market/indices/{indexId}/bars</code></td><td>period/start/end/cursor/limit</td><td>固定 index identity 的 bar page</td><td>ETag；304</td></tr>
+                <tr><td><code>/internal/v1/market/equity-rankings</code></td><td>asOf/metric/order/cursor/limit</td><td>冻结横截面派生排行</td><td>ETag；304</td></tr>
+                <tr><td><code>/internal/v1/market/money-flow/equity-rankings</code></td><td>asOf/direction/cursor/limit</td><td>订单规模方法学股票流入/流出排行</td><td>ETag；304</td></tr>
+                <tr><td><code>/internal/v1/market/calendar</code></td><td>venues/start/end</td><td>交易日和 session schedule</td><td>ETag；304</td></tr>
+                <tr><td><code>/internal/v1/market/sectors/strength</code><br><code>/internal/v1/market/sectors/money-flow-rankings</code></td><td>scheme/asOf/window/order/cursor/limit</td><td>已物化持续性与供应商板块资金流</td><td>ETag；304</td></tr>
+                <tr><td><code>/internal/v1/market/industries/sw/{code}/{bars|constituents|valuation}</code></td><td>period/window/snapshotDate/tradeDate/cursor/limit</td><td>已物化 K 线、最新修订有效区间、逐字段估值</td><td>ETag；304</td></tr>
+                <tr><td colspan="4">既有 sector 目录、EOD、bars、观察成分和 SW taxonomy 路径继续复用；EOD/申万 composite 通过 <code>inputDataVersions</code> 暴露来源组件，不再只有模糊单一版本。</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>8.2 公开 POST 能力</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>能力</th><th>POST 路径</th><th>Body / path</th><th>公开输出</th></tr></thead>
+              <tbody>
+                <tr><td>市场完整首页</td><td><code>/api/v1/market/overview</code></td><td><code>{ asOf?: YYYY-MM-DD }</code></td><td>一个 complete bundle；未指定日期取 latest complete，不接收 requestedComponents。</td></tr>
+                <tr><td>指数 K 线</td><td><code>/api/v1/market/indices/:indexId/bars</code></td><td>period/start/end/cursor/limit</td><td>OHLC/amount/volume + identity/source/finality。</td></tr>
+                <tr><td>股票市场排行</td><td><code>/api/v1/market/equities/rankings</code></td><td>asOf、metric、order、cursor、limit≤50</td><td>changePercent/amountCny/turnoverPercent；exchange+symbol 深链身份。</td></tr>
+                <tr><td>股票资金流排行</td><td><code>/api/v1/market/money-flow/equity-rankings</code></td><td>asOf、direction、cursor、limit≤50</td><td>Tushare L2 订单规模估算，含 methodology/version/universe/coverage。</td></tr>
+                <tr><td>板块目录</td><td><code>/api/v1/market/sectors</code></td><td>scheme/query/cursor/limit</td><td>东财行业与概念独立目录 publication。</td></tr>
+                <tr><td>板块 K 线/快照/成分</td><td><code>/api/v1/market/sectors/:scheme/:sectorCode/{bars|eod-snapshot|constituents}</code></td><td>period/window/asOf/cursor/limit</td><td>原生周期 bars、quote+strength composite EOD、观察成分；不改变观察成分语义。</td></tr>
+                <tr><td>板块排行/持续性</td><td><code>/api/v1/market/sectors/eod-snapshots</code><br><code>/api/v1/market/sectors/strength</code></td><td>scheme/asOf/window/sort/order/cursor</td><td>同 scheme、同 publication 排行与有效样本。</td></tr>
+                <tr><td>板块资金流</td><td><code>/api/v1/market/sectors/money-flow-rankings</code></td><td>scheme/asOf/order/cursor/limit</td><td>供应商来源、方法学和 trade-direction 语义显式标注。</td></tr>
+                <tr><td>申万</td><td><code>/api/v1/market/industries/sw/list</code><br><code>/valuations</code><br><code>/:code</code><br><code>/:code/{bars|constituents|valuation}</code></td><td>level/parent/asOf/period/window/cursor</td><td>SW taxonomy、估值、行情、最新修订有效成员，各自显式版本与 composite lineage。</td></tr>
+                <tr><td>交易日历</td><td><code>/api/v1/market/calendar/query</code></td><td>venues/start/end</td><td>开闭市、session、source version；当前状态由服务端按 Asia/Shanghai 计算。</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>8.3 <code>MarketOverviewResponse</code> 必填结构</h3>
+          <pre class="flow" aria-label="市场首页公开响应结构">
+{
+  dataVersion, tradeDate, publishedAt, finality: "final",
+  status: { marketState, marketStateAsOf, freshness, lagTradingDays,
+            freshnessReason, latestEligibleTradeDate, quality: "passed" },
+  indices[4]: { indexId, name, point, previousClose, change, changePercent,
+                volume?, volumeUnit: "lot", amountCny?, source },
+  turnover: { sseAmountCny, szseAmountCny, totalAmountCny,
+              previousTotalAmountCny, changeAmountCny, changePercent },
+  breadth: { eligible, advancing, flat, declining, suspended, unknown: 0 },
+  limits: { limitUp, limitDown, rulesVersion },
+  marketMoneyFlow: { source, methodologyId, methodologyVersion, netAmountCny },
+  equityMoneyFlowRankings: { source, methodologyId, universe, coverage, inflow[], outflow[] },
+  equityRankings: { gainers[], losers[], amount[], turnover[] },
+  sectorRankings: { eastmoneyIndustry: { strongest[], weakest[] },
+                    eastmoneyConcept: { strongest[], weakest[] } },
+  attentionSignals[],
+  quality: { componentCount, passedCount, universeVersion, sourceBindings[], checks[] }
+}
+          </pre>
+          <p>以上字段除业务上明确可空的 provider value 外均为必填；四指数长度、固定 identity、<code>volumeUnit="lot"</code>、<code>unknown=0</code>、宽度恒等式、资金流榜正负方向和完整包组件计数由 Zod 和 DTO 双层校验。金额使用十进制字符串传输，Web 使用 decimal formatter；禁止 JSON number 丢精度。响应不暴露 token、raw URI、内部 publicationId、fencing token 或 provider 原始字段。</p>
+
+          <h3>8.4 错误、可靠性与容量</h3>
+          <ul>
+            <li>指定日期没有 complete bundle：404 <code>publication-not-found</code>，附 <code>latestAvailableDate</code>；最新指针也不存在：503 <code>dataset-unavailable</code>。永不返回 200 + 零值。</li>
+            <li>参数非法 400、未认证 401、无权限 403、游标版本变化 409、限流 429、下游超时/契约漂移 503；Problem Details 只含稳定 code、requestId、retryAfter。</li>
+            <li>overview 目标 p95：warm ≤350ms、cold ≤1200ms，响应 ≤256KB；排行 limit≤50，bars 单页 limit≤1000。指数/SW bar lineage 上限 7500 个唯一 input dataVersion，内部最大响应 2MiB；内部 client timeout 1.5s，公开总预算 2s。</li>
+            <li>同一用户 + route 使用既有网关限流；ETag 命中返回 204 且不带 body。日志记录 route、duration、status、dataVersion、requestId，不记录响应行情明细。</li>
+            <li>连续 5 次下游网络失败/30s 打开 circuit，15s 后 half-open；circuit 期间 503，不由 API 内存缓存伪装成功。已发布数据仍可由 data-sync 读端正常服务。</li>
+          </ul>
+        </section>
+
+        <section id="datasets">
+          <h2>9. 新增/扩展数据集与 canonical 粒度</h2>
+          <p>以下是实施必须落地的最终能力，不是候选。所有派生数据集记录 <code>inputPublicationIds</code>、<code>universeVersion</code>、<code>rulesVersion</code>、<code>methodologyVersion</code>、<code>asOf</code>、<code>finality</code>、质量报告和发布原因。本次只写影响分析，按用户约束不在目标目录外新增 ADR、迁移或契约文件；实施时按此表机械提取。</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>优先级</th><th>数据集</th><th>canonical 粒度</th><th>核心字段</th><th>影响</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>1</td><td><code>market.calendar</code> / <code>market.session-schedule</code></td>
+                  <td>market + venue + tradeDate + scheduleVersion</td>
+                  <td>isTradingDay、session segments、exception、source、effective interval</td>
+                  <td>替换单年静态 gate；同步调度、API、首页状态共用。</td>
+                </tr>
+                <tr>
+                  <td>2</td><td><code>index.quote.eod</code> / <code>index.bar.1d</code></td>
+                  <td>indexIdentity + tradeDate + source/methodology version</td>
+                  <td>previousClose、OHLC、close/point、change、changePercent、source-reported volume/amount、currency</td>
+                  <td>新增指数 identity 关联、adapter、质量、publication、内部/公开读取；不复用 constituent shadow。</td>
+                </tr>
+                <tr>
+                  <td>3</td><td><code>equity.market-snapshot.eod</code></td>
+                  <td>market + tradeDate + cutoff + universeVersion；行粒度 security identity</td>
+                  <td>previousClose、close、change、changePercent、volume、amountCny、turnover、tradingStatus、limit metadata</td>
+                  <td>完整批次原子发布；需 catalog 生命周期与覆盖门；避免单股 latest 拼接。</td>
+                </tr>
+                <tr>
+                  <td>4</td><td><code>market.breadth.eod</code> / <code>market.turnover.eod</code> / <code>market.limit-breadth.eod</code></td>
+                  <td>market/venue + tradeDate + universe/rules/input version</td>
+                  <td>advance/decline/flat/suspended/unknown、limitUp/Down、amountCny、coverage</td>
+                  <td>从同一个股票横截面派生；涨跌停规则版本化，可复算、可回滚。</td>
+                </tr>
+                <tr>
+                  <td>5</td><td><code>equity.market-ranking.eod</code></td>
+                  <td>market + tradeDate + rankingMethod + input publication</td>
+                  <td>rank、securityId、metricValue、tieRule、eligibleUniverse</td>
+                  <td>支持涨跌/成交/换手排行；“活跃”本方案固定为成交额排行，不引入隐式复合分。</td>
+                </tr>
+                <tr>
+                  <td>6</td><td>扩展 <code>sector.quote.eod.snapshot</code></td>
+                  <td>保持 scheme + tradeDate + publication</td>
+                  <td>补 source-reported amount 与经证据校准的单位；保留原值</td>
+                  <td>迁移向后兼容；amountCny 为明确 CNY，保留 sourceAmount/sourceUnit lineage。</td>
+                </tr>
+                <tr>
+                  <td>7</td><td><code>sector.strength.eod</code></td>
+                  <td>scheme + sectorId + asOf + window + methodologyVersion</td>
+                  <td>cumulativeReturn、upDays、medianRank、validSamples、coverage</td>
+                  <td>独立派生任务与 publication；禁止 request-time 跨日扫表。</td>
+                </tr>
+                <tr>
+                  <td>8</td><td><code>market.attention-signal.eod</code></td>
+                  <td>market + tradeDate + ruleId/version + signalId</td>
+                  <td>severity、title、evidence metrics、threshold、input publications</td>
+                  <td>规则审计、回放、去重与解释；不使用无证据自然语言判断。</td>
+                </tr>
+                <tr>
+                  <td>9</td><td><code>money-flow.market.dc.eod</code> / <code>money-flow.equity.order-size.eod</code> / <code>sector.money-flow.dc.eod</code></td>
+                  <td>source + methodologyVersion + universe + tradeDate；行粒度 market/equity/sector identity</td>
+                  <td>净额、分档买卖额、方向、rank、coverage、单位、finality</td>
+                  <td>替换 research source binding 后通过 production 质量门；三种来源语义仍物理/逻辑隔离。</td>
+                </tr>
+                <tr>
+                  <td>10</td><td><code>sw.membership</code> / <code>sw.market-data</code></td>
+                  <td>SW code + source effective interval；SW code + tradeDate</td>
+                  <td>正式成分证据、OHLC、成交、PE/PB、逐指标 availability、revision</td>
+                  <td>由 Tushare SW 数据集补齐；TTM PE/股息率标记来源未报告；仍不建立与东财行业的隐式 crosswalk。</td>
+                </tr>
+                <tr>
+                  <td>11</td><td><code>market.overview-bundle.eod</code></td>
+                  <td>market=CN-A-SSE-SZSE + tradeDate + bundleVersion</td>
+                  <td>component dataset/dataVersion/digest、sourceBindingHash、qualityEvaluationId、publishedAt</td>
+                  <td>新增 manifest 与 current pointer；不复制业务明细，是首页原子可见性的唯一门。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>表与迁移影响</h3>
+          <p>建议新增 <code>market_calendar_day</code>、<code>market_session_segment</code>、<code>index_daily_bar</code>、<code>equity_eod_snapshot</code>、<code>equity_eod_quote</code>、<code>market_eod_aggregate</code>、<code>market_equity_ranking</code>、<code>market_attention_signal</code>、<code>market_overview_bundle</code>、<code>market_overview_bundle_component</code>；复用既有 publication/release/source-observation/quality 模型。扩展板块/SW 表只加可空列，回填完成并验证后再收紧约束；旧 API 投影在迁移期间继续读取旧字段。</p>
+        </section>
+
+        <section id="partial">
+          <h2>10. 跨 publication、跨来源与部分失败</h2>
+          <h3>首页：写时组合，读时原子</h3>
+          <ol>
+            <li><strong>同日完整：</strong>bundle coordinator 只接受 tradeDate=T、production、final、quality=passed 的必需组件。组件版本可以不同，但都被同一不可变 manifest 固定；<code>assembledAt</code> 不是行情时间。</li>
+            <li><strong>不推进不等于丢数据：</strong>T 日任一组件失败时，各组件 publication 仍可供运维和详情使用，但首页 current pointer 保持 T-1 完整包；页头明确“最新完整数据 T-1 / T 日仍在校验”。</li>
+            <li><strong>无读时拼接：</strong>service-api 不并发拉取“各自最新”，所以不会产生指数 T、资金 T-1、板块 T-2 的伪同屏。requested asOf=T 且 bundle 不存在时返回 404，不自动改日期。</li>
+            <li><strong>来源隔离：</strong>行业、概念、申万和不同资金流方法学分别成组；不在 envelope 内做相加、平均、交叉排名。</li>
+            <li><strong>质量优先：</strong>被隔离、research、coverage 不足或 incomplete 的 publication 不因页面需要而放行。</li>
+            <li><strong>修订可见：</strong>publication rollback 后缓存键/ETag 变化；页面刷新显示新版本，并在详情元信息中保留 revision/原因。</li>
+          </ol>
+          <h3>详情/列表：组件级部分失败</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>场景</th><th>API</th><th>Web</th><th>禁止行为</th></tr></thead>
+              <tbody>
+                <tr><td>板块摘要成功、K 线超时</td><td>两个独立请求；bars 503</td><td>摘要保留，K 线区错误 + 局部重试</td><td>用 EOD 点位伪造蜡烛</td></tr>
+                <tr><td>成分为 T-1、摘要为 T</td><td>各响应保留 asOf/dataVersion</td><td>成分标题显示 T-1 与落后 1 日</td><td>把 observed interval 标成正式调样日</td></tr>
+                <tr><td>行业 scheme 成功、概念失败</td><td>两个查询独立状态</td><td>行业可用，概念页签错误</td><td>用行业排行填概念</td></tr>
+                <tr><td>SW taxonomy 成功、估值缺值</td><td>null 保持 source-null；不是 0</td><td>字段显示“未披露”与来源日期</td><td>前端计算或名称映射补齐</td></tr>
+                <tr><td>当前 publication 被撤回</td><td>ETag 改变；最新指针回退</td><td>刷新后显示回退版本和 revision 提示</td><td>浏览器继续称旧缓存为最新</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>复杂状态文案</h3>
+          <div class="grid-3">
+            <div class="card"><strong>空</strong>“该日期尚无可发布数据”，附最近可用日期；不写“0”。</div>
+            <div class="card"><strong>旧</strong>“最新完整市场数据为 07-29；07-30 仍在校验”，整页保持同一完整版本。</div>
+            <div class="card"><strong>错</strong>“板块排行读取失败”，保留其他卡，提供局部重试。</div>
+            <div class="card"><strong>研究</strong>显示方法学说明和“尚未通过生产门禁”，不显示研究数值。</div>
+            <div class="card"><strong>部分</strong>只适用于详情/列表多查询页面；市场首页不返回 partial bundle。</div>
+            <div class="card"><strong>不可比较</strong>显示差异原因，例如 scheme、日期、单位或方法学不一致。</div>
+          </div>
+        </section>
+
+        <section id="state">
+          <h2>11. 页面查询、缓存、刷新、URL 与图表状态</h2>
+          <h3>状态所有权</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>状态</th><th>归属</th><th>示例</th><th>规则</th></tr></thead>
+              <tbody>
+                <tr><td>可分享查询状态</td><td>React Router URL</td><td>asOf、scheme、sectorCode、period、sort、order、page、query、level、parentCode</td><td>刷新/复制链接可复现；参数白名单和 canonical serialization。</td></tr>
+                <tr><td>远端数据状态</td><td>TanStack Query</td><td>overview、sector EOD、bars、constituents、SW taxonomy/valuation</td><td>queryKey 包含完整请求参数与 capability；不放 Redux/Context。</td></tr>
+                <tr><td>图表交互</td><td>KLineChart / ECharts 实例</td><td>十字线、缩放窗口、tooltip、legend 临时隐藏</td><td>高频状态不写 URL；period 和分析维度写 URL。</td></tr>
+                <tr><td>短生命周期 UI</td><td>组件本地</td><td>弹层、展开行、当前 hover、局部重试中</td><td>卸载即丢弃；不污染全局。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>建议 URL</h3>
+          <ul>
+            <li><code>/market?asOf=2026-07-30</code></li>
+            <li><code>/market/sectors?scheme=eastmoney.industry&amp;asOf=2026-07-30&amp;sort=changePercent&amp;order=desc&amp;page=1</code></li>
+            <li><code>/market/sectors/eastmoney.industry/BK0475?period=1d&amp;start=2026-04-01&amp;end=2026-07-30</code></li>
+            <li><code>/market/industries/sw?level=2&amp;parentCode=801010.SI&amp;snapshotDate=2026-07-30&amp;sort=ttmPe</code></li>
+          </ul>
+          <h3>缓存与刷新</h3>
+          <ul>
+            <li>overview latest 按服务端市场状态条件刷新：盘前/交易中/午间休市 60 秒，闭市/非交易日 5 分钟；stale 在 17:20–20:00 降为 15 分钟，20:00 后停止自动刷新。精确历史 <code>asOf</code> 使用无限 staleTime、禁用窗口聚焦刷新且无 interval。</li>
+            <li>板块目录/EOD/强弱/资金流、板块详情和申万详情按各自 publication 使用 EOD staleTime；路由进入、窗口重新聚焦和用户手动刷新触发条件 POST，不复制 overview 的动态状态轮询。</li>
+            <li>复用现有条件 POST/ETag 语义；<code>204</code> 表示沿用缓存，不清空页面。</li>
+            <li>overview <code>staleTime=5min</code>、<code>gcTime=24h</code>；EOD bars/目录 <code>staleTime=30min</code>、<code>gcTime=24h</code>；历史已结束窗口 <code>staleTime=24h</code>、<code>gcTime=7d</code>。dataVersion/ETag 变化立即替换。</li>
+            <li>列表翻页保留上一页数据并显示表体加载；切换 scheme 清理不可兼容排序和选中项。</li>
+            <li>市场首页手动刷新只重查完整 bundle；详情页按组件并发并显示“正在更新 3/6”，失败组件可单独重试。</li>
+          </ul>
+          <h3>queryKey 与请求去重</h3>
+          <pre class="flow" aria-label="前端查询键">
+["market","overview", asOf ?? "latest"]
+["market","index-bars", indexId, period, start, end, cursor]
+["market","equity-rankings", asOf, metric, order, cursor, limit]
+["market","sectors", scheme, asOf, sort, order, query, cursor]
+["market","sector", scheme, sectorCode, "bars", period, start, end, cursor]
+["market","sector", scheme, sectorCode, "constituents", asOf, cursor]
+["market","sw", "taxonomy", level, parentCode, asOf, cursor]
+["market","sw", code, "bars|valuation|constituents", asOf, range, cursor]
+          </pre>
+          <h3>图表</h3>
+          <ul>
+            <li>指数和板块 OHLC 统一 KLineChart；周/月直接请求后端原生 period。</li>
+            <li>宽度、资金流、成交比较、行业强弱与持续性统一 ECharts，按模块 lazy-load，避免首屏将两套引擎打入同一基础包。</li>
+            <li>涨跌颜色：中国市场红涨 <span class="up">#FF5630</span>、绿跌 <span class="down">#22C55E</span>、平盘灰；同时使用 +/−、箭头和文字，不能只靠颜色。</li>
+            <li>图表空/错/旧状态占据同一尺寸，避免 layout shift；tooltip 必须显示日期、单位、来源/方法学。</li>
+          </ul>
+        </section>
+
+        <section id="prototype">
+          <h2>12. 原型与视觉规范</h2>
+          <div class="grid-3">
+            <div class="card"><strong>可编辑原型</strong><a href="prototype.html?view=market">prototype.html · 市场首页</a><br><a href="prototype.html?view=sector">prototype.html · 板块详情</a><br><a href="prototype.html?view=states">prototype.html · 复杂状态</a></div>
+            <div class="card"><strong>静态图</strong><a href="assets/prototype-market-home.png">市场首页 1440×900</a><br><a href="assets/prototype-sector-detail.png">板块详情 1440×900</a><br><a href="assets/prototype-states.png">复杂状态 1440×900</a></div>
+            <div class="card"><strong>设计约束</strong>固定浅色桌面壳；300px 侧栏、72px 顶栏；16px 卡片圆角；无渐变、暗色壳、移动端与 AI 图片。</div>
+          </div>
+          <div class="callout warn">
+            市场首页数值来自第 17 节 <strong>2026-07-29 真实隔离探针</strong>，并明确标记“非当前 production publication”；板块/资金端点探针失败的区域只显示不可用，不填假值。原型验证真实数据标签、红涨绿跌、来源、空错旧与深链边界。
+          </div>
+          <h3>无障碍与桌面密度</h3>
+          <ul>
+            <li>支持键盘导航、可见焦点、语义表格、按钮名称与面包屑；文字对比满足 WCAG AA。</li>
+            <li>1440×900 首屏优先展示市场状态、主要指数、成交/宽度与强弱摘要；不放欢迎语大 Hero。</li>
+            <li>低于 1200px 显示“需要更宽桌面视口”，不实现响应式重排或移动端导航。</li>
+          </ul>
+        </section>
+
+        <section id="delivery">
+          <h2>13. 分阶段实施</h2>
+          <p>阶段用于控制工程风险，不用于把半成品暴露给用户。当前代码已完成阶段 1–4 的工程落地；阶段 0 中真实 token/license preflight 与阶段 5 的预发连续 20 开市日、真实三服务 HTTP E2E 尚未完成。路由虽已存在，目标生产环境必须把第 0A/15 节门禁纳入 readiness，任何环境都不得用 fixture 代替未完成 publication。</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>阶段</th><th>service-data-sync</th><th>service-api / service-web</th><th>硬退出条件</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>0 · 环境 preflight</td>
+                  <td>Tushare token/权限、目标数据集、全量行数、Docker/PG/Redis/对象存储检查。</td>
+                  <td>生成实施契约/ADR/迁移；OpenAPI 路径和 0007 深链按本方案落文件。</td>
+                  <td>所有端点真实调用成功；token 不进日志；不存在 TBD 字段。</td>
+                </tr>
+                <tr>
+                  <td>1 · 基础 canonical</td>
+                  <td>日历、四指数、股票 daily/daily_basic/suspend/stk_limit；表、adapter、质量门、内部 GET。</td>
+                  <td>API client/schema/controller skeleton；Web 只建隐藏路由和加载/错误态。</td>
+                  <td>任选连续 20 个真实交易日全量回填；身份/集合/金额门全部通过。</td>
+                </tr>
+                <tr>
+                  <td>2 · 市场派生</td>
+                  <td>冻结横截面、宽度、成交、涨跌停、股票排行、注意信号；幂等/重放/回滚。</td>
+                  <td>overview/ranking/calendar POST DTO、ETag、权限、Problem Details。</td>
+                  <td>20 日派生可复算；横截面与聚合 lineage 完整；API contract 测试通过。</td>
+                </tr>
+                <tr>
+                  <td>3 · 板块/资金/SW</td>
+                  <td>dc_*、moneyflow_*、SW taxonomy/member/daily；迁移既有 source policy；持续性派生。</td>
+                  <td>扩现有 sector/SW API；Web 完成板块中心、详情、SW 页面。</td>
+                  <td>catalog 100% 覆盖、排行完整、来源/方法学/单位可见；无 research leakage。</td>
+                </tr>
+                <tr>
+                  <td>4 · 完整包与页面</td>
+                  <td>bundle coordinator、current pointer、通过 <code>/schedules/upsert</code> 配置的交易日 19:20 唯一 schedule、人工 retry、次日补洞和失败恢复；17:20 只作为 EOD eligibility，不存在 19:35/19:50 自动触发。</td>
+                  <td>Web 删除 fixture，接 strict Zod service-api client；完成所有页面、URL、KLineChart/ECharts。</td>
+                  <td>同一真实交易日 bundle 20/20；三服务 trace 可关联；无第三方直连。</td>
+                </tr>
+                <tr>
+                  <td>5 · 真实数据上线</td>
+                  <td>预发跑满连续 20 个开市日；故障、修订、指针回退和 token 轮换演练。</td>
+                  <td>真实浏览器 E2E、1440×900 视觉回归、性能/无障碍；再启用路由和侧栏。</td>
+                  <td>第 15 节全部证据通过；全仓搜索无市场 fixture 被 production import。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="rollback">
+          <h2>14. 降级、发布与回滚</h2>
+          <h3>配置门禁与发布切换</h3>
+          <ul>
+            <li>数据侧以 <code>DATA_SYNC_MARKET_OVERVIEW_ENABLED</code>、Tushare enable/token、license scope/reference 作为强门禁；未满足时进程或执行在写 publication 前失败。</li>
+            <li>当前 service-api/service-web 没有虚构的 market 专用运行时 feature flag。发布切换使用可回滚镜像、入口路由/访问策略与 data-sync current pointer；若未来增加 flag，首页 20 项仍必须作为一个 release unit，不能关闭失败卡后把不完整页面称为 complete。</li>
+            <li>数据侧 production provider 只允许 <code>tushare-pro</code>，publication 指针是唯一事实；API/Web 部署开关不能绕过同步质量与许可门禁。</li>
+          </ul>
+          <h3>降级顺序</h3>
+          <ol>
+            <li>T 日完整包构建失败：保持 T-1 current pointer，页头显示“最新完整数据 T-1”；不让 T 日半包进入首页。</li>
+            <li>详情派生解释卡失败：仅该卡显示错误，保留同页已成功的真实 publication。</li>
+            <li>资金流过期/失败：不推进首页 bundle；详情不替换为沪深港通、融资融券或成交额。</li>
+            <li>单个 scheme 失败：另一个 scheme 正常，页级标记 partial。</li>
+            <li>从未有完整包：路由显示系统级 unavailable 与重试/运维 requestId，不展示任何行情或 fixture。</li>
+          </ol>
+          <h3>回滚</h3>
+          <ul>
+            <li>service-data-sync：回退 current publication 指针；保留失败 revision、raw 与质量报告，禁止覆盖历史。</li>
+            <li>service-api：新字段先可选扩展、真实回填验证后收紧；overview 不回退到现有细粒度 API 现场拼装。</li>
+            <li>service-web：回退到上一已验证镜像或在入口撤下市场路由；TanStack 缓存随 ETag/dataVersion 失效，不能继续显示被撤回 publication 为“最新”。详情组件局部失败保持独立，不需要为一张增强卡回退整个首页。</li>
+            <li>数据库：新增表/列迁移要求可回滚；publication rollback 与 schema rollback 分开演练。</li>
+          </ul>
+        </section>
+
+        <section id="acceptance">
+          <h2>15. 验收与测试方案</h2>
+          <div class="callout"><strong>上线判定：</strong>选取一个已收盘真实交易日 T，从空环境执行真实同步，随后只通过 service-api 查询并在浏览器打开页面。若任一业务数值来自 fixture/MSW/硬编码、任一首页必需项非同一 bundle、任一集合差异未解释，整体验收失败。</div>
+          <div class="callout warn"><strong>当前判定：</strong>工程测试、编译、构建、Web runtime health，以及 TestClient 真实内部响应 → API strict Zod 的 10/10 合同互操作已取得第 0A 节所列证据；合法 token/license 的真实 Tushare preflight、生产 publication、真实业务数值三服务 HTTP 部署、连续 20 开市日和登录后浏览器逐字段对账仍是上线前必做项，当前不得标为通过。</div>
+          <div class="grid-2">
+            <div class="card">
+              <strong>service-data-sync</strong>
+              <ul>
+                <li>adapter contract、canonical mapping、质量门、幂等/重放/租约/隔离；单元测试 fixture 不进入部署镜像的数据路径。</li>
+                <li>横截面覆盖、同 cutoff、universe 生命周期、停牌/平盘/涨跌停边界。</li>
+                <li>publication 原子性、rollback、输入 lineage 与连续交易日缺口。</li>
+              </ul>
+            </div>
+            <div class="card">
+              <strong>service-api</strong>
+              <ul>
+                <li>POST-only 架构测试、DTO 白名单、权限、条件 POST/ETag、partial envelope。</li>
+                <li>无 publication、research、incomplete、stale、依赖超时和回滚版本。</li>
+                <li>排序稳定性、分页 tie、scheme/code/asOf 校验。</li>
+              </ul>
+            </div>
+            <div class="card">
+              <strong>service-web</strong>
+              <ul>
+                <li>路由/URL 恢复、query key、局部重试、200/204 强条件缓存和镜像/入口回滚。</li>
+                <li>KLineChart period、ECharts 空错旧、红涨绿跌、单位/来源/时间标签。</li>
+                <li>0007 深链固定 exchange+symbol；键盘、焦点、语义表格、1440×900 视觉回归。</li>
+              </ul>
+            </div>
+            <div class="card">
+              <strong>跨服务验收样例</strong>
+              <ul>
+                <li>T 日指数成功、资金流仅 T-1、概念失败：T bundle 不生成，首页仍返回 T-1 complete。</li>
+                <li>板块 EOD coverage 不足：不推进 component/bundle，详情旧版标“最近可用”。</li>
+                <li>概念重叠：全市场宽度仍只来自股票横截面 publication。</li>
+              </ul>
+            </div>
+          </div>
+          <h3>原型验收</h3>
+          <ul class="checklist">
+            <li>市场首页和板块详情截图均为 1440×900；复杂状态单独成图。</li>
+            <li>首屏直接显示今日市场状态，无账户、持仓、欢迎 Hero。</li>
+            <li>红涨绿跌；K 线标记 KLineChart，非 K 线分析标记 ECharts。</li>
+            <li>没有移动端、响应式、暗色壳层、渐变或 AI dashboard 图片。</li>
+          </ul>
+          <h3>真实数据逐层对账</h3>
+          <ol>
+            <li><strong>Provider → canonical：</strong>抽取四指数全部行、每场所 30 只股票、5 个行业/5 个概念、5 个 SW 节点，逐字段核对 source response、单位转换、identity 和 digest。</li>
+            <li><strong>Canonical → 派生：</strong>用冻结 input publication 重算 breadth、turnover、limit、四类股票排行和 5/20 日 sector strength，结果逐项相等；无 request-time 扫表。</li>
+            <li><strong>Publication → internal API：</strong>manifest 中 component dataVersion 与内部 GET body/ETag 一致；撤回一个 component 后新 bundle 不生成。</li>
+            <li><strong>Internal → public API：</strong>公开 overview 必填 20/20、四指数长度=4、breadth 恒等式成立、金额 decimal string 无精度损失、敏感字段未暴露。</li>
+            <li><strong>API → browser：</strong>拦截网络请求确认只访问 service-api；页面显示的 tradeDate/dataVersion/source 与 API 一致；刷新命中 204 后 DOM 数值不清空。</li>
+            <li><strong>反假数据检查：</strong>production build 对 <code>mocks/market-overview</code>、<code>demoMarketOverview</code>、MSW market handler 做依赖图/文本双检，命中即失败；预发断开 provider 时只能显示已发布真实版本或 unavailable。</li>
+          </ol>
+          <h3>发布质量阈值</h3>
+          <p>连续 20 个开市日 bundle 成功率 100%；首页 required component coverage 100%；身份未解析 0；breadth unknown 0；API schema 失败 0；跨服务 E2E 100%；overview p95 达到第 8 节预算；桌面视觉差异经评审批准。外部源临时失败可导致当日 bundle 延迟，但不能导致错误数值或半包上线。</p>
+        </section>
+
+        <section id="risks">
+          <h2>16. 无卡点决策表、依赖与补数顺序</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>原卡点</th><th>本方案冻结值</th><th>失败处理</th></tr></thead>
+              <tbody>
+                <tr><td>生产数据源</td><td>Tushare Pro 单一 production adapter；AKShare 仅隔离研究</td><td>token/权限/schema preflight fail-fast；不静默切源。</td></tr>
+                <tr><td>指数身份</td><td>000001.SH、399001.SZ、000300.SH、399006.SZ；index_daily</td><td>任一缺失阻断 bundle；成分 shadow 永不替代。</td></tr>
+                <tr><td>全市场横截面</td><td>daily + daily_basic + suspend_d + stk_limit，同 tradeDate 原子 publication</td><td>集合差异非 0 就隔离；不从单股 latest 拼接。</td></tr>
+                <tr><td>涨跌停规则</td><td>source-reported limit_status/stk_limit 为事实；2026 交易所规则版本复核</td><td>偏差 &gt;0.01 元隔离，不靠前端阈值猜测。</td></tr>
+                <tr><td>板块来源/单位</td><td>dc_index/dc_daily/dc_member；amount 千元→CNY，保留 source unit</td><td>active catalog coverage 非 100% 不发布。</td></tr>
+                <tr><td>资金流</td><td>大盘 DC、个股 Tushare L2、板块 DC 三种 methodology 分离</td><td>coverage/排行不完整阻断 bundle；不称统一市场事实。</td></tr>
+                <tr><td>申万缺口</td><td>index_classify/index_member_all/sw_daily 补 taxonomy/member/bar/valuation</td><td>source coverage 起点前 unavailable，不用东财映射。</td></tr>
+                <tr><td>活跃/异常</td><td>活跃=成交额排行；异常=版本化阈值规则，输出证据</td><td>规则版本缺失不生成 signal；不用 AI 分数。</td></tr>
+                <tr><td>股票深链</td><td><code>/market/equities/:exchange/:symbol</code></td><td>缺 exchange 的旧 <code>/instruments/:symbol</code> 不作为目标。</td></tr>
+                <tr><td>跨 publication</td><td>首页完整 bundle；详情组件级版本</td><td>T 半包不推进 current pointer；保留上一真实完整包。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout warn"><strong>外部依赖不是隐式卡点：</strong>实施环境必须在阶段 0 前完成 Tushare token、对应权限和网络出口配置；这是明确的部署不变量。方案不提供“先用免费抓取顶上”的分支。若组织不提供该依赖，项目应在 preflight 明确失败，而不是上线假数据。</div>
+          <h3>建议补数顺序</h3>
+          <ol>
+            <li>交易日历/会话与四个主要指数。</li>
+            <li>股票 daily/daily_basic/suspend/stk_limit 原子横截面。</li>
+            <li>宽度、成交、涨跌停、涨跌/成交/换手排行和注意信号。</li>
+            <li>东财目录、EOD、bars、members、板块资金流与 5/20 日持续性。</li>
+            <li>市场/股票资金流；保持各自 methodology 和 universe。</li>
+            <li>申万 taxonomy、正式成员、行情与估值。</li>
+            <li>完整 bundle、内部 API、公开 POST、Web 页面；最后一次性解除路由开关。</li>
+          </ol>
+        </section>
+
+        <section id="evidence">
+          <h2>17. 审计基线与落地证据索引</h2>
+          <p>原始调研以实施前仓库源码、配置、既有方案和锁定运行镜像中的真实隔离探针为准；该基线没有被新实现覆盖。当前实现证据来自本次新增/扩展的三服务源码、迁移、严格合同、测试和 runtime 构建。隔离探针只证明数据可得性与免费抓取链的不稳定性，不冒充 Tushare production publication。</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>主题</th><th>证据</th><th>本方案采用的结论</th></tr></thead>
+              <tbody>
+                <tr><td>板块目录/K 线</td><td><a href="../../service-data-sync/0012-industry-and-sector-data-sync/index.html">data-sync 0012</a>；<a href="../../service-api/0003-sector-market-data-access/index.html">service-api 0003</a></td><td>东财行业/概念分 scheme；日周月原生 bars；现有 POST API。</td></tr>
+                <tr><td>板块成分</td><td><a href="../../service-data-sync/0013-sector-membership-history/index.html">data-sync 0013</a></td><td>观察区间不是正式调整历史。</td></tr>
+                <tr><td>板块 EOD</td><td><a href="../../service-data-sync/0015-sector-eod-snapshot-ranking/index.html">data-sync 0015</a> + 本次 composite 扩展</td><td>quote+strength 两个唯一输入版本生成 composite dataVersion；<code>marketValue</code> 是同步层换算后的 canonical <code>CNY</code>，<code>latestValue</code> 仍为 provider-native，K 线成交量也不伪装成统一单位。</td></tr>
+                <tr><td>资金流</td><td><a href="../../service-data-sync/0017-daily-money-flow/index.html">data-sync 0017</a> + 本次 Tushare adapter</td><td>市场、股票订单规模、东财板块资金流分开 publication；来源/方法学隔离、方向符号失败关闭。</td></tr>
+                <tr><td>指数成分</td><td><a href="../../service-data-sync/0019-index-constituents/index.html">data-sync 0019</a></td><td>Proposed/shadow，且明确不属于指数行情。</td></tr>
+                <tr><td>申万行业</td><td><a href="../../service-data-sync/README.md">data-sync 方案索引与实现状态</a> + 本次 SW materialization</td><td>taxonomy、最新修订有效成员、source-reported 估值和已物化日/周/月线均有版本化读取；不把它们等同东财行业。</td></tr>
+                <tr><td>Web 技术栈</td><td><a href="../../../service-web/README.md">service-web README</a> + <code>src/api/market.ts</code>/<code>src/types/market.ts</code></td><td>React Router、MUI、TanStack Query、KLineChart、ECharts；五个市场路由已接 strict service-api client，旧 market mock 已删除。</td></tr>
+                <tr><td>API 规则</td><td><a href="../../../service-api/README.md">service-api README</a> + <code>MarketOverviewModule</code></td><td>公开业务路由保持 POST-only；内部 publication GET 经 Zod、请求身份、ETag 和 dataVersion 防腐。</td></tr>
+                <tr><td>生产源能力</td><td><a href="https://tushare.pro/document/2?doc_id=26">trade_cal</a>、<a href="https://tushare.pro/document/1?doc_id=95">index_daily</a>、<a href="https://tushare.pro/document/2?doc_id=32">daily_basic</a>、<a href="https://tushare.pro/document/2?doc_id=183">stk_limit</a>、<a href="https://tushare.pro/document/2?doc_id=170">moneyflow</a>、<a href="https://tushare.pro/document/2?doc_id=215">daily_info</a></td><td>日历、指数、全量 EOD/每日指标、source-reported 限价、沪深资金流和 SH_A/SZ_A 同口径成交额对账均有明确字段、更新时段与行上限。</td></tr>
+                <tr><td>2026 交易规则</td><td><a href="https://www.sse.com.cn/lawandrules/sselawsrules2025/fund/trading/c/c_20260424_10817739.shtml">上交所 2026 交易规则</a>、<a href="https://www.bse.cn/jygl_list/200028217.html">北交所 2026 交易规则</a></td><td>涨跌停复核规则必须带 effective date；不再沿用过期 ST 5% 假设。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>2026-07-29 真实隔离探针</h3>
+          <div class="callout info">运行环境：Docker Python 3.12、<code>AKShare==1.18.78</code>，探针日期 2026-07-30，市场日 2026-07-29。只记录聚合摘要；未把第三方原始大表写入仓库。</div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>探针</th><th>真实结果</th><th>方案结论</th></tr></thead>
+              <tbody>
+                <tr><td>Sina 指数 spot + Tencent/Eastmoney 历史交叉校验</td><td>上证 3828.469（+0.397%）；深成 13658.443（+1.101%）；沪深300 4600.2624（+0.673%）；创业板 3378.696（+1.553%）。</td><td>指数点位可以真实取得，但必须建立正式 canonical/publication，不能使用指数成分。</td></tr>
+                <tr><td>Sina 全 A 股 spot</td><td>5,533 个唯一代码；上涨 4,252、平盘 66、下跌 1,215、unknown 0。</td><td>全市场股票横截面可支撑宽度与排行；板块 EOD 不能替代。</td></tr>
+                <tr><td>股票横截面成交额</td><td>SSE 10,865.28 亿元、SZSE 12,090.73 亿元、BSE 153.89 亿元；研究探针可分场所识别，P0 仅采用沪深合计。</td><td>探针证明可按场所聚合；其中与 Eastmoney 指数口径的偏差只保留为研究证据，不能成为生产质量门。生产只与 Tushare <code>daily_info</code> SH_A/SZ_A 同 universe 对账。</td></tr>
+                <tr><td>沪深上一交易日比较</td><td>07-29 为 22,965.79 亿元；07-28 为 20,257.81 亿元；放量 2,707.98 亿元、+13.3676%。</td><td>必须比较相邻已确认交易日、相同场所口径。</td></tr>
+                <tr><td>排行</td><td>真实横截面可稳定生成涨幅、跌幅和成交额 Top N；当日成交额首位 C长鑫 448.14 亿元。</td><td>排行应由完整横截面派生并携带 dataVersion/tie rule，而非供应商不完整翻页。</td></tr>
+                <tr><td>Eastmoney/THS 免费抓取链</td><td>指数/股票 Eastmoney spot、行业/概念、板块历史/成分、市场/股票资金流多次出现 RemoteDisconnected、502、invalid JSON；THS/Sina 部分端点受 ARM native dependency 影响。</td><td>AKShare 不能作为唯一 production source 或 silent fallback；因此冻结 Tushare Pro adapter。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>代码审计覆盖</h3>
+          <ul>
+            <li><strong>实施前：</strong>service-data-sync 已有 sector catalog/bars、membership、EOD、money-flow、SW taxonomy/valuation、index shadow、equity catalog/bars、2026 trading calendar 与 publication repositories；缺指数行情、同日股票横截面和首页 bundle。</li>
+            <li><strong>当前 data-sync：</strong>新增 Tushare HTTPS adapter、权限/许可 preflight、市场 Data Operations dataset、17:20 EOD eligibility、可通过 0022 <code>/schedules/upsert</code> 设置的唯一 schedule、同次最多 3 次网络重试、人工 retry、25 交易日补洞、全部 canonical/派生、原子 bundle、历史 revision、composite lineage 和内部读取；生产 schedule 冻结为交易日 19:20，不冒充仓库 seed 或多次自动触发。</li>
+            <li><strong>实施前：</strong>service-api 有 sector/SW/money-flow controllers，但没有 index quote、market breadth 或 full-market ranking 公开能力；当前已新增 MarketOverview module/client/controller 并扩展既有 controller。</li>
+            <li><strong>实施前：</strong>service-web 的未路由 <code>MarketOverviewView</code> 直接返回 <code>demoMarketOverview</code>；当前该 mock 已删除，五个路由使用严格条件 POST client 和真实 publication 元数据。</li>
+          </ul>
+          <div class="callout">
+            <strong>评审请求：</strong>评审当前三服务实现是否忠实落实冻结来源、canonical 粒度、完整 bundle、内部读取、公开 POST、页面架构、质量门、许可/HTTPS 门禁与上线顺序。代码评审通过后仍须在具备商业再分发许可和合法 token 的目标环境执行第 15 节实盘验收；不得用隔离探针或测试 fixture 代替。
+          </div>
+        </section>
+        <footer>0008 · 市场概览与行业板块 · Implemented / Deployment-gated · 2026-07-30</footer>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

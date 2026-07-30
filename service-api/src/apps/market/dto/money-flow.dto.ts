@@ -6,6 +6,7 @@ import {
   IsISO8601,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Matches,
   Max,
@@ -97,6 +98,11 @@ export class ListMoneyFlowMethodologiesQueryDto {
 
 /** 约束三类来源日序列共有的方法学、窗口和分页参数。 */
 export class ListMoneyFlowDailyQueryDto {
+  /** 个股股票中心读取时绑定 data-status 返回的精确序列 publication。 */
+  @IsOptional()
+  @IsUUID()
+  public readonly dataVersion?: string;
+
   /** 选择不可变方法学版本字符串。 */
   @IsString()
   @Length(1, 64)

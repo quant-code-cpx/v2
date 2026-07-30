@@ -1,4 +1,4 @@
-"""财务 raw 归档、标准解码与分能力发布编排测试。"""
+"""财务成功零 raw 留存、失败 evidence 与分能力发布编排测试。"""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from typing import cast
+from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
@@ -24,6 +25,12 @@ from service_data_sync.application.ports.financial_sync import (
 )
 from service_data_sync.application.ports.market_data import RawPayload
 from service_data_sync.domain.equity import Exchange
+from service_data_sync.infrastructure.object_storage.client import ObjectStorageClient
+from service_data_sync.infrastructure.object_storage.raw_payload_store import (
+    FailureEvidenceDataSource,
+    S3RawPayloadStore,
+    retain_failure_evidence_async,
+)
 
 
 class FakeFinancialSource:
@@ -66,7 +73,7 @@ class IncompleteFinancialSource(FakeFinancialSource):
 
 
 class FakeRawPayloadStore:
-    """记录发布前归档的原始证据，并返回确定性的对象存储 URI。"""
+    """捕获异常地尝试写入的成功 raw，测试应证明该列表始终为空。"""
 
     def __init__(self) -> None:
         """初始化空证据列表。"""
@@ -105,8 +112,8 @@ class FakeFinancialRepository:
         return _result("financial.valuation", "3")
 
 
-def test_sync_archives_each_raw_batch_before_publishing_three_capabilities() -> None:
-    """每项能力先存 raw evidence，再解码并发布为彼此独立的消费者 dataVersion。"""
+def test_sync_keeps_success_payloads_out_of_object_storage() -> None:
+    """成功三能力只传递摘要和未留存标记，不能主动归档任何 raw payload。"""
     source = FakeFinancialSource()
     raw_store = FakeRawPayloadStore()
     repository = FakeFinancialRepository()
@@ -119,11 +126,7 @@ def test_sync_archives_each_raw_batch_before_publishing_three_capabilities() -> 
         ).sync_security(exchange=Exchange.SSE, symbol="600519")
     )
 
-    assert [payload.payload for payload in raw_store.payloads] == [
-        b'{"raw":"financial.statement.raw"}',
-        b'{"raw":"financial.metric.raw"}',
-        b'{"raw":"financial.valuation.raw"}',
-    ]
+    assert raw_store.payloads == []
     assert result.reports.capability == "financial.report"
     assert result.provider_metrics.capability == "financial.provider-metric"
     assert result.valuations.capability == "financial.valuation"
@@ -136,9 +139,93 @@ def test_sync_archives_each_raw_batch_before_publishing_three_capabilities() -> 
     report_source = cast(FinancialSourceObservation, repository.calls["reports"]["source"])
     metric_source = cast(FinancialSourceObservation, repository.calls["metrics"]["source"])
     valuation_source = cast(FinancialSourceObservation, repository.calls["valuations"]["source"])
-    assert report_source.raw_uri == "s3://raw/1"
-    assert metric_source.raw_uri == "s3://raw/2"
-    assert valuation_source.raw_uri == "s3://raw/3"
+    assert report_source.raw_uri.startswith("unretained://sha256/")
+    assert metric_source.raw_uri.startswith("unretained://sha256/")
+    assert valuation_source.raw_uri.startswith("unretained://sha256/")
+
+
+def test_sync_arms_terminal_before_final_report_publication() -> None:
+    """控制面绑定 financial.report，故仅在最终 report 写入前允许 dispatcher 武装终态。"""
+    source = FakeFinancialSource()
+    raw_store = FakeRawPayloadStore()
+    timeline: list[str] = []
+
+    class OrderedRepository(FakeFinancialRepository):
+        """记录三类 publication 调用顺序，模拟末次事务前的 arm 回调。"""
+
+        def publish_reports(self, **kwargs: object) -> FinancialPublicationResult:
+            """记录报表 publication 是 arm 后最终写入的控制面目标。"""
+            timeline.append("reports")
+            return super().publish_reports(**kwargs)
+
+        def publish_provider_metrics(self, **kwargs: object) -> FinancialPublicationResult:
+            """记录指标 publication 在终态前独立完成。"""
+            timeline.append("metrics")
+            return super().publish_provider_metrics(**kwargs)
+
+        def publish_valuations(self, **kwargs: object) -> FinancialPublicationResult:
+            """记录 valuation publication 在终态前独立完成。"""
+            timeline.append("valuations")
+            return super().publish_valuations(**kwargs)
+
+    def arm_final_publication() -> None:
+        """模拟 dispatcher 在末次 report 数据库事务前武装成功终态。"""
+        timeline.append("arm")
+
+    asyncio.run(
+        FinancialSyncService(
+            source=source,
+            repository=OrderedRepository(),
+            raw_payload_store=raw_store,
+        ).sync_security(
+            exchange=Exchange.SSE,
+            symbol="600519",
+            before_final_publication=arm_final_publication,
+        )
+    )
+
+    assert timeline == ["metrics", "valuations", "arm", "reports"]
+
+
+def test_financial_decode_failure_persists_only_staged_failure_evidence() -> None:
+    """来源已返回但报表解码失败时，外层包装器必须固化失败 evidence 而非成功 raw。"""
+    client = Mock()
+    store = S3RawPayloadStore(ObjectStorageClient(client=client, bucket="raw-evidence"))
+
+    class InvalidStatementSource(FakeFinancialSource):
+        """只使三表标准载荷失效，验证解码前暂存能覆盖失败诊断。"""
+
+        async def fetch(self, request: SourceRequest) -> ProviderBatch:
+            """对 statement 返回坏 schema，其余能力仍沿用受控测试来源。"""
+            batch = await super().fetch(request)
+            if request.capability != "financial.statement.raw":
+                return batch
+            return ProviderBatch(
+                provider_id=batch.provider_id,
+                capability=batch.capability,
+                payload=b"{}",
+                observed_at=batch.observed_at,
+                content_type=batch.content_type,
+                raw_payload=batch.raw_payload,
+                raw_content_type=batch.raw_content_type,
+                upstream_source=batch.upstream_source,
+                adapter_version=batch.adapter_version,
+                schema_fingerprint=batch.schema_fingerprint,
+            )
+
+    async def failing_operation() -> None:
+        """执行会在三表 schema 校验失败的同步，让包装器负责受限 evidence 留存。"""
+        await FinancialSyncService(
+            source=FailureEvidenceDataSource(InvalidStatementSource(), store),
+            repository=FakeFinancialRepository(),
+            raw_payload_store=store,
+        ).sync_security(exchange=Exchange.SSE, symbol="600519")
+
+    with pytest.raises(ProviderError, match="financial payload identity or schema mismatch"):
+        asyncio.run(retain_failure_evidence_async(store, failing_operation))
+
+    # 原始与标准化批次各一份，再加不含异常正文的 failure manifest。
+    assert client.put_object.call_count == 3
 
 
 def test_sync_rejects_invalid_identity_before_any_provider_egress() -> None:

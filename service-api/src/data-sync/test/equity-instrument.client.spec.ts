@@ -65,7 +65,11 @@ describe('EquityInstrumentClient', () => {
         }),
         {
           status: 200,
-          headers: { ETag: '"equities-v1"', 'Content-Type': 'application/json' },
+          headers: {
+            ETag: '"equities-v1"',
+            'Content-Type': 'application/json',
+            'X-Data-Version': publication.dataVersion,
+          },
         },
       ),
     );
@@ -96,7 +100,7 @@ describe('EquityInstrumentClient', () => {
     const url = requestedUrl(target);
     expect(url.pathname).toBe('/internal/v1/equities');
     expect(url.searchParams.getAll('status')).toEqual(['LISTED', 'SUSPENDED']);
-    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+    expect(Object.fromEntries(Array.from(url.searchParams.entries()))).toMatchObject({
       exchange: 'SSE',
       query: '浦发',
       asOf: '2026-06-30',
@@ -116,7 +120,11 @@ describe('EquityInstrumentClient', () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ ...internalEquity, ...publication }), {
         status: 200,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          ETag: '"equity-v1"',
+          'Content-Type': 'application/json',
+          'X-Data-Version': publication.dataVersion,
+        },
       }),
     );
     const client = new EquityInstrumentClient(config, fetcher);
@@ -161,7 +169,14 @@ describe('EquityInstrumentClient', () => {
           publishedAt: publication.publishedAt,
           knowledgeCutoff: publication.knowledgeCutoff,
         }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
+        {
+          status: 200,
+          headers: {
+            ETag: '"history-v1"',
+            'Content-Type': 'application/json',
+            'X-Data-Version': publication.dataVersion,
+          },
+        },
       ),
     );
     const client = new EquityInstrumentClient(config, fetcher);
@@ -231,6 +246,80 @@ describe('EquityInstrumentClient', () => {
     ).rejects.toMatchObject({
       status: HttpStatus.CONFLICT,
       response: { code: 'snapshot-expired' },
+    });
+  });
+
+  /** 验证无身份 publication 使用稳定公开码，详情页可区别于普通依赖故障。 */
+  it('preserves the publication unavailable state without downstream details', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 'publication-unavailable', detail: 'internal release table' }),
+        {
+          status: 503,
+          headers: { 'Content-Type': 'application/problem+json' },
+        },
+      ),
+    );
+    const client = new EquityInstrumentClient(config, fetcher);
+
+    await expect(
+      client.getEquity({
+        exchange: 'SSE',
+        symbol: '600000',
+        requestId: 'req-no-publication',
+      }),
+    ).rejects.toMatchObject({
+      status: HttpStatus.SERVICE_UNAVAILABLE,
+      response: { code: 'publication-unavailable' },
+    });
+  });
+
+  /** 验证条件命中同时保留强 ETag 与发布版本，供公开 POST 安全映射为 204。 */
+  it('preserves the publication version on a conditional hit', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(null, {
+        status: 304,
+        headers: { ETag: '"equities-v1"', 'X-Data-Version': publication.dataVersion },
+      }),
+    );
+    const client = new EquityInstrumentClient(config, fetcher);
+
+    await expect(
+      client.listEquities({
+        limit: 50,
+        ifNoneMatch: '"equities-v1"',
+        requestId: 'req-list-cache',
+      }),
+    ).resolves.toEqual({
+      status: 304,
+      etag: '"equities-v1"',
+      dataVersion: publication.dataVersion,
+    });
+  });
+
+  /** 验证响应头与正文 publication 不一致时失败关闭，不能污染浏览器条件缓存。 */
+  it('rejects a mismatched publication header', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ ...internalEquity, ...publication }), {
+        status: 200,
+        headers: {
+          ETag: '"equity-v1"',
+          'Content-Type': 'application/json',
+          'X-Data-Version': '00000000-0000-4000-8000-000000000099',
+        },
+      }),
+    );
+    const client = new EquityInstrumentClient(config, fetcher);
+
+    await expect(
+      client.getEquity({
+        exchange: 'SSE',
+        symbol: '600000',
+        requestId: 'req-version-mismatch',
+      }),
+    ).rejects.toMatchObject({
+      status: HttpStatus.SERVICE_UNAVAILABLE,
+      response: { code: 'dependency-unavailable' },
     });
   });
 

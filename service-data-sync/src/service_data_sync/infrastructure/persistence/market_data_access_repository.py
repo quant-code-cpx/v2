@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from service_data_sync.application.etf.query_contract import assert_etf_v2_query_contract
 from service_data_sync.application.ports.market_data_access import (
     MarketDataAccessRepository,
     MarketDataAccessUnavailable,
@@ -41,6 +42,7 @@ def _field(
     unit: str | None = None,
     nullable: bool = False,
     filterable: bool = False,
+    filter_operators: tuple[str, ...] = (),
     sortable: bool = False,
 ) -> MarketDataFieldDescriptor:
     """构造所有 P0 dataset 共享的字段描述，避免字段能力在目录和 reader 间漂移。"""
@@ -50,7 +52,7 @@ def _field(
         nullable=nullable,
         selectable=True,
         unit=unit,
-        filter_operators=("EQ", "IN") if filterable else (),
+        filter_operators=filter_operators or (("EQ", "IN") if filterable else ()),
         sortable=sortable,
     )
 
@@ -75,7 +77,7 @@ def _descriptor(
         availability="DISABLED",
         availability_reason="等待来源许可、连续探针、PIT 和 shadow 质量门禁。",
         allowed_time_dimensions=(time_dimension,),
-        visibility_modes=_VISIBILITY,
+        visibility_modes=("CURRENT",),
         fields=fields,
         filters=filters,
         allowed_sort_fields=tuple(item.name for item in fields if item.sortable),
@@ -83,6 +85,78 @@ def _descriptor(
         methodologies=(_METHODOLOGY,),
         max_range_days=max_range_days,
     )
+
+
+def _etf_v2_descriptor(
+    *,
+    code: str,
+    title: str,
+    time_dimension: str,
+    fields: tuple[MarketDataFieldDescriptor, ...],
+    filters: tuple[MarketDataFilterDescriptor, ...],
+    sources: tuple[MarketDataSourceDescriptor, ...],
+    max_range_days: int = 366,
+) -> MarketDataDatasetDescriptor:
+    """构造 ETF 中心真实同步链路使用的 v2 typed 契约，publication 缺失时保持不可读。"""
+    return MarketDataDatasetDescriptor(
+        code=code,
+        schema_version=2,
+        title=title,
+        domain="ETF",
+        priority="P0",
+        availability="DISABLED",
+        availability_reason="尚无满足质量门禁的当前 publication。",
+        allowed_time_dimensions=(time_dimension,),
+        visibility_modes=("CURRENT",),
+        fields=fields,
+        filters=filters,
+        allowed_sort_fields=tuple(item.name for item in fields if item.sortable),
+        sources=sources,
+        methodologies=(
+            {"code": "etf-reported-source-contract", "version": "1", "kind": "REPORTED"},
+        ),
+        max_range_days=max_range_days,
+    )
+
+
+_ETF_DIRECTORY_SOURCES = (
+    MarketDataSourceDescriptor(
+        source_ref="src_sse_etf_directory",
+        publisher="上海证券交易所",
+        source_dataset="ETF 专用目录",
+        authoritative=True,
+        redistribution="INTERNAL_ONLY",
+        coverage_note="仅当前快照；历史 observationDate 返回显式不可用，不回退或冒充历史目录。",
+    ),
+    MarketDataSourceDescriptor(
+        source_ref="src_szse_fund_directory",
+        publisher="深圳证券交易所",
+        source_dataset="基金产品目录",
+        authoritative=True,
+        redistribution="INTERNAL_ONLY",
+        coverage_note="仅当前快照，且只接收来源字段明确标记为 ETF 的产品。",
+    ),
+)
+_ETF_TENCENT_BAR_SOURCE = (
+    MarketDataSourceDescriptor(
+        source_ref="src_tencent_etf_kline",
+        publisher="腾讯证券",
+        source_dataset="证券未复权日线",
+        authoritative=False,
+        redistribution="INTERNAL_ONLY",
+        coverage_note="成交量口径为股，成交额口径为人民币元。",
+    ),
+)
+_ETF_EASTMONEY_NAV_SOURCE = (
+    MarketDataSourceDescriptor(
+        source_ref="src_eastmoney_etf_nav",
+        publisher="东方财富",
+        source_dataset="基金历史净值与申赎状态",
+        authoritative=False,
+        redistribution="INTERNAL_ONLY",
+        coverage_note="净值终态未披露；交易状态未披露，不从申赎状态推断。",
+    ),
+)
 
 
 _DATASETS: tuple[MarketDataDatasetDescriptor, ...] = (
@@ -165,6 +239,103 @@ _DATASETS: tuple[MarketDataDatasetDescriptor, ...] = (
             MarketDataFilterDescriptor("etfEntityRef", ("EQ", "IN")),
             MarketDataFilterDescriptor("stateDimension", ("EQ", "IN")),
         ),
+    ),
+    _etf_v2_descriptor(
+        code="fund.etf.profile.reported",
+        title="ETF 产品目录与上市资料",
+        time_dimension="EFFECTIVE_AT",
+        fields=(
+            _field("etfEntityRef", "ENTITY_REF", filterable=True, sortable=True),
+            _field("exchange", "CODE", filterable=True),
+            _field(
+                "symbol",
+                "CODE",
+                filter_operators=("EQ", "PREFIX"),
+                sortable=True,
+            ),
+            _field(
+                "displayName",
+                "STRING",
+                filter_operators=("CONTAINS",),
+                sortable=True,
+            ),
+            _field("etfType", "CODE"),
+            _field("managementMode", "CODE"),
+            _field("managerName", "STRING", nullable=True),
+            _field("custodianName", "STRING", nullable=True),
+            _field("listedOn", "DATE", nullable=True),
+            _field("delistedOn", "DATE", nullable=True),
+            _field("listingStatus", "CODE", filterable=True),
+            _field("quoteCurrency", "CODE"),
+            _field("navCurrency", "CODE"),
+            _field("sourceTimePrecision", "CODE"),
+        ),
+        filters=(
+            MarketDataFilterDescriptor("etfEntityRef", ("EQ", "IN"), max_values=500),
+            MarketDataFilterDescriptor("exchange", ("EQ", "IN"), max_values=1),
+            MarketDataFilterDescriptor("symbol", ("EQ", "PREFIX"), max_values=1),
+            MarketDataFilterDescriptor("displayName", ("CONTAINS",), max_values=1),
+            MarketDataFilterDescriptor("listingStatus", ("EQ", "IN")),
+        ),
+        sources=_ETF_DIRECTORY_SOURCES,
+    ),
+    _etf_v2_descriptor(
+        code="fund.etf.bar.1d.reported",
+        title="ETF 未复权日行情",
+        time_dimension="TRADE_DATE",
+        fields=(
+            _field("tradeDate", "DATE", sortable=True),
+            _field("etfEntityRef", "ENTITY_REF", filterable=True),
+            _field("open", "DECIMAL_STRING", unit="CNY"),
+            _field("high", "DECIMAL_STRING", unit="CNY"),
+            _field("low", "DECIMAL_STRING", unit="CNY"),
+            _field("close", "DECIMAL_STRING", unit="CNY"),
+            _field("volume", "DECIMAL_STRING", unit="SHARE"),
+            _field("volumeUnit", "CODE"),
+            _field("amount", "DECIMAL_STRING", unit="CNY"),
+            _field("currency", "CODE"),
+            _field("tradeStatus", "CODE", nullable=True),
+            _field("adjustment", "CODE"),
+        ),
+        filters=(MarketDataFilterDescriptor("etfEntityRef", ("EQ", "IN")),),
+        sources=_ETF_TENCENT_BAR_SOURCE,
+    ),
+    _etf_v2_descriptor(
+        code="fund.etf.nav.1d.reported",
+        title="ETF 来源报告净值",
+        time_dimension="TRADE_DATE",
+        fields=(
+            _field("navDate", "DATE", sortable=True),
+            _field("etfEntityRef", "ENTITY_REF", filterable=True),
+            _field("navKind", "CODE", filterable=True),
+            _field("nav", "DECIMAL_STRING", unit="CNY"),
+            _field("currency", "CODE"),
+            _field("finality", "CODE"),
+        ),
+        filters=(
+            MarketDataFilterDescriptor("etfEntityRef", ("EQ", "IN")),
+            MarketDataFilterDescriptor("navKind", ("EQ", "IN"), max_values=500),
+        ),
+        sources=_ETF_EASTMONEY_NAV_SOURCE,
+    ),
+    _etf_v2_descriptor(
+        code="fund.etf.trading_state.reported",
+        title="ETF 申购与赎回状态",
+        time_dimension="EFFECTIVE_AT",
+        fields=(
+            _field("etfEntityRef", "ENTITY_REF", filterable=True),
+            _field("stateDimension", "CODE", filterable=True),
+            _field("state", "CODE", filterable=True),
+            _field("effectiveFrom", "DATE", sortable=True),
+            _field("effectiveTo", "DATE", nullable=True),
+            _field("reason", "STRING", nullable=True),
+        ),
+        filters=(
+            MarketDataFilterDescriptor("etfEntityRef", ("EQ", "IN")),
+            MarketDataFilterDescriptor("stateDimension", ("EQ", "IN"), max_values=500),
+            MarketDataFilterDescriptor("state", ("EQ", "IN"), max_values=500),
+        ),
+        sources=_ETF_EASTMONEY_NAV_SOURCE,
     ),
     _descriptor(
         code="market.margin.market.1d.reported",
@@ -386,21 +557,29 @@ class CatalogMarketDataAccessRepository(MarketDataAccessRepository):
     @staticmethod
     def _assert_contract(descriptor: MarketDataDatasetDescriptor, request: MarketDataQuery) -> None:
         """执行无数据库依赖的 typed allowlist 校验，避免未来 reader 漏做外层防护。"""
+        if descriptor.domain == "ETF" and descriptor.schema_version == 2:
+            _assert_etf_v2_boundary(request)
         selected = {field.name for field in descriptor.fields if field.selectable}
         if not set(request.fields) <= selected:
             raise MarketDataRequestValidationError("requested field is not selectable")
-        allowed_filters = {item.field: set(item.operators) for item in descriptor.filters}
+        allowed_filters = {item.field: item for item in descriptor.filters}
         for item in request.filters:
             if (
                 item.field not in allowed_filters
-                or item.operator not in allowed_filters[item.field]
+                or item.operator not in allowed_filters[item.field].operators
+                or len(item.values) > allowed_filters[item.field].max_values
             ):
                 raise MarketDataRequestValidationError("filter is not allowed for dataset")
         if not set(field for field, _direction in request.sort) <= set(
             descriptor.allowed_sort_fields
-        ):
+        ) or any(direction not in {"ASC", "DESC"} for _field, direction in request.sort):
             raise MarketDataRequestValidationError("sort is not allowed for dataset")
         if request.time.get("dimension") not in descriptor.allowed_time_dimensions:
             raise MarketDataRequestValidationError("time dimension is not allowed for dataset")
         if request.visibility.get("mode") not in descriptor.visibility_modes:
             raise MarketDataRequestValidationError("visibility mode is not allowed for dataset")
+
+
+def _assert_etf_v2_boundary(request: MarketDataQuery) -> None:
+    """调用服务内单一 ETF v2 查询契约，保持 catalog 与 HTTP 入口一致。"""
+    assert_etf_v2_query_contract(request)

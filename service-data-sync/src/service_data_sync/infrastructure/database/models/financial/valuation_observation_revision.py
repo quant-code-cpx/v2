@@ -65,7 +65,9 @@ class ValuationObservationRevision(Base):
             name="ck_valuation_observation_content_sha256",
         ),
         CheckConstraint(
-            "effective_to IS NULL OR effective_to > effective_from",
+            "effective_from = observation_date "
+            "AND effective_to IS NOT NULL "
+            "AND effective_to = observation_date + 1",
             name="ck_valuation_observation_effective_range",
         ),
         CheckConstraint(
@@ -149,10 +151,10 @@ class ValuationObservationRevision(Base):
         String(32), nullable=False, comment="固定为 PROVIDER_OBSERVATION，不宣称官方最终态。"
     )
     effective_from: Mapped[date] = mapped_column(
-        Date, nullable=False, comment="该 revision 业务上开始有效的保守日期。"
+        Date, nullable=False, comment="固定等于估值观察日。"
     )
     effective_to: Mapped[date | None] = mapped_column(
-        Date, nullable=True, comment="业务有效半开区间的结束日期。"
+        Date, nullable=True, comment="固定为估值观察日次日，使业务半开区间仅覆盖当日。"
     )
     known_from: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, comment="平台首次可以使用本 revision 的时间。"

@@ -149,8 +149,10 @@ class FinancialReadRepository(Protocol):
         capability: FinancialCapability,
         methodology_code: str,
         methodology_version: int,
+        as_of: date | None = None,
+        known_at: datetime | None = None,
     ) -> FinancialPublicationSnapshot | None:
-        """返回精确证券、能力和已验证方法学的当前发布；不存在时返回空值。"""
+        """先按双时态代码解析永久证券，再返回其精确当前发布；不存在时返回空值。"""
         ...
 
     def list_reports(
@@ -178,8 +180,10 @@ class FinancialReadRepository(Protocol):
         exchange: Exchange,
         symbol: str,
         report_ref: UUID,
+        as_of: date | None = None,
+        known_at: datetime | None = None,
     ) -> FinancialPublicationSnapshot | None:
-        """返回该公开报表引用所属的当前已验证生产发布；未发布时返回空值。"""
+        """先按双时态代码解析永久证券，再返回公开报表引用所属发布。"""
         ...
 
     def get_report_detail(

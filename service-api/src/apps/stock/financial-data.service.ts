@@ -36,6 +36,7 @@ export class FinancialDataService {
     return this.client.listReports({
       exchange: path.exchange,
       symbol: path.symbol,
+      dataVersion: query.dataVersion,
       statementTypes: query.statementType,
       periodBases: query.basis,
       scope: query.scope,
@@ -64,6 +65,7 @@ export class FinancialDataService {
     return this.client.getReport({
       exchange: path.exchange,
       symbol: path.symbol,
+      dataVersion: query.dataVersion,
       reportRef: path.reportRef,
       metrics: query.metric,
       asOf: query.asOf,
@@ -88,6 +90,7 @@ export class FinancialDataService {
     return this.client.listMetrics({
       exchange: path.exchange,
       symbol: path.symbol,
+      dataVersion: query.dataVersion,
       origin: query.origin,
       methodologyCode: query.methodologyCode,
       methodologyVersion: query.methodologyVersion,
@@ -120,6 +123,7 @@ export class FinancialDataService {
     return this.client.listValuations({
       exchange: path.exchange,
       symbol: path.symbol,
+      dataVersion: query.dataVersion,
       methodologyCode: query.methodologyCode,
       methodologyVersion: query.methodologyVersion,
       metrics: query.metric,

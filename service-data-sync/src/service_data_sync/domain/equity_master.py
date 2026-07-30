@@ -57,12 +57,15 @@ class EquityLifecycleEntry:
     status: EquityLifecycleStatus
     effective_on: date
     evidence_kind: EquityLifecycleEvidenceKind
+    name: str | None = None
     listed_on: date | None = None
     delisted_on: date | None = None
     correction_approval_reference: str | None = None
 
     def __post_init__(self) -> None:
         """阻止目录缺席或普通停牌伪装成可发布的生命周期转换。"""
+        if self.name is not None and not self.name.strip():
+            raise ValueError("lifecycle identity name must not be blank")
         expected_evidence = {
             EquityLifecycleStatus.LISTED: {
                 EquityLifecycleEvidenceKind.EXPLICIT_LISTING,

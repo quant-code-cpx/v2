@@ -3,10 +3,13 @@ import { ConfigModule } from '@nestjs/config';
 
 import { AuthModule } from './apps/auth/auth.module.js';
 import { AuditModule } from './apps/audit/audit.module.js';
+import { DataOperationsModule } from './apps/data-operations/data-operations.module.js';
 import { IndustryModule } from './apps/industry/industry.module.js';
 import { MoneyFlowModule } from './apps/market/money-flow.module.js';
 import { MarketDataAccessModule } from './apps/market/market-data-access.module.js';
+import { MarketOverviewModule } from './apps/market/market-overview.module.js';
 import { StockModule } from './apps/stock/stock.module.js';
+import { StockConnectModule } from './apps/stock-connect/stock-connect.module.js';
 import { UserModule } from './apps/user/user.module.js';
 import { AppConfigModule } from './config/app-config.module.js';
 import { validateEnvironment } from './config/env.validation.js';
@@ -29,10 +32,13 @@ import { RedisModule } from './shared/redis/redis.module.js';
     UserModule,
     AuthModule,
     AuditModule,
+    DataOperationsModule,
     StockModule,
+    StockConnectModule,
     IndustryModule,
     MoneyFlowModule,
     MarketDataAccessModule,
+    MarketOverviewModule,
   ],
 })
 export class AppModule {}

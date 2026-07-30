@@ -26,7 +26,7 @@ export const internalSectorSchema = z
 /** 校验公开 API 允许投影的板块身份，不包含内部 UUID。 */
 export const sectorSchema = internalSectorSchema.omit({ sectorId: true });
 
-/** 校验同步服务原样提供的独立上游周期 K 线。 */
+/** 校验同步期已物化且已终结的板块周期 K 线，并保留来源未报告的真实空值。 */
 export const sectorBarSchema = z
   .object({
     periodEnd: z.string().date(),
@@ -34,14 +34,14 @@ export const sectorBarSchema = z
     high: nonNegativeDecimalString,
     low: nonNegativeDecimalString,
     close: nonNegativeDecimalString,
-    volumeValue: nonNegativeDecimalString,
+    volumeValue: nonNegativeDecimalString.nullable(),
     volumeUnit: z.literal('provider_native'),
-    amountCny: nonNegativeDecimalString,
+    amountCny: nonNegativeDecimalString.nullable(),
     amplitudePercent: nonNegativeDecimalString.nullable(),
     changePercent: decimalString.nullable(),
     changeAmount: decimalString.nullable(),
     turnoverPercent: nonNegativeDecimalString.nullable(),
-    isFinal: z.boolean(),
+    isFinal: z.literal(true),
   })
   .strict();
 
@@ -90,6 +90,10 @@ const sectorEodSnapshotMetadataSchema = z
     qualityStatus: z.enum(['passed', 'warned']),
     dataVersion: z.string().uuid(),
     publishedAt: z.string().datetime({ offset: true }),
+    inputDataVersions: z
+      .array(z.string().uuid())
+      .length(2)
+      .refine(hasUniqueDataVersions, 'sector EOD input publication versions must be unique'),
   })
   .strict();
 
@@ -105,7 +109,7 @@ const internalSectorEodItemSchema = z
     changeValue: decimalString.nullable(),
     changePercent: decimalString.nullable(),
     marketValue: nonNegativeDecimalString.nullable(),
-    marketValueUnit: z.literal('provider_native'),
+    marketValueUnit: z.literal('CNY'),
     turnoverPercent: nonNegativeDecimalString.nullable(),
     advancers: z.number().int().nonnegative().nullable(),
     decliners: z.number().int().nonnegative().nullable(),
@@ -137,7 +141,7 @@ export const internalSectorEodResourceSchema = sectorEodSnapshotMetadataSchema
     changeValue: decimalString.nullable(),
     changePercent: decimalString.nullable(),
     marketValue: nonNegativeDecimalString.nullable(),
-    marketValueUnit: z.literal('provider_native'),
+    marketValueUnit: z.literal('CNY'),
     turnoverPercent: nonNegativeDecimalString.nullable(),
     advancers: z.number().int().nonnegative().nullable(),
     decliners: z.number().int().nonnegative().nullable(),
@@ -195,6 +199,7 @@ export type SectorEodPage = {
   qualityStatus: 'passed' | 'warned';
   dataVersion: string;
   publishedAt: string;
+  inputDataVersions: string[];
   sort: (typeof SECTOR_EOD_SORTS)[number];
   order: 'asc' | 'desc';
   items: Array<{
@@ -206,7 +211,7 @@ export type SectorEodPage = {
     changeValue: string | null;
     changePercent: string | null;
     marketValue: string | null;
-    marketValueUnit: 'provider_native';
+    marketValueUnit: 'CNY';
     turnoverPercent: string | null;
     advancers: number | null;
     decliners: number | null;
@@ -299,11 +304,17 @@ export const internalEquitySectorPageSchema = z
       })
       .strict(),
     scheme: z.enum(SECTOR_SCHEMES),
+    identityAsOf: z.string().date(),
+    dataVersion: z.string().uuid(),
     release: membershipReleaseSchema,
     items: z.array(internalEquityMembershipSchema).max(500),
     nextCursor: z.string().max(1024).nullable(),
   })
-  .strict();
+  .strict()
+  .refine(hasMatchingMembershipDataVersion, {
+    message: 'top-level and release membership dataVersion must match',
+    path: ['dataVersion'],
+  });
 
 /** 描述公开板块到成分页，已移除 sectorId 与 instrumentId。 */
 export type SectorConstituentPage = {
@@ -335,6 +346,8 @@ export type EquitySectorPage = {
     listingStatus: 'LISTED' | 'SUSPENDED' | 'DELISTED';
   };
   scheme: (typeof SECTOR_SCHEMES)[number];
+  identityAsOf: string;
+  dataVersion: string;
   release: z.infer<typeof membershipReleaseSchema>;
   items: Array<{
     scheme: (typeof SECTOR_SCHEMES)[number];
@@ -353,3 +366,16 @@ export type InternalSectorConstituentPage = z.infer<typeof internalSectorConstit
 
 /** 描述内部证券到板块分页，供防腐 client 严格校验。 */
 export type InternalEquitySectorPage = z.infer<typeof internalEquitySectorPageSchema>;
+
+/** 确保证券归属顶层快照版本与 release 上下文严格一致。 */
+function hasMatchingMembershipDataVersion(value: {
+  dataVersion: string;
+  release: { dataVersion: string };
+}): boolean {
+  return value.dataVersion === value.release.dataVersion;
+}
+
+/** 判断 composite publication 的输入版本是否没有重复值。 */
+function hasUniqueDataVersions(values: readonly string[]): boolean {
+  return new Set(values).size === values.length;
+}

@@ -164,13 +164,6 @@ export function KlinePanel({ symbol, period, candles }: KlinePanelProps) {
           {loadError}
         </Alert>
       )}
-      <Alert
-        severity="info"
-        variant="outlined"
-        sx={{ position: "absolute", left: 12, bottom: 12, zIndex: 2, py: 0, pointerEvents: "none" }}
-      >
-        Fixture 数据 · 历史与实时接口接入后替换 DataLoader source
-      </Alert>
     </Box>
   );
 }

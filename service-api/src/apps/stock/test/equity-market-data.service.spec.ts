@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { EquityMarketDataClient } from '../../../data-sync/clients/equity-market-data.client.js';
 import { EquityMarketDataService } from '../equity-market-data.service.js';
 
+const dataVersion = '00000000-0000-4000-8000-000000000001';
+const factorDataVersion = '00000000-0000-4000-8000-000000000002';
+
 /** 覆盖公开参数组合校验与 client 转发。 */
 describe('EquityMarketDataService', () => {
   /** 验证周线复权查询完整转发交易所限定身份和请求关联。 */
@@ -16,6 +19,8 @@ describe('EquityMarketDataService', () => {
     const result = await service.listBars(
       { exchange: 'SSE', symbol: '600519' },
       {
+        dataVersion,
+        factorDataVersion,
         period: '1w',
         start: '2026-01-01',
         end: '2026-07-28',
@@ -32,6 +37,8 @@ describe('EquityMarketDataService', () => {
     expect(listBars).toHaveBeenCalledWith({
       exchange: 'SSE',
       symbol: '600519',
+      dataVersion,
+      factorDataVersion,
       period: '1w',
       start: '2026-01-01',
       end: '2026-07-28',
@@ -59,21 +66,33 @@ describe('EquityMarketDataService', () => {
 
     await service.listAdjustmentFactors(
       path,
-      { start: '2026-01-01', end: '2026-07-28', limit: 500 },
+      { dataVersion, start: '2026-01-01', end: '2026-07-28', limit: 500 },
       undefined,
       'req-factor',
     );
     await service.listCorporateActions(
       path,
-      { start: '2025-01-01', end: '2026-07-28', limit: 100 },
+      { dataVersion, start: '2025-01-01', end: '2026-07-28', limit: 100 },
       undefined,
       'req-action',
     );
-    await service.getCompanyProfile(path, undefined, 'req-profile');
+    await service.getCompanyProfile(
+      path,
+      { dataVersion, asOf: '2026-07-28' },
+      undefined,
+      'req-profile',
+    );
 
     expect(listAdjustmentFactors).toHaveBeenCalledOnce();
     expect(listCorporateActions).toHaveBeenCalledOnce();
-    expect(getCompanyProfile).toHaveBeenCalledOnce();
+    expect(getCompanyProfile).toHaveBeenCalledWith({
+      exchange: 'SSE',
+      symbol: '600519',
+      dataVersion,
+      asOf: '2026-07-28',
+      ifNoneMatch: undefined,
+      requestId: 'req-profile',
+    });
   });
 
   /** 验证倒置日期、无复权锚点和过长 ETag 在访问下游前被拒绝。 */
@@ -88,6 +107,7 @@ describe('EquityMarketDataService', () => {
       service.listBars(
         path,
         {
+          dataVersion,
           period: '1d',
           start: '2026-07-28',
           end: '2026-01-01',
@@ -102,6 +122,22 @@ describe('EquityMarketDataService', () => {
       service.listBars(
         path,
         {
+          dataVersion,
+          period: '1d',
+          start: '2026-01-01',
+          end: '2026-07-28',
+          adjust: 'qfq',
+          limit: 500,
+        },
+        undefined,
+        'req-factor-version',
+      ),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      service.listBars(
+        path,
+        {
+          dataVersion,
           period: '1d',
           start: '2026-01-01',
           end: '2026-07-28',
@@ -113,9 +149,9 @@ describe('EquityMarketDataService', () => {
         'req-anchor',
       ),
     ).toThrow(BadRequestException);
-    expect(() => service.getCompanyProfile(path, 'x'.repeat(257), 'req-etag')).toThrow(
-      BadRequestException,
-    );
+    expect(() =>
+      service.getCompanyProfile(path, { dataVersion }, 'x'.repeat(257), 'req-etag'),
+    ).toThrow(BadRequestException);
     expect(listBars).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,1285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>service-data-sync｜沪深港通全量同步技术方案</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17202a;
+        --muted: #637083;
+        --line: #dfe5ec;
+        --soft: #f6f8fb;
+        --blue: #155eef;
+        --red: #c62828;
+        --green: #16845b;
+        --amber: #9a6700;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #eef2f6;
+        color: var(--ink);
+        font:
+          14px/1.72 Inter,
+          "PingFang SC",
+          "Microsoft YaHei",
+          sans-serif;
+      }
+      main {
+        width: 1180px;
+        margin: 32px auto 72px;
+        padding: 52px 64px;
+        background: #fff;
+        border: 1px solid var(--line);
+        box-shadow: 0 8px 28px rgba(20, 34, 52, 0.08);
+      }
+      h1 {
+        margin: 8px 0 12px;
+        font-size: 34px;
+        line-height: 1.25;
+      }
+      h2 {
+        margin: 42px 0 14px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+        font-size: 23px;
+      }
+      h3 {
+        margin: 24px 0 8px;
+        font-size: 17px;
+      }
+      p {
+        margin: 8px 0 14px;
+      }
+      a {
+        color: var(--blue);
+      }
+      code {
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: #edf2f7;
+        font-family: ui-monospace, monospace;
+      }
+      pre {
+        overflow: auto;
+        padding: 16px;
+        background: #111827;
+        color: #e5eef9;
+        border-radius: 8px;
+        line-height: 1.55;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 14px 0 24px;
+        font-size: 13px;
+      }
+      th,
+      td {
+        padding: 10px 11px;
+        border: 1px solid var(--line);
+        vertical-align: top;
+        text-align: left;
+      }
+      th {
+        background: #f0f4f8;
+        font-weight: 700;
+      }
+      ul,
+      ol {
+        padding-left: 22px;
+      }
+      li {
+        margin: 5px 0;
+      }
+      .eyebrow {
+        color: var(--blue);
+        font-weight: 800;
+        letter-spacing: 0.08em;
+      }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 18px 0 28px;
+      }
+      .tag {
+        padding: 5px 10px;
+        border: 1px solid #cad6e4;
+        border-radius: 999px;
+        background: var(--soft);
+      }
+      .callout {
+        margin: 18px 0;
+        padding: 14px 16px;
+        border-left: 4px solid var(--blue);
+        background: #f3f7ff;
+      }
+      .ok {
+        border-left-color: var(--green);
+        background: #f0faf6;
+      }
+      .warn {
+        border-left-color: var(--amber);
+        background: #fff9e8;
+      }
+      .bad {
+        border-left-color: var(--red);
+        background: #fff5f5;
+      }
+      .flow {
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        background: var(--soft);
+        font-family: ui-monospace, monospace;
+      }
+      .check td:first-child {
+        width: 28px;
+        color: var(--green);
+        font-weight: 800;
+      }
+      @media print {
+        body {
+          background: #fff;
+        }
+        main {
+          width: auto;
+          margin: 0;
+          padding: 20mm 16mm;
+          border: 0;
+          box-shadow: none;
+        }
+        a {
+          color: inherit;
+          text-decoration: none;
+        }
+        h2 {
+          break-after: avoid;
+        }
+        table,
+        pre,
+        .callout {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">SERVICE-DATA-SYNC · IMPLEMENTATION READY</div>
+      <h1>沪深港通全量同步技术方案</h1>
+      <p>
+        本方案把四条互联互通通道的官方历史文件、日终统计、通道状态、额度、交易日历和证券身份收敛为一个不可变
+        bundle
+        publication。正式同步只接受官方或获许可交付；上游未披露的字段写入明确可用性，不以零值、估算值或模拟数据补齐。
+      </p>
+      <div class="meta">
+        <span class="tag">状态：Proposed · 可实施</span>
+        <span class="tag">所有金额：十进制字符串 + 原币 + BASE</span>
+        <span class="tag">时区：Asia/Hong_Kong</span>
+            <span class="tag">回补：沪 2014-11-17 起；深 2016-12-05 起</span>
+      </div>
+
+      <div class="callout ok">
+        <strong>无数据卡点原则：</strong
+        >交付凭证、账号、主机地址是已冻结的部署输入。凭证未配置或官方文件未到时不产生
+        publication； 系统保持上一已批准版本并报警，绝不切换到
+        AKShare、网页抓取或本地样本。
+      </div>
+
+      <h2>1. 职责、边界与现状结论</h2>
+      <p>
+        service-data-sync
+        拥有来源接入、标准化、身份解析、派生计算、质量门禁、发布和历史回补。它不提供完整港股行情、全量港股主数据、
+        汇率、跨境持仓、交易订单、结算、实时额度、新闻公告或融资融券。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>现有能力</th>
+            <th>实测结论</th>
+            <th>本方案闭环动作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>market.stock_connect.market_stat.reported</code></td>
+            <td>
+              模型已有买、卖、成交额、净买入、额度、币种和 availability；当前
+              typed reader 丢弃多数列并把币种固化为 CNY。
+            </td>
+            <td>
+              保留数据集，扩展 reader
+              原样输出完整事实、原币和字段可用性，禁止固定币种描述。
+            </td>
+          </tr>
+          <tr>
+            <td><code>market.stock_connect.active_security.snapshot</code></td>
+            <td>
+              本质是供应商/交易所公布的活跃证券榜，不是全市场排行；当前 reader
+              只读 rank 与 turnover。
+            </td>
+            <td>
+              明确 <code>SOURCE_ACTIVE_SECURITIES_ONLY</code> 范围，恢复
+              buy/sell/currency/identity/release 关联。
+            </td>
+          </tr>
+          <tr>
+            <td>AKShare stock-connect adapter</td>
+            <td>市场成交额为空、活跃证券为空且币种固化，不能支撑真实发布。</td>
+            <td>
+              从该能力的 approved source map 移除；生产只注册下述官方适配器。
+            </td>
+          </tr>
+          <tr>
+            <td>数据运维控制面</td>
+            <td>
+              已有命令账本、租约、fencing、计划、重试与健康检查，可承载标准任务。
+            </td>
+            <td>
+        注册 <code>market.stock_connect.overview.bundle</code> fenced
+              executor；不恢复 legacy CLI 直跑。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>2. 通道与方向语义</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>channel</th>
+            <th>方向</th>
+            <th>交易目标</th>
+            <th>交易金额币种</th>
+            <th>额度币种</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>SH_NORTHBOUND</code></td>
+            <td>北向</td>
+            <td>经沪股通买卖上交所证券</td>
+            <td>CNY</td>
+            <td>CNY</td>
+          </tr>
+          <tr>
+            <td><code>SZ_NORTHBOUND</code></td>
+            <td>北向</td>
+            <td>经深股通买卖深交所证券</td>
+            <td>CNY</td>
+            <td>CNY</td>
+          </tr>
+          <tr>
+            <td><code>SH_SOUTHBOUND</code></td>
+            <td>南向</td>
+            <td>经港股通（沪）买卖港交所证券</td>
+            <td>HKD</td>
+            <td>CNY</td>
+          </tr>
+          <tr>
+            <td><code>SZ_SOUTHBOUND</code></td>
+            <td>南向</td>
+            <td>经港股通（深）买卖港交所证券</td>
+            <td>HKD</td>
+            <td>CNY</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout warn">
+        南向成交额是 HKD、额度是
+        CNY。四通道金额不跨币种求和；总览按币种分组展示。未建设汇率服务前不做折算，
+        也不以抓取时间替代 <code>trade_date</code>。
+      </div>
+
+      <h2>3. 冻结的数据源与可用性矩阵</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>事实</th>
+            <th>权威来源/交付</th>
+            <th>publication</th>
+            <th>币种</th>
+            <th>不可用语义</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              沪线、深线 NB/SB 日成交额；可披露时的买入、卖出；活跃 Top 10
+            </td>
+            <td>
+              HKEX Data Marketplace 的 Shanghai / Shenzhen Daily Statistics
+              CSV；生产交付固定为
+              <code>sftp.data.hkex.com.hk:22</code>，使用注册邮箱、OpenSSH
+              私钥认证与严格 <code>known_hosts</code> 校验。
+            </td>
+            <td>
+              正常约 18:00 HKT 到达；文件 SHA-256、产品名和接收时间进入
+              lineage。来源未在文件内明确提供 publication 时间，因此固定
+              <code>sourcePublicationAvailability=NOT_PROVIDED_BY_SOURCE</code>、
+              <code>sourcePublicationAt=null</code>；SFTP mtime 不冒充 publication。
+            </td>
+            <td>NB=CNY；SB=HKD</td>
+            <td>文件未到：<code>SOURCE_MISSING</code> 且不发布 bundle。</td>
+          </tr>
+          <tr>
+            <td>北向日终额度与交易状态</td>
+            <td>HKEX OMD-C Binary MsgType 80 的日终最终快照。</td>
+            <td>
+              会话结束后固化；MsgType 80 只报告额度，<code>CLOSED</code>
+              必须由官方日历交易日与 landing manifest 的
+              <code>END_OF_DAY</code> finality 联合派生，委托接受状态保持未知。
+            </td>
+            <td>CNY</td>
+            <td>
+              阈值以上记 <code>SUFFICIENT</code> 且余额为空；不得把空值写成 0。
+            </td>
+          </tr>
+          <tr>
+            <td>港股通（沪）日终额度与状态</td>
+            <td>
+              上交所 MDGW <code>trdses04.txt</code>，按 IS117 1.09 / IS124
+              3.50 冻结交付 profile。
+            </td>
+            <td>收盘最终状态固化。</td>
+            <td>CNY</td>
+            <td>余额与状态联合解析，0 必须区分“充足”与“用尽”。</td>
+          </tr>
+          <tr>
+            <td>港股通（深）日终额度与状态</td>
+            <td>深交所 STEP/Binary 市场状态 390019。</td>
+            <td>收盘最终状态固化。</td>
+            <td>CNY</td>
+            <td>
+              按 TradingSessionSubID、AmountStatus、PosAmt、ThresholdAmount
+              联合判定。
+            </td>
+          </tr>
+          <tr>
+            <td>精确交易日、共同交易日</td>
+            <td>
+              HKEX Stock Connect 年度官方 CSV；逐年 manifest 指向精确官方 HTTPS
+              对象或受控本地官方归档。
+            </td>
+            <td>按年度 checksum/version 发布；每日任务启动前再次校验。</td>
+            <td>不适用</td>
+            <td>内地或香港单边休市分别入列，不能按自然日推断。</td>
+          </tr>
+          <tr>
+            <td>港股证券稳定身份</td>
+            <td>
+              HKEX Securities Master Fixed-length Format
+              历史/每日文件；只持久化互联互通事实引用的稳定 Securities ID
+              与日期化 trading code。解析器由获许可
+              layout 的版本化 profile 驱动，不能把 CSV 或 T+2
+              to-be-listed JSON 当作正式主档。
+            </td>
+            <td>
+              交付/发布时间与 T+1 生效交易日分别保存；先于对应交易日统计完成身份投影。
+            </td>
+            <td>不适用</td>
+            <td>
+              主档交付缺件或单证券无法解析时保留 source code/name，标记
+              <code>SOURCE_UNRESOLVED</code>，不生成错误链接。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        官方依据：
+        <a href="https://www.hkex.com.hk/eng/ods/historicalData.aspx"
+          >HKEX Historical Data Products</a
+        >、
+        <a
+          href="https://www.hkex.com.hk/Services/Market-Data-Services/Historical-Data-Services/HKEX-Data-Marketplace?sc_lang=en"
+          >HKEX Data Marketplace</a
+        >、
+        <a
+          href="https://www.hkex.com.hk/Services/Market-Data-Services/Historical-Data-Services/Guidance-and-Reference?sc_lang=en"
+          >SFTP 交付与密钥指南</a
+        >、
+        <a
+          href="https://www.hkex.com.hk/eng/prod/dataprod/Documents/17-01-24%20Daily%20and%20Monthly%20Statistics%20files%20for%20SH-HK%20Stock%20Connact_back%20issue%20files%20%28final%29%20%28resend%29.pdf"
+          >沪港通 2014-11-17 起 back issues 通知</a
+        >、
+        <a
+          href="https://www.hkex.com.hk/mutual-market/stock-connect/reference-materials/trading-hour%2C-trading-and-settlement-calendar?sc_lang=en"
+          >Stock Connect Calendar</a
+        >、
+        <a
+          href="https://www.hkex.com.hk/eng/ods/historicalDataProfile.aspx?ProductID=RqfRuNIO8idk7BLz%2FIe6XSQZPxMFe7wWLUskIe2v4LM%3D&amp;SchemeID=T8Rpyj0svycf98X6QhHsCqt0blVyRI2RwhQEIGuBo20%3D"
+          >HKEX Securities Master</a
+        >。
+      </p>
+      <div class="callout">
+        沪线产品页标注的首期为 2014-12-01，但 HKEX MDD/17/119
+        明确补发自 2014-11-17 起的 Daily Statistics，并将 2014-11
+        文件随 2014-12 订阅交付；FULL 下界必须采用 2014-11-17。
+      </div>
+      <p>
+        状态与额度接口依据：
+        <a
+          href="https://www.hkex.com.hk/eng/prod/dataprod/Documents/HKEX_OMD-C_MMDH_Binary_Interface_Specifications_v2.1.pdf"
+          >HKEX OMD-C MMDH Binary v2.1</a
+        >、
+        <a
+          href="https://www.sse.com.cn/services/tradingtech/data/"
+          >上交所 IS117 1.09 / IS124 3.50 技术文件入口</a
+        >、
+        <a
+          href="https://www.szse.cn/marketServices/technicalservice/interface/P020250328368855912431.pdf"
+          >深交所 STEP 行情接口 Ver1.17</a
+        >。
+      </p>
+
+      <h3>3.1 2024 披露制度不是数据故障</h3>
+      <p>
+        自 2024-08-19 起，北向盘后只公布总成交额、成交笔数、ETF
+        成交额与活跃证券总成交额，不再公布买入、卖出和可据此计算的净额；
+        南向盘后继续公布买入、卖出和总额。因此：
+      </p>
+      <ul>
+        <li>
+          北向新制度日：<code>buy/sell/net = NOT_DISCLOSED_BY_REGIME</code
+          >，真实 turnover 正常发布。
+        </li>
+        <li>
+          南向：保留 reported buy/sell；<code>net_buy = buy - sell</code>
+          进入独立派生数据集。
+        </li>
+        <li>旧制度历史：只有同一官方文件同时报告 buy 与 sell 时才计算净额。</li>
+        <li>
+          净买入/净卖出排序只在“官方活跃证券榜内”执行；绝不声称全市场排名。
+        </li>
+      </ul>
+      <p>
+        规则依据：
+        <a
+          href="https://big5.sse.com.cn/site/cht/www.sse.com.cn/lawandrules/sselawsrules2025/global/hkexsc/c/c_20250613_10781806.shtml"
+          >上交所沪深港通交易信息披露机制调整通知</a
+        >、
+        <a
+          href="https://www.hkex.com.hk/News/Market-Communications/2024/2404122news?sc_lang=en"
+          >HKEX 公告</a
+        >、
+        <a href="https://www.szse.cn/aboutus/trends/news/t20240412_606835.html"
+          >深交所公告</a
+        >。
+      </p>
+
+      <h2>4. 数据集、模型与 publication</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>数据集</th>
+            <th>粒度/主键</th>
+            <th>核心字段</th>
+            <th>发布条件</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>market.stock_connect.market_stat.reported</code></td>
+            <td>trade_date + channel</td>
+            <td>
+              buy/sell/turnover、trade_count、ETF
+              turnover、currency、逐字段 availability
+            </td>
+            <td>官方日统计文件通过结构、金额恒等式、币种和日期检查。</td>
+          </tr>
+          <tr>
+            <td>
+              <code>bundle.market_stat.net_buy</code> projection（非独立 dataset）
+            </td>
+            <td>market stat release</td>
+            <td>
+              net_buy、<code>buy-minus-sell-v1</code>、输入 lineage、availability
+            </td>
+            <td>
+              同一市场统计行、通道、交易日、release 与币种的 buy/sell 都为
+              REPORTED 时随 bundle 生成；否则不产生数值。
+            </td>
+          </tr>
+          <tr>
+            <td><code>market.stock_connect.active_security.snapshot</code></td>
+            <td>trade_date + channel + source_rank + source_code</td>
+            <td>官方 rank、buy/sell/turnover、原币、身份引用、源 release</td>
+            <td>榜单行数、rank 唯一、代码格式和市场统计 release 关联通过。</td>
+          </tr>
+          <tr>
+            <td>
+              <code>bundle.active_security.net_buy</code> projection（非独立 dataset）
+            </td>
+            <td>active release + instrument</td>
+            <td>
+              net_buy、<code>buy-minus-sell-v1</code>、输入 lineage、availability
+            </td>
+            <td>
+              同一来源榜行、通道、交易日、release 与币种的 buy/sell 都为
+              REPORTED 时随 bundle 生成；否则不产生数值。
+            </td>
+          </tr>
+          <tr>
+            <td><code>market.stock_connect.channel_status.eod</code></td>
+            <td>trade_date + channel</td>
+            <td>
+              交易日、session、买卖接受状态、quota
+              state/balance/CNY、observed_at、finality
+            </td>
+            <td>收盘最终快照，状态码与余额联合校验通过。</td>
+          </tr>
+          <tr>
+            <td><code>market.stock_connect.trading_calendar</code></td>
+            <td>calendar_date + channel/direction</td>
+            <td>是否交易、是否结算、内地/香港休市原因、年度版本</td>
+            <td>官方年度 CSV checksum 固化。</td>
+          </tr>
+          <tr>
+            <td><code>market.stock_connect.readiness.snapshot</code></td>
+            <td>date mode + canonical channel set + 持久化证据版本</td>
+            <td>
+              candidate/ready trade date、日历来源版本、逐通道
+              calendarState/state/reasonCode、bundle dataVersion、evidenceObservedAt
+            </td>
+            <td>
+              仅由已持久化的日历、entitlement、delivery object、preflight、execution
+              和 publication 事件生成；查询时钟不参与正文或版本。
+            </td>
+          </tr>
+          <tr>
+            <td><code>market.stock_connect.overview.bundle</code></td>
+            <td>trade_date + canonical channel set</td>
+            <td>
+              上述 component release IDs、身份覆盖率、quality、data_version
+            </td>
+            <td>
+              单通道日包先独立原子发布；所选 channel set 齐备后再发布 overview，不复制业务事实。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>4.1 不变量</h3>
+      <ul>
+        <li>
+          <code>turnover = buy + sell</code> 只在三者均为 reported
+          时校验；不反推任一缺失值。
+        </li>
+        <li>
+          金额数据库列使用
+          <code>numeric(38, 6)</code>，合同输出十进制字符串；禁止 float。
+        </li>
+        <li>事实币种来自源行：NB 为 CNY、SB 成交为 HKD、所有 quota 为 CNY。</li>
+        <li>
+          <code>trade_date</code>
+          来自官方文件/消息业务日期并通过交易日历验证；<code>observed_at</code>
+          独立保存。
+        </li>
+        <li>
+          每条来源引用显式保存
+          <code>sourcePublicationAvailability</code>。仅源内容/消息明确提供时，
+          <code>sourcePublicationAt</code> 才非空；接收/抓取时刻进入独立
+          <code>sourceObservedAt</code>，SFTP mtime 不得冒充 publication。
+        </li>
+        <li>
+          一个 release 不可变；修订创建新 revision，bundle
+          指向新组件，旧版本可追溯。
+        </li>
+      </ul>
+
+      <h2>5. 适配器与执行链路</h2>
+      <div class="flow">
+          年度日历 → HKEX SFTP 文件落地与 SHA-256 → Securities Master 身份投影<br>
+          → 市场统计 / 官方活跃榜 → 榜内净额派生 → OMD-C / SSE / SZSE 日终状态<br>
+        → 单通道日包质量门禁 → 所选 channel set 齐套 overview publication → 内部只读 API<br>
+          日历/交付/运行/publication 持久化事件 → readiness snapshot → 独立内部只读 API
+      </div>
+      <p>
+        每个 provider adapter 仅负责下载与解析成 provider-neutral
+        DTO，不得写数据库。application service 在同一 fenced execution
+        内完成标准化、持久化与发布；repository 以 <code>lease_token</code> 和
+        <code>fencing_token</code> 拒绝迟到写入。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>组件</th>
+            <th>固定实现</th>
+            <th>失败行为</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>HkexMarketplaceSftpAdapter</code></td>
+            <td>
+              host key pinning、只读账号、产品目录 allowlist、临时下载后 SHA-256
+              校验。
+            </td>
+            <td>文件未稳定或重复 checksum 冲突：重试并阻止新 publication。</td>
+          </tr>
+          <tr>
+            <td><code>HkexOmdcDqbAdapter</code></td>
+            <td>
+              按 MMDH v2.1 的 20-byte TCP frame 与 24-byte
+              business body 解析 MsgType 80，保存 sequence、DQB 业务时间与 final
+              snapshot。
+            </td>
+            <td>
+              frame 长度、sequence 或最终快照不完整：拒绝本次状态组件并阻止新
+              bundle publication。
+            </td>
+          </tr>
+          <tr>
+            <td><code>SseMdgwStatusAdapter</code></td>
+            <td>
+              解析 MD402 / trdses04，联合 PosAmt、ThresholdAmount、MktStatus。
+            </td>
+            <td>未知枚举进入隔离区，schema drift 告警。</td>
+          </tr>
+          <tr>
+            <td><code>SzseStepStatusAdapter</code></td>
+            <td>
+              解析 390019，联合 AmountStatus、PosAmt、ThresholdAmount、session。
+            </td>
+            <td>未知 session/status 进入隔离区，禁止猜测。</td>
+          </tr>
+          <tr>
+            <td><code>HkexCalendarManifestAdapter</code></td>
+            <td>
+              按逐年 manifest 读取精确 HKEX HTTPS 对象或受控本地官方归档；
+              HTTPS 校验证书，所有对象校验 SHA-256，只解析官方年度 Stock Connect Calendar CSV。
+            </td>
+            <td>年度文件变更产生新 revision 并定向重算受影响日期。</td>
+          </tr>
+          <tr>
+            <td><code>HkexSecuritiesMasterFixedWidthAdapter</code></td>
+            <td>
+              通过同一严格 SFTP 边界读取正式 Securities Master；校验 profile
+              manifest SHA-256、记录长度、稳定 Securities ID、代码、名称编码、发行日与
+              T+1 生效交易日。entity 以 Securities ID 为 key，代码只生成有日期的
+              identifier version；snapshot 缺席会关闭旧代码/可交易生命周期。
+            </td>
+            <td>
+              未提供获许可 layout profile、区间缺失/重叠或 profile/hash
+              漂移时预检 fail-closed；已声明有效 profile 下的单日主档缺件或单证券未映射按
+              <code>SOURCE_UNRESOLVED</code> 降级，绝不猜字段位置。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>5.1 源文件保留</h3>
+      <p>
+        获许可文件进入私有加密对象区
+        <code>licensed/stock-connect/&lt;product&gt;/&lt;trade-date&gt;/</code
+        >，不得进入 Git、日志或公开 API。
+        <code>retention_mode</code> 是合同配置：允许保留时保存源文件与
+        manifest；不允许时发布成功后删除字节，只永久保存产品名、SHA-256、
+        大小、交付时间、解析器版本和 Marketplace
+        可重取标识。两种模式都保持可审计且不阻塞生产。
+      </p>
+
+      <h2>6. 调度、幂等、回补与恢复</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>任务</th>
+            <th>时间/范围</th>
+            <th>策略</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>当日 bundle</td>
+            <td>
+              18:20 Asia/Hong_Kong；18:35、19:00、20:00 重试；20:15 截止告警
+            </td>
+            <td>
+              父命令展开四个 <code>trade-date/date:channel</code> 分区；共同
+              publication 在全部必需分区成功后创建。
+            </td>
+          </tr>
+          <tr>
+            <td>年度日历</td>
+            <td>每年文件发布后；每日任务前轻量校验</td>
+            <td>
+              checksum 变化即新 revision，重算受影响 latest/common-date 索引。
+            </td>
+          </tr>
+          <tr>
+            <td>Securities Master</td>
+            <td>每日 03:20；历史回补前先完成目标区间</td>
+            <td>
+              按主档 T+1 生效日落库，只投影互联互通事实引用的 HKEX
+              代码，不扩展为完整港股主数据产品。
+            </td>
+          </tr>
+          <tr>
+            <td>全量回补</td>
+            <td>
+              沪线从 HKEX Daily Statistics 官方 back issues 起点 2014-11-17 开始；深线
+              2016-12-05 起
+            </td>
+            <td>
+              不可变分页清单、按页和日/通道分区续跑，最近日期优先；限流不影响当日任务。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        标准 executor：<code>market.stock_connect.overview.bundle</code>。
+        data-operations 的 <code>STOCK_CONNECT</code> selector
+        固定为 <code>operation=MARKET</code>；
+        <code>channel=ALL</code> 且 <code>direction=null</code>
+        是一次覆盖四通道的全量入口，避免同一 datasetCode 需要提交两次。
+        <code>ALL+NORTHBOUND|SOUTHBOUND</code> 覆盖两条同向通道，
+        <code>SH|SZ+null</code> 覆盖所选市场双向。分区键：
+        <code>trade-date:{date}:channel:{SH|SZ}:direction:{NB|SB}</code
+        >。幂等键由 dataset、source product、trade date、channel、源
+        SHA-256、schema mapping version 确定性生成。
+      </p>
+      <p>
+        FULL 预检不会把约三千个交易日的来源证据复制到 command、run 或 broker payload。
+        data-sync 先原子保存一个不可变 delivery manifest header，再按最多 20
+        个交易日、256 个 target 分页；每页有独立 SHA-256，header 保存有序页摘要、root
+        hash、target/page count、<code>availableUntil</code> 与最小剩余窗口。preflight
+        与 execution intent 只保存 <code>manifestId/rootHash/count</code>
+        引用；Celery 唤醒消息不携带清单正文。
+      </p>
+      <p>
+        executor 每次只校验并加载当前页，分批完成后持久化 checkpoint；正常
+        <code>YIELDED</code> 续跑不消耗 worker-loss 恢复预算，进程丢失才写独立
+        recovery attempt。重复 preflight/submit 复用相同摘要，页面被改写、重排、过期或剩余窗口不足都在创建
+        command/run 前拒绝，避免排队后才发现持牌文件已从 SFTP 清理。
+      </p>
+      <p>
+        <code>MARKET+ALL</code> 由一个 fenced run 编排，但不使用跨全部日期和通道的长事务。
+        某通道失败时，已完成单通道 publication 保持可读，四通道 latest-common 指针不前移；
+        同一执行幂等重跑补齐后，四通道 overview 才一次前移。
+      </p>
+      <p>
+        每次日历、delivery entitlement/object、preflight、execution 或 bundle
+        publication 状态改变时，同一事务更新对应 readiness 证据并生成规范快照。
+        快照删除顶层 <code>dataVersion</code> 后递归按对象键字典序、数组原序、保留
+        null、UTF-8、无空白且不转义 Unicode 序列化，SHA-256 小写摘要同时写正文和
+        <code>X-Data-Version</code>。<code>observedAt</code> 只取持久化证据时间最大值；
+        无快照严格返回 409，不以服务器当前时间补造。
+      </p>
+      <ol>
+        <li>同 key、同 payload：返回已有运行；同 key、不同 payload：409。</li>
+        <li>
+          下载、解析或质量失败：隔离 staging，记录结构化错误；已批准 release
+          不变。
+        </li>
+        <li>
+          进程终止：租约到期后由 recovery worker 重领；旧 fencing token
+          无法提交。
+        </li>
+        <li>
+          源修订：创建新 revision，定向重算 derived 与 bundle；回滚只切换可见
+          bundle 指针。
+        </li>
+      </ol>
+
+      <h2>7. 质量门禁与可观测性</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>门禁</th>
+            <th>通过条件</th>
+            <th>不通过</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>来源真实性</td>
+            <td>
+              来源代码在 approved map；SFTP host key / HTTPS 证书有效；SHA-256
+              完整。
+            </td>
+            <td>拒绝运行，不允许备用非官方来源。</td>
+          </tr>
+          <tr>
+            <td>结构</td>
+            <td>
+              列头、编码、日期、枚举与 mapping version
+              匹配；未知列允许记录但未知必需列拒绝。
+            </td>
+            <td><code>SCHEMA_DRIFT</code> 告警并隔离。</td>
+          </tr>
+          <tr>
+            <td>金额</td>
+            <td>
+              非负 reported 金额；可校验时 buy + sell = turnover；币种符合通道。
+            </td>
+            <td><code>AMOUNT_INVARIANT_FAILED</code>。</td>
+          </tr>
+          <tr>
+            <td>榜单</td>
+            <td>
+              rank 唯一连续、行数不超过官方上限、代码非空、市场 release 存在。
+            </td>
+            <td>榜单 component 不发布。</td>
+          </tr>
+          <tr>
+            <td>身份</td>
+            <td>
+              主档 profile 区间必须唯一且摘要匹配；合法 profile
+              下的主档交付缺件或单证券未映射均如实计量，显式标记并保留源身份。
+            </td>
+            <td>
+              profile 区间重叠、布局或摘要漂移硬拒绝；其余无法解析统一以
+              <code>SOURCE_UNRESOLVED</code> 和
+              <code>APPROVED_WITH_WARNINGS</code> 发布具体 quality issue，
+              当前与历史同语义且不生成深链接。
+            </td>
+          </tr>
+          <tr>
+            <td>历史状态来源</td>
+            <td>
+              官方状态源有可回取记录时必须导入；超出官方保留范围时写明
+              <code>STATUS_SOURCE_NOT_AVAILABLE_HISTORICAL</code>。
+            </td>
+            <td>
+              允许历史统计 bundle 以
+              <code>APPROVED_WITH_WARNINGS</code>
+              发布，但额度/状态保持无数值；当日仍为强制门禁。
+            </td>
+          </tr>
+          <tr>
+            <td>完整性</td>
+            <td>
+              日历、统计、活跃榜、状态、身份尝试、派生结果齐备；北向制度未披露视为合规齐备。
+            </td>
+            <td>不创建 bundle。</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        指标：source file lag、latest approved trade date、bundle
+        age、四通道成功率、schema drift、identity coverage、quota final snapshot
+        lag、 quarantine count、publication duration。日志只记录 source
+        code、checksum 前缀、run/release ID，不记录凭证和获许可文件内容。
+      </p>
+
+      <h2>8. 内部 API 与精确日期</h2>
+      <p>
+        实现五个 POST-only 只读端点，机器合同见
+          <a href="../../contracts/0024-data-sync-stock-connect-internal.openapi.yaml"
+            ><code
+              >docs/contracts/0024-data-sync-stock-connect-internal.openapi.yaml</code
+            ></a
+        >。
+      </p>
+      <ul>
+        <li>
+          <code>/internal/v1/stock-connect/readiness/query</code>：返回独立持久化
+          readiness 快照；LATEST 区分 candidate 与全部所选通道 READY 的
+          readyTradeDate，EXACT 不回退。无证据返回 409
+          <code>READINESS_NOT_OBSERVED</code>。
+        </li>
+        <li>
+          <code>/internal/v1/stock-connect/overview/query</code>：LATEST
+          解析为所选通道最后一个共同完成且已发布交易日。
+        </li>
+        <li>
+          <code>/internal/v1/stock-connect/channels/query</code>：LATEST
+          解析为单通道最后已发布交易日。
+        </li>
+        <li>
+          <code>/internal/v1/stock-connect/active-securities/query</code
+          >：来源榜或榜内净额排序，游标分页。
+        </li>
+        <li>
+          <code>/internal/v1/stock-connect/securities/context/query</code
+          >：只按稳定 entityRef 查询；无身份的历史行不伪造引用。
+        </li>
+      </ul>
+      <p>
+        EXACT 无 publication 返回 409
+        <code>EXACT_DATE_NOT_PUBLISHED</code>，不得悄悄改成前一日。响应携带
+        <code>X-Data-Version</code>、component lineage、source publication
+        时间和 quality。readiness 的 <code>X-Data-Version</code>
+        则必须与规范快照摘要一致，不借用任一业务 publication 版本。
+      </p>
+
+      <h2>9. 实施顺序、回滚与真实验收</h2>
+      <ol>
+        <li>
+          Expand：新增表、availability 枚举、索引、数据集目录和 provider
+          配置；旧 reader 保持兼容。
+        </li>
+        <li>
+          接入 HKEX SFTP、calendar/master、三套日终状态源；在 shadow schema
+          完成真实历史回补。
+        </li>
+        <li>
+          逐日核对源文件与 canonical release，生成派生净额与 bundle；建立
+          latest/common-date 索引。
+        </li>
+        <li>
+          内部 API 只读暗上线；service-api 契约测试和真实数据对账通过后开启 read
+          path。
+        </li>
+        <li>
+          Contract：下线 AKShare 的 stock-connect approved
+          registration，保留迁移期旧表只读后再清理。
+        </li>
+      </ol>
+      <div class="callout">
+        <strong>回滚：</strong>停用计划与公开 feature flag，bundle visible
+        pointer 切回上一批准版本；新表和旧 reader 在一个发布窗口内并存。
+        不删除源 release，不覆写历史，不让 Web 读取 staging。
+      </div>
+      <div class="callout warn">
+        下表定义生产启用门禁，并不表示当前开发机已拥有持牌文件。缺少真实
+        SFTP/OMD-C/MDGW/STEP entitlement 时只能完成自动合同与失败关闭验证，不能以测试
+        fixture 冒充源到 publication 对账。
+      </div>
+      <h3>9.1 可直接执行的发布门禁与回滚</h3>
+      <p>
+        以下入口均由安装包注册，不依赖直接调用 repository。manifest 校验离线运行；
+        coverage audit 只读 PostgreSQL 且以持久化状态边界 lock 为准；任一业务缺口都使用稳定非零退出码。
+      </p>
+      <pre>data-sync-stock-connect-manifests validate-all \
+  --calendar /run/quant-v2/stock-connect-config/hkex-calendar-manifest.json \
+  --sftp /run/quant-v2/stock-connect-config/hkex-sftp-delivery-manifest.json \
+  --status /run/quant-v2/stock-connect-config/stock-connect-status-manifest.json \
+  --status-required-from "${DATA_SYNC_STOCK_CONNECT_STATUS_REQUIRED_FROM}" \
+  --master /run/quant-v2/stock-connect-config/hkex-securities-master-fixed-length-profile.json \
+  --master-sha256 "${DATA_SYNC_HKEX_SECURITIES_MASTER_PROFILE_MANIFEST_SHA256}"
+
+data-sync-stock-connect-manifests calculate-sftp-root \
+  --path /run/quant-v2/stock-connect-config/hkex-sftp-delivery-manifest.json
+
+data-sync-stock-connect-coverage-audit \
+  --manifest-id "${STOCK_CONNECT_DELIVERY_MANIFEST_ID}" \
+  --root-hash "${STOCK_CONNECT_DELIVERY_ROOT_HASH}"
+
+data-sync-stock-connect-rollback \
+  --operation-id "${ROLLBACK_OPERATION_UUID}" \
+  --channel SH_NORTHBOUND \
+  --trade-date "${ROLLBACK_TRADE_DATE}" \
+  --target-bundle-release-id "${TARGET_BUNDLE_RELEASE_UUID}" \
+  --actor-ref "${ROLLBACK_ACTOR_REF}" \
+  --reason "${ROLLBACK_REASON}" \
+  --request-id "${ROLLBACK_REQUEST_ID}"</pre>
+      <ul>
+        <li>
+          manifest CLI：0 全部合法，2 表示输入、文件、schema、摘要、边界或 root 非法；不访问网络和数据库。
+        </li>
+        <li>
+          coverage audit：0 表示 entitlement、object、status、market、active 与 bundle
+          六阶段全窗口覆盖；3 表示存在缺口；2 表示输入或数据库依赖失败。
+        </li>
+        <li>
+          rollback：0 表示成功或同 operation 幂等重放；3 表示 fencing、并发 publication、
+          目标归属等业务 fail-closed；2 表示输入或依赖失败。actor、reason 和 request-id 均必填。
+        </li>
+      </ul>
+      <table class="check">
+        <tbody>
+          <tr>
+            <td>✓</td>
+            <td>
+              用实际获许可 HKEX
+              文件完成一个沪线、一个深线交易日的四通道导入；记录真实 SHA-256；
+              此抽样只做逐字段对账，不替代下一项全历史覆盖门禁。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              对沪线 2014-11-17、深线 2016-12-05 至验收截止日之间的每个官方开放日和
+              必需通道/component 执行全窗口 coverage audit；缺失、重复、孤儿、
+              manifest/page/root hash 错误或跨 release 拼包任一非零即失败。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              用相同持久化证据在 data-sync、service-api 与 Web 重算 readiness
+              SHA-256；candidate/ready 日期、逐通道状态和 reasonCode 一致；
+              删除快照后查询严格返回 <code>READINESS_NOT_OBSERVED</code>。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              逐字段核对源 CSV → canonical DB → bundle → 内部
+              API；代码、rank、turnover、buy/sell 和币种完全一致。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              南向派生净额等于同一源行 buy − sell；北向新制度日为
+              <code>NOT_DISCLOSED_BY_REGIME</code> 且无数值。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              沪深与香港休市不一致日期按官方 calendar 返回精确状态；EXACT
+              不漂移。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              断开任一上游、制造迟到文件、重复文件、schema drift、sequence
+              gap，均不污染上一 publication。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              在持有当前 fencing token 时完成可见指针回滚；旧 token、并发新发布或目标
+              bundle 不属于同一数据集/通道集合时均被拒绝，并保留不可变审计记录。
+            </td>
+          </tr>
+          <tr>
+            <td>✓</td>
+            <td>
+              产品演示与端到端验收不加载本地样本、随机生成值或非官方备用源。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>10. 可直接交付的四类清单合同</h2>
+      <div class="callout warn">
+        下列 <code>{{PLACEHOLDER}}</code> 是部署占位符，不是样本业务数据，也不能直接进入生产。
+        所有值必须由获许可交付、交易所规格或变更单填写；严格解析器拒绝未知键。原始文件的换行或编码发生变化会改变
+        SHA-256，生成摘要后不得再格式化文件。
+      </div>
+
+      <h3>10.1 年度 Stock Connect Calendar manifest</h3>
+      <pre>{
+  "manifestSchema": "quant-v2.hkex-stock-connect-calendar-manifest.v1",
+  "entries": [{
+    "year": {{YEAR_INTEGER}},
+    "sourceKind": "{{HTTPS_OBJECT_OR_LOCAL_ARCHIVE_OR_CURRENT_YEAR_HTTPS_TEMPLATE}}",
+    "url": {{OFFICIAL_HTTPS_URL_OR_NULL}},
+    "relativePath": {{SAFE_RELATIVE_PATH_OR_NULL}},
+    "sha256": "{{RAW_CALENDAR_CSV_SHA256_LOWERCASE}}",
+    "sourcePublicationAt": "{{RFC3339_WITH_TIMEZONE}}",
+    "observedAt": "{{RFC3339_WITH_TIMEZONE}}"
+  }]
+}</pre>
+      <p>
+        顶层只能有 <code>manifestSchema/entries</code>，entry
+        七个键也必须完整。<code>year</code> 为 2013–2100 的唯一整数。
+        <code>HTTPS_OBJECT</code> 只接收 HKEX 官方 HTTPS 精确对象并要求
+        <code>relativePath=null</code>；<code>LOCAL_ARCHIVE</code> 要求
+        <code>url=null</code> 且路径不能绝对、回退或逃逸清单目录；
+        <code>HTTPS_TEMPLATE</code> 的两个位置均为 null，且只允许运行时 UTC 当前年。
+        <code>sha256</code> 覆盖年度 CSV 原始字节；两个时间都必须带时区。HTTP
+        明确提供来源时间时必须与 <code>sourcePublicationAt</code> 相同。
+      </p>
+
+      <h3>10.2 HKEX SFTP entitlement 分页 manifest</h3>
+      <pre>{
+  "manifestSchema": "quant-v2.hkex-sftp-delivery-manifest.v1",
+  "rootHash": "{{CANONICAL_PAGES_ROOT_SHA256}}",
+  "pages": [{
+    "pageNo": {{ZERO_BASED_CONTIGUOUS_INTEGER}},
+    "relativePath": "{{SAFE_PAGE_JSON_RELATIVE_PATH}}",
+    "sha256": "{{RAW_PAGE_JSON_SHA256_LOWERCASE}}"
+  }]
+}</pre>
+      <pre>{
+  "pageSchema": "quant-v2.hkex-sftp-delivery-manifest-page.v1",
+  "pageNo": {{SAME_PAGE_NUMBER}},
+  "entries": [{
+    "remotePath": "{{LICENSED_REMOTE_PATH}}",
+    "orderReference": "{{LICENSED_ORDER_REFERENCE}}",
+    "availableUntil": "{{RFC3339_WITH_TIMEZONE}}"
+  }]
+}</pre>
+      <p>
+        page 编号必须从 0 连续且路径只能位于 header 同目录；每个 page ref 的
+        <code>sha256</code> 覆盖 page 文件原始字节。entry 只能有
+        <code>remotePath/orderReference/availableUntil</code>，远端路径唯一且不得含
+        <code>..</code>。<code>rootHash</code> 覆盖按
+        <code>pageNo</code> 排序后的
+        <code>{"pages":[...]}</code>：UTF-8、键排序、无空白分隔、
+        <code>ensure_ascii=false</code>；不包含 <code>manifestSchema</code>，page
+        内容通过 page 原始摘要间接覆盖。
+      </p>
+
+      <h3>10.3 状态覆盖与同名 finality sidecar</h3>
+      <pre>{
+  "manifestSchema": "quant-v2.stock-connect-status-coverage-manifest.v1",
+  "requiredFrom": "{{FROZEN_FIRST_OPERATING_DATE}}",
+  "observedAt": "{{RFC3339_WITH_TIMEZONE}}",
+  "entries": [{
+    "tradeDate": "{{ISO_TRADE_DATE}}",
+    "channel": "{{SH_OR_SZ}}",
+    "direction": "{{NORTHBOUND_OR_SOUTHBOUND}}",
+    "relativePath": "{{SAFE_LANDING_RELATIVE_PATH}}",
+    "profileId": "{{APPROVED_STATUS_PROFILE_ID}}",
+    "payloadSha256": "{{RAW_LANDING_SHA256_LOWERCASE}}",
+    "sidecarSha256": "{{RAW_SIDECAR_JSON_SHA256_LOWERCASE}}"
+  }]
+}</pre>
+      <p>
+        <code>(tradeDate, channel, direction)</code> 唯一。两个摘要分别覆盖 landing
+        与同名 <code>.manifest.json</code> 原始字节。<code>requiredFrom</code>
+        必须等于配置，并由数据库首次锁定；后续只可前移、不可后移或删除，未来日期也拒绝。
+        从该边界起的官方开放日缺任一必需 entry、文件、sidecar 或 finality 时 preflight
+        失败，不能通过改环境变量降级为历史缺源。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>sidecar profile</th>
+            <th>固定生产者/版本字段</th>
+            <th>额外字段</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>hkex-omdc-mmdh-msg80-v2.1</code></td>
+            <td>
+              <code>HKEX_OMDC_CAPTURE</code> /
+              <code>HKEX_OMDC_MMDH_MSG80_V2.1</code> /
+              <code>quant-v2.stock-connect-status-raw-final.v1</code> /
+              message 80 / market HKEX
+            </td>
+            <td><code>sequence</code> 必须等于 payload 最终连续 sequence</td>
+          </tr>
+          <tr>
+            <td><code>sse-is117-v1.09-is124-v3.50-gateway-v1</code></td>
+            <td>
+              <code>SSE_MDGW_GATEWAY</code> /
+              <code>SSE_IS117_1.09_IS124_3.50</code> /
+              <code>quant-v2.stock-connect-status-gateway.v1</code> /
+              trdses04 / market SSE
+            </td>
+            <td>无</td>
+          </tr>
+          <tr>
+            <td><code>szse-step-binary-v1.17-msg390019-gateway-v1</code></td>
+            <td>
+              <code>SZSE_STEP_GATEWAY</code> /
+              <code>SZSE_STEP_BINARY_1.17</code> /
+              <code>quant-v2.stock-connect-status-gateway.v1</code> /
+              390019 / market HKEX 或 XHKG
+            </td>
+            <td>无</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        三类 sidecar 通用 exact keys 为
+        <code>producer/sourceProfile/projectionProfile/messageType/marketId/businessDate/channel/direction/finality/payloadSha256</code>；
+        OMD-C 再增加 <code>sequence</code>。<code>finality</code> 恒为
+        <code>END_OF_DAY_FINAL</code>，业务键与 coverage entry
+        一致，<code>payloadSha256</code> 覆盖 landing 原始字节。
+      </p>
+
+      <h3>10.4 HKEX Securities Master fixed-length profile set</h3>
+      <pre>{
+  "manifestSchema": "quant-v2.hkex-securities-master-fixed-length-profile-set.v1",
+  "profiles": [{
+    "effectiveFrom": "{{ISO_DATE}}",
+    "effectiveTo": {{INCLUSIVE_ISO_DATE_OR_NULL}},
+    "profileId": "{{APPROVED_PROFILE_ID}}",
+    "specificationReference": "{{APPROVED_SPEC_REFERENCE}}",
+    "recordLengthBytes": {{POSITIVE_INTEGER}},
+    "lineEnding": "{{LF_OR_CRLF}}",
+    "fileName": {
+      "pattern": "{{REGEX_WITH_NAMED_ISSUED_DATE_GROUP}}",
+      "issuedDateGroup": "{{GROUP_NAME}}",
+      "issuedDateFormat": "{{DATE_FORMAT}}",
+      "dateRole": "ISSUED_DATE"
+    },
+    "dataRecord": {
+      "selector": {{NULL_OR_SELECTOR_OBJECT}},
+      "securityId": {{FIXED_FIELD_OBJECT}},
+      "instrumentCode": {{FIXED_FIELD_OBJECT}},
+      "displayName": {{FIXED_FIELD_OBJECT}},
+      "effectiveTradeDate": {{FIXED_DATE_FIELD_OBJECT}}
+    }
+  }]
+}</pre>
+      <p>
+        selector 非空时 exact 结构为
+        <code>{"field": FIXED_FIELD_OBJECT, "equals": "..."}</code>。普通 fixed field
+        只能有 <code>offsetBytes/lengthBytes/encoding/trim</code>；日期字段再增加
+        <code>dateFormat</code>。<code>securityId</code> 是 entity
+        key，<code>instrumentCode</code> 只是日期化 identifier；前者缺失时该行只能
+        <code>SOURCE_UNRESOLVED</code>。offset 从 0 计、length 大于 0、字段不得越界或互相重叠，
+        codec 必须存在，trim 仅允许 <code>BOTH/LEFT/NONE/RIGHT</code>。profile id
+        唯一，inclusive 生效区间不得重叠，目标日必须唯一命中。整个 profile manifest
+        原始字节的 SHA-256 必须等于
+        <code>DATA_SYNC_HKEX_SECURITIES_MASTER_PROFILE_MANIFEST_SHA256</code>。
+      </p>
+
+      <h3>10.5 摘要生成与只读验证</h3>
+      <pre>rtk python -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' FILE
+rtk python -c 'import hashlib,json,sys; p=json.load(open(sys.argv[1])); v={"pages":sorted(p["pages"],key=lambda x:x["pageNo"])}; print(hashlib.sha256(json.dumps(v,ensure_ascii=False,separators=(",",":"),sort_keys=True).encode()).hexdigest())' SFTP_HEADER_JSON</pre>
+      <p>
+        第一条命令用于 calendar 原文件、page、status landing/sidecar 和整个 master
+        profile；第二条只计算 SFTP header 的 canonical
+        <code>rootHash</code>。两条命令都只读且不输出文件内容。独立清单 validator
+        在 worker 启动前运行；随后必须对真实授权范围调用
+        <code>POST /internal/v1/data-operations/commands/preflight</code>，确认每个 target
+        <code>eligible=true</code> 后才允许 submit。preflight 失败或任何 manifest
+        摘要漂移都必须保持零 command/run。
+      </p>
+
+      <h2>11. 配置清单</h2>
+      <pre>
+DATA_SYNC_STOCK_CONNECT_ENABLED=false
+DATA_SYNC_STOCK_CONNECT_LICENSE_SCOPE=
+DATA_SYNC_HKEX_SFTP_HOST=sftp.data.hkex.com.hk
+DATA_SYNC_HKEX_SFTP_PORT=22
+DATA_SYNC_HKEX_SFTP_USERNAME=
+DATA_SYNC_HKEX_SFTP_PRIVATE_KEY_PATH=/run/quant-v2/stock-connect-config/hkex-sftp-private-key
+DATA_SYNC_HKEX_SFTP_PRIVATE_KEY_PASSPHRASE=
+DATA_SYNC_HKEX_SFTP_KNOWN_HOSTS_PATH=/run/quant-v2/stock-connect-config/known_hosts
+DATA_SYNC_HKEX_SH_DAILY_PATH_TEMPLATE=
+DATA_SYNC_HKEX_SZ_DAILY_PATH_TEMPLATE=
+DATA_SYNC_HKEX_SECURITIES_MASTER_PATH_TEMPLATE=
+DATA_SYNC_HKEX_SECURITIES_MASTER_PROFILE_MANIFEST_PATH=/run/quant-v2/stock-connect-config/hkex-securities-master-fixed-length-profile.json
+DATA_SYNC_HKEX_SECURITIES_MASTER_PROFILE_MANIFEST_SHA256=
+DATA_SYNC_HKEX_CALENDAR_URL_TEMPLATE=https://www.hkex.com.hk/-/media/HKEX-Market/Mutual-Market/Stock-Connect/Reference-Materials/Trading-Hour%2C-Trading-and-Settlement-Calendar/{year}-Calendar_csv_e.csv
+DATA_SYNC_HKEX_CALENDAR_MANIFEST_PATH=/run/quant-v2/stock-connect-config/hkex-calendar-manifest.json
+DATA_SYNC_HKEX_SFTP_DELIVERY_MANIFEST_PATH=/run/quant-v2/stock-connect-config/hkex-sftp-delivery-manifest.json
+DATA_SYNC_STOCK_CONNECT_STATUS_MANIFEST_PATH=/run/quant-v2/stock-connect-config/stock-connect-status-manifest.json
+DATA_SYNC_STOCK_CONNECT_STATUS_REQUIRED_FROM=
+DATA_SYNC_STOCK_CONNECT_STATUS_DELIVERY_ROOT=/var/lib/quant-v2/stock-connect-status
+DATA_SYNC_HKEX_OMDC_STATUS_PATH_TEMPLATE=hkex-omdc/{channel}/{year}/{trade_date}.bin
+DATA_SYNC_SSE_MDGW_STATUS_PATH_TEMPLATE=sse-mdgw/{year}/{trade_date}/trdses04.projection.csv
+DATA_SYNC_SZSE_STEP_STATUS_PATH_TEMPLATE=szse-step/{year}/{trade_date}/390019.projection.csv
+DATA_SYNC_STOCK_CONNECT_REQUEST_TIMEOUT_SECONDS=30
+DATA_SYNC_STOCK_CONNECT_PREFLIGHT_TIMEOUT_SECONDS=300
+DATA_SYNC_STOCK_CONNECT_MIN_PARTITIONS_PER_MINUTE=20
+DATA_SYNC_STOCK_CONNECT_DELIVERY_EXPIRY_SAFETY_SECONDS=3600
+DATA_SYNC_STOCK_CONNECT_MAX_DELIVERY_BYTES=67108864
+DATA_SYNC_STOCK_CONNECT_MAX_MANIFEST_BYTES=262144
+DATA_SYNC_STOCK_CONNECT_MAX_ZIP_COMPRESSION_RATIO=100
+DATA_SYNC_STOCK_CONNECT_RAW_RETENTION_MODE=MANIFEST_ONLY
+DATA_SYNC_STOCK_CONNECT_RAW_RETENTION_LICENSE_REFERENCE=
+DATA_SYNC_STOCK_CONNECT_RAW_KMS_KEY_ID=
+DATA_SYNC_STOCK_CONNECT_CURSOR_HMAC_SECRET=</pre>
+      <p>
+        Secret 值只由运行环境注入；<code>.env.example</code>
+        仅记录空值、非敏感默认值和说明。Compose 为 API 与 worker 共同只读挂载
+        <code>data_sync_stock_connect_config</code> 和
+        <code>data_sync_stock_connect_status</code>，前者由 secret provisioner
+        写入私钥、known_hosts、逐年日历摘要、分页 SFTP entitlement 清单与经过 SHA-256
+        固定的主数据 profile，后者由正式行情网关写入
+        OMD-C/MDGW/STEP payload 和同名 manifest。data-sync-api 同时连接受控 egress，
+        因而提交前可真实探测 HTTPS/SFTP；缺任一授权输入时在 preflight 拒绝，不生成排队后必失败的任务。
+      </p>
+    </main>
+  </body>
+</html>

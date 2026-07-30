@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -38,6 +38,7 @@ from service_data_sync.domain.sector import (
 )
 
 from ..database.connection import DatabaseClient
+from ..database.fenced_execution import current_fenced_execution
 from ..database.models.equity.identity.equity_identifier_version import (
     EquityIdentifierVersion,
 )
@@ -411,9 +412,13 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
             )
 
     def publish_release(
-        self, *, scheme: SectorScheme, observation_date: date
+        self,
+        *,
+        scheme: SectorScheme,
+        observation_date: date,
+        before_final_publication: Callable[[], None] | None = None,
     ) -> PublishedSectorMembershipRelease | None:
-        """汇总冻结的 ACTIVE 板块快照，满足质量覆盖门才原子切换 scheme release。"""
+        """汇总 ACTIVE 快照并在同事务内武装终态；无可发布清单时绝不调用回调。"""
         now = datetime.now(UTC)
         with self._database.transaction() as connection:
             self._lock_scheme(connection, scheme)
@@ -445,6 +450,12 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
             if current is not None and self._release_matches(
                 connection, UUID(str(current["release_id"])), component_snapshot_ids, quality_status
             ):
+                _record_fenced_release(
+                    data_version=UUID(str(current["data_version"])),
+                    record_count=expected_count,
+                )
+                if before_final_publication is not None:
+                    before_final_publication()
                 return PublishedSectorMembershipRelease(
                     release_id=UUID(str(current["release_id"])),
                     data_version=UUID(str(current["data_version"])),
@@ -490,6 +501,8 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
                         snapshot_observed_at=snapshot["observed_at"],
                     )
                 )
+            if before_final_publication is not None:
+                before_final_publication()
             self._publish_dataset(
                 connection,
                 scheme=scheme,
@@ -498,6 +511,7 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
                 effective_as_of=observation_date,
                 published_at=now,
             )
+            _record_fenced_release(data_version=data_version, record_count=expected_count)
         return PublishedSectorMembershipRelease(
             release_id=release_id,
             data_version=data_version,
@@ -508,9 +522,13 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         )
 
     def get_release(
-        self, *, scheme: SectorScheme, as_of: datetime | None
+        self,
+        *,
+        scheme: SectorScheme,
+        as_of: datetime | None,
+        data_version: UUID | None = None,
     ) -> StoredSectorMembershipRelease | None:
-        """读取当前或历史最近 release，始终只暴露不可变已发布清单。"""
+        """读取精确版本、当前或历史最近 release，始终只暴露不可变已发布清单。"""
         statement = select(
             SectorMembershipRelease.release_id,
             SectorMembershipRelease.scheme,
@@ -521,12 +539,18 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
             SectorMembershipRelease.carried_forward_sector_count,
             SectorMembershipRelease.published_at,
         ).where(SectorMembershipRelease.scheme == scheme.value)
-        if as_of is None:
+        if data_version is not None:
+            statement = statement.where(SectorMembershipRelease.data_version == data_version)
+        elif as_of is None:
             statement = statement.where(SectorMembershipRelease.superseded_at.is_(None))
         else:
             statement = (
                 statement.where(SectorMembershipRelease.release_as_of <= as_of)
-                .order_by(SectorMembershipRelease.release_as_of.desc())
+                .order_by(
+                    SectorMembershipRelease.release_as_of.desc(),
+                    SectorMembershipRelease.published_at.desc(),
+                    SectorMembershipRelease.release_id.desc(),
+                )
                 .limit(1)
             )
         with self._database.session() as connection:
@@ -680,14 +704,30 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
             )
         return tuple(_stored_constituent(row) for row in rows)
 
-    def get_release_equity(
+    def resolve_equity_identity(
         self,
         *,
-        release_id: UUID,
         exchange: Exchange,
         symbol: str,
+        identity_as_of: date | None,
+        known_at: datetime | None,
     ) -> StoredMembershipEquity | None:
-        """在 release 冻结的市场日与知识时刻解析反向查询身份，不读当前锚列。"""
+        """按独立业务日与知识时刻解析永久证券，禁止 release 时间改写 route 身份。"""
+        identifier_time = _bitemporal_conditions(
+            EquityIdentifierVersion,
+            effective_as_of=identity_as_of,
+            known_at=known_at,
+        )
+        name_time = _bitemporal_conditions(
+            EquityNameVersion,
+            effective_as_of=identity_as_of,
+            known_at=known_at,
+        )
+        listing_time = _bitemporal_conditions(
+            EquityListingStatusVersion,
+            effective_as_of=identity_as_of,
+            known_at=known_at,
+        )
         with self._database.session() as connection:
             row = (
                 connection.execute(
@@ -698,21 +738,7 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
                         EquityNameVersion.name,
                         EquityListingStatusVersion.status,
                     )
-                    .select_from(SectorMembershipRelease)
-                    .join(
-                        EquityIdentifierVersion,
-                        and_(
-                            EquityIdentifierVersion.exchange == exchange.value,
-                            EquityIdentifierVersion.symbol == symbol,
-                            EquityIdentifierVersion.identity_state == "CONFIRMED",
-                            EquityIdentifierVersion.effective_range.contains(
-                                func.date(SectorMembershipRelease.release_as_of)
-                            ),
-                            EquityIdentifierVersion.knowledge_range.contains(
-                                SectorMembershipRelease.published_at
-                            ),
-                        ),
-                    )
+                    .select_from(EquityIdentifierVersion)
                     .join(
                         EquityInstrument,
                         EquityInstrument.security_id == EquityIdentifierVersion.security_id,
@@ -721,12 +747,7 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
                         EquityNameVersion,
                         and_(
                             EquityNameVersion.security_id == EquityIdentifierVersion.security_id,
-                            EquityNameVersion.effective_range.contains(
-                                func.date(SectorMembershipRelease.release_as_of)
-                            ),
-                            EquityNameVersion.knowledge_range.contains(
-                                SectorMembershipRelease.published_at
-                            ),
+                            *name_time,
                         ),
                     )
                     .join(
@@ -734,15 +755,17 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
                         and_(
                             EquityListingStatusVersion.security_id
                             == EquityIdentifierVersion.security_id,
-                            EquityListingStatusVersion.effective_range.contains(
-                                func.date(SectorMembershipRelease.release_as_of)
-                            ),
-                            EquityListingStatusVersion.knowledge_range.contains(
-                                SectorMembershipRelease.published_at
-                            ),
+                            *listing_time,
                         ),
                     )
-                    .where(SectorMembershipRelease.release_id == release_id)
+                    .where(
+                        EquityIdentifierVersion.exchange == exchange.value,
+                        EquityIdentifierVersion.symbol == symbol,
+                        EquityIdentifierVersion.identity_state == "CONFIRMED",
+                        EquityInstrument.master_confirmed_at.is_not(None),
+                        EquityInstrument.listing_status != "PENDING",
+                        *identifier_time,
+                    )
                 )
                 .mappings()
                 .one_or_none()
@@ -1272,6 +1295,41 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
         )
 
 
+def _record_fenced_release(*, data_version: UUID, record_count: int) -> None:
+    """把稳定 release 版本和覆盖分区数交给同事务控制面终态；普通调用不受影响。"""
+    execution = current_fenced_execution()
+    if execution is None:
+        return
+    execution.record_checkpoint(kind="data-version", position=str(data_version))
+    execution.record_publication_progress(record_count=record_count)
+
+
+def _bitemporal_conditions(
+    model: Any,
+    *,
+    effective_as_of: date | None,
+    known_at: datetime | None,
+) -> tuple[Any, ...]:
+    """为身份、名称和上市状态生成一致的半开业务时间与知识时间谓词。"""
+    effective = (
+        (model.effective_to.is_(None),)
+        if effective_as_of is None
+        else (
+            model.effective_from <= effective_as_of,
+            or_(model.effective_to.is_(None), model.effective_to > effective_as_of),
+        )
+    )
+    knowledge = (
+        (model.known_to.is_(None),)
+        if known_at is None
+        else (
+            model.known_from <= known_at,
+            or_(model.known_to.is_(None), model.known_to > known_at),
+        )
+    )
+    return (*effective, *knowledge)
+
+
 def _stored_sector(row: Mapping[Any, Any]) -> StoredSector:
     """将数据库板块锚投影为不含 SQL 类型的应用端口值。"""
     return StoredSector(
@@ -1316,7 +1374,7 @@ def _stored_constituent(row: Mapping[Any, Any]) -> StoredMembershipConstituent:
 
 
 def _stored_membership_equity(row: Mapping[Any, Any]) -> StoredMembershipEquity:
-    """投影 release 下可反向查询的唯一证券，不使用当前身份锚作为真相。"""
+    """投影双时态解析出的永久证券公开身份，不泄漏内部数值键。"""
     return StoredMembershipEquity(
         instrument_id=UUID(str(row["instrument_id"])),
         exchange=Exchange(str(row["exchange"])),

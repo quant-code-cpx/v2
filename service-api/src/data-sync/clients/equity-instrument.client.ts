@@ -29,21 +29,25 @@ type ConflictPolicy = {
 
 type NotModified = {
   status: 304;
-  etag: string | undefined;
+  etag: string;
+  dataVersion: string;
 };
 
-type UpstreamSuccess<T> = {
+type VersionedBody = { dataVersion: string | null };
+
+type UpstreamSuccess<T extends VersionedBody> = {
   status: 200;
-  etag: string | undefined;
+  etag: string;
+  dataVersion: string;
   body: T;
 };
 
 /** 描述保留条件请求状态的下游读取结果。 */
-export type ConditionalRead<T> = NotModified | UpstreamSuccess<T>;
+export type ConditionalRead<T extends VersionedBody> = NotModified | UpstreamSuccess<T>;
 
 const downstreamProblemCodeSchema = z
   .object({
-    code: z.enum(['snapshot-expired', 'identity-resolution-conflict']),
+    code: z.enum(['snapshot-expired', 'identity-resolution-conflict', 'publication-unavailable']),
   })
   .passthrough();
 
@@ -149,7 +153,7 @@ export class EquityInstrumentClient {
   }
 
   /** 发起带内部凭据、超时、请求关联和严格响应校验的 GET。 */
-  private async request<T>(
+  private async request<T extends VersionedBody>(
     path: string,
     ifNoneMatch: string | undefined,
     requestId: string,
@@ -175,13 +179,22 @@ export class EquityInstrumentClient {
       throw dependencyUnavailable();
     }
 
-    const etag = response.headers.get('etag') ?? undefined;
-    if (response.status === 304) return { status: 304, etag };
+    const etag = response.headers.get('etag');
+    const dataVersion = response.headers.get('x-data-version');
+    if (response.status === 304) {
+      if (!validEtag(etag) || !validDataVersion(dataVersion)) throw dependencyUnavailable();
+      return { status: 304, etag, dataVersion };
+    }
     if (!response.ok) throw await upstreamProblem(response, conflictPolicy);
 
     try {
-      return { status: 200, etag, body: schema.parse(await response.json()) };
-    } catch {
+      const body = schema.parse(await response.json());
+      if (!validEtag(etag) || !validDataVersion(dataVersion) || dataVersion !== body.dataVersion) {
+        throw dependencyUnavailable();
+      }
+      return { status: 200, etag, dataVersion, body };
+    } catch (error) {
+      if (error instanceof PublicProblemException) throw error;
       throw dependencyUnavailable();
     }
   }
@@ -196,6 +209,16 @@ function setOptional(parameters: URLSearchParams, key: string, value: string | u
 function querySuffix(parameters: URLSearchParams): string {
   const query = parameters.toString();
   return query.length === 0 ? '' : `?${query}`;
+}
+
+/** 校验下游只返回受控强 ETag，禁止弱校验器或换行进入公开响应头。 */
+function validEtag(value: string | null): value is string {
+  return value !== null && /^"[^"\r\n]{1,252}"$/.test(value);
+}
+
+/** 校验下游 publication 版本是规范 UUID。 */
+function validDataVersion(value: string | null): value is string {
+  return value !== null && z.string().uuid().safeParse(value).success;
 }
 
 /** 移除目录中每条证券的内部 UUID，并用公开 schema 再校验页上限。 */
@@ -279,9 +302,11 @@ async function upstreamProblem(
     );
   }
   if (response.status === 409) {
-    const downstreamCode = await readConflictCode(response);
+    const downstreamCode = await readProblemCode(response);
     const code =
-      downstreamCode !== undefined && conflictPolicy.allowed.includes(downstreamCode)
+      downstreamCode !== undefined &&
+      downstreamCode !== 'publication-unavailable' &&
+      conflictPolicy.allowed.includes(downstreamCode)
         ? downstreamCode
         : conflictPolicy.fallback;
     return conflictProblem(code);
@@ -295,11 +320,20 @@ async function upstreamProblem(
       Number.isSafeInteger(retry) && retry > 0 ? retry : undefined,
     );
   }
+  if (response.status === 503 && (await readProblemCode(response)) === 'publication-unavailable') {
+    return new PublicProblemException(
+      HttpStatus.SERVICE_UNAVAILABLE,
+      'publication-unavailable',
+      'Equity instrument publication is unavailable',
+    );
+  }
   return dependencyUnavailable();
 }
 
-/** 仅从严格白名单中读取冲突码，忽略下游其他问题字段。 */
-async function readConflictCode(response: Response): Promise<ConflictCode | undefined> {
+/** 仅从严格白名单中读取问题码，忽略下游其他问题字段。 */
+async function readProblemCode(
+  response: Response,
+): Promise<ConflictCode | 'publication-unavailable' | undefined> {
   try {
     const parsed = downstreamProblemCodeSchema.safeParse(await response.json());
     return parsed.success ? parsed.data.code : undefined;

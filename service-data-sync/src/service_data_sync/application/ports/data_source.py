@@ -7,8 +7,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
@@ -25,6 +26,7 @@ class ProviderErrorCode(StrEnum):
     AUTHENTICATION = "authentication"
     INVALID_REQUEST = "invalid_request"
     SCHEMA = "schema"
+    CURRENTLY_UNSUPPORTED = "currently_unsupported"
 
 
 class ProviderError(RuntimeError):
@@ -35,10 +37,22 @@ class ProviderError(RuntimeError):
     """
 
     def __init__(self, code: ProviderErrorCode, message: str, *, retryable: bool) -> None:
-        """保存可移植失败分类、面向日志的消息和是否允许重试的策略。"""
+        """保存可移植失败分类、重试策略和可选的脱敏失败证据。"""
         super().__init__(message)
         self.code = code
         self.retryable = retryable
+        self.failure_evidence: bytes | None = None
+        self.failure_evidence_content_type: str | None = None
+
+    def attach_failure_evidence(
+        self,
+        payload: bytes,
+        *,
+        content_type: str = "application/json",
+    ) -> None:
+        """附加 adapter 生成的脱敏审计摘要；禁止放入凭据或供应商响应原文。"""
+        self.failure_evidence = payload
+        self.failure_evidence_content_type = content_type
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +118,78 @@ class ProviderBatch:
             payload=b"",
             observed_at=datetime.now(UTC),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderPreflightRequest:
+    """描述人工提交前一次有界、只读且不产生业务写入的来源探测。"""
+
+    dataset_code: str
+    mode: str
+    selector: Mapping[str, object]
+    date_from: str | None
+    date_to: str | None
+    observation_date: str | None
+    timeout_seconds: int
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderPreflightComponent:
+    """返回一个来源组件的可提交结论与不泄密稳定原因码。"""
+
+    component: str
+    accepted: bool
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderPreflightReport:
+    """汇总来源探针结论，并携带仅供内部受理冻结的可审计交付证据。"""
+
+    components: tuple[ProviderPreflightComponent, ...]
+    execution_evidence: Mapping[str, object] | None = None
+    readiness_evidence: Mapping[str, object] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderStatusCoverageBoundary:
+    """描述来源状态清单声明、但仍需持久化门禁确认的 coverage 边界。"""
+
+    required_from: date
+    manifest_sha256: str
+
+
+@runtime_checkable
+class SourceStatusCoverageBoundaryPort(Protocol):
+    """由具有历史缺源豁免的来源暴露不发网络的状态覆盖边界声明。"""
+
+    def status_coverage_boundary(self) -> ProviderStatusCoverageBoundary:
+        """返回已完成清单 schema 与摘要校验的候选边界。"""
+        ...
+
+
+@runtime_checkable
+class SourcePreflightProbePort(Protocol):
+    """由需要在线 entitlement 校验的数据源实现只读 preflight probe。"""
+
+    def preflight_probe(self, request: ProviderPreflightRequest) -> ProviderPreflightReport:
+        """在总 deadline 内验证认证、来源文件与本地 landing，不写业务状态。"""
+        ...
+
+
+@runtime_checkable
+class SourcePreflightVerificationPort(Protocol):
+    """由来源在执行前复核受理时冻结的交付证据，阻断清单漂移。"""
+
+    def verify_preflight_evidence(
+        self,
+        evidence: Mapping[str, object],
+        *,
+        timeout_seconds: int,
+        target_keys: tuple[str, ...] | None = None,
+    ) -> tuple[ProviderPreflightComponent, ...]:
+        """复核整份或指定内部批次的来源对象，并要求目标版本与冻结证据一致。"""
+        ...
 
 
 @runtime_checkable

@@ -18,6 +18,7 @@ from service_data_sync.application.etf.daily_bar_sync import (
 from service_data_sync.application.ports.data_source import (
     ProviderBatch,
     ProviderError,
+    ProviderErrorCode,
     SourceRequest,
 )
 from service_data_sync.application.ports.dataset_availability import DatasetAvailability
@@ -132,6 +133,9 @@ class FakeAvailabilityRepository:
             availability=str(kwargs["availability"]),
             reason_code=str(kwargs["reason_code"]),
             observed_at=observed_at,
+            entity_partition=str(kwargs["entity_partition"]),
+            coverage_from=cast(date, kwargs["coverage_from"]),
+            coverage_to=cast(date, kwargs["coverage_to"]),
         )
         return self.observation
 
@@ -187,7 +191,40 @@ def test_sync_records_legal_empty_payload_without_staging_success_bytes() -> Non
     assert result.availability == "empty"
     assert availability_repository.observation is not None
     assert availability_repository.observation.reason_code == "no_matching_facts"
+    assert availability_repository.observation.entity_partition == "etf:SSE.510300"
+    assert availability_repository.observation.coverage_from == date(2026, 7, 1)
+    assert availability_repository.observation.coverage_to == date(2026, 7, 28)
     assert raw_store.payloads == []
+
+
+@pytest.mark.parametrize(
+    ("code", "retryable"),
+    (
+        (ProviderErrorCode.RATE_LIMITED, True),
+        (ProviderErrorCode.AUTHENTICATION, False),
+        (ProviderErrorCode.INVALID_REQUEST, False),
+    ),
+)
+def test_sync_preserves_source_failure_reason_and_retryability(
+    code: ProviderErrorCode,
+    retryable: bool,
+) -> None:
+    """来源空态 DTO 必须保留稳定原因与重试语义，executor 不得把永久错误改成可重试。"""
+    result = asyncio.run(
+        EtfDailyBarSyncService(
+            source=FailingSource(code=code, retryable=retryable),
+            repository=FakeRepository(),
+            raw_payload_store=FakeRawPayloadStore(),
+        ).sync(
+            etf=EtfIdentifier.parse("SSE.510300"),
+            start=date(2026, 7, 1),
+            end=date(2026, 7, 28),
+        )
+    )
+
+    assert result.availability == "source_unavailable"
+    assert result.reason_code == code.value
+    assert result.retryable is retryable
 
 
 def test_decoder_rejects_adjusted_etf_prices() -> None:
@@ -224,3 +261,17 @@ class EmptySource(FakeSource):
             ).encode(),
             observed_at=datetime(2026, 7, 29, tzinfo=UTC),
         )
+
+
+class FailingSource(FakeSource):
+    """按测试参数返回来源级失败，用于冻结跨层 reason/retryable 语义。"""
+
+    def __init__(self, *, code: ProviderErrorCode, retryable: bool) -> None:
+        """保存待抛出的稳定错误分类和是否可重试。"""
+        self._code = code
+        self._retryable = retryable
+
+    async def fetch(self, request: SourceRequest) -> ProviderBatch:
+        """拒绝请求并抛出不含 Provider 原文的标准失败。"""
+        del request
+        raise ProviderError(self._code, "fixture source failure", retryable=self._retryable)

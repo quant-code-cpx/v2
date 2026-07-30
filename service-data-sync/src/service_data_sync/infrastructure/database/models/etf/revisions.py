@@ -77,17 +77,22 @@ class EtfProfileVersion(Base):
         nullable=False,
         comment="ETF 上市工具 UUID。",
     )
+    display_name: Mapped[str | None] = mapped_column(
+        String(160),
+        nullable=True,
+        comment="来源明确提供的 ETF 展示名称；迁移前历史资料可为空。",
+    )
     etf_type: Mapped[str] = mapped_column(
-        String(32), nullable=False, comment="来源确认的 ETF 产品类型。"
+        String(80), nullable=False, comment="来源确认的 ETF 产品类型。"
     )
     management_mode: Mapped[str] = mapped_column(
-        String(24), nullable=False, comment="被动、主动或其他管理方式。"
+        String(80), nullable=False, comment="被动、主动或其他管理方式。"
     )
     manager_name: Mapped[str | None] = mapped_column(
-        String(200), nullable=True, comment="来源提供的管理人原文；未知时为空。"
+        String(160), nullable=True, comment="来源提供的管理人原文；未知时为空。"
     )
     custodian_name: Mapped[str | None] = mapped_column(
-        String(200), nullable=True, comment="来源提供的托管人原文；未知时为空。"
+        String(160), nullable=True, comment="来源提供的托管人原文；未知时为空。"
     )
     established_on: Mapped[date | None] = mapped_column(
         Date, nullable=True, comment="基金成立日期；缺失不由 listing 日期代替。"
@@ -339,7 +344,7 @@ class EtfDailyBarRevision(Base):
         Numeric(28, 8), nullable=False, comment="成交量原始标准化数值。"
     )
     volume_unit: Mapped[str] = mapped_column(
-        String(16), nullable=False, comment="成交量单位，股和手不可混用。"
+        String(40), nullable=False, comment="成交量单位，股和手不可混用。"
     )
     amount_value: Mapped[Decimal] = mapped_column(
         Numeric(24, 4), nullable=False, comment="成交额标准化数值。"
@@ -348,7 +353,7 @@ class EtfDailyBarRevision(Base):
         CHAR(3), nullable=False, comment="成交额与报价币种 ISO 代码。"
     )
     trade_status: Mapped[str | None] = mapped_column(
-        String(24), nullable=True, comment="来源明确的交易状态；缺失不从成交量推断。"
+        String(80), nullable=True, comment="来源明确的交易状态；缺失不从成交量推断。"
     )
     source_published_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="可验证来源发布时间；无证据时为空。"
@@ -620,10 +625,10 @@ class EtfStatusRevision(Base):
         String(16), nullable=False, comment="交易、申购或赎回状态维度。"
     )
     status_code: Mapped[str] = mapped_column(
-        String(24), nullable=False, comment="来源确认的该维度状态码。"
+        String(80), nullable=False, comment="来源确认的该维度状态码。"
     )
     reason: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="状态变化原因原文或受控说明。"
+        String(500), nullable=True, comment="状态变化原因原文或受控说明。"
     )
     effective_from: Mapped[date] = mapped_column(Date, nullable=False, comment="状态开始适用日期。")
     effective_to: Mapped[date | None] = mapped_column(

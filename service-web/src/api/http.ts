@@ -96,11 +96,18 @@ async function readJsonBody(response: Response): Promise<unknown> {
   return contentType.includes("json") ? response.json() : undefined;
 }
 
-/** 发送携带 cookie 的 POST JSON 请求，并返回载荷及响应元数据。 */
-export async function requestJsonWithMetadata<T>(
+/** 描述可能由条件请求返回 204 的完整 HTTP 读取结果。 */
+export interface JsonHttpResponse<T> {
+  data: T | undefined;
+  headers: Headers;
+  status: number;
+}
+
+/** 发送携带 cookie 的 POST JSON 请求，并保留 204 与实体响应的区别。 */
+export async function requestJsonResponse<T>(
   path: string,
   options: JsonRequestOptions,
-): Promise<{ data: T; headers: Headers }> {
+): Promise<JsonHttpResponse<T>> {
   const headers = new Headers(options.headers);
   headers.set("Accept", "application/json");
 
@@ -127,7 +134,17 @@ export async function requestJsonWithMetadata<T>(
     );
   }
 
-  return { data: payload as T, headers: response.headers };
+  return { data: payload as T | undefined, headers: response.headers, status: response.status };
+}
+
+/** 发送携带 cookie 的 POST JSON 请求，并返回必须存在的载荷及响应元数据。 */
+export async function requestJsonWithMetadata<T>(
+  path: string,
+  options: JsonRequestOptions,
+): Promise<{ data: T; headers: Headers }> {
+  const response = await requestJsonResponse<T>(path, options);
+
+  return { data: response.data as T, headers: response.headers };
 }
 
 /** 发送一个 POST JSON 请求，并仅返回成功载荷。 */

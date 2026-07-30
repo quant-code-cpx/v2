@@ -10,6 +10,7 @@ import {
   IsISO8601,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Matches,
   Max,
@@ -22,6 +23,10 @@ import { DATE_ONLY_PATTERN, OFFSET_DATE_TIME_PATTERN } from './temporal-patterns
 
 /** 约束估值方法学、指标集合、日期窗、双时态与分页范围。 */
 export class ListValuationsQueryDto {
+  /** 绑定 data-status 返回的精确估值 publication。 */
+  @IsUUID()
+  public readonly dataVersion!: string;
+
   /** 显式选择唯一估值方法学代码。 */
   @IsString()
   @Matches(/^[a-z][a-z0-9_.-]{2,79}$/)

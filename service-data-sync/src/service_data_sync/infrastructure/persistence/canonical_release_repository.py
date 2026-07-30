@@ -24,6 +24,7 @@ from service_data_sync.application.ports.canonical_release import (
     PublishedCanonicalRelease,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.fenced_execution import current_fenced_execution
 from service_data_sync.infrastructure.database.models.canonical import (
     CanonicalCheckpoint,
     CanonicalDataset,
@@ -59,21 +60,43 @@ class SqlAlchemyCanonicalReleaseRepository(CanonicalReleaseRepository):
         *,
         candidate: CanonicalReleaseCandidate,
         write_facts: Callable[[Session, UUID], None] | None,
+        write_publication: Callable[[Session, UUID, UUID, UUID], None] | None = None,
+        write_visibility: Callable[[Session, UUID, UUID, UUID], None] | None = None,
+        record_fenced_progress: bool = True,
     ) -> PublishedCanonicalRelease:
         """在 `release` 创建与 `publication` 切换之间写入强类型事实，消除非空外键循环。
 
         回调失败会使整个事务回滚，避免消费者看到没有事实行的已发布版本。
         """
         with self._database.transaction() as session:
-            return _publish_in_session(session, candidate=candidate, write_facts=write_facts)
+            return _publish_in_session(
+                session,
+                candidate=candidate,
+                write_facts=write_facts,
+                write_publication=write_publication,
+                write_visibility=write_visibility,
+                record_fenced_progress=record_fenced_progress,
+            )
 
     def publish_prepared(
         self,
         *,
         prepare_candidate: Callable[[Session], CanonicalReleaseCandidate],
         write_facts: Callable[[Session, CanonicalReleaseCandidate, UUID], None],
+        write_publication: (
+            Callable[[Session, CanonicalReleaseCandidate, UUID, UUID, UUID], None] | None
+        ) = None,
+        write_visibility: (
+            Callable[[Session, CanonicalReleaseCandidate, UUID, UUID, UUID], None] | None
+        ) = None,
+        record_fenced_progress: bool = True,
     ) -> PublishedCanonicalRelease:
-        """在同一事务内准备来源/运行候选、写 revision 并切换 publication。"""
+        """在同一事务内准备候选、事实、聚合清单和可见性证据并切换 publication。
+
+        `write_publication` 只在创建新 publication 时运行，保持聚合组件清单幂等语义；
+        `write_visibility` 在新建和复用当前 publication 时都运行，供窗口覆盖等独立知识
+        版本原子关联最终选中的 publication。
+        """
         with self._database.transaction() as session:
             candidate = prepare_candidate(session)
             return _publish_in_session(
@@ -82,7 +105,63 @@ class SqlAlchemyCanonicalReleaseRepository(CanonicalReleaseRepository):
                 write_facts=lambda current_session, release_id: write_facts(
                     current_session, candidate, release_id
                 ),
+                write_publication=(
+                    None
+                    if write_publication is None
+                    else (
+                        lambda current_session, publication_id, data_version, release_id: (
+                            write_publication(
+                                current_session,
+                                candidate,
+                                publication_id,
+                                data_version,
+                                release_id,
+                            )
+                        )
+                    )
+                ),
+                write_visibility=(
+                    None
+                    if write_visibility is None
+                    else (
+                        lambda current_session, publication_id, data_version, release_id: (
+                            write_visibility(
+                                current_session,
+                                candidate,
+                                publication_id,
+                                data_version,
+                                release_id,
+                            )
+                        )
+                    )
+                ),
+                record_fenced_progress=record_fenced_progress,
             )
+
+    def publish_in_session(
+        self,
+        *,
+        session: Session,
+        candidate: CanonicalReleaseCandidate,
+        write_facts: Callable[[Session, UUID], None] | None = None,
+        write_publication: Callable[[Session, UUID, UUID, UUID], None] | None = None,
+        write_visibility: Callable[[Session, UUID, UUID, UUID], None] | None = None,
+        record_fenced_progress: bool = True,
+    ) -> PublishedCanonicalRelease:
+        """在调用方既有事务中复用统一 release 发布路径。
+
+        部分早期仓储已先在同一事务写入强类型 revision；它们仍必须通过这里创建真实
+        `DatasetRelease` 并让 `DatasetPublication.release_id` 成为非空外键，不能另写一套
+        publication SQL 或开启嵌套事务。
+        """
+        return _publish_in_session(
+            session,
+            candidate=candidate,
+            write_facts=write_facts,
+            write_publication=write_publication,
+            write_visibility=write_visibility,
+            record_fenced_progress=record_fenced_progress,
+        )
 
 
 def _publish_in_session(
@@ -90,6 +169,9 @@ def _publish_in_session(
     *,
     candidate: CanonicalReleaseCandidate,
     write_facts: Callable[[Session, UUID], None] | None,
+    write_publication: Callable[[Session, UUID, UUID, UUID], None] | None = None,
+    write_visibility: Callable[[Session, UUID, UUID, UUID], None] | None = None,
+    record_fenced_progress: bool = True,
 ) -> PublishedCanonicalRelease:
     """执行已准备候选的统一发布步骤；调用方必须已开启同一数据库事务。
 
@@ -119,6 +201,15 @@ def _publish_in_session(
     if current is not None and current.release_id == release.release_id:
         # 重试命中当前内容时不创建新数据版本，只推进受同一栅栏保护的处理水位。
         _advance_checkpoint(session, candidate=candidate, release_id=release.release_id)
+        if write_visibility is not None:
+            write_visibility(
+                session,
+                current.publication_id,
+                current.data_version,
+                release.release_id,
+            )
+        if record_fenced_progress:
+            _record_fenced_publication_progress(candidate, data_version=current.data_version)
         return PublishedCanonicalRelease(
             release_id=release.release_id,
             data_version=current.data_version,
@@ -152,11 +243,18 @@ def _publish_in_session(
             quality_status=candidate.quality.status,
             published_at=now,
             superseded_at=None,
-            effective_as_of=candidate.fact_max,
+            effective_as_of=candidate.publication_effective_as_of or candidate.fact_max,
             knowledge_cutoff=now,
         )
     )
+    if write_publication is not None:
+        # 聚合组件清单必须和 publication 指针在同一事务中写入，不能提交后补齐。
+        write_publication(session, publication_id, data_version, release.release_id)
     _advance_checkpoint(session, candidate=candidate, release_id=release.release_id)
+    if write_visibility is not None:
+        write_visibility(session, publication_id, data_version, release.release_id)
+    if record_fenced_progress:
+        _record_fenced_publication_progress(candidate, data_version=data_version)
     return PublishedCanonicalRelease(
         release_id=release.release_id,
         data_version=data_version,
@@ -164,6 +262,16 @@ def _publish_in_session(
         reused_publication=False,
         published_at=candidate.created_at,
     )
+
+
+def _record_fenced_publication_progress(
+    candidate: CanonicalReleaseCandidate, *, data_version: UUID
+) -> None:
+    """把已发布候选的真实记录数交给当前控制面执行，普通仓储调用不产生副作用。"""
+    execution = current_fenced_execution()
+    if execution is not None:
+        execution.record_publication_progress(record_count=len(candidate.records))
+        execution.record_checkpoint(kind="data-version", position=str(data_version))
 
 
 def _validate_candidate_references(session: Session, candidate: CanonicalReleaseCandidate) -> None:

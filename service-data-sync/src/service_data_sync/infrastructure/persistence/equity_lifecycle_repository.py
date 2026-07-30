@@ -24,13 +24,17 @@ from service_data_sync.application.ports.equity_lifecycle import (
 )
 from service_data_sync.domain.equity import Exchange
 from service_data_sync.domain.equity_master import (
+    EquityIdentityResolutionStatus,
     EquityLifecycleEntry,
     EquityLifecycleEvidenceKind,
     EquityLifecycleStatus,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.fenced_execution import (
+    current_fenced_execution,
+)
 from service_data_sync.infrastructure.persistence.equity_identity_resolver import (
-    require_single_confirmed_identity_on_connection,
+    resolve_identity_on_connection,
 )
 from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 
@@ -52,12 +56,13 @@ from ..database.models.equity.identity.equity_master_snapshot import (
 from ..database.models.equity.identity.equity_master_snapshot_member import (
     EquityMasterSnapshotMember,
 )
+from ..database.models.equity.identity.equity_name_version import EquityNameVersion
 from ..database.models.publication.dataset_publication import (
     DatasetPublication,
 )
 
 _CAPABILITY = "equity.lifecycle.explicit"
-_DATASET = "equity.master.catalog"
+_DATASET = "equity.lifecycle.explicit"
 
 
 class EquityLifecycleTransitionError(ValueError):
@@ -162,6 +167,10 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
                 observed_at=observed_at,
                 updated_at=now,
             )
+            _record_fenced_lifecycle_publication(
+                data_version=data_version,
+                record_count=len(entries),
+            )
         return PublishedEquityLifecycle(
             snapshot_id=snapshot_id,
             data_version=data_version,
@@ -252,19 +261,34 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
         source_batch_id: UUID,
         now: datetime,
     ) -> tuple[int, bool]:
-        """解析唯一确认身份、校验状态机并追加或复用生命周期事实。"""
-        try:
-            security_id = require_single_confirmed_identity_on_connection(
-                connection,
-                exchange=entry.identifier.exchange,
-                symbol=entry.identifier.symbol,
-                fact_dates=(entry.effective_on,),
-                known_at=now,
-            )
-        except ValueError as error:
+        """解析唯一确认身份；首次官方历史证据可安全冷启动或回填同一身份。"""
+        resolution = resolve_identity_on_connection(
+            connection,
+            exchange=entry.identifier.exchange,
+            symbol=entry.identifier.symbol,
+            fact_date=entry.effective_on,
+            known_at=now,
+        )
+        if resolution.status is EquityIdentityResolutionStatus.CONFLICT:
             raise EquityLifecycleTransitionError(
-                "lifecycle identity is not uniquely confirmed"
-            ) from error
+                "lifecycle identity conflicts at the official effective date"
+            )
+        if (
+            resolution.status is EquityIdentityResolutionStatus.RESOLVED
+            and resolution.identity_state == "CONFIRMED"
+            and resolution.security_id is not None
+        ):
+            security_id = resolution.security_id
+        elif resolution.status is EquityIdentityResolutionStatus.NOT_FOUND:
+            security_id = self._bootstrap_missing_identity(
+                connection,
+                entry=entry,
+                source_batch_id=source_batch_id,
+                now=now,
+            )
+            return security_id, True
+        else:
+            raise EquityLifecycleTransitionError("lifecycle identity is not uniquely confirmed")
         current = (
             connection.execute(
                 select(
@@ -377,6 +401,422 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
                 entry=entry,
             )
         return security_id, True
+
+    def _bootstrap_missing_identity(
+        self,
+        connection: Session,
+        *,
+        entry: EquityLifecycleEntry,
+        source_batch_id: UUID,
+        now: datetime,
+    ) -> int:
+        """按官方日期冷启动历史退市身份，或回填当前在册身份的观测日边界。
+
+        名称和上市日必须来自交易所行；缺少任一语义字段就拒绝创建永久身份。普通暂停、
+        复牌和更正必须先命中既有身份，不能借此入口猜测代码归属。
+        """
+        if entry.name is None or entry.listed_on is None:
+            raise EquityLifecycleTransitionError(
+                "lifecycle identity bootstrap requires official name and listed_on"
+            )
+        if (
+            entry.status is EquityLifecycleStatus.DELISTED
+            and entry.evidence_kind is EquityLifecycleEvidenceKind.EXPLICIT_DELISTING
+        ):
+            return self._bootstrap_historical_delisted_identity(
+                connection,
+                entry=entry,
+                source_batch_id=source_batch_id,
+                now=now,
+            )
+        if (
+            entry.status is EquityLifecycleStatus.LISTED
+            and entry.evidence_kind is EquityLifecycleEvidenceKind.EXPLICIT_LISTING
+        ):
+            return self._backfill_or_create_current_listing_identity(
+                connection,
+                entry=entry,
+                source_batch_id=source_batch_id,
+                now=now,
+            )
+        raise EquityLifecycleTransitionError(
+            "lifecycle transition cannot bootstrap an unknown identity"
+        )
+
+    def _bootstrap_historical_delisted_identity(
+        self,
+        connection: Session,
+        *,
+        entry: EquityLifecycleEntry,
+        source_batch_id: UUID,
+        now: datetime,
+    ) -> int:
+        """从官方上市/退市日期创建历史证券，并保留代码复用后的当前身份。"""
+        if (
+            entry.name is None
+            or entry.listed_on is None
+            or entry.delisted_on is None
+            or entry.delisted_on != entry.effective_on
+            or entry.listed_on >= entry.delisted_on
+        ):
+            raise EquityLifecycleTransitionError(
+                "historical delisting bootstrap requires ordered official dates"
+            )
+        try:
+            identifier_end = entry.delisted_on + timedelta(days=1)
+        except OverflowError as error:
+            raise EquityLifecycleTransitionError(
+                "historical identifier boundary exceeds date range"
+            ) from error
+        conflict = connection.execute(
+            select(EquityIdentifierVersion.version_id)
+            .where(
+                EquityIdentifierVersion.exchange == entry.identifier.exchange.value,
+                EquityIdentifierVersion.symbol == entry.identifier.symbol,
+                EquityIdentifierVersion.identity_state == "CONFIRMED",
+                EquityIdentifierVersion.known_to.is_(None),
+                EquityIdentifierVersion.effective_range.op("&&")(
+                    func.daterange(entry.listed_on, identifier_end, "[)")
+                ),
+            )
+            .limit(1)
+            .with_for_update()
+        ).scalar_one_or_none()
+        if conflict is not None:
+            raise EquityLifecycleTransitionError(
+                "historical lifecycle evidence overlaps an existing identity"
+            )
+        security_id = self._insert_instrument(
+            connection,
+            entry=entry,
+            listing_status="DELISTED",
+            now=now,
+        )
+        identifier_version_id = uuid4()
+        delisted_version_id = uuid4()
+        self._insert_identifier_version(
+            connection,
+            version_id=identifier_version_id,
+            security_id=security_id,
+            entry=entry,
+            effective_from=entry.listed_on,
+            effective_to=identifier_end,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        self._insert_name_version(
+            connection,
+            security_id=security_id,
+            entry=entry,
+            effective_from=entry.listed_on,
+            effective_to=identifier_end,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        self._insert_listing_version(
+            connection,
+            version_id=uuid4(),
+            security_id=security_id,
+            entry=entry,
+            status=EquityLifecycleStatus.LISTED,
+            effective_from=entry.listed_on,
+            effective_to=entry.delisted_on,
+            evidence_kind=EquityLifecycleEvidenceKind.EXPLICIT_LISTING,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        self._insert_listing_version(
+            connection,
+            version_id=delisted_version_id,
+            security_id=security_id,
+            entry=entry,
+            status=EquityLifecycleStatus.DELISTED,
+            effective_from=entry.delisted_on,
+            effective_to=None,
+            evidence_kind=EquityLifecycleEvidenceKind.EXPLICIT_DELISTING,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        connection.execute(
+            update(EquityInstrument)
+            .where(EquityInstrument.security_id == security_id)
+            .values(current_master_version=delisted_version_id)
+        )
+        return security_id
+
+    def _backfill_or_create_current_listing_identity(
+        self,
+        connection: Session,
+        *,
+        entry: EquityLifecycleEntry,
+        source_batch_id: UUID,
+        now: datetime,
+    ) -> int:
+        """用官方上市日修订当前目录的观测日知识版本，不创建重叠永久身份。"""
+        if entry.name is None or entry.listed_on is None or entry.listed_on != entry.effective_on:
+            raise EquityLifecycleTransitionError(
+                "listing bootstrap requires an official effective listed_on"
+            )
+        current = (
+            connection.execute(
+                select(
+                    EquityIdentifierVersion.version_id,
+                    EquityIdentifierVersion.security_id,
+                    EquityIdentifierVersion.identity_state,
+                    EquityIdentifierVersion.effective_from,
+                    EquityIdentifierVersion.effective_to,
+                )
+                .where(
+                    EquityIdentifierVersion.exchange == entry.identifier.exchange.value,
+                    EquityIdentifierVersion.symbol == entry.identifier.symbol,
+                    EquityIdentifierVersion.effective_to.is_(None),
+                    EquityIdentifierVersion.known_to.is_(None),
+                )
+                .with_for_update()
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if current is None:
+            security_id = self._insert_instrument(
+                connection,
+                entry=entry,
+                listing_status="LISTED",
+                now=now,
+            )
+        else:
+            if str(current["identity_state"]) != "CONFIRMED":
+                raise EquityLifecycleTransitionError("current listing identity is not confirmed")
+            if current["effective_from"] <= entry.listed_on:
+                raise EquityLifecycleTransitionError(
+                    "current listing identity cannot be backfilled safely"
+                )
+            security_id = int(current["security_id"])
+            self._close_single_observation_version(
+                connection,
+                model=EquityNameVersion,
+                security_id=security_id,
+                expected_effective_from=current["effective_from"],
+                now=now,
+            )
+            self._close_single_observation_version(
+                connection,
+                model=EquityListingStatusVersion,
+                security_id=security_id,
+                expected_effective_from=current["effective_from"],
+                now=now,
+            )
+            connection.execute(
+                update(EquityIdentifierVersion)
+                .where(EquityIdentifierVersion.version_id == current["version_id"])
+                .values(known_to=now)
+            )
+        identifier_version_id = uuid4()
+        listing_version_id = uuid4()
+        self._insert_identifier_version(
+            connection,
+            version_id=identifier_version_id,
+            security_id=security_id,
+            entry=entry,
+            effective_from=entry.listed_on,
+            effective_to=None,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        self._insert_name_version(
+            connection,
+            security_id=security_id,
+            entry=entry,
+            effective_from=entry.listed_on,
+            effective_to=None,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        self._insert_listing_version(
+            connection,
+            version_id=listing_version_id,
+            security_id=security_id,
+            entry=entry,
+            status=EquityLifecycleStatus.LISTED,
+            effective_from=entry.listed_on,
+            effective_to=None,
+            evidence_kind=EquityLifecycleEvidenceKind.EXPLICIT_LISTING,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        connection.execute(
+            update(EquityInstrument)
+            .where(EquityInstrument.security_id == security_id)
+            .values(
+                name=entry.name,
+                listing_status="LISTED",
+                master_confirmed_at=now,
+                current_master_version=listing_version_id,
+                updated_at=now,
+            )
+        )
+        return security_id
+
+    @staticmethod
+    def _close_single_observation_version(
+        connection: Session,
+        *,
+        model: type[EquityNameVersion] | type[EquityListingStatusVersion],
+        security_id: int,
+        expected_effective_from: date,
+        now: datetime,
+    ) -> None:
+        """只关闭首次目录创建的单一观测知识版本，拒绝覆盖已有历史修订。"""
+        rows = (
+            connection.execute(
+                select(model.version_id, model.effective_from, model.effective_to)
+                .where(
+                    model.security_id == security_id,
+                    model.known_to.is_(None),
+                )
+                .with_for_update()
+            )
+            .mappings()
+            .all()
+        )
+        if (
+            len(rows) != 1
+            or rows[0]["effective_from"] != expected_effective_from
+            or rows[0]["effective_to"] is not None
+        ):
+            raise EquityLifecycleTransitionError(
+                "official listing backfill conflicts with existing history"
+            )
+        connection.execute(
+            update(model).where(model.version_id == rows[0]["version_id"]).values(known_to=now)
+        )
+
+    @staticmethod
+    def _insert_instrument(
+        connection: Session,
+        *,
+        entry: EquityLifecycleEntry,
+        listing_status: str,
+        now: datetime,
+    ) -> int:
+        """创建由官方生命周期证据确认的永久证券锚。"""
+        return int(
+            connection.execute(
+                insert(EquityInstrument)
+                .values(
+                    instrument_id=uuid4(),
+                    exchange=entry.identifier.exchange.value,
+                    symbol=entry.identifier.symbol,
+                    name=entry.name,
+                    listing_status=listing_status,
+                    created_at=now,
+                    updated_at=now,
+                    master_confirmed_at=now,
+                    current_master_version=uuid4(),
+                )
+                .returning(EquityInstrument.security_id)
+            ).scalar_one()
+        )
+
+    @staticmethod
+    def _insert_identifier_version(
+        connection: Session,
+        *,
+        version_id: UUID,
+        security_id: int,
+        entry: EquityLifecycleEntry,
+        effective_from: date,
+        effective_to: date | None,
+        source_batch_id: UUID,
+        now: datetime,
+    ) -> None:
+        """写入带官方日期精度的确认代码版本。"""
+        connection.execute(
+            insert(EquityIdentifierVersion).values(
+                version_id=version_id,
+                security_id=security_id,
+                exchange=entry.identifier.exchange.value,
+                symbol=entry.identifier.symbol,
+                identity_state="CONFIRMED",
+                effective_from=effective_from,
+                effective_to=effective_to,
+                known_from=now,
+                known_to=None,
+                effective_date_precision="OFFICIAL_DATE",
+                source_batch_id=source_batch_id,
+                content_sha256=_identity_hash(entry, effective_from, effective_to),
+            )
+        )
+
+    @staticmethod
+    def _insert_name_version(
+        connection: Session,
+        *,
+        security_id: int,
+        entry: EquityLifecycleEntry,
+        effective_from: date,
+        effective_to: date | None,
+        source_batch_id: UUID,
+        now: datetime,
+    ) -> None:
+        """写入交易所官方简称的有效区间，不用代码或当前目录名称补位。"""
+        if entry.name is None:
+            raise EquityLifecycleTransitionError("official lifecycle name is unavailable")
+        connection.execute(
+            insert(EquityNameVersion).values(
+                version_id=uuid4(),
+                security_id=security_id,
+                name=entry.name,
+                effective_from=effective_from,
+                effective_to=effective_to,
+                known_from=now,
+                known_to=None,
+                effective_date_precision="OFFICIAL_DATE",
+                source_batch_id=source_batch_id,
+                content_sha256=_name_hash(entry, effective_from, effective_to),
+            )
+        )
+
+    @staticmethod
+    def _insert_listing_version(
+        connection: Session,
+        *,
+        version_id: UUID,
+        security_id: int,
+        entry: EquityLifecycleEntry,
+        status: EquityLifecycleStatus,
+        effective_from: date,
+        effective_to: date | None,
+        evidence_kind: EquityLifecycleEvidenceKind,
+        source_batch_id: UUID,
+        now: datetime,
+    ) -> None:
+        """写入由同一官方批次支持的上市或退市状态区间。"""
+        delisted_on = entry.delisted_on if status is EquityLifecycleStatus.DELISTED else None
+        connection.execute(
+            insert(EquityListingStatusVersion).values(
+                version_id=version_id,
+                security_id=security_id,
+                status=status.value,
+                listed_on=entry.listed_on,
+                delisted_on=delisted_on,
+                effective_from=effective_from,
+                effective_to=effective_to,
+                known_from=now,
+                known_to=None,
+                effective_date_precision="OFFICIAL_DATE",
+                evidence_kind=evidence_kind.value,
+                correction_approval_reference=None,
+                source_batch_id=source_batch_id,
+                content_sha256=_listing_hash(
+                    entry,
+                    status,
+                    effective_from,
+                    effective_to,
+                    evidence_kind,
+                ),
+            )
+        )
 
     @staticmethod
     def _close_identifier_after_delisting(
@@ -498,7 +938,7 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
                 row_ordinal=ordinal,
                 exchange=entry.identifier.exchange.value,
                 symbol=entry.identifier.symbol,
-                name=None,
+                name=entry.name,
                 listed_on=entry.listed_on,
                 candidate_status=entry.status.value,
                 candidate_status_date=entry.effective_on,
@@ -578,19 +1018,18 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
                 DatasetPublication.superseded_at.is_(None),
             )
         ).scalar_one_or_none()
-        if current is None:
-            raise EquityLifecycleTransitionError("lifecycle requires a catalog publication")
-        if not business_changed:
+        if current is not None and not business_changed:
             return UUID(str(current))
-        connection.execute(
-            update(DatasetPublication)
-            .where(
-                DatasetPublication.dataset == _DATASET,
-                DatasetPublication.partition_key == exchange.value,
-                DatasetPublication.superseded_at.is_(None),
+        if current is not None:
+            connection.execute(
+                update(DatasetPublication)
+                .where(
+                    DatasetPublication.dataset == _DATASET,
+                    DatasetPublication.partition_key == exchange.value,
+                    DatasetPublication.superseded_at.is_(None),
+                )
+                .values(superseded_at=published_at)
             )
-            .values(superseded_at=published_at)
-        )
         data_version = uuid4()
         connection.execute(
             insert(DatasetPublication).values(
@@ -606,6 +1045,14 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
             )
         )
         return data_version
+
+
+def _record_fenced_lifecycle_publication(*, data_version: UUID, record_count: int) -> None:
+    """把生命周期分区进度和版本交给当前 fenced 控制面同事务落账。"""
+    execution = current_fenced_execution()
+    if execution is not None:
+        execution.record_publication_progress(record_count=record_count)
+        execution.record_checkpoint(kind="data-version", position=str(data_version))
 
 
 def _is_transition_allowed(
@@ -654,6 +1101,7 @@ def _business_hash(entries: tuple[EquityLifecycleEntry, ...]) -> bytes:
                 {
                     "exchange": entry.identifier.exchange.value,
                     "symbol": entry.identifier.symbol,
+                    "name": entry.name,
                     "status": entry.status.value,
                     "effectiveOn": entry.effective_on.isoformat(),
                     "evidenceKind": entry.evidence_kind.value,
@@ -674,3 +1122,67 @@ def _business_hash(entries: tuple[EquityLifecycleEntry, ...]) -> bytes:
 def _entry_hash(entry: EquityLifecycleEntry) -> bytes:
     """生成单条显式证据业务哈希，便于审计修订而不暴露原始载荷。"""
     return _business_hash((entry,))
+
+
+def _identity_hash(
+    entry: EquityLifecycleEntry,
+    effective_from: date,
+    effective_to: date | None,
+) -> bytes:
+    """生成官方生命周期身份版本的稳定内容哈希。"""
+    return _stable_hash(
+        {
+            "exchange": entry.identifier.exchange.value,
+            "symbol": entry.identifier.symbol,
+            "effectiveFrom": effective_from.isoformat(),
+            "effectiveTo": None if effective_to is None else effective_to.isoformat(),
+            "identityState": "CONFIRMED",
+        }
+    )
+
+
+def _name_hash(
+    entry: EquityLifecycleEntry,
+    effective_from: date,
+    effective_to: date | None,
+) -> bytes:
+    """生成官方简称版本的稳定内容哈希。"""
+    return _stable_hash(
+        {
+            "name": entry.name,
+            "effectiveFrom": effective_from.isoformat(),
+            "effectiveTo": None if effective_to is None else effective_to.isoformat(),
+        }
+    )
+
+
+def _listing_hash(
+    entry: EquityLifecycleEntry,
+    status: EquityLifecycleStatus,
+    effective_from: date,
+    effective_to: date | None,
+    evidence_kind: EquityLifecycleEvidenceKind,
+) -> bytes:
+    """生成官方上市状态区间的稳定内容哈希。"""
+    return _stable_hash(
+        {
+            "status": status.value,
+            "listedOn": None if entry.listed_on is None else entry.listed_on.isoformat(),
+            "delistedOn": None if entry.delisted_on is None else entry.delisted_on.isoformat(),
+            "effectiveFrom": effective_from.isoformat(),
+            "effectiveTo": None if effective_to is None else effective_to.isoformat(),
+            "evidenceKind": evidence_kind.value,
+        }
+    )
+
+
+def _stable_hash(value: Mapping[str, object]) -> bytes:
+    """把版本业务字段序列化为确定性 SHA-256 摘要。"""
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).digest()

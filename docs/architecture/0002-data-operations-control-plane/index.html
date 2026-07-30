@@ -761,7 +761,7 @@ lease expiry:         RUNNING ─▶ INTERRUPTED ─▶ QUEUED 或 FAILED
         <ol class="sequence">
           <li>
             用户选择一个或最多 100 个数据集；每个 target
-            只显示自身支持的模式，批量快捷预设仅应用于交集。
+            只显示自身支持的模式与 <code>selectorKinds</code>，批量快捷预设仅应用于交集。
           </li>
           <li>
             无副作用 preflight 返回解析范围、预计分区/Provider
@@ -787,6 +787,14 @@ lease expiry:         RUNNING ─▶ INTERRUPTED ─▶ QUEUED 或 FAILED
           配不同请求体返回冲突。parent command 详情接口 权威返回聚合状态与有序
           child runs，页面不从分页 run 列表猜测批次。
         </aside>
+        <p>
+          每个同步 target 还冻结严格的业务 <code>selector</code>。它只允许
+          <code>GLOBAL</code>、<code>INSTRUMENT</code>、<code>SECTOR</code>、<code>SCHEME</code>、
+          <code>EXCHANGE</code>、<code>CONTRACT</code>、<code>ETF</code>、<code>MARGIN</code>、
+          <code>STOCK_CONNECT</code>、<code>TRADING_EVENT</code> 或 <code>INDEX</code> 的受限判别结构；
+          允许集由数据集 capability 返回。该字段使既有按证券、板块、交易所或合约的 CLI/Celery
+          能无损转换为 command，且不允许浏览器、API 或 task 透传 Provider 参数、URI 或凭据。
+        </p>
         <p>
           每个 run 在受理时冻结 Provider、真实上游、adapter 与方法学版本的
           <code>sourceSnapshot</code>；历史详情不得用当前目录来源覆盖。

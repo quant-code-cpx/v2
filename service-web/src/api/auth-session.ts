@@ -149,7 +149,10 @@ class AuthSession {
         query.queryKey[0] === "auth" ||
         query.queryKey[0] === "account" ||
         query.queryKey[0] === "users" ||
-        query.queryKey[0] === "audit-events",
+        query.queryKey[0] === "audit-events" ||
+        query.queryKey[0] === "market" ||
+        query.queryKey[0] === "market-data" ||
+        query.queryKey[0] === "stock-connect",
     });
     // 即使本来已匿名也强制发布，避免已挂载壳层保留过期身份 UI。
     this.setSnapshot({ status: "anonymous", anonymousReason }, true);

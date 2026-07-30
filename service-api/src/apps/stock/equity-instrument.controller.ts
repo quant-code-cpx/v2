@@ -86,14 +86,12 @@ export function writeConditionalResponse<T extends VersionedBody>(
   response: Response,
   result: ConditionalRead<T>,
 ): T | undefined {
-  if (result.etag !== undefined) response.setHeader('ETag', result.etag);
+  response.setHeader('ETag', result.etag);
   response.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
+  response.setHeader('X-Data-Version', result.dataVersion);
   if (result.status === 304) {
     response.status(204).send();
     return undefined;
-  }
-  if (result.body.dataVersion !== null) {
-    response.setHeader('X-Data-Version', result.body.dataVersion);
   }
   return result.body;
 }

@@ -6,6 +6,7 @@ import os
 from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from hashlib import sha256
 from uuid import UUID, uuid4
 
 import pytest
@@ -20,10 +21,13 @@ from service_data_sync.application.ports.stock_connect import StockConnectSource
 from service_data_sync.bootstrap.settings import load_settings
 from service_data_sync.domain.stock_connect import (
     StockConnectActiveSecurity,
+    StockConnectCalendarDay,
     StockConnectChannel,
+    StockConnectChannelStatus,
     StockConnectMarketDaily,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.models.canonical import DataSource
 from service_data_sync.infrastructure.database.models.equity.identity.equity_identifier_version import (  # noqa: E501
     EquityIdentifierVersion,
 )
@@ -33,12 +37,18 @@ from service_data_sync.infrastructure.database.models.equity.identity.equity_ins
 from service_data_sync.infrastructure.database.models.market import (
     MarketEntity,
     MarketInstrument,
+    StockConnectBundlePublication,
     StockConnectDisclosureRegime,
+    StockConnectOverviewGeneration,
+    StockConnectOverviewPublication,
     TradingVenue,
 )
 from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 from service_data_sync.infrastructure.persistence.sqlalchemy_market_data_access_repository import (
     SqlAlchemyMarketDataAccessRepository,
+)
+from service_data_sync.infrastructure.persistence.stock_connect_center_repository import (
+    SqlAlchemyStockConnectCenterRepository,
 )
 from service_data_sync.infrastructure.persistence.stock_connect_market_data_repository import (
     SqlAlchemyStockConnectMarketDataRepository,
@@ -69,6 +79,7 @@ def test_stock_connect_publications_are_read_from_independent_channel_releases()
                     source_kind="official",
                     rights_status="internal",
                     license_scope="integration_test_only",
+                    rights_evidence_ref=("license-audit:integration-stock-connect"),
                 )
             },
         )
@@ -80,7 +91,11 @@ def test_stock_connect_publications_are_read_from_independent_channel_releases()
         active = repository.publish_active_securities(
             channel=_CHANNEL,
             records=(_active_record(symbol),),
-            source=_source("c" * 64, "d" * 64, "market.stock_connect.active_security.snapshot"),
+            source=_source(
+                sha256(f"active-raw:{symbol}".encode()).hexdigest(),
+                sha256(f"active-normalized:{symbol}".encode()).hexdigest(),
+                "market.stock_connect.active_security.snapshot",
+            ),
         )
         reader = SqlAlchemyMarketDataAccessRepository(database)
         market_page = reader.query(
@@ -106,6 +121,12 @@ def test_stock_connect_publications_are_read_from_independent_channel_releases()
             ),
             after=None,
         )
+        with database.session() as session:
+            rights_evidence_ref = session.scalar(
+                select(DataSource.rights_evidence_ref).where(
+                    DataSource.code == "integration_stock_connect_official"
+                )
+            )
     finally:
         database.close()
 
@@ -118,6 +139,385 @@ def test_stock_connect_publications_are_read_from_independent_channel_releases()
     assert isinstance(active_values, Mapping)
     assert active_values["instrumentEntityRef"] == str(instrument_id)
     assert active_values["rank"] == 1
+    assert rights_evidence_ref == "license-audit:integration-stock-connect"
+
+
+@pytest.mark.integration
+def test_all_four_overview_advances_only_after_missing_channels_are_completed() -> None:
+    """第 2/3/4 通道前失败只推进健康单通道，幂等补齐后全四通道一次前移。"""
+    if os.environ.get("DATA_SYNC_RUN_INTEGRATION") != "1":
+        pytest.skip("set DATA_SYNC_RUN_INTEGRATION=1 after starting local infrastructure")
+    database = DatabaseClient.from_settings(load_settings())
+    channels = tuple(
+        StockConnectChannel(channel, direction)
+        for channel in ("SH", "SZ")
+        for direction in ("NORTHBOUND", "SOUTHBOUND")
+    )
+    old_date = date(2099, 7, 27)
+    new_date = date(2099, 7, 28)
+    full_set = "SH_NORTHBOUND,SH_SOUTHBOUND,SZ_NORTHBOUND,SZ_SOUTHBOUND"
+    northbound_set = "SH_NORTHBOUND,SZ_NORTHBOUND"
+    overview_channels = tuple(
+        sorted(f"{channel.channel}_{channel.direction}" for channel in channels)
+    )
+    old_generation_id = uuid4()
+    new_generation_id = uuid4()
+    approval = StockConnectSourceApproval(
+        provider_id="integration-stock-connect",
+        source_code="integration_stock_connect_official",
+        legal_name="港通集成测试官方来源",
+        source_kind="official",
+        rights_status="internal",
+        license_scope="integration_test_only",
+        rights_evidence_ref="license-audit:integration-stock-connect",
+    )
+    market_repository = SqlAlchemyStockConnectMarketDataRepository(
+        database,
+        approved_sources={"integration-stock-connect": approval},
+    )
+    center_repository = SqlAlchemyStockConnectCenterRepository(database)
+    try:
+        for channel in channels:
+            _publish_zero_bundle(
+                market_repository=market_repository,
+                center_repository=center_repository,
+                channel=channel,
+                trade_date=old_date,
+                overview_generation_id=old_generation_id,
+                overview_channels=overview_channels,
+            )
+        old_overview = _latest_overview_date(
+            database,
+            channel_set=full_set,
+        )
+        assert old_overview == old_date
+
+        for index, channel in enumerate(channels, start=1):
+            _publish_zero_bundle(
+                market_repository=market_repository,
+                center_repository=center_repository,
+                channel=channel,
+                trade_date=new_date,
+                overview_generation_id=new_generation_id,
+                overview_channels=overview_channels,
+            )
+            current = _latest_overview_date(
+                database,
+                channel_set=full_set,
+            )
+            assert current == (new_date if index == 4 else old_date)
+            assert _latest_overview_date(
+                database,
+                channel_set=northbound_set,
+            ) == (new_date if index == 4 else old_date)
+            if index == 1:
+                assert (
+                    _latest_bundle_date(
+                        database,
+                        channel_code="SH_NORTHBOUND",
+                    )
+                    == new_date
+                )
+
+        before_retry = _current_overview_versions(
+            database,
+            trade_date=new_date,
+            channel_set=full_set,
+        )
+        _publish_zero_bundle(
+            market_repository=market_repository,
+            center_repository=center_repository,
+            channel=channels[-1],
+            trade_date=new_date,
+            overview_generation_id=new_generation_id,
+            overview_channels=overview_channels,
+        )
+        after_retry = _current_overview_versions(
+            database,
+            trade_date=new_date,
+            channel_set=full_set,
+        )
+        historical_generation_id = uuid4()
+        for channel in channels:
+            _publish_zero_bundle(
+                market_repository=market_repository,
+                center_repository=center_repository,
+                channel=channel,
+                trade_date=old_date,
+                overview_generation_id=historical_generation_id,
+                overview_channels=overview_channels,
+            )
+        with database.session() as session:
+            historical_generation = session.get(
+                StockConnectOverviewGeneration,
+                (historical_generation_id, old_date),
+            )
+            assert historical_generation is not None
+            assert historical_generation.completed_at is not None
+        assert _latest_overview_date(database, channel_set=full_set) == new_date
+    finally:
+        database.close()
+
+    assert len(before_retry) == 1
+    assert after_retry == before_retry
+
+
+@pytest.mark.integration
+def test_overview_generation_honors_single_channel_and_direction_pair_selection() -> None:
+    """同向 pair 必须同 run 齐备后推进，单通道 generation 则可独立形成 overview。"""
+    if os.environ.get("DATA_SYNC_RUN_INTEGRATION") != "1":
+        pytest.skip("set DATA_SYNC_RUN_INTEGRATION=1 after starting local infrastructure")
+    database = DatabaseClient.from_settings(load_settings())
+    pair = (
+        StockConnectChannel("SH", "NORTHBOUND"),
+        StockConnectChannel("SZ", "NORTHBOUND"),
+    )
+    pair_codes = ("SH_NORTHBOUND", "SZ_NORTHBOUND")
+    pair_set = ",".join(pair_codes)
+    old_date = date(2099, 8, 9)
+    pair_date = date(2099, 8, 10)
+    single_date = date(2099, 8, 11)
+    approval = StockConnectSourceApproval(
+        provider_id="integration-stock-connect",
+        source_code="integration_stock_connect_official",
+        legal_name="港通集成测试官方来源",
+        source_kind="official",
+        rights_status="internal",
+        license_scope="integration_test_only",
+        rights_evidence_ref="license-audit:integration-stock-connect",
+    )
+    market_repository = SqlAlchemyStockConnectMarketDataRepository(
+        database,
+        approved_sources={"integration-stock-connect": approval},
+    )
+    center_repository = SqlAlchemyStockConnectCenterRepository(database)
+    try:
+        old_generation = uuid4()
+        for channel in pair:
+            _publish_zero_bundle(
+                market_repository=market_repository,
+                center_repository=center_repository,
+                channel=channel,
+                trade_date=old_date,
+                overview_generation_id=old_generation,
+                overview_channels=pair_codes,
+            )
+        pair_generation = uuid4()
+        _publish_zero_bundle(
+            market_repository=market_repository,
+            center_repository=center_repository,
+            channel=pair[0],
+            trade_date=pair_date,
+            overview_generation_id=pair_generation,
+            overview_channels=pair_codes,
+        )
+        assert _latest_bundle_date(database, channel_code="SH_NORTHBOUND") == pair_date
+        assert _latest_overview_date(database, channel_set=pair_set) == old_date
+        _publish_zero_bundle(
+            market_repository=market_repository,
+            center_repository=center_repository,
+            channel=pair[1],
+            trade_date=pair_date,
+            overview_generation_id=pair_generation,
+            overview_channels=pair_codes,
+        )
+        assert _latest_overview_date(database, channel_set=pair_set) == pair_date
+
+        _publish_zero_bundle(
+            market_repository=market_repository,
+            center_repository=center_repository,
+            channel=pair[0],
+            trade_date=single_date,
+            overview_generation_id=uuid4(),
+            overview_channels=("SH_NORTHBOUND",),
+        )
+        assert _latest_overview_date(database, channel_set="SH_NORTHBOUND") == single_date
+    finally:
+        database.close()
+
+
+def _publish_zero_bundle(
+    *,
+    market_repository: SqlAlchemyStockConnectMarketDataRepository,
+    center_repository: SqlAlchemyStockConnectCenterRepository,
+    channel: StockConnectChannel,
+    trade_date: date,
+    overview_generation_id: UUID,
+    overview_channels: tuple[str, ...],
+) -> None:
+    """发布一个零成交真实日包，使测试只聚焦 channel-set 可见性边界。"""
+    seed = f"{trade_date.isoformat()}:{channel.channel}:{channel.direction}"
+    raw_hash = sha256(f"raw:{seed}".encode()).hexdigest()
+    normalized_hash = sha256(f"normalized:{seed}".encode()).hexdigest()
+    market = market_repository.publish_market_daily(
+        channel=channel,
+        records=(
+            StockConnectMarketDaily(
+                trade_date=trade_date,
+                buy_amount=None,
+                sell_amount=None,
+                turnover_amount=Decimal("0"),
+                net_buy_amount=None,
+                quota_balance=None,
+                currency=("CNY" if channel.direction == "NORTHBOUND" else "HKD"),
+                availability_status="PARTIAL",
+                field_availability=(
+                    ("turnoverAmount", "REPORTED"),
+                    ("buyAmount", "SOURCE_MISSING"),
+                    ("sellAmount", "SOURCE_MISSING"),
+                    ("netBuyAmount", "NOT_APPLICABLE"),
+                    ("tradeCount", "SOURCE_MISSING"),
+                    ("etfTurnoverAmount", "SOURCE_MISSING"),
+                ),
+            ),
+        ),
+        source=_source(
+            raw_hash,
+            normalized_hash,
+            "market.stock_connect.market_stat.reported",
+        ),
+    )
+    calendar_ref = _official_ref(
+        source_code="HKEX_CALENDAR",
+        product_name=f"{trade_date.year}-calendar.csv",
+        digest=sha256(f"calendar:{trade_date.year}".encode()).hexdigest(),
+    )
+    status_digest = sha256(f"status:{seed}".encode()).hexdigest()
+    status = StockConnectChannelStatus(
+        trade_date=trade_date,
+        channel=channel.channel,
+        direction=channel.direction,
+        trading_day=True,
+        session_state="CLOSED",
+        session_availability=("DERIVED" if channel.direction == "NORTHBOUND" else "REPORTED"),
+        buy_order_accepted=None,
+        sell_order_accepted=None,
+        quota_state="SUFFICIENT",
+        quota_balance=None,
+        quota_currency="CNY",
+        observed_at=_OBSERVED_AT,
+        source_code=(
+            "HKEX_OMDC"
+            if channel.direction == "NORTHBOUND"
+            else "SSE_MDGW"
+            if channel.channel == "SH"
+            else "SZSE_STEP"
+        ),
+        product_name=f"integration-status-{channel.channel}-{channel.direction}",
+        source_publication_at=_OBSERVED_AT,
+        source_file_sha256=status_digest,
+    )
+    center_repository.publish_bundle(
+        channel=channel,
+        overview_generation_id=overview_generation_id,
+        overview_channels=overview_channels,
+        market_data_version=market.data_version,
+        active_data_version=None,
+        calendar=StockConnectCalendarDay(
+            calendar_date=trade_date,
+            northbound_trading=True,
+            southbound_trading=True,
+            hong_kong_state="OPEN",
+            mainland_state="OPEN",
+        ),
+        calendar_source_ref=calendar_ref,
+        calendar_observed_at=_OBSERVED_AT,
+        status=status,
+        quality_issues=(),
+        source_refs=(
+            calendar_ref,
+            _official_ref(
+                source_code="HKEX_DATA_MARKETPLACE",
+                product_name=f"integration-daily-{seed}",
+                digest=raw_hash,
+            ),
+            _official_ref(
+                source_code=status.source_code,
+                product_name=status.product_name,
+                digest=status_digest,
+            ),
+        ),
+    )
+
+
+def _official_ref(
+    *,
+    source_code: str,
+    product_name: str,
+    digest: str,
+) -> dict[str, object]:
+    """构造 publication 与 observed 语义分离的最小官方来源引用。"""
+    return {
+        "sourceCode": source_code,
+        "productName": product_name,
+        "sourcePublicationAvailability": "REPORTED",
+        "sourcePublicationAt": _OBSERVED_AT.isoformat().replace("+00:00", "Z"),
+        "sourceObservedAt": _OBSERVED_AT.isoformat().replace("+00:00", "Z"),
+        "sourceFileSha256": digest,
+    }
+
+
+def _latest_overview_date(
+    database: DatabaseClient,
+    *,
+    channel_set: str,
+) -> date | None:
+    """读取指定通道集合当前可见的最近共同交易日。"""
+    with database.session() as session:
+        return session.scalar(
+            select(StockConnectOverviewPublication.trade_date)
+            .where(
+                StockConnectOverviewPublication.channel_set == channel_set,
+                StockConnectOverviewPublication.superseded_at.is_(None),
+            )
+            .order_by(
+                StockConnectOverviewPublication.trade_date.desc(),
+                StockConnectOverviewPublication.published_at.desc(),
+            )
+            .limit(1)
+        )
+
+
+def _latest_bundle_date(
+    database: DatabaseClient,
+    *,
+    channel_code: str,
+) -> date | None:
+    """读取单通道当前 bundle 日期，证明 partial generation 不阻塞健康通道详情。"""
+    channel, direction = channel_code.split("_", maxsplit=1)
+    with database.session() as session:
+        return session.scalar(
+            select(StockConnectBundlePublication.trade_date)
+            .where(
+                StockConnectBundlePublication.channel == channel,
+                StockConnectBundlePublication.direction == direction,
+                StockConnectBundlePublication.superseded_at.is_(None),
+            )
+            .order_by(
+                StockConnectBundlePublication.trade_date.desc(),
+                StockConnectBundlePublication.published_at.desc(),
+            )
+            .limit(1)
+        )
+
+
+def _current_overview_versions(
+    database: DatabaseClient,
+    *,
+    trade_date: date,
+    channel_set: str,
+) -> tuple[str, ...]:
+    """读取同日同集合的当前版本，幂等补跑不得产生第二个 current。"""
+    with database.session() as session:
+        return tuple(
+            session.scalars(
+                select(StockConnectOverviewPublication.data_version).where(
+                    StockConnectOverviewPublication.trade_date == trade_date,
+                    StockConnectOverviewPublication.channel_set == channel_set,
+                    StockConnectOverviewPublication.superseded_at.is_(None),
+                )
+            )
+        )
 
 
 def _seed_venue_and_regime(database: DatabaseClient) -> UUID:

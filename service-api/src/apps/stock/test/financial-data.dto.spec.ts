@@ -8,11 +8,14 @@ import { GetFinancialReportQueryDto } from '../dto/get-financial-report-query.dt
 import { ListFinancialMetricsQueryDto } from '../dto/list-financial-metrics-query.dto.js';
 import { ListValuationsQueryDto } from '../dto/list-valuations-query.dto.js';
 
+const dataVersion = '00000000-0000-4000-8000-000000000001';
+
 /** 验证财务公开查询在进入 service 前完成数组、分页和点时边界约束。 */
 describe('financial query DTOs', () => {
   /** 验证重复参数被规范为数组，数字参数被转换且合法平台派生筛选可通过。 */
   it('normalizes valid derived metric filters and numeric pagination', async () => {
     const input = plainToInstance(ListFinancialMetricsQueryDto, {
+      dataVersion,
       origin: 'PLATFORM_DERIVED',
       methodologyCode: 'platform.financial-derivation',
       methodologyVersion: '1',
@@ -32,6 +35,7 @@ describe('financial query DTOs', () => {
   /** 验证指标数量、来源、游标长度和页大小不能绕过 DTO 上限。 */
   it('rejects invalid origin, unbounded filters, cursor and page size', async () => {
     const input = plainToInstance(ListFinancialMetricsQueryDto, {
+      dataVersion,
       origin: 'MIXED',
       methodologyCode: 'platform.financial-derivation',
       methodologyVersion: '1',
@@ -47,9 +51,11 @@ describe('financial query DTOs', () => {
   /** 验证报表详情和估值只接受受控指标数量及严格日期。 */
   it('rejects oversized report filters and malformed valuation dates', async () => {
     const report = plainToInstance(GetFinancialReportQueryDto, {
+      dataVersion,
       metric: Array.from({ length: 101 }, metricCode),
     });
     const valuation = plainToInstance(ListValuationsQueryDto, {
+      dataVersion,
       methodologyCode: 'eastmoney.valuation',
       methodologyVersion: '1',
       metric: ['pe_ttm'],

@@ -78,6 +78,20 @@ class FakeRepository:
         return PublishedSectorCatalog(uuid4(), inserted_count=2, unchanged_count=0)
 
 
+class FinalPublicationRepository(FakeRepository):
+    """要求目录 publication 前先武装控制面终态的仓储替身。"""
+
+    def __init__(self, raw_store: FakeRawPayloadStore) -> None:
+        """初始化尚未进入最终 publication 的测试状态。"""
+        super().__init__(raw_store)
+        self.final_publication_armed = False
+
+    def publish_catalog(self, **kwargs: object) -> PublishedSectorCatalog:
+        """确认终态回调已经在目录 canonical 写事务前执行。"""
+        assert self.final_publication_armed
+        return super().publish_catalog(**kwargs)
+
+
 def test_catalog_sync_archives_raw_evidence_and_activates_sorted_entries() -> None:
     """目录同步必须先归档完整供应商载荷，再发布排序后的稳定代码和名称。"""
     raw_store = FakeRawPayloadStore()
@@ -95,3 +109,46 @@ def test_catalog_sync_archives_raw_evidence_and_activates_sorted_entries() -> No
     assert result.inserted_count == 2
     assert raw_store.payloads[0].payload == b'{"provider":true}'
     assert [entry.identifier.code for entry in repository.entries] == ["BK0001", "BK0002"]
+
+
+def test_catalog_sync_passes_observation_date_and_arms_final_publication() -> None:
+    """当前目录观察日必须传给 adapter，并在最终 catalog publication 前武装 fenced 终态。"""
+    raw_store = FakeRawPayloadStore()
+    repository = FinalPublicationRepository(raw_store)
+    callback_calls: list[str] = []
+
+    def arm_final_publication() -> None:
+        """模拟 dispatcher 将 run 成功终态放入紧随其后的数据库事务。"""
+        repository.final_publication_armed = True
+        callback_calls.append("armed")
+
+    class ObservationDateSource(FakeSource):
+        """断言目录用例不丢失控制面冻结的具名观察日。"""
+
+        async def fetch(self, request: SourceRequest) -> ProviderBatch:
+            """验证观察日参数后复用固定中立目录响应。"""
+            assert request.parameters == (
+                ("sectorScheme", "eastmoney.industry"),
+                ("observationDate", "2026-07-29"),
+            )
+            return await super().fetch(
+                SourceRequest(
+                    capability=request.capability,
+                    parameters=(("sectorScheme", "eastmoney.industry"),),
+                )
+            )
+
+    result = asyncio.run(
+        SectorCatalogSyncService(
+            source=ObservationDateSource(),
+            repository=cast(SectorMarketDataRepository, repository),
+            raw_payload_store=raw_store,
+        ).sync(
+            scheme=SectorScheme.EASTMONEY_INDUSTRY,
+            observation_date=datetime(2026, 7, 29, tzinfo=UTC).date(),
+            before_final_publication=arm_final_publication,
+        )
+    )
+
+    assert result.inserted_count == 2
+    assert callback_calls == ["armed"]

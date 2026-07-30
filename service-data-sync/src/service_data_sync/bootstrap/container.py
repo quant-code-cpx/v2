@@ -32,9 +32,20 @@ from service_data_sync.infrastructure.providers.akshare import (
     AkshareExchangeEquityLifecycleAdapter,
     AkshareP0MarketDataAdapter,
     AkshareSinaAdjustmentFactorsAdapter,
+    AkshareSwIndustrySnapshotAdapter,
     AkshareTencentDailyBarsAdapter,
     AkshareThsMoneyFlowAdapter,
 )
+from service_data_sync.infrastructure.providers.akshare.eastmoney_http import (
+    install_eastmoney_request_compatibility,
+)
+from service_data_sync.infrastructure.providers.official import (
+    OfficialStockConnectAdapter,
+    OfficialStockConnectConfig,
+)
+from service_data_sync.infrastructure.providers.tushare import TushareMarketOverviewAdapter
+
+_EQUITY_CATALOG_MIN_TIMEOUT_SECONDS = 180
 
 
 @dataclass
@@ -89,7 +100,52 @@ def build_source_registry(settings: Settings) -> SourceRegistry:
     adapter。这样关闭某个实验性能力时，不会影响已批准的独立数据集。
     """
     registry = SourceRegistry()
+    if settings.stock_connect_enabled:
+        registry.register(
+            OfficialStockConnectAdapter(
+                OfficialStockConnectConfig(
+                    sftp_host=settings.hkex_sftp_host,
+                    sftp_port=settings.hkex_sftp_port,
+                    sftp_username=settings.hkex_sftp_username,
+                    sftp_private_key_path=settings.hkex_sftp_private_key_path,
+                    sftp_private_key_passphrase=(
+                        settings.hkex_sftp_private_key_passphrase.get_secret_value()
+                        if settings.hkex_sftp_private_key_passphrase is not None
+                        else None
+                    ),
+                    sftp_known_hosts_path=settings.hkex_sftp_known_hosts_path,
+                    sh_daily_path_template=settings.hkex_sh_daily_path_template,
+                    sz_daily_path_template=settings.hkex_sz_daily_path_template,
+                    securities_master_path_template=(settings.hkex_securities_master_path_template),
+                    securities_master_profile_manifest_path=(
+                        settings.hkex_securities_master_profile_manifest_path
+                    ),
+                    securities_master_profile_manifest_sha256=(
+                        settings.hkex_securities_master_profile_manifest_sha256
+                    ),
+                    calendar_url_template=settings.hkex_calendar_url_template,
+                    calendar_manifest_path=settings.hkex_calendar_manifest_path,
+                    sftp_delivery_manifest_path=(settings.hkex_sftp_delivery_manifest_path),
+                    status_delivery_root=settings.stock_connect_status_delivery_root,
+                    status_manifest_path=settings.stock_connect_status_manifest_path,
+                    status_required_from=settings.stock_connect_status_required_from,
+                    omdc_status_path_template=settings.hkex_omdc_status_path_template,
+                    sse_status_path_template=settings.sse_mdgw_status_path_template,
+                    szse_status_path_template=settings.szse_step_status_path_template,
+                    request_timeout_seconds=(settings.stock_connect_request_timeout_seconds),
+                    preflight_timeout_seconds=(settings.stock_connect_preflight_timeout_seconds),
+                    min_partitions_per_minute=(settings.stock_connect_min_partitions_per_minute),
+                    delivery_expiry_safety_seconds=(
+                        settings.stock_connect_delivery_expiry_safety_seconds
+                    ),
+                    max_delivery_bytes=settings.stock_connect_max_delivery_bytes,
+                    max_manifest_bytes=settings.stock_connect_max_manifest_bytes,
+                    max_zip_compression_ratio=(settings.stock_connect_max_zip_compression_ratio),
+                )
+            )
+        )
     if settings.akshare_enabled:
+        install_eastmoney_request_compatibility()
         # P0 CLI 默认精确选择 `provider_id=akshare`；统一 adapter 避免同名 provider 注册歧义。
         registry.register(
             AkshareP0MarketDataAdapter(
@@ -103,7 +159,11 @@ def build_source_registry(settings: Settings) -> SourceRegistry:
         )
         registry.register(
             AkshareEastmoneyEquityCatalogAdapter(
-                request_timeout_seconds=settings.akshare_request_timeout_seconds
+                # 全市场目录单次真实抓取明显长于普通单证券请求，只扩大这一 adapter 的墙钟预算。
+                request_timeout_seconds=max(
+                    settings.akshare_request_timeout_seconds,
+                    _EQUITY_CATALOG_MIN_TIMEOUT_SECONDS,
+                )
             )
         )
         registry.register(
@@ -139,7 +199,9 @@ def build_source_registry(settings: Settings) -> SourceRegistry:
                     request_timeout_seconds=(
                         settings.financial_request_timeout_seconds
                         or settings.akshare_request_timeout_seconds
-                    )
+                    ),
+                    max_concurrency=settings.financial_max_concurrency or 1,
+                    requests_per_minute=settings.financial_requests_per_minute,
                 )
             )
         if settings.money_flow_enabled:
@@ -184,6 +246,30 @@ def build_source_registry(settings: Settings) -> SourceRegistry:
                         request_timeout_seconds=settings.akshare_request_timeout_seconds
                     )
                 )
+            if settings.sw_sector_enabled:
+                registry.register(
+                    AkshareSwIndustrySnapshotAdapter(
+                        request_timeout_seconds=settings.akshare_request_timeout_seconds
+                    )
+                )
+    if settings.tushare_enabled:
+        token = settings.tushare_token
+        if token is None:
+            # Settings 已先行校验；保留防御分支，避免未来绕过配置入口时创建空凭据 adapter。
+            raise ValueError("DATA_SYNC_TUSHARE_TOKEN is required")
+        registry.register(
+            TushareMarketOverviewAdapter(
+                token=token.get_secret_value(),
+                timeout_seconds=settings.tushare_request_timeout_seconds,
+                response_row_limit=settings.tushare_response_row_limit,
+                minimum_entitlement_points=settings.tushare_minimum_entitlement_points,
+                max_requests_per_minute=settings.tushare_max_requests_per_minute,
+                max_retries=settings.tushare_max_retries,
+                retry_base_seconds=settings.tushare_retry_base_seconds,
+                license_scope=settings.market_data_license_scope.value,
+                license_reference=settings.market_data_license_reference,
+            )
+        )
     return registry
 
 

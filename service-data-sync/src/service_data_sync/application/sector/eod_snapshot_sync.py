@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -96,8 +97,13 @@ class SectorEodSnapshotSyncService:
         trade_date: date,
         source_cutoff_at: datetime,
         execution_mode: SectorEodExecutionMode = SectorEodExecutionMode.SHADOW,
+        before_final_publication: Callable[[], None] | None = None,
     ) -> SectorEodSnapshotSyncResult:
-        """归档完整观察，并按受控模式保存 candidate 或原子发布目标交易日版本。"""
+        """归档完整观察，并按受控模式保存 candidate 或原子发布目标交易日版本。
+
+        只有 `PUBLISH` 路径会消费 `before_final_publication`；调用方据此把末次
+        canonical 写入与控制面 run 终态绑定到同一 PostgreSQL 提交事务。
+        """
         if source_cutoff_at.tzinfo is None:
             raise ValueError("source_cutoff_at must include a timezone")
         require_open_trading_day(self._trading_calendar, trade_date=trade_date)
@@ -143,6 +149,7 @@ class SectorEodSnapshotSyncService:
                 or hashlib.sha256(_SCHEMA.encode()).hexdigest(),
                 upstream_source=batch.upstream_source,
                 execution_mode=execution_mode,
+                before_final_publication=before_final_publication,
             )
         except Exception as error:
             _mark_run_failed(self._repository, run=run, error=error)
@@ -155,8 +162,13 @@ class SectorEodSnapshotSyncService:
         trade_date: date,
         source_cutoff_at: datetime,
         execution_mode: SectorEodExecutionMode = SectorEodExecutionMode.SHADOW,
+        before_final_publication: Callable[[], None] | None = None,
     ) -> SectorEodSnapshotSyncResult:
-        """从 checkpoint 的 raw evidence 恢复，并按受控模式保存或发布。"""
+        """从 checkpoint 的 raw evidence 恢复，并按受控模式保存或发布。
+
+        重放虽然不访问 Provider，但仍会发布或推进 EOD checkpoint；因此 publication
+        模式同样必须由 fenced 控制面提供最终事务回调。
+        """
         if source_cutoff_at.tzinfo is None:
             raise ValueError("source_cutoff_at must include a timezone")
         require_open_trading_day(self._trading_calendar, trade_date=trade_date)
@@ -217,6 +229,7 @@ class SectorEodSnapshotSyncService:
                 source_batch_id=observation.source_batch_id,
                 quality_status=quality.status,
                 quality_results=quality.results,
+                before_final_publication=before_final_publication,
             )
             return _result(publication, execution_mode=execution_mode, run_id=run.run_id)
         except Exception as error:
@@ -239,6 +252,7 @@ class SectorEodSnapshotSyncService:
         schema_fingerprint: str,
         upstream_source: str | None,
         execution_mode: SectorEodExecutionMode,
+        before_final_publication: Callable[[], None] | None,
     ) -> SectorEodSnapshotSyncResult:
         """先归档原始观察，再登记 source batch、解析并按运行模式持久化。"""
         self._repository.renew_lease(run=run)
@@ -320,6 +334,7 @@ class SectorEodSnapshotSyncService:
             source_batch_id=observation.source_batch_id,
             quality_status=quality.status,
             quality_results=quality.results,
+            before_final_publication=before_final_publication,
         )
         return _result(publication, execution_mode=execution_mode, run_id=run.run_id)
 
@@ -665,6 +680,7 @@ def _store_passing_snapshot(
     source_batch_id: UUID,
     quality_status: str,
     quality_results: tuple[SectorEodQualityResult, ...],
+    before_final_publication: Callable[[], None] | None,
 ) -> PublishedSectorEodSnapshot:
     """将通过质量门的完整候选按 shadow 或 publish 模式交给仓储，禁止隐式发布。"""
     if execution_mode is SectorEodExecutionMode.SHADOW:
@@ -684,6 +700,8 @@ def _store_passing_snapshot(
             quality_status=quality_status,
             quality_results=quality_results,
         )
+    if before_final_publication is not None:
+        before_final_publication()
     return repository.publish_snapshot(
         scheme=scheme,
         trade_date=trade_date,

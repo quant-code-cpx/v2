@@ -40,31 +40,80 @@ class StoredEquityInstrument:
 
 @dataclass(frozen=True, slots=True)
 class PublishedDailyBars:
-    """描述一次已提交日线发布及其写入结果。
+    """描述一次已提交日线窗口及其 publication、覆盖和精确来源结果。
 
     `data_version` 是读取端应固定使用的不可变版本。
     两个计数分别说明新增事实和与既有内容相同的幂等记录。
+    合法空窗返回零记录 publication；来源不可用不会构造本结果。
     """
 
     data_version: UUID
     inserted_count: int
     unchanged_count: int
     instrument: StoredEquityInstrument
+    coverage_version: UUID
+    source_batch_id: UUID
+    publication_kind: str
 
 
 @dataclass(frozen=True, slots=True)
 class EquitySourceObservation:
-    """描述来源摘要及成功不留存或失败归档标记的标准观察。
+    """描述原始与标准化对象、来源版本和 schema 的完整观察。
 
-    `source_payload_sha256` 用于验证输入内容，`raw_uri` 指向失败证据或成功路径的不可回放标记。
-    `observed_at` 是服务观察来源的带时区时间。
+    两份真实对象各自保留摘要、定位、内容类型和字节数；覆盖 manifest 因而可复验从上游
+    响应到 canonical revision 的映射，而不需要伪造标准化来源。`observed_at` 是服务实际
+    观察上游的带时区知识时间。
     """
 
     provider_id: str
     capability: str
-    source_payload_sha256: str
+    raw_payload_sha256: str
     raw_uri: str
+    raw_content_type: str
+    raw_byte_size: int
+    normalized_payload_sha256: str
+    normalized_uri: str
+    normalized_content_type: str
+    normalized_byte_size: int
     observed_at: datetime
+    upstream_source: str
+    adapter_version: str
+    schema_fingerprint: str
+
+    def __post_init__(self) -> None:
+        """拒绝缺失、伪摘要或无时区来源观察，coverage 只能绑定可复验真实对象。"""
+        if self.observed_at.tzinfo is None:
+            raise ValueError("equity source observed_at must include a timezone")
+        if any(
+            not value.strip()
+            for value in (
+                self.provider_id,
+                self.capability,
+                self.raw_uri,
+                self.raw_content_type,
+                self.normalized_uri,
+                self.normalized_content_type,
+                self.upstream_source,
+                self.adapter_version,
+            )
+        ):
+            raise ValueError("equity source observation metadata is incomplete")
+        for digest in (
+            self.raw_payload_sha256,
+            self.normalized_payload_sha256,
+            self.schema_fingerprint,
+        ):
+            if len(digest) != 64 or any(
+                character not in "0123456789abcdef" for character in digest
+            ):
+                raise ValueError("equity source observation digest is invalid")
+        if self.raw_byte_size < 0 or self.normalized_byte_size < 0:
+            raise ValueError("equity source observation byte size is invalid")
+
+    @property
+    def source_payload_sha256(self) -> str:
+        """兼容既有来源账本字段名，并明确其值就是真实 raw 对象摘要。"""
+        return self.raw_payload_sha256
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +128,9 @@ class PublishedEquityDataset:
     inserted_count: int
     unchanged_count: int
     instrument: StoredEquityInstrument
+    coverage_version: UUID | None = None
+    source_batch_id: UUID | None = None
+    publication_kind: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,9 +143,10 @@ class EquityDatasetPublication:
 
 @dataclass(frozen=True, slots=True)
 class EquityAvailabilityObservation:
-    """表示不会产生 `canonical` 事实的同步结果，供读取方安全显示为空。
+    """保留旧任务或运维探针的非成功诊断观察。
 
-    这表示精确窗口的合法空集或来源不可用，不等于没有执行过同步，也不能作为行情数值或生命周期变化写入数据库。
+    新的合法空行情窗口必须使用零记录 publication 与 immutable coverage；本结构不构成成功
+    证据，不能被回填 finalizer、行情读取或生命周期逻辑消费。
     """
 
     availability: str
@@ -173,9 +226,9 @@ class RawPayloadStore(Protocol):
 
 
 class EquityDailyBarRepository(Protocol):
-    """负责标准日线写入和可用性观察的最小应用 `Protocol`。
+    """负责标准日线窗口事实或真实零记录 coverage 的最小应用 `Protocol`。
 
-    实现负责版本化、幂等和事实/非事实结果的互斥；应用服务只提交已解码、已校验的领域对象与来源摘要。
+    实现负责版本化、幂等及 DATA/零记录 publication 互斥；来源失败必须在调用前抛出。
     """
 
     def publish_daily_bars(
@@ -183,12 +236,11 @@ class EquityDailyBarRepository(Protocol):
         *,
         identifier: EquityIdentifier,
         bars: Sequence[EquityDailyBar],
-        provider_id: str,
-        source_payload_sha256: str,
-        raw_uri: str,
-        observed_at: datetime,
+        source: EquitySourceObservation,
+        start: date,
+        end: date,
     ) -> PublishedDailyBars:
-        """记录来源摘要和留证标记后，对标准日线进行版本化发布。"""
+        """原子发布标准日线 DATA 或通过质量门的零记录 coverage，并冻结精确来源身份。"""
         ...
 
     def record_daily_bar_availability(
@@ -202,7 +254,7 @@ class EquityDailyBarRepository(Protocol):
         provider_id: str | None,
         observed_at: datetime,
     ) -> EquityAvailabilityObservation:
-        """记录空集或来源不可用，禁止写入缺少业务事实的日线行。"""
+        """记录旧任务或运维探针诊断，不能替代成功 publication/coverage。"""
         ...
 
     def clear_daily_bar_availability(
@@ -213,7 +265,7 @@ class EquityDailyBarRepository(Protocol):
         end: date,
         cleared_at: datetime,
     ) -> None:
-        """在同一窗口成功发布真实日线后，终结旧的非事实可用性观测。"""
+        """在同一窗口形成 DATA 或零记录 coverage 后，终结旧诊断观测。"""
         ...
 
 
@@ -261,9 +313,10 @@ class EquityMarketDataRepository(EquityDailyBarRepository, Protocol):
         period: EquityBarPeriod,
         bars: Sequence[EquityPeriodBar],
         source: EquitySourceObservation,
-        window_end: date,
+        start: date,
+        end: date,
     ) -> PublishedEquityDataset:
-        """发布上游直接返回的周线或月线，禁止从日线聚合。"""
+        """发布上游原生周/月 DATA 或通过质量门的零记录 coverage，禁止从日线聚合。"""
         ...
 
     def publish_adjustment_factors(
@@ -283,9 +336,10 @@ class EquityMarketDataRepository(EquityDailyBarRepository, Protocol):
         identifier: EquityIdentifier,
         actions: Sequence[EquityCorporateAction],
         source: EquitySourceObservation,
-        window_end: date,
+        start: date,
+        end: date,
     ) -> PublishedEquityDataset:
-        """发布分红送转事件修订。"""
+        """发布精确闭区间内的分红送转修订与真实零记录 coverage。"""
         ...
 
     def publish_company_profile(
@@ -324,8 +378,9 @@ class EquityMarketDataRepository(EquityDailyBarRepository, Protocol):
         period: EquityBarPeriod,
         start: date,
         end: date,
+        known_at: datetime | None = None,
     ) -> Sequence[StoredEquityBar]:
-        """读取日、周或月独立 canonical 表中的当前行情。"""
+        """按可选 publication 知识截止点读取日、周或月独立 canonical 表。"""
         ...
 
     def list_adjustment_factors(
@@ -333,8 +388,9 @@ class EquityMarketDataRepository(EquityDailyBarRepository, Protocol):
         *,
         security_id: int,
         end: date,
+        known_at: datetime | None = None,
     ) -> Sequence[StoredAdjustmentFactor]:
-        """读取截止日期前的完整当前累计因子序列。"""
+        """按可选 publication 知识截止点读取完整累计因子序列。"""
         ...
 
     def list_corporate_actions(
@@ -343,10 +399,16 @@ class EquityMarketDataRepository(EquityDailyBarRepository, Protocol):
         security_id: int,
         start: date | None,
         end: date | None,
+        known_at: datetime | None = None,
     ) -> Sequence[StoredCorporateAction]:
-        """读取按报告期过滤的当前公司行动版本。"""
+        """按报告期和可选 publication 知识截止点读取公司行动版本。"""
         ...
 
-    def get_company_profile(self, *, security_id: int) -> StoredCompanyProfile | None:
-        """读取一只证券当前发布的公司概况。"""
+    def get_company_profile(
+        self,
+        *,
+        security_id: int,
+        known_at: datetime | None = None,
+    ) -> StoredCompanyProfile | None:
+        """按可选 publication 知识截止点读取一只证券公司概况。"""
         ...

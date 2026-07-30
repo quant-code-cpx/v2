@@ -275,13 +275,6 @@ class FakeRepository:
         del scheme, trade_date
         return None
 
-    def rollback_published_snapshot(
-        self, *, scheme: SectorScheme, trade_date: date, revision: int
-    ) -> SectorEodSnapshot:
-        """禁止同步编排测试误走运维 rollback 路径，保持替身职责单一。"""
-        del scheme, trade_date, revision
-        raise AssertionError("sync application must not rollback publication")
-
     def list_ranked_quotes(self, **_kwargs: object) -> tuple[RankedSectorEodQuote, ...]:
         """返回空排行；同步编排测试不经过 EOD 查询路径。"""
         return ()
@@ -289,6 +282,20 @@ class FakeRepository:
     def get_snapshot_quote(self, **_kwargs: object) -> RankedSectorEodQuote | None:
         """返回空单资源；同步编排测试不经过 EOD 查询路径。"""
         return None
+
+
+class FinalPublicationRepository(FakeRepository):
+    """要求 fenced 终态回调先执行的 EOD 仓储替身。"""
+
+    def __init__(self) -> None:
+        """初始化尚未武装最终 publication 的测试状态。"""
+        super().__init__()
+        self.final_publication_armed = False
+
+    def publish_snapshot(self, **kwargs: object) -> PublishedSectorEodSnapshot:
+        """验证控制面先武装终态，再进入同一 publication 事务。"""
+        assert self.final_publication_armed
+        return super().publish_snapshot(**kwargs)
 
 
 def test_sync_archives_raw_before_publishing_normalized_eod_snapshot() -> None:
@@ -322,6 +329,35 @@ def test_sync_archives_raw_before_publishing_normalized_eod_snapshot() -> None:
     assert isinstance(raw_uri, str)
     assert raw_uri.startswith("s3://test/raw/")
     assert len(repository.renewed_runs) >= 2
+
+
+def test_publish_sync_arms_fenced_finalizer_immediately_before_publication() -> None:
+    """PUBLISH 运行必须在 EOD publication 前调用控制面终态回调，shadow 不可触发它。"""
+    repository = FinalPublicationRepository()
+    calls: list[str] = []
+
+    def arm_final_publication() -> None:
+        """模拟 dispatcher 把 run 终态并入随后 canonical 写事务。"""
+        repository.final_publication_armed = True
+        calls.append("armed")
+
+    result = asyncio.run(
+        SectorEodSnapshotSyncService(
+            source=FakeSource(),
+            repository=repository,
+            raw_payload_store=FakeStore(),
+            trading_calendar=OpenTradingCalendar(),
+        ).sync(
+            scheme=SectorScheme.EASTMONEY_INDUSTRY,
+            trade_date=date(2026, 7, 27),
+            source_cutoff_at=datetime(2026, 7, 27, 8, 15, tzinfo=UTC),
+            execution_mode=SectorEodExecutionMode.PUBLISH,
+            before_final_publication=arm_final_publication,
+        )
+    )
+
+    assert result.execution_mode is SectorEodExecutionMode.PUBLISH
+    assert calls == ["armed"]
 
 
 def test_sync_uses_a_distinct_raw_object_for_each_equal_content_observation() -> None:

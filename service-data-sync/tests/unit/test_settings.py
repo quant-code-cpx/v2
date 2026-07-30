@@ -18,6 +18,53 @@ def test_settings_loads_typed_environment(configured_environment: None) -> None:
     assert settings.trading_calendar_enabled is False
 
 
+def test_production_requires_legacy_and_split_internal_service_tokens(
+    configured_environment: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """STAGING/PRODUCTION 既保留旧内部 bearer，又要求数据运维读写 bearer 完整分离。"""
+    monkeypatch.setenv("DATA_SYNC_ENV", "production")
+
+    with pytest.raises(ConfigurationError):
+        load_settings()
+
+    monkeypatch.setenv(
+        "DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN",
+        "read-service-token-00000000000000000000000000000001",
+    )
+    monkeypatch.setenv(
+        "DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN",
+        "operations-service-token-00000000000000000000000000001",
+    )
+
+    monkeypatch.delenv("DATA_SYNC_INTERNAL_API_BEARER_TOKEN")
+    with pytest.raises(ConfigurationError):
+        load_settings()
+
+    monkeypatch.setenv(
+        "DATA_SYNC_INTERNAL_API_BEARER_TOKEN",
+        "legacy-service-token-00000000000000000000000000000001",
+    )
+
+    settings = load_settings()
+
+    assert settings.internal_read_api_bearer_token is not None
+    assert settings.internal_operations_api_bearer_token is not None
+
+
+def test_production_rejects_equal_data_operations_service_tokens(
+    configured_environment: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """生产读写服务身份必须使用不同 secret，避免读 bearer 获得写路由权限。"""
+    del configured_environment
+    shared_token = "shared-service-token-00000000000000000000000000000001"
+    monkeypatch.setenv("DATA_SYNC_ENV", "production")
+    monkeypatch.setenv("DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN", shared_token)
+    monkeypatch.setenv("DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN", shared_token)
+
+    with pytest.raises(ConfigurationError, match="invalid service-data-sync configuration"):
+        load_settings()
+
+
 def test_settings_loads_explicit_calendar_enablement(
     configured_environment: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -150,4 +197,46 @@ def test_settings_rejects_invalid_values(
     monkeypatch.setenv(variable, value)
 
     with pytest.raises(ConfigurationError):
+        load_settings()
+
+
+def test_optional_tushare_blank_from_compose_is_treated_as_unconfigured(
+    configured_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """默认关闭市场能力时，Compose 展开的空 token 不应阻止进程启动。"""
+    monkeypatch.setenv("DATA_SYNC_TUSHARE_TOKEN", "   ")
+
+    settings = load_settings()
+
+    assert settings.tushare_token is None
+    assert settings.market_overview_enabled is False
+
+
+def test_optional_stock_connect_blanks_from_compose_are_treated_as_unconfigured(
+    configured_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """互联互通关闭时，Compose 的空日期和空游标密钥不能阻断其他数据能力启动。"""
+    monkeypatch.setenv("DATA_SYNC_STOCK_CONNECT_STATUS_REQUIRED_FROM", "")
+    monkeypatch.setenv("DATA_SYNC_STOCK_CONNECT_CURSOR_HMAC_SECRET", "   ")
+
+    settings = load_settings()
+
+    assert settings.stock_connect_status_required_from is None
+    assert settings.stock_connect_cursor_hmac_secret is None
+    assert settings.stock_connect_enabled is False
+
+
+def test_enabled_market_overview_rejects_blank_tushare_token(
+    configured_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """启用真实市场完整包时，空 token 即使来自 Compose 也必须启动即失败。"""
+    monkeypatch.setenv("DATA_SYNC_TUSHARE_ENABLED", "true")
+    monkeypatch.setenv("DATA_SYNC_MARKET_OVERVIEW_ENABLED", "true")
+    monkeypatch.setenv("DATA_SYNC_MARKET_DATA_LICENSE_SCOPE", "internal-research-approved")
+    monkeypatch.setenv("DATA_SYNC_TUSHARE_TOKEN", "")
+
+    with pytest.raises(ConfigurationError, match="invalid service-data-sync configuration"):
         load_settings()

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -32,6 +33,8 @@ def run_financial_derivation(
     symbol: str,
     mode: str,
     request_key: str,
+    run_id: UUID | None = None,
+    before_final_publication: Callable[[], None] | None = None,
 ) -> FinancialDerivationResult:
     """登记可恢复运行，基于最新已发布报表派生指标，并写入明确终态。
 
@@ -40,26 +43,44 @@ def run_financial_derivation(
     识别未完成或失败的请求并安全重试。
     """
     started_at = datetime.now(UTC)
-    run_id = _start_run(
-        database,
-        mode=mode,
-        request_key=request_key,
-        started_at=started_at,
-    )
-    try:
-        result = FinancialDerivedMetricService(
-            repository=SqlAlchemyFinancialDerivationRepository(database)
-        ).derive(
-            exchange=exchange,
-            symbol=symbol,
-            derivation_run_id=run_id,
-            computed_at=started_at,
+    if run_id is None:
+        run_id = _start_run(
+            database,
+            mode=mode,
+            request_key=request_key,
+            started_at=started_at,
         )
+    else:
+        run_id = _start_run(
+            database,
+            mode=mode,
+            request_key=request_key,
+            started_at=started_at,
+            requested_run_id=run_id,
+        )
+    try:
+        service = FinancialDerivedMetricService(
+            repository=SqlAlchemyFinancialDerivationRepository(database)
+        )
+        if before_final_publication is None:
+            result = service.derive(
+                exchange=exchange,
+                symbol=symbol,
+                derivation_run_id=run_id,
+                computed_at=started_at,
+            )
+        else:
+            result = service.derive(
+                exchange=exchange,
+                symbol=symbol,
+                derivation_run_id=run_id,
+                computed_at=started_at,
+                before_final_publication=before_final_publication,
+            )
     except Exception:
         # 先落失败终态再透传原异常，避免 worker 重启后把已失败请求误判为仍在执行。
         _finish_run(database, run_id=run_id, status="failed")
         raise
-    _finish_run(database, run_id=run_id, status="succeeded")
     return result
 
 
@@ -69,6 +90,7 @@ def _start_run(
     mode: str,
     request_key: str,
     started_at: datetime,
+    requested_run_id: UUID | None = None,
 ) -> UUID:
     """创建或重启同一幂等请求的运行账本，并返回稳定 `run_id`。
 
@@ -86,7 +108,7 @@ def _start_run(
             .with_for_update()
         ).scalar_one_or_none()
         if current is None:
-            run_id = uuid4()
+            run_id = requested_run_id or uuid4()
             connection.execute(
                 insert(SyncRun).values(
                     run_id=run_id,
@@ -103,6 +125,8 @@ def _start_run(
             )
             return run_id
         run_id = UUID(str(current))
+        if requested_run_id is not None and run_id != requested_run_id:
+            raise RuntimeError("financial derivation request key belongs to another run")
         connection.execute(
             update(SyncRun)
             .where(SyncRun.run_id == run_id)

@@ -5,10 +5,13 @@ import { describe, expect, it } from 'vitest';
 import { AppConfigModule } from '../../config/app-config.module.js';
 import { EquityInstrumentClient } from '../clients/equity-instrument.client.js';
 import { EquityMarketDataClient } from '../clients/equity-market-data.client.js';
+import { EquityWorkspaceClient } from '../clients/equity-workspace.client.js';
 import { FinancialDataClient } from '../clients/financial-data.client.js';
 import { MoneyFlowClient } from '../clients/money-flow.client.js';
 import { MarketDataAccessClient } from '../clients/market-data-access.client.js';
+import { MarketOverviewClient } from '../clients/market-overview.client.js';
 import { SectorMarketDataClient } from '../clients/sector-market-data.client.js';
+import { StockConnectClient } from '../clients/stock-connect.client.js';
 import { SwSectorClient } from '../clients/sw-sector.client.js';
 import { DataSyncModule } from '../data-sync.module.js';
 
@@ -22,10 +25,13 @@ describe('DataSyncModule', () => {
 
     expect(moduleReference.get(EquityInstrumentClient)).toBeInstanceOf(EquityInstrumentClient);
     expect(moduleReference.get(EquityMarketDataClient)).toBeInstanceOf(EquityMarketDataClient);
+    expect(moduleReference.get(EquityWorkspaceClient)).toBeInstanceOf(EquityWorkspaceClient);
     expect(moduleReference.get(FinancialDataClient)).toBeInstanceOf(FinancialDataClient);
     expect(moduleReference.get(MoneyFlowClient)).toBeInstanceOf(MoneyFlowClient);
     expect(moduleReference.get(MarketDataAccessClient)).toBeInstanceOf(MarketDataAccessClient);
+    expect(moduleReference.get(MarketOverviewClient)).toBeInstanceOf(MarketOverviewClient);
     expect(moduleReference.get(SectorMarketDataClient)).toBeInstanceOf(SectorMarketDataClient);
+    expect(moduleReference.get(StockConnectClient)).toBeInstanceOf(StockConnectClient);
     expect(moduleReference.get(SwSectorClient)).toBeInstanceOf(SwSectorClient);
 
     await moduleReference.close();

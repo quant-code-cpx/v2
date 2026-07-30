@@ -3,11 +3,15 @@ import { z } from 'zod';
 // 解析显式环境字符串，确保 Cookie 策略得到确定布尔值。
 const booleanFromEnvironment = z.enum(['true', 'false']).transform((value) => value === 'true');
 const ACCOUNT_PATTERN = /^[a-z0-9][a-z0-9._-]{4,31}$/;
-const optionalBootstrapValue = <Schema extends z.ZodType>(schema: Schema) =>
-  z.preprocess(
-    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
-    schema.optional(),
-  );
+
+/** 将空白环境变量视为未配置，避免 Compose 空占位覆盖安全回退。 */
+function blankEnvironmentValueToUndefined(value: unknown): unknown {
+  return typeof value === 'string' && value.trim() === '' ? undefined : value;
+}
+
+/** 构造可由空字符串安全省略的环境变量 schema。 */
+const optionalEnvironmentValue = <Schema extends z.ZodType>(schema: Schema) =>
+  z.preprocess(blankEnvironmentValueToUndefined, schema.optional());
 
 const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -41,22 +45,55 @@ const environmentSchema = z.object({
   REFRESH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100).default(30),
   REFRESH_RACE_GRACE_SECONDS: z.coerce.number().int().min(1).max(30).default(5),
   DATA_SYNC_INTERNAL_BASE_URL: z.string().url().default('http://127.0.0.1:8000'),
-  DATA_SYNC_INTERNAL_BEARER_TOKEN: z.string().min(32),
+  // 既有内部 API 仍使用此服务身份；数据运维 0022 路由改用下方最小权限凭据。
+  DATA_SYNC_INTERNAL_API_BEARER_TOKEN: z.string().min(32),
+  DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN: z.string().min(32).optional(),
+  DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN: z.string().min(32).optional(),
   DATA_SYNC_INTERNAL_REQUEST_TIMEOUT_MS: z.coerce
     .number()
     .int()
     .min(100)
     .max(30_000)
     .default(5_000),
-  BOOTSTRAP_ADMIN_ACCOUNT: optionalBootstrapValue(
+  DATA_SYNC_INTERNAL_PREFLIGHT_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .max(3_610_000)
+    .default(310_000),
+  STOCK_CONNECT_API_ENABLED: booleanFromEnvironment.default(false),
+  DATA_SYNC_STOCK_CONNECT_BASE_URL: optionalEnvironmentValue(z.string().url()),
+  DATA_SYNC_STOCK_CONNECT_API_BEARER_TOKEN: optionalEnvironmentValue(z.string().min(32)),
+  DATA_SYNC_STOCK_CONNECT_TIMEOUT_MS: z.coerce.number().int().min(500).max(10_000).default(3_000),
+  DATA_SYNC_STOCK_CONNECT_CIRCUIT_FAILURES: z.coerce.number().int().min(1).max(20).default(5),
+  DATA_SYNC_STOCK_CONNECT_CIRCUIT_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .max(300_000)
+    .default(30_000),
+  DATA_SYNC_STOCK_CONNECT_CIRCUIT_OPEN_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .max(300_000)
+    .default(30_000),
+  BOOTSTRAP_ADMIN_ACCOUNT: optionalEnvironmentValue(
     z.string().trim().toLowerCase().regex(ACCOUNT_PATTERN),
   ),
-  BOOTSTRAP_ADMIN_PASSWORD: optionalBootstrapValue(z.string().min(12).regex(/\d/)),
+  BOOTSTRAP_ADMIN_PASSWORD: optionalEnvironmentValue(z.string().min(12).regex(/\d/)),
 });
 
-export type Environment = z.infer<typeof environmentSchema>;
+/** 表示完成本地回退或生产 split 校验后的运行环境。 */
+export type Environment = Omit<
+  z.infer<typeof environmentSchema>,
+  'DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN' | 'DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN'
+> & {
+  DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN: string;
+  DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN: string;
+};
 
-/** Parse environment variables and enforce secure cross-field cookie invariants. */
+/** 解析环境变量，并强制执行 Cookie 与下游服务身份的跨字段安全约束。 */
 export function validateEnvironment(input: Record<string, unknown>): Environment {
   const result = environmentSchema.safeParse(input);
   if (result.success) {
@@ -69,7 +106,32 @@ export function validateEnvironment(input: Record<string, unknown>): Environment
       throw new Error('COOKIE_SECURE must be true when COOKIE_SAME_SITE is none');
     }
 
-    return result.data;
+    const readToken = result.data.DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN;
+    const operationsToken = result.data.DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN;
+    if (result.data.NODE_ENV === 'production' && (!readToken || !operationsToken)) {
+      throw new Error(
+        'DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN and DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN are required in production',
+      );
+    }
+    if (
+      result.data.NODE_ENV === 'production' &&
+      readToken !== undefined &&
+      operationsToken !== undefined &&
+      readToken === operationsToken
+    ) {
+      throw new Error(
+        'DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN and DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN must differ in production',
+      );
+    }
+
+    // 开发与测试仅为平滑本地升级回退到既有服务身份；生产环境绝不复用旧 token。
+    return {
+      ...result.data,
+      DATA_SYNC_INTERNAL_READ_API_BEARER_TOKEN:
+        readToken ?? result.data.DATA_SYNC_INTERNAL_API_BEARER_TOKEN,
+      DATA_SYNC_INTERNAL_OPERATIONS_API_BEARER_TOKEN:
+        operationsToken ?? result.data.DATA_SYNC_INTERNAL_API_BEARER_TOKEN,
+    };
   }
 
   throw new Error(

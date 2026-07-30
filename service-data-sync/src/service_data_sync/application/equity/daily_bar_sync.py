@@ -1,7 +1,7 @@
 """将数据源无关日线批次转换为已发布数据的应用用例。
 
-日线只接受一个交易所限定证券和包含端日期窗口；解码后的未复权事实通过仓储以修订和发布版本保存。
-合法空集或来源不可用会记录可用性观察而非虚构行情，成功路径不保存原始供应商字节。
+日线只接受一个交易所限定证券和包含端日期窗口；未复权事实与合法空响应分别发布为 DATA 或
+零记录 coverage。来源不可用直接失败，不得伪造成功；成功载荷由私有存储策略返回摘要定位。
 """
 
 from __future__ import annotations
@@ -9,19 +9,20 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
 from service_data_sync.application.ports.data_source import (
     DataSourcePort,
+    ProviderBatch,
     ProviderError,
     ProviderErrorCode,
     SourceRequest,
 )
 from service_data_sync.application.ports.market_data import (
-    EquityAvailabilityObservation,
     EquityDailyBarRepository,
+    EquitySourceObservation,
     PublishedDailyBars,
     RawPayload,
     RawPayloadStore,
@@ -40,10 +41,13 @@ class DailyBarSyncResult:
     inserted_count: int
     unchanged_count: int
     availability: str = "available"
+    coverage_version: UUID | None = None
+    source_batch_id: UUID | None = None
+    publication_kind: str | None = None
 
 
 class EquityDailyBarSyncService:
-    """同步一个有界日线窗口；成功为空时写观测，失败时才归档原始证据。"""
+    """同步一个有界日线窗口；事实与合法空响应都发布，来源失败直接失败。"""
 
     def __init__(
         self,
@@ -69,96 +73,32 @@ class EquityDailyBarSyncService:
             raise ValueError("start must not be after end")
         capability = "equity.bar.1d.raw"
         if capability not in self._source.capabilities():
-            return _availability_result(
-                identifier,
-                self._repository.record_daily_bar_availability(
-                    identifier=identifier,
-                    start=start,
-                    end=end,
-                    availability="source_unavailable",
-                    reason_code="capability_not_configured",
-                    provider_id=self._source.provider_id,
-                    observed_at=datetime.now(UTC),
-                ),
+            raise ProviderError(
+                ProviderErrorCode.INVALID_REQUEST,
+                "equity daily-bar capability is not configured",
+                retryable=False,
             )
         # 应用层只传递标准证券标识与日期范围。
         # 供应商参数名必须封装在适配器内。
-        try:
-            batch = await self._source.fetch(
-                SourceRequest(
-                    capability=capability,
-                    parameters=(
-                        ("instrument", identifier.qualified_symbol),
-                        ("start", start.isoformat()),
-                        ("end", end.isoformat()),
-                    ),
-                )
-            )
-        except ProviderError as error:
-            if error.code not in {
-                ProviderErrorCode.UNAVAILABLE,
-                ProviderErrorCode.RATE_LIMITED,
-                ProviderErrorCode.AUTHENTICATION,
-                ProviderErrorCode.INVALID_REQUEST,
-            }:
-                raise
-            return _availability_result(
-                identifier,
-                self._repository.record_daily_bar_availability(
-                    identifier=identifier,
-                    start=start,
-                    end=end,
-                    availability="source_unavailable",
-                    reason_code=error.code.value,
-                    provider_id=self._source.provider_id,
-                    observed_at=datetime.now(UTC),
+        batch = await self._source.fetch(
+            SourceRequest(
+                capability=capability,
+                parameters=(
+                    ("instrument", identifier.qualified_symbol),
+                    ("start", start.isoformat()),
+                    ("end", end.isoformat()),
                 ),
-            )
-        # 原始证据或标准状态落库前，先拒绝结构和证券标识漂移。
-        bars = decode_daily_bar_batch(batch.payload, identifier)
-        if not bars:
-            return _availability_result(
-                identifier,
-                self._repository.record_daily_bar_availability(
-                    identifier=identifier,
-                    start=start,
-                    end=end,
-                    availability="empty",
-                    reason_code="no_matching_facts",
-                    provider_id=batch.provider_id,
-                    observed_at=batch.observed_at,
-                ),
-            )
-        raw_payload = batch.raw_payload if batch.raw_payload is not None else batch.payload
-        raw_content_type = batch.raw_content_type or batch.content_type
-        raw_digest = hashlib.sha256(raw_payload).hexdigest()
-        # 成功路径只记录摘要标记；若后续发布失败，入口会固化已暂存来源字节。
-        raw_uri = self._raw_payload_store.put(
-            RawPayload(
-                object_key=(
-                    f"raw/{capability}/{batch.provider_id}/{batch.observed_at:%Y/%m/%d}/"
-                    f"{raw_digest}.json"
-                ),
-                content_sha256=raw_digest,
-                content_type=raw_content_type,
-                payload=raw_payload,
             )
         )
-        # 仓储事务将原始血缘与带版本的业务值一并记录。
+        # 原始证据或标准状态落库前，先拒绝结构和证券标识漂移。
+        bars = decode_daily_bar_batch(batch.payload, identifier)
+        # 合法空数组同样携带真实来源批次，并由仓储发布 passed 零记录 coverage。
         publication = self._repository.publish_daily_bars(
             identifier=identifier,
             bars=bars,
-            provider_id=batch.provider_id,
-            source_payload_sha256=raw_digest,
-            raw_uri=raw_uri,
-            observed_at=batch.observed_at,
-        )
-        # 成功发布的业务事实必须覆盖同窗口旧空状态，避免读取端继续误报空集。
-        self._repository.clear_daily_bar_availability(
-            identifier=identifier,
+            source=_archive_batch(batch=batch, payload_store=self._raw_payload_store),
             start=start,
             end=end,
-            cleared_at=datetime.now(UTC),
         )
         return _result(identifier, publication)
 
@@ -239,18 +179,57 @@ def _result(identifier: EquityIdentifier, publication: PublishedDailyBars) -> Da
         data_version=publication.data_version,
         inserted_count=publication.inserted_count,
         unchanged_count=publication.unchanged_count,
-        availability="available",
+        availability=(
+            "empty" if publication.publication_kind == "ZERO_RECORD_COVERAGE" else "available"
+        ),
+        coverage_version=publication.coverage_version,
+        source_batch_id=publication.source_batch_id,
+        publication_kind=publication.publication_kind,
     )
 
 
-def _availability_result(
-    identifier: EquityIdentifier, observation: EquityAvailabilityObservation
-) -> DailyBarSyncResult:
-    """将无事实同步观测映射为可成功结束的应用层结果。"""
-    return DailyBarSyncResult(
-        instrument=identifier,
-        data_version=None,
-        inserted_count=0,
-        unchanged_count=0,
-        availability=observation.availability,
+def _archive_batch(
+    *,
+    batch: ProviderBatch,
+    payload_store: RawPayloadStore,
+) -> EquitySourceObservation:
+    """生成 raw 与标准载荷摘要及私有定位，供 SourceBatch 和覆盖精确核验。"""
+    raw_payload = batch.raw_payload if batch.raw_payload is not None else batch.payload
+    raw_content_type = batch.raw_content_type or batch.content_type
+    raw_digest = hashlib.sha256(raw_payload).hexdigest()
+    normalized_digest = hashlib.sha256(batch.payload).hexdigest()
+    prefix = f"equity-bar/{batch.capability}/{batch.provider_id}/{batch.observed_at:%Y/%m/%d}"
+    raw_uri = payload_store.put(
+        RawPayload(
+            object_key=f"raw/{prefix}/{raw_digest}.json",
+            content_sha256=raw_digest,
+            content_type=raw_content_type,
+            payload=raw_payload,
+        )
+    )
+    normalized_uri = payload_store.put(
+        RawPayload(
+            object_key=f"normalized/{prefix}/{normalized_digest}.json",
+            content_sha256=normalized_digest,
+            content_type=batch.content_type,
+            payload=batch.payload,
+        )
+    )
+    return EquitySourceObservation(
+        provider_id=batch.provider_id,
+        capability=batch.capability,
+        raw_payload_sha256=raw_digest,
+        raw_uri=raw_uri,
+        raw_content_type=raw_content_type,
+        raw_byte_size=len(raw_payload),
+        normalized_payload_sha256=normalized_digest,
+        normalized_uri=normalized_uri,
+        normalized_content_type=batch.content_type,
+        normalized_byte_size=len(batch.payload),
+        observed_at=batch.observed_at,
+        upstream_source=batch.upstream_source or batch.provider_id,
+        adapter_version=batch.adapter_version,
+        schema_fingerprint=(
+            batch.schema_fingerprint or hashlib.sha256(_DAILY_BAR_SCHEMA.encode()).hexdigest()
+        ),
     )

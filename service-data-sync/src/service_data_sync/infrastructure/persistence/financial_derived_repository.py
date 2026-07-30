@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
-from datetime import date, datetime
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, insert, or_, select, tuple_, update
 from sqlalchemy.orm import Session
@@ -29,9 +30,7 @@ from service_data_sync.application.ports.financial_derived import (
 )
 from service_data_sync.domain.equity import Exchange
 from service_data_sync.infrastructure.database.connection import DatabaseClient
-from service_data_sync.infrastructure.database.models.equity.identity import (
-    equity_identifier_version,
-)
+from service_data_sync.infrastructure.database.fenced_execution import current_fenced_execution
 from service_data_sync.infrastructure.database.models.execution.sync_run import SyncRun
 from service_data_sync.infrastructure.database.models.financial import (
     derived_financial_metric_revision,
@@ -63,9 +62,11 @@ from service_data_sync.infrastructure.database.models.publication.dataset_public
 from service_data_sync.infrastructure.database.partition_manager import (
     ensure_financial_year_partitions,
 )
+from service_data_sync.infrastructure.persistence.equity_identity_resolver import (
+    require_single_confirmed_identity_on_connection,
+)
 
 DerivedFinancialMetricRevision = derived_financial_metric_revision.DerivedFinancialMetricRevision
-EquityIdentifierVersion = equity_identifier_version.EquityIdentifierVersion
 
 _REPORT_METHODOLOGY_CODE = "akshare.eastmoney.financial-report"
 _REPORT_METHODOLOGY_VERSION = 1
@@ -79,6 +80,7 @@ _FORMULA_INPUT_CODES = (
     "statement.income_statement.total-operate-income",
     "statement.income_statement.parent-netprofit",
 )
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 class SqlAlchemyFinancialDerivationRepository(FinancialDerivationRepository):
@@ -89,10 +91,18 @@ class SqlAlchemyFinancialDerivationRepository(FinancialDerivationRepository):
         self._database = database
 
     def load_inputs(self, *, exchange: Exchange, symbol: str) -> FinancialDerivationSnapshot:
-        """按 publication 的 asOf/knownAt 与日期感知身份读取唯一报表输入快照。"""
+        """锁定本次当前证券身份，再读取其唯一已发布报表输入快照。"""
         with self._database.session() as connection:
+            known_at = datetime.now(UTC)
+            security_id = require_single_confirmed_identity_on_connection(
+                connection,
+                exchange=exchange,
+                symbol=symbol,
+                fact_dates=(known_at.astimezone(_SHANGHAI).date(),),
+                known_at=known_at,
+            )
             publication_row = (
-                connection.execute(_report_publication_statement(exchange=exchange, symbol=symbol))
+                connection.execute(_report_publication_statement(security_id=security_id))
                 .mappings()
                 .one_or_none()
             )
@@ -119,8 +129,9 @@ class SqlAlchemyFinancialDerivationRepository(FinancialDerivationRepository):
         metrics: Sequence[DerivedFinancialMetricInput],
         derivation_run_id: UUID,
         computed_at: datetime,
+        before_final_publication: Callable[[], None] | None = None,
     ) -> FinancialDerivedPublication:
-        """重验报表版本，追加变化 revision/逐项 manifest，并原子替换派生发布。"""
+        """重验报表版本，追加 revision/manifest，并原子提交派生发布、运行终态与栅栏。"""
         if computed_at.tzinfo is None:
             raise ValueError("computed_at must include a timezone")
         with self._database.transaction() as connection:
@@ -156,6 +167,8 @@ class SqlAlchemyFinancialDerivationRepository(FinancialDerivationRepository):
                 )
                 changed_count += int(changed)
                 unchanged_count += int(not changed)
+            if before_final_publication is not None:
+                before_final_publication()
             data_version = _publish(
                 connection,
                 snapshot=snapshot,
@@ -164,6 +177,15 @@ class SqlAlchemyFinancialDerivationRepository(FinancialDerivationRepository):
                 changed_count=changed_count,
                 computed_at=computed_at,
             )
+            _finish_derivation_run(
+                connection,
+                derivation_run_id=derivation_run_id,
+                finished_at=computed_at,
+            )
+            execution = current_fenced_execution()
+            if execution is not None:
+                execution.record_checkpoint(kind="data-version", position=str(data_version))
+                execution.record_publication_progress(record_count=len(metrics))
         return FinancialDerivedPublication(
             data_version=data_version,
             inserted_count=changed_count,
@@ -173,9 +195,9 @@ class SqlAlchemyFinancialDerivationRepository(FinancialDerivationRepository):
 
 
 def _report_publication_statement(
-    *, exchange: Exchange, symbol: str
+    *, security_id: int
 ) -> Select[tuple[UUID, int, UUID, date, datetime]]:
-    """构造按 publication 截点解析证券身份的唯一报表输入选择器。"""
+    """按已锁定永久证券键选择当前报表发布，不把报告期误当成当时上市身份。"""
     return (
         select(
             FinancialPublication.data_version,
@@ -193,22 +215,8 @@ def _report_publication_statement(
             FinancialMethodology,
             FinancialMethodology.methodology_id == FinancialPublication.methodology_id,
         )
-        .join(
-            EquityIdentifierVersion,
-            and_(
-                EquityIdentifierVersion.security_id == FinancialPublication.security_id,
-                EquityIdentifierVersion.exchange == exchange.value,
-                EquityIdentifierVersion.symbol == symbol,
-                EquityIdentifierVersion.identity_state == "CONFIRMED",
-                EquityIdentifierVersion.effective_range.op("@>")(
-                    FinancialPublication.effective_as_of
-                ),
-                EquityIdentifierVersion.knowledge_range.op("@>")(
-                    FinancialPublication.knowledge_cutoff
-                ),
-            ),
-        )
         .where(
+            FinancialPublication.security_id == security_id,
             FinancialPublication.capability == "financial.report",
             FinancialMethodology.code == _REPORT_METHODOLOGY_CODE,
             FinancialMethodology.version == _REPORT_METHODOLOGY_VERSION,
@@ -361,6 +369,27 @@ def _require_derivation_run(connection: Session, derivation_run_id: UUID) -> Non
     ).one_or_none()
     if run is None or run.capability != "financial.derived-metric" or run.status != "running":
         raise FinancialDerivationUnavailable("financial derivation run is unavailable")
+
+
+def _finish_derivation_run(
+    connection: Session,
+    *,
+    derivation_run_id: UUID,
+    finished_at: datetime,
+) -> None:
+    """在派生 publication 同事务把唯一运行从 running 收敛为 succeeded。"""
+    updated = connection.execute(
+        update(SyncRun)
+        .where(
+            SyncRun.run_id == derivation_run_id,
+            SyncRun.capability == "financial.derived-metric",
+            SyncRun.status == "running",
+        )
+        .values(status="succeeded", finished_at=finished_at)
+        .returning(SyncRun.run_id)
+    ).scalar_one_or_none()
+    if updated is None or UUID(str(updated)) != derivation_run_id:
+        raise FinancialDerivationUnavailable("financial derivation run could not be finalized")
 
 
 def _require_derived_methodology(connection: Session) -> UUID:
@@ -548,6 +577,7 @@ def _write_metric(
             derivation_run_id=derivation_run_id,
             computed_at=computed_at,
             effective_from=metric.effective_from,
+            # 报告期已纳入双时态逻辑键，本 revision 从最晚输入有效日起持续可见。
             effective_to=None,
             known_from=computed_at,
             known_to=None,

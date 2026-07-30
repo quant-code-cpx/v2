@@ -15,6 +15,10 @@ from celery import Celery
 from sqlalchemy.orm import Session
 
 from service_data_sync.application.financial.derived import FinancialDerivationResult
+from service_data_sync.application.legacy_entrypoints import (
+    LEGACY_ENTRYPOINT_UNAVAILABLE,
+    LegacyEntryPointUnavailable,
+)
 from service_data_sync.application.ports.financial_derived import FinancialDerivedPublication
 from service_data_sync.bootstrap import financial_derived as bootstrap
 from service_data_sync.bootstrap.settings import Settings
@@ -141,7 +145,8 @@ def test_run_financial_derivation_marks_success_and_passes_stable_run_to_service
     )
 
     assert actual is expected
-    assert finished == [(run_id, "succeeded")]
+    # 成功终态已由派生仓储与 publication 同事务写入，组合根只补偿失败路径。
+    assert finished == []
 
 
 def test_run_financial_derivation_marks_failure_before_reraising(
@@ -197,6 +202,77 @@ def test_run_financial_derivation_marks_failure_before_reraising(
     assert finished == ["failed"]
 
 
+def test_run_financial_derivation_reuses_control_plane_run_and_arms_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """控制面运行标识和终态武装回调必须原样传到派生 publication 边界。"""
+    run_id = UUID("70000000-0000-4000-8000-000000000009")
+    database = cast(DatabaseClient, object())
+    timeline: list[str] = []
+
+    def start_run(
+        received_database: DatabaseClient,
+        *,
+        mode: str,
+        request_key: str,
+        started_at: datetime,
+        requested_run_id: UUID | None = None,
+    ) -> UUID:
+        """确认桥接账本使用控制面 run_id，避免产生第二套运行身份。"""
+        assert received_database is database
+        assert mode == "manual"
+        assert request_key == "data-operation:run-9:SSE:600519"
+        assert started_at.tzinfo is UTC
+        assert requested_run_id == run_id
+        return run_id
+
+    def arm_publication() -> None:
+        """记录 dispatcher 在最终 publication 事务前武装终态。"""
+        timeline.append("arm")
+
+    class FakeService:
+        """验证控制面 fencing 参数到达派生应用服务。"""
+
+        def __init__(self, *, repository: object) -> None:
+            """确认组合根仍使用生产派生仓储。"""
+            assert isinstance(repository, bootstrap.SqlAlchemyFinancialDerivationRepository)
+
+        def derive(
+            self,
+            *,
+            exchange: Exchange,
+            symbol: str,
+            derivation_run_id: UUID,
+            computed_at: datetime,
+            before_final_publication: object,
+        ) -> FinancialDerivationResult:
+            """在最终 publication 边界调用控制面武装回调。"""
+            assert exchange is Exchange.SSE
+            assert symbol == "600519"
+            assert derivation_run_id == run_id
+            assert computed_at.tzinfo is UTC
+            assert before_final_publication is arm_publication
+            arm_publication()
+            timeline.append("publish")
+            return _result()
+
+    monkeypatch.setattr(bootstrap, "_start_run", start_run)
+    monkeypatch.setattr(bootstrap, "FinancialDerivedMetricService", FakeService)
+
+    result = bootstrap.run_financial_derivation(
+        database=database,
+        exchange=Exchange.SSE,
+        symbol="600519",
+        mode="manual",
+        request_key="data-operation:run-9:SSE:600519",
+        run_id=run_id,
+        before_final_publication=arm_publication,
+    )
+
+    assert result.publication.row_count == 4
+    assert timeline == ["arm", "publish"]
+
+
 def test_start_run_inserts_new_ledger_with_capability_scoped_request_key() -> None:
     """首次请求应创建 `running` 账本并把外部幂等键限定到派生能力。"""
     started_at = datetime(2026, 7, 28, 9, tzinfo=UTC)
@@ -216,6 +292,39 @@ def test_start_run_inserts_new_ledger_with_capability_scoped_request_key() -> No
     assert parameters["mode"] == "manual"
     assert parameters["request_key"] == "financial.derived-metric:cli:request-1"
     assert parameters["status"] == "running"
+
+
+def test_start_run_uses_requested_control_plane_run_id_and_rejects_collision() -> None:
+    """控制面运行标识必须成为新账本主键，既有幂等键冲突必须显式失败。"""
+    requested_run_id = UUID("70000000-0000-4000-8000-000000000009")
+    started_at = datetime(2026, 7, 30, 9, tzinfo=UTC)
+    insert_connection = LedgerConnection((ScalarResult(None), ScalarResult()))
+
+    actual = bootstrap._start_run(
+        cast(DatabaseClient, LedgerDatabase(insert_connection)),
+        mode="manual",
+        request_key="data-operation:run-9:SSE:600519",
+        started_at=started_at,
+        requested_run_id=requested_run_id,
+    )
+
+    assert actual == requested_run_id
+    parameters = insert_connection.executed[1].compile().params
+    assert parameters["run_id"] == requested_run_id
+
+    collision_connection = LedgerConnection(
+        (ScalarResult(UUID("70000000-0000-4000-8000-000000000010")),)
+    )
+    with pytest.raises(RuntimeError, match="belongs to another run"):
+        bootstrap._start_run(
+            cast(DatabaseClient, LedgerDatabase(collision_connection)),
+            mode="manual",
+            request_key="data-operation:run-9:SSE:600519",
+            started_at=started_at,
+            requested_run_id=requested_run_id,
+        )
+
+    assert len(collision_connection.executed) == 1
 
 
 def test_start_run_reuses_idempotent_ledger_and_resets_terminal_fields() -> None:
@@ -286,6 +395,7 @@ def test_finish_run_rejects_unknown_status_and_ledger_mismatch() -> None:
         )
 
 
+@pytest.mark.skip(reason="旧派生 CLI 已安全停用，行为由 data-operations 控制面替代")
 def test_cli_runs_single_security_outputs_compact_json_and_closes_container(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -341,6 +451,7 @@ def test_cli_runs_single_security_outputs_compact_json_and_closes_container(
     assert container.closed is True
 
 
+@pytest.mark.skip(reason="旧派生 CLI 已安全停用，行为由 data-operations 控制面替代")
 def test_cli_rejects_disabled_financial_capability_before_building_container(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -366,6 +477,7 @@ def test_cli_rejects_disabled_financial_capability_before_building_container(
     assert build_calls == 0
 
 
+@pytest.mark.skip(reason="旧派生 CLI 已安全停用，行为由 data-operations 控制面替代")
 def test_cli_closes_container_when_derivation_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -399,6 +511,7 @@ def test_cli_closes_container_when_derivation_fails(
     assert container.closed is True
 
 
+@pytest.mark.skip(reason="旧派生 Celery 任务已安全停用，行为由 data-operations 控制面替代")
 def test_celery_task_is_idempotently_registered_and_uses_request_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -448,6 +561,7 @@ def test_celery_task_is_idempotently_registered_and_uses_request_identity(
     assert container.closed is True
 
 
+@pytest.mark.skip(reason="旧派生 Celery 任务已安全停用，行为由 data-operations 控制面替代")
 def test_celery_task_uses_fallback_identity_and_closes_container_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -478,6 +592,7 @@ def test_celery_task_uses_fallback_identity_and_closes_container_on_failure(
     assert container.closed is True
 
 
+@pytest.mark.skip(reason="旧派生 Celery 任务已安全停用，行为由 data-operations 控制面替代")
 def test_celery_task_rejects_disabled_financial_capability_before_container(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -499,6 +614,19 @@ def test_celery_task_rejects_disabled_financial_capability_before_container(
         app.tasks[financial_derived_tasks._TASK].run("SSE", "600519")
 
     assert build_calls == 0
+
+
+def test_legacy_derived_cli_and_task_reject_before_using_runtime() -> None:
+    """旧派生入口必须以稳定错误停用，不能调用运行账本或直接发布指标。"""
+    with pytest.raises(SystemExit) as cli_error:
+        entrypoint.main(["--exchange", "SSE", "--symbol", "600519"])
+    assert str(cli_error.value) == (f"{LEGACY_ENTRYPOINT_UNAVAILABLE}: data-sync-financial-derived")
+
+    app = Celery("legacy-financial-derived-runtime")
+    financial_derived_tasks.register_financial_derived_tasks(app, settings=cast(Settings, object()))
+    with pytest.raises(LegacyEntryPointUnavailable) as task_error:
+        app.tasks[financial_derived_tasks._TASK].run("SSE", "600519")
+    assert task_error.value.code == LEGACY_ENTRYPOINT_UNAVAILABLE
 
 
 def _result() -> FinancialDerivationResult:

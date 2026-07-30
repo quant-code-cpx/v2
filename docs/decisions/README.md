@@ -47,3 +47,6 @@ NNNN-short-title.md
 - [0022：空观测是可发布状态，不是跨服务阻断](0022-empty-observation-and-consumer-contract.md) — Accepted
 - [0023：个人市场数据通用查询网关](0023-personal-market-data-query-gateway.md) — Accepted
 - [0024：数据运维控制面与全局串行同步](0024-data-operations-control-plane.md) — Proposed
+- [0025：沪深港通官方来源与原子 bundle 边界](0025-stock-connect-official-source-and-bundle-boundary.md) — Accepted
+- [0027：市场概览原子发布与生产数据源边界](0027-market-overview-atomic-publication-and-source-boundary.md) — Accepted
+- [0026：ETF 中心 typed market-data 全链路边界](0026-etf-center-typed-market-data-boundary.md) — Proposed

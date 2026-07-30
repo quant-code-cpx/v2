@@ -69,6 +69,7 @@ export class MoneyFlowClient {
     bucket: string;
     start: string;
     end: string;
+    dataVersion?: string | undefined;
     knownAt?: string | undefined;
     cursor?: string | undefined;
     limit: number;
@@ -82,6 +83,7 @@ export class MoneyFlowClient {
       end: input.end,
       limit: String(input.limit),
     });
+    setOptional(parameters, 'dataVersion', input.dataVersion);
     setOptional(parameters, 'knownAt', input.knownAt);
     setOptional(parameters, 'cursor', input.cursor);
     return this.request(
@@ -154,7 +156,7 @@ export class MoneyFlowClient {
       if (!validEtag(etag) || !validDataVersion(dataVersion)) throw dependencyUnavailable();
       return { status: 304, etag, dataVersion };
     }
-    if (!response.ok) throw upstreamProblem(response);
+    if (!response.ok) throw await upstreamProblem(response);
     try {
       const internalBody = internalSchema.parse(await response.json());
       const publicBody = project(internalBody);
@@ -344,7 +346,7 @@ function dependencyUnavailable(retryAfter?: number): PublicProblemException {
 }
 
 /** 映射允许公开的内部状态，不透传下游正文或内部标识。 */
-function upstreamProblem(response: Response): PublicProblemException {
+async function upstreamProblem(response: Response): Promise<PublicProblemException> {
   if (response.status === 400) {
     return new PublicProblemException(
       HttpStatus.BAD_REQUEST,
@@ -360,10 +362,25 @@ function upstreamProblem(response: Response): PublicProblemException {
     );
   }
   if (response.status === 409) {
+    let code = 'query-conflict';
+    try {
+      const body = z
+        .object({ code: z.string() })
+        .passthrough()
+        .parse(await response.json());
+      if (body.code === 'snapshot-expired') code = 'snapshot-expired';
+      if (body.code === 'identity-boundary-conflict') code = 'identity-resolution-conflict';
+    } catch {
+      // 下游错误正文不是可信合同；未知 409 保持既有查询冲突语义。
+    }
     return new PublicProblemException(
       HttpStatus.CONFLICT,
-      'query-conflict',
-      'Money-flow cursor or identity range conflicts with this query',
+      code,
+      code === 'snapshot-expired'
+        ? 'Published money-flow snapshot changed'
+        : code === 'identity-resolution-conflict'
+          ? 'Instrument identity conflicts with this query'
+          : 'Money-flow cursor or identity range conflicts with this query',
     );
   }
   if (response.status === 429) {

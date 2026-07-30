@@ -188,6 +188,56 @@ def test_registry_adds_equity_market_sources_only_with_explicit_capability_flag(
     }
 
 
+def test_registry_grants_only_the_full_market_catalog_a_longer_timeout(
+    configured_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """全市场目录至少获得 180 秒预算，其他 `AKShare` adapter 仍沿用普通请求预算。"""
+    captured: dict[str, int] = {}
+    p0_adapter_type = container_module.AkshareP0MarketDataAdapter
+    catalog_adapter_type = container_module.AkshareEastmoneyEquityCatalogAdapter
+
+    def build_p0_adapter(*, request_timeout_seconds: int) -> object:
+        """记录普通 adapter 的请求预算并返回真实实现。"""
+        captured["p0"] = request_timeout_seconds
+        return p0_adapter_type(request_timeout_seconds=request_timeout_seconds)
+
+    def build_catalog_adapter(*, request_timeout_seconds: int) -> object:
+        """记录目录 adapter 的请求预算并返回真实实现。"""
+        captured["catalog"] = request_timeout_seconds
+        return catalog_adapter_type(request_timeout_seconds=request_timeout_seconds)
+
+    monkeypatch.setenv("DATA_SYNC_AKSHARE_ENABLED", "true")
+    monkeypatch.setenv("DATA_SYNC_AKSHARE_REQUEST_TIMEOUT_SECONDS", "12")
+    monkeypatch.setattr(container_module, "AkshareP0MarketDataAdapter", build_p0_adapter)
+    monkeypatch.setattr(
+        container_module,
+        "AkshareEastmoneyEquityCatalogAdapter",
+        build_catalog_adapter,
+    )
+
+    registry = container_module.build_source_registry(load_settings())
+
+    assert "akshare-eastmoney-equity-catalog" in registry.provider_ids()
+    assert captured == {"p0": 12, "catalog": 180}
+
+
+def test_registry_adds_sw_snapshot_source_only_with_its_explicit_capability_flag(
+    configured_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """申万 taxonomy 必须同时满足 AKShare、板块域和申万专属开关才进入来源注册表。"""
+    monkeypatch.setenv("DATA_SYNC_AKSHARE_ENABLED", "true")
+    monkeypatch.setenv("DATA_SYNC_SECTOR_ENABLED", "true")
+    monkeypatch.setenv("DATA_SYNC_SW_SECTOR_ENABLED", "true")
+
+    registry = container_module.build_source_registry(load_settings())
+
+    assert {
+        provider.provider_id for provider in registry.for_capability("sector.sw.snapshot.raw")
+    } == {"akshare-legulegu-sw-industry"}
+
+
 def test_registry_adds_csindex_shadow_adapter_only_with_explicit_policy(
     configured_environment: None,
     monkeypatch: pytest.MonkeyPatch,

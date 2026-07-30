@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, Req } from '@nestjs/common';
+import { Body, Controller, Header, HttpCode, HttpStatus, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 import type { AuthenticatedRequest } from '../../common/models/auth-context.js';
@@ -18,6 +18,7 @@ export class MarketDataAccessController {
 
   @Post('query')
   @HttpCode(HttpStatus.OK)
+  @Header('Cache-Control', 'private, no-store')
   /** 返回一个不可变发布页，或者在来源暂不可用时返回带状态的空 records。 */
   public query(
     @Body() body: unknown,

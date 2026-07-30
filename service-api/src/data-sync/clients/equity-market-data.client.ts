@@ -39,6 +39,8 @@ export class EquityMarketDataClient {
   public listBars(input: {
     exchange: string;
     symbol: string;
+    dataVersion: string;
+    factorDataVersion?: string | undefined;
     period: string;
     start: string;
     end: string;
@@ -50,6 +52,7 @@ export class EquityMarketDataClient {
     requestId: string;
   }): Promise<ConditionalRead<EquityBarPage>> {
     const parameters = new URLSearchParams({
+      dataVersion: input.dataVersion,
       period: input.period,
       start: input.start,
       end: input.end,
@@ -57,6 +60,7 @@ export class EquityMarketDataClient {
       limit: String(input.limit),
     });
     setOptional(parameters, 'adjustAsOf', input.adjustAsOf);
+    setOptional(parameters, 'factorDataVersion', input.factorDataVersion);
     setOptional(parameters, 'cursor', input.cursor);
     return this.request(
       path(input.exchange, input.symbol, `bars?${parameters.toString()}`),
@@ -70,6 +74,7 @@ export class EquityMarketDataClient {
   public listAdjustmentFactors(input: {
     exchange: string;
     symbol: string;
+    dataVersion: string;
     start?: string | undefined;
     end: string;
     cursor?: string | undefined;
@@ -78,6 +83,7 @@ export class EquityMarketDataClient {
     requestId: string;
   }): Promise<ConditionalRead<EquityAdjustmentFactorPage>> {
     const parameters = new URLSearchParams({
+      dataVersion: input.dataVersion,
       end: input.end,
       limit: String(input.limit),
     });
@@ -95,6 +101,7 @@ export class EquityMarketDataClient {
   public listCorporateActions(input: {
     exchange: string;
     symbol: string;
+    dataVersion: string;
     start?: string | undefined;
     end?: string | undefined;
     cursor?: string | undefined;
@@ -102,7 +109,10 @@ export class EquityMarketDataClient {
     ifNoneMatch?: string | undefined;
     requestId: string;
   }): Promise<ConditionalRead<EquityCorporateActionPage>> {
-    const parameters = new URLSearchParams({ limit: String(input.limit) });
+    const parameters = new URLSearchParams({
+      dataVersion: input.dataVersion,
+      limit: String(input.limit),
+    });
     setOptional(parameters, 'start', input.start);
     setOptional(parameters, 'end', input.end);
     setOptional(parameters, 'cursor', input.cursor);
@@ -118,11 +128,16 @@ export class EquityMarketDataClient {
   public getCompanyProfile(input: {
     exchange: string;
     symbol: string;
+    dataVersion: string;
+    asOf?: string | undefined;
     ifNoneMatch?: string | undefined;
     requestId: string;
   }): Promise<ConditionalRead<EquityCompanyProfile>> {
+    const parameters = new URLSearchParams({ dataVersion: input.dataVersion });
+    setOptional(parameters, 'asOf', input.asOf);
+    const query = parameters.size === 0 ? '' : `?${parameters.toString()}`;
     return this.request(
-      path(input.exchange, input.symbol, 'company-profile'),
+      path(input.exchange, input.symbol, `company-profile${query}`),
       input.ifNoneMatch,
       input.requestId,
       equityCompanyProfileSchema,
@@ -130,7 +145,7 @@ export class EquityMarketDataClient {
   }
 
   /** 发起带内部凭据、超时、关联标识与严格 schema 校验的 GET。 */
-  private async request<T>(
+  private async request<T extends { dataVersion: string | null }>(
     requestPath: string,
     ifNoneMatch: string | undefined,
     requestId: string,
@@ -153,12 +168,21 @@ export class EquityMarketDataClient {
     } catch {
       throw dependencyUnavailable();
     }
-    const etag = response.headers.get('etag') ?? undefined;
-    if (response.status === 304) return { status: 304, etag };
+    const etag = response.headers.get('etag');
+    const dataVersion = response.headers.get('x-data-version');
+    if (response.status === 304) {
+      if (!validEtag(etag) || !validDataVersion(dataVersion)) throw dependencyUnavailable();
+      return { status: 304, etag, dataVersion };
+    }
     if (!response.ok) throw await upstreamProblem(response);
     try {
-      return { status: 200, etag, body: schema.parse(await response.json()) };
-    } catch {
+      const body = schema.parse(await response.json());
+      if (!validEtag(etag) || !validDataVersion(dataVersion) || dataVersion !== body.dataVersion) {
+        throw dependencyUnavailable();
+      }
+      return { status: 200, etag, dataVersion, body };
+    } catch (error) {
+      if (error instanceof PublicProblemException) throw error;
       throw dependencyUnavailable();
     }
   }
@@ -172,6 +196,16 @@ function path(exchange: string, symbol: string, suffix: string): string {
 /** 仅在值存在时添加查询参数。 */
 function setOptional(parameters: URLSearchParams, key: string, value: string | undefined): void {
   if (value !== undefined) parameters.set(key, value);
+}
+
+/** 校验下游只返回受控强 ETag，防止弱校验器或非法字符进入公开响应头。 */
+function validEtag(value: string | null): value is string {
+  return value !== null && /^"[^"\r\n]{1,252}"$/.test(value);
+}
+
+/** 校验内部 publication 版本是规范 UUID。 */
+function validDataVersion(value: string | null): value is string {
+  return value !== null && z.string().uuid().safeParse(value).success;
 }
 
 /** 将下游不可用、鉴权异常、超时或合同漂移统一映射为公开 503。 */

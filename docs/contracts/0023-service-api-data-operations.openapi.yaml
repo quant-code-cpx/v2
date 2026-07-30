@@ -3,6 +3,9 @@ x-http-method-policy: post-only
 info:
   title: quant-v2 数据运维公开 POST API
   version: 1.0.0
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
   x-contract-status: Proposed
   description: >-
     service-api 面向 PC 管理端的数据运维合同。ADMIN 与 SUPER_ADMIN 可读，首版只有
@@ -732,7 +735,7 @@ components:
                 type: string
             availability:
               type: array
-              maxItems: 4
+              maxItems: 5
               items:
                 $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/DatasetAvailability"
             observationStates:
@@ -942,10 +945,15 @@ components:
           type: array
           minItems: 1
           maxItems: 100
-          description: v1 同一请求内 datasetCode 必须唯一
+          description: >-
+            v1 同一请求内 datasetCode 必须唯一。ETF 固定映射 profile→MASTER、
+            trading_state→STATUS、bar→BARS、nav→NAV；profile MASTER 可提交
+            scope=ALL_VENUES、venue=null、etf=null 的沪深双市场范围；ALL_ETFS 必须提交
+            venue=null、etf=null、profileDataVersions=null 的预检草稿。单只 ETF 使用显式
+            qualified identity；venue 可为 null，非 null 时必须与 identity 前缀一致。
           x-unique-by: datasetCode
           items:
-            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SyncTarget"
+            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SyncDraftTarget"
     SyncSubmitRequest:
       type: object
       additionalProperties: false
@@ -961,10 +969,13 @@ components:
           type: array
           minItems: 1
           maxItems: 100
-          description: 必须与 preflight 冻结顺序一致，且 datasetCode 唯一
+          description: >-
+            必须与 preflight 冻结顺序和 target 完全一致，且 datasetCode 唯一；ALL_ETFS
+            必须复用服务端返回的 SSE/SZSE 双 profileDataVersions；ALL_VENUES 不携带
+            profileDataVersions，仍须复用 preflight 返回的完整 target。
           x-unique-by: datasetCode
           items:
-            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SyncTarget"
+            $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SyncFrozenTarget"
         reason:
           type: string
           minLength: 2
@@ -1304,7 +1315,7 @@ components:
         run:
           $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/RunSummary"
         target:
-          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SyncTarget"
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SyncFrozenTarget"
         sourceSnapshot:
           type: array
           minItems: 1
@@ -1471,6 +1482,7 @@ components:
           scheduleId,
           datasetCode,
           mode,
+          selector,
           targetPolicy,
           enabled,
           frequency,
@@ -1490,6 +1502,12 @@ components:
           type: string
         mode:
           $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SyncMode"
+        selector:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/DraftTargetSelector"
+          description: >-
+            ETF 计划固定映射 profile→MASTER、trading_state→STATUS、bar→BARS、nav→NAV；
+            新建 profile 计划使用 ALL_VENUES 显式覆盖 SSE、SZSE；ALL_ETFS 仅保存
+            profileDataVersions=null 模板。
         targetPolicy:
           $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ScheduleTargetPolicy"
         enabled:
@@ -1557,6 +1575,7 @@ components:
           scheduleId,
           datasetCode,
           mode,
+          selector,
           targetPolicy,
           frequency,
           misfirePolicy,
@@ -1577,6 +1596,12 @@ components:
           description: v1 每个 datasetCode 至多一个计划；创建重复值返回 409
         mode:
           $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/SyncMode"
+        selector:
+          $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/DraftTargetSelector"
+          description: >-
+            ETF 计划固定映射 profile→MASTER、trading_state→STATUS、bar→BARS、nav→NAV；
+            新建 profile 计划使用 ALL_VENUES，既有单市场 MASTER 保持兼容；ALL_ETFS
+            仅接受 profileDataVersions=null 模板。
         targetPolicy:
           $ref: "0022-data-sync-operations-internal.openapi.yaml#/components/schemas/ScheduleTargetPolicy"
         frequency:

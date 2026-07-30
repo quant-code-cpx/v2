@@ -113,6 +113,20 @@ class FakeSwRepository:
         return self.checkpoint
 
 
+class FinalPublicationRepository(FakeSwRepository):
+    """要求申万双 publication 前先武装控制面终态的仓储替身。"""
+
+    def __init__(self) -> None:
+        """初始化尚未进入最终 publication 的测试状态。"""
+        super().__init__()
+        self.final_publication_armed = False
+
+    def publish_snapshot(self, *, snapshot: object, source: SwSourceObservation) -> SwPublishResult:
+        """确认 taxonomy/估值共同提交前已经调用 fenced 终态回调。"""
+        assert self.final_publication_armed
+        return super().publish_snapshot(snapshot=snapshot, source=source)
+
+
 def test_decoder_builds_three_level_parent_closure_and_ratio_unit() -> None:
     """解码器应将父级名称解析为代码，并把来源百分数除以一百。"""
     snapshot = decode_sw_snapshot(_payload(), expected_date=_SNAPSHOT_DATE)
@@ -180,6 +194,31 @@ def test_sync_archives_raw_and_normalized_payload_then_replays_without_source() 
     store.values[source.raw_uri] = b'{"raw":"tampered"}'
     with pytest.raises(ValueError, match="raw payload digest"):
         service.replay(snapshot_date=_SNAPSHOT_DATE)
+
+
+def test_sync_arms_fenced_finalizer_before_taxonomy_and_valuation_publication() -> None:
+    """申万实时快照必须在双 canonical publication 前武装同一 run 终态。"""
+    repository = FinalPublicationRepository()
+    calls: list[str] = []
+
+    def arm_final_publication() -> None:
+        """模拟 dispatcher 将 run 终态加入随后的 publication 事务。"""
+        repository.final_publication_armed = True
+        calls.append("armed")
+
+    result = asyncio.run(
+        SwSnapshotSyncService(
+            source=FakeSwSource(),
+            repository=cast(object, repository),  # type: ignore[arg-type]
+            raw_payload_store=MemoryRawStore(),
+        ).sync(
+            snapshot_date=_SNAPSHOT_DATE,
+            before_final_publication=arm_final_publication,
+        )
+    )
+
+    assert result.replayed is False
+    assert calls == ["armed"]
 
 
 def test_sync_rejects_unsupported_source_and_missing_or_tampered_replay() -> None:

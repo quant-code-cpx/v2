@@ -10,6 +10,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Annotated, Any
@@ -25,6 +26,7 @@ from service_data_sync.application.ports.market_data import EquityMarketDataRepo
 from service_data_sync.application.ports.market_data_access import (
     MarketDataAccessRepository,
 )
+from service_data_sync.application.ports.market_overview import MarketOverviewRepository
 from service_data_sync.application.ports.money_flow import MoneyFlowReadRepository
 from service_data_sync.application.ports.sector_eod import SectorEodRepository
 from service_data_sync.application.ports.sector_market_data import (
@@ -35,8 +37,12 @@ from service_data_sync.application.ports.sector_market_data import (
 from service_data_sync.application.ports.sector_membership import SectorMembershipRepository
 from service_data_sync.application.ports.sw_sector import SwSectorRepository
 from service_data_sync.bootstrap.container import ServiceContainer, build_container
-from service_data_sync.bootstrap.settings import Settings, load_settings
+from service_data_sync.bootstrap.settings import Environment, Settings, load_settings
 from service_data_sync.domain.sector import SectorBar, SectorIdentifier, SectorPeriod, SectorScheme
+from service_data_sync.infrastructure.data_operations.control_plane import (
+    DataOperationsControlPlane,
+    build_catalog,
+)
 from service_data_sync.infrastructure.persistence.equity_market_data_repository import (
     SqlAlchemyEquityMarketDataRepository,
 )
@@ -48,6 +54,9 @@ from service_data_sync.infrastructure.persistence.financial_read_repository impo
 )
 from service_data_sync.infrastructure.persistence.market_data_access_repository import (
     CatalogMarketDataAccessRepository,
+)
+from service_data_sync.infrastructure.persistence.market_overview_repository import (
+    SqlAlchemyMarketOverviewRepository,
 )
 from service_data_sync.infrastructure.persistence.money_flow_read_repository import (
     SqlAlchemyMoneyFlowReadRepository,
@@ -63,6 +72,9 @@ from service_data_sync.infrastructure.persistence.sector_membership_repository i
 )
 from service_data_sync.infrastructure.persistence.sqlalchemy_market_data_access_repository import (
     SqlAlchemyMarketDataAccessRepository,
+)
+from service_data_sync.infrastructure.persistence.stock_connect_read_repository import (
+    SqlAlchemyStockConnectReadRepository,
 )
 from service_data_sync.infrastructure.persistence.sw_sector_repository import (
     SqlAlchemySwSectorRepository,
@@ -95,8 +107,11 @@ def create_app(
     sw_repository: SwSectorRepository | None = None,
     money_flow_repository: MoneyFlowReadRepository | None = None,
     market_data_repository: MarketDataAccessRepository | None = None,
+    market_overview_repository: MarketOverviewRepository | None = None,
+    data_operations_control_plane: DataOperationsControlPlane | None = None,
+    stock_connect_repository: SqlAlchemyStockConnectReadRepository | None = None,
 ) -> FastAPI:
-    """构造共享只读内部应用；运行时独占 `canonical` 数据读取与服务凭据校验。"""
+    """构造受认证内部应用，组合发布读取与数据运维控制面 POST 路由。"""
     resolved_settings = settings or load_settings()
     container: ServiceContainer | None = None
     if repository is None:
@@ -117,9 +132,13 @@ def create_app(
         if money_flow_repository is None:
             money_flow_repository = SqlAlchemyMoneyFlowReadRepository(
                 container.database,
-                cursor_secret=resolved_settings.internal_api_bearer_token.get_secret_value().encode(),
+                cursor_secret=_legacy_bearer_secret(resolved_settings).encode(),
             )
-    credential = resolved_settings.internal_api_bearer_token.get_secret_value()
+        if market_overview_repository is None:
+            market_overview_repository = SqlAlchemyMarketOverviewRepository(container.database)
+    legacy_credential = _legacy_bearer_secret(resolved_settings)
+    read_credential = _read_bearer_secret(resolved_settings)
+    operations_credential = _operations_bearer_secret(resolved_settings)
     # 正常运行使用 release-aware typed reader；注入假 repository 的测试仍可无数据库运行。
     # 目录可发现但没有合格发布时必须 503，禁止回退到 raw 或研究态表。
     resolved_market_data_repository = market_data_repository or (
@@ -128,6 +147,27 @@ def create_app(
         else CatalogMarketDataAccessRepository()
     )
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+    if resolved_settings.stock_connect_enabled:
+        if stock_connect_repository is None:
+            if container is None:
+                raise RuntimeError("stock-connect read repository is unavailable")
+            cursor_secret = resolved_settings.stock_connect_cursor_hmac_secret
+            if cursor_secret is None:
+                raise RuntimeError("stock-connect cursor secret is unavailable")
+            stock_connect_repository = SqlAlchemyStockConnectReadRepository(
+                container.database,
+                cursor_secret=cursor_secret.get_secret_value().encode(),
+            )
+        from service_data_sync.interfaces.internal_stock_connect_api import (
+            register_stock_connect_routes,
+        )
+
+        register_stock_connect_routes(
+            app,
+            repository=stock_connect_repository,
+            read_bearer_token=read_credential,
+        )
 
     @app.exception_handler(InternalProblem)
     async def render_internal_problem(request: Request, error: InternalProblem) -> JSONResponse:
@@ -154,14 +194,25 @@ def create_app(
         request: Request, _error: RequestValidationError
     ) -> JSONResponse:
         """将框架参数校验统一映射为 v1 合同约定的 400 问题响应。"""
-        request_id = _request_id(request)
+        stock_connect = request.url.path.startswith("/internal/v1/stock-connect/")
+        supplied_request_id = request.headers.get("X-Request-Id")
+        request_id = (
+            supplied_request_id
+            if stock_connect
+            and supplied_request_id is not None
+            and re.fullmatch(r"[A-Za-z0-9._:/-]{1,128}", supplied_request_id)
+            else "invalid-request-id"
+            if stock_connect
+            else _request_id(request)
+        )
         return JSONResponse(
             status_code=400,
             content=_problem_payload(
                 status=400,
-                code="validation-error",
+                code="VALIDATION_FAILED" if stock_connect else "validation-error",
                 detail="Request parameters are invalid",
                 request_id=request_id,
+                instance=request.url.path if stock_connect else None,
             ),
             media_type="application/problem+json",
             headers={"X-Request-Id": request_id, "Cache-Control": "no-store"},
@@ -170,12 +221,64 @@ def create_app(
     def require_service_bearer(
         authorization: Annotated[str | None, Header()] = None,
     ) -> None:
-        """仅接受完全匹配的内部 Bearer 凭据，避免匿名或前缀匹配绕过。"""
-        expected = f"Bearer {credential}"
+        """校验既有内部 API 的通用服务身份，不把数据运维专用 token 扩散到旧路由。"""
+        expected = f"Bearer {legacy_credential}"
         if authorization is None or not hmac.compare_digest(authorization, expected):
             raise InternalProblem(
                 status=401, code="unauthorized", detail="Service credential is invalid"
             )
+
+    def require_read_service_bearer(
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> None:
+        """仅接受数据运维查询 bearer，避免查询凭据执行提交、取消或计划修改。"""
+        expected = f"Bearer {read_credential}"
+        if authorization is None or not hmac.compare_digest(authorization, expected):
+            raise InternalProblem(
+                status=401, code="unauthorized", detail="Service credential is invalid"
+            )
+
+    def require_operations_service_bearer(
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> None:
+        """仅接受运维写服务身份，读凭据不得提交、取消或修改自动计划。"""
+        expected = f"Bearer {operations_credential}"
+        if authorization is None or not hmac.compare_digest(authorization, expected):
+            raise InternalProblem(
+                status=401, code="unauthorized", detail="Service credential is invalid"
+            )
+
+    if data_operations_control_plane is None and container is not None:
+        # 控制面只依赖现有 PostgreSQL、来源注册表与配置，不直接导入具体 adapter。
+        data_operations_control_plane = DataOperationsControlPlane(
+            database=container.database,
+            catalog=build_catalog(resolved_settings, container.source_registry),
+            source_registry=container.source_registry,
+            trading_calendar=container.trading_calendar,
+        )
+    if data_operations_control_plane is not None:
+        from service_data_sync.interfaces.internal_data_operations_api import (
+            register_data_operations_routes,
+        )
+
+        register_data_operations_routes(
+            app,
+            control_plane=data_operations_control_plane,
+            require_read_service_bearer=require_read_service_bearer,
+            require_operations_service_bearer=require_operations_service_bearer,
+        )
+
+    if market_overview_repository is not None:
+        from service_data_sync.interfaces.internal_market_overview_api import (
+            register_market_overview_routes,
+        )
+
+        register_market_overview_routes(
+            app,
+            repository=market_overview_repository,
+            require_service_bearer=require_service_bearer,
+            cursor_secret=legacy_credential.encode(),
+        )
 
     @app.get("/health", include_in_schema=False)
     def health() -> dict[str, str]:
@@ -210,6 +313,14 @@ def create_app(
             detail="Financial cursor does not match request",
         )
 
+    def financial_snapshot_problem() -> InternalProblem:
+        """拒绝已切换、回收或不属于目标证券的财务 publication。"""
+        return InternalProblem(
+            status=409,
+            code="snapshot-expired",
+            detail="Published financial snapshot changed",
+        )
+
     def money_flow_unavailable_problem() -> InternalProblem:
         """返回没有可消费技术发布的资金流依赖失败。"""
         return InternalProblem(
@@ -234,6 +345,14 @@ def create_app(
         """把游标不匹配或证券身份边界映射为稳定冲突。"""
         return InternalProblem(status=409, code="query-conflict", detail=detail)
 
+    def money_flow_snapshot_problem() -> InternalProblem:
+        """拒绝已切换、回收或不属于目标证券的资金流 publication。"""
+        return InternalProblem(
+            status=409,
+            code="snapshot-expired",
+            detail="Published money-flow snapshot changed",
+        )
+
     from service_data_sync.interfaces.internal_money_flow_api import (
         register_money_flow_routes,
     )
@@ -245,6 +364,7 @@ def create_app(
         not_found_problem=money_flow_not_found_problem,
         validation_problem=money_flow_validation_problem,
         conflict_problem=money_flow_conflict_problem,
+        snapshot_problem=money_flow_snapshot_problem,
         repository=money_flow_repository,
     )
 
@@ -255,7 +375,7 @@ def create_app(
         app,
         repository=resolved_market_data_repository,
         require_service_bearer=require_service_bearer,
-        cursor_secret=credential.encode(),
+        cursor_secret=legacy_credential.encode(),
     )
 
     # 财务路由只在精确 `publication` 已存在时读取，
@@ -269,8 +389,9 @@ def create_app(
         not_found_problem=financial_report_not_found_problem,
         validation_problem=financial_validation_problem,
         cursor_problem=financial_cursor_problem,
+        snapshot_problem=financial_snapshot_problem,
         # 内部认证凭据只作为游标完整性密钥，游标本身不承载认证能力。
-        cursor_secret=credential.encode(),
+        cursor_secret=legacy_credential.encode(),
         repository=financial_repository,
     )
 
@@ -283,7 +404,7 @@ def create_app(
             app,
             repository=sw_repository,
             require_service_bearer=require_service_bearer,
-            cursor_secret=credential.encode(),
+            cursor_secret=legacy_credential.encode(),
         )
 
     if equity_repository is not None:
@@ -294,7 +415,7 @@ def create_app(
             app,
             repository=equity_repository,
             require_service_bearer=require_service_bearer,
-            cursor_secret=credential.encode(),
+            cursor_secret=legacy_credential.encode(),
         )
 
     if equity_market_repository is not None:
@@ -307,7 +428,20 @@ def create_app(
             app,
             repository=equity_market_repository,
             require_service_bearer=require_service_bearer,
-            cursor_secret=credential.encode(),
+            cursor_secret=legacy_credential.encode(),
+        )
+
+    if container is not None:
+        # 股票中心聚合 reader 只读取 data-sync 自有 publication，禁止用注入 fixture 伪造生产链。
+        from service_data_sync.interfaces.internal_equity_workspace_api import (
+            register_equity_workspace_routes,
+        )
+
+        register_equity_workspace_routes(
+            app,
+            database=container.database,
+            require_service_bearer=require_service_bearer,
+            cursor_secret=legacy_credential.encode(),
         )
 
     if membership_repository is not None:
@@ -330,7 +464,7 @@ def create_app(
             app,
             repository=eod_repository,
             require_service_bearer=require_service_bearer,
-            cursor_secret=credential.encode(),
+            cursor_secret=legacy_credential.encode(),
         )
 
     @app.get("/internal/v1/sectors", dependencies=[Depends(require_service_bearer)])
@@ -374,6 +508,7 @@ def create_app(
             request=request,
             if_none_match=if_none_match,
             etag=_catalog_etag(publication, normalized_query, cursor, limit),
+            data_version=publication.data_version,
             body=body,
         )
 
@@ -397,6 +532,7 @@ def create_app(
             request=request,
             if_none_match=if_none_match,
             etag=_resource_etag("sector", publication.data_version, identifier.qualified_key),
+            data_version=publication.data_version,
             body=body,
         )
 
@@ -474,6 +610,7 @@ def create_app(
             request=request,
             if_none_match=if_none_match,
             etag=_resource_etag("bars", publication.data_version, identifier.qualified_key, period),
+            data_version=publication.data_version,
             body=body,
         )
 
@@ -710,11 +847,17 @@ def _conditional_json_response(
     request: Request,
     if_none_match: str | None,
     etag: str,
+    data_version: UUID,
     body: dict[str, Any],
 ) -> Response:
-    """在内容匹配时返回 304，否则返回可私有复验的 JSON 表示。"""
+    """在内容匹配时返回 304，并让成功与缓存响应都携带精确 publication。"""
     request_id = _request_id(request)
-    headers = {"ETag": etag, "Cache-Control": _PRIVATE_REVALIDATE, "X-Request-Id": request_id}
+    headers = {
+        "ETag": etag,
+        "Cache-Control": _PRIVATE_REVALIDATE,
+        "X-Data-Version": str(data_version),
+        "X-Request-Id": request_id,
+    }
     if if_none_match is not None and if_none_match == etag:
         return Response(status_code=304, headers=headers)
     return JSONResponse(content=body, headers=headers)
@@ -737,16 +880,50 @@ def _resource_etag(kind: str, data_version: UUID, *parts: str) -> str:
 
 
 def _request_id(request: Request) -> str:
-    """复用受限长度请求标识，或为内部问题和响应生成新的可关联标识。"""
+    """仅回显稳定安全字符请求标识，拒绝控制字符和 header 注入。"""
     supplied = request.headers.get("X-Request-Id")
-    return supplied if supplied is not None and 1 <= len(supplied) <= 128 else str(uuid4())
+    return (
+        supplied
+        if supplied is not None and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", supplied)
+        else str(uuid4())
+    )
+
+
+def _legacy_bearer_secret(settings: Settings) -> str:
+    """读取既有内部 API 的通用 bearer；该身份不授予已分离的数据运维路由权限。"""
+    return settings.internal_api_bearer_token.get_secret_value()
+
+
+def _read_bearer_secret(settings: Settings) -> str:
+    """读取数据运维查询 bearer；LOCAL/TEST 未拆分时回退旧内部 bearer。"""
+    token = settings.internal_read_api_bearer_token
+    if token is not None:
+        return token.get_secret_value()
+    if settings.environment in {Environment.LOCAL, Environment.TEST}:
+        return _legacy_bearer_secret(settings)
+    raise RuntimeError("internal read bearer token is unavailable")
+
+
+def _operations_bearer_secret(settings: Settings) -> str:
+    """读取数据运维写 bearer；LOCAL/TEST 未拆分时回退旧内部 bearer。"""
+    token = settings.internal_operations_api_bearer_token
+    if token is not None:
+        return token.get_secret_value()
+    if settings.environment in {Environment.LOCAL, Environment.TEST}:
+        return _legacy_bearer_secret(settings)
+    raise RuntimeError("internal operations bearer token is unavailable")
 
 
 def _problem_payload(
-    *, status: int, code: str, detail: str, request_id: str
+    *,
+    status: int,
+    code: str,
+    detail: str,
+    request_id: str,
+    instance: str | None = None,
 ) -> dict[str, str | int]:
     """生成合同约定的最小问题对象，不包含异常、配置或 SQL 信息。"""
-    return {
+    payload: dict[str, str | int] = {
         "type": f"https://quant-v2.local/problems/{code}",
         "title": "Request failed",
         "status": status,
@@ -754,3 +931,6 @@ def _problem_payload(
         "detail": detail,
         "requestId": request_id,
     }
+    if instance is not None:
+        payload["instance"] = instance
+    return payload

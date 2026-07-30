@@ -41,3 +41,4 @@ def test_financial_partition_manager_creates_all_yearly_tables_and_constraints()
     assert "ex_provider_financial_metric_revision_2026_bitemporal" in rendered
     assert "ex_derived_financial_metric_revision_2026_bitemporal" in rendered
     assert "ex_valuation_observation_revision_2026_bitemporal" in rendered
+    assert rendered.count("report_period WITH =, security_id WITH =") == 2

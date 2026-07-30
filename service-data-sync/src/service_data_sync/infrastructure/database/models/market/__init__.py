@@ -48,6 +48,31 @@ from .margin_stock_connect import (
     StockConnectHoldingItem,
     StockConnectHoldingSnapshot,
 )
+from .overview import (
+    MarketOverviewActiveBundle,
+    MarketOverviewBundle,
+    MarketOverviewBundleComponent,
+    MarketOverviewComponentRelease,
+    MarketOverviewCurrentPointer,
+    MarketOverviewDerivationInputPointer,
+    MarketOverviewPointerTransition,
+)
+from .stock_connect_center import (
+    StockConnectBundlePublication,
+    StockConnectBundleRollbackAudit,
+    StockConnectCalendarObservation,
+    StockConnectChannelStatusRevision,
+    StockConnectOverviewPublication,
+)
+from .stock_connect_identity import StockConnectHkexInstrumentIdentity
+from .stock_connect_overview_generation import (
+    StockConnectOverviewGeneration,
+    StockConnectOverviewGenerationComponent,
+)
+from .stock_connect_readiness import (
+    StockConnectReadinessCalendarDay,
+    StockConnectReadinessSnapshot,
+)
 
 __all__ = [
     "DerivativeContract",
@@ -74,16 +99,33 @@ __all__ = [
     "MarketEntity",
     "MarketEntityRelationVersion",
     "MarketInstrument",
+    "MarketOverviewActiveBundle",
+    "MarketOverviewBundle",
+    "MarketOverviewBundleComponent",
+    "MarketOverviewComponentRelease",
+    "MarketOverviewCurrentPointer",
+    "MarketOverviewDerivationInputPointer",
+    "MarketOverviewPointerTransition",
     "MarketSessionVersion",
     "MarginEligibilityRevision",
     "MarginMarketDailyRevision",
     "MarginSecurityDailyRevision",
     "MarginSystemRiskDailyRevision",
     "StockConnectActiveSecurityRevision",
+    "StockConnectBundleRollbackAudit",
+    "StockConnectBundlePublication",
+    "StockConnectCalendarObservation",
     "StockConnectChannelDailyRevision",
+    "StockConnectChannelStatusRevision",
+    "StockConnectOverviewPublication",
     "StockConnectDisclosureRegime",
     "StockConnectHoldingItem",
     "StockConnectHoldingSnapshot",
+    "StockConnectHkexInstrumentIdentity",
+    "StockConnectOverviewGeneration",
+    "StockConnectOverviewGenerationComponent",
+    "StockConnectReadinessCalendarDay",
+    "StockConnectReadinessSnapshot",
     "RestrictedUnlockLot",
     "ShareCapitalComponent",
     "ShareholderHoldingAction",

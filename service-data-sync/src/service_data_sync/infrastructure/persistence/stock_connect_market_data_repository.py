@@ -11,10 +11,10 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
-from uuid import UUID, uuid4
+from datetime import UTC, date, datetime, timedelta
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import and_, func, insert, literal, or_, select, update
 from sqlalchemy.orm import Session
 
 from service_data_sync.application.ports.canonical_release import (
@@ -33,6 +33,7 @@ from service_data_sync.application.ports.stock_connect import (
 from service_data_sync.domain.stock_connect import (
     StockConnectActiveSecurity,
     StockConnectChannel,
+    StockConnectInstrumentMaster,
     StockConnectMarketDaily,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
@@ -50,8 +51,13 @@ from service_data_sync.infrastructure.database.models.market import (
 )
 from service_data_sync.infrastructure.database.models.market.identity import (
     InstrumentIdentifierVersion,
+    InstrumentLifecycleVersion,
+    MarketEntity,
     MarketInstrument,
     TradingVenue,
+)
+from service_data_sync.infrastructure.database.models.market.stock_connect_identity import (
+    StockConnectHkexInstrumentIdentity,
 )
 from service_data_sync.infrastructure.persistence.canonical_release_repository import (
     SqlAlchemyCanonicalReleaseRepository,
@@ -79,6 +85,8 @@ _METRIC_FIELDS = {
     "turnover_amount",
     "net_buy_amount",
     "quota_balance",
+    "trade_count",
+    "etf_turnover_amount",
 }
 
 
@@ -102,7 +110,7 @@ class _PreparedActiveRecord:
     """封装待写活跃榜 revision 的值、工具身份、依赖统计 release 与修订序号。"""
 
     value: StockConnectActiveSecurity
-    instrument_id: UUID
+    instrument_id: UUID | None
     market_stat_release_id: UUID
     content_hash: str
     revision_no: int
@@ -157,8 +165,11 @@ class SqlAlchemyStockConnectMarketDataRepository(
                 code=_MARKET_METHODOLOGY,
                 semantic_family="reported-stock-connect-channel-daily",
                 mapping_version=_MARKET_MAPPING,
-                documentation_ref="docs/service-data-sync/0022-stock-connect/index.html",
+                documentation_ref=(
+                    "docs/service-web/0010-stock-connect-center/service-data-sync.html"
+                ),
             )
+            _ensure_default_regimes(session, channel=channel, methodology_version_id=methodology_id)
             source_dataset_id = ensure_source_dataset(
                 session,
                 approval=approval,
@@ -253,6 +264,10 @@ class SqlAlchemyStockConnectMarketDataRepository(
                         quota_balance=item.value.quota_balance,
                         currency=item.value.currency,
                         availability_status=item.value.availability_status,
+                        trade_count=item.value.trade_count,
+                        etf_turnover_amount=item.value.etf_turnover_amount,
+                        field_availability=dict(item.value.field_availability),
+                        center_schema_version=1,
                         methodology_version_id=candidate.methodology_version_id,
                         release_id=release_id,
                         revision_no=item.revision_no,
@@ -289,6 +304,143 @@ class SqlAlchemyStockConnectMarketDataRepository(
             channel=channel,
         )
 
+    def ensure_hkex_instruments(
+        self,
+        *,
+        records: Sequence[StockConnectInstrumentMaster],
+        target_source_codes: set[str],
+        source: StockConnectSourceObservation,
+    ) -> dict[str, UUID]:
+        """以稳定证券 ID 处理完整主档快照，但仅扩张到港股通活跃榜目标身份。"""
+        values = tuple(records)
+        if not values or len({item.source_instrument_code for item in values}) != len(values):
+            raise ValueError("HKEX master records must be non-empty and unique by code")
+        effective_dates = {item.effective_from for item in values}
+        if len(effective_dates) != 1:
+            raise ValueError("HKEX master snapshot must use exactly one effective date")
+        stable_ids = [
+            item.source_security_id for item in values if item.source_security_id is not None
+        ]
+        if len(set(stable_ids)) != len(stable_ids):
+            raise ValueError("HKEX master stable security ids must be unique")
+        snapshot_date = effective_dates.pop()
+        try:
+            snapshot_end = snapshot_date + timedelta(days=1)
+        except OverflowError as error:
+            raise ValueError("HKEX master snapshot date exceeds supported range") from error
+        approval = _approved_source(self._approved_sources, source)
+        resolved: dict[str, UUID] = {}
+        with self._database.transaction() as session:
+            now = datetime.now(UTC)
+            session.execute(
+                select(
+                    func.pg_advisory_xact_lock(
+                        func.hashtextextended(literal("stock-connect:hkex-master"), literal(0))
+                    )
+                )
+            )
+            ensure_dataset(
+                session,
+                code="market.stock_connect.instrument_master.reported",
+                domain="stock_connect",
+                grain="HKEX stable security id + venue code + effective trade date",
+                now=now,
+            )
+            source_dataset_id = ensure_source_dataset(
+                session,
+                approval=approval,
+                capability=source.capability,
+                native_grain="HKEX stable security id + instrument code + effective trade date",
+            )
+            source_batch_id = record_source_batch(
+                session, source=source, source_dataset_id=source_dataset_id, now=now
+            )
+            venue_id = _ensure_hkex_venue(session)
+            tracked = {
+                item.source_security_id: item
+                for item in session.execute(
+                    select(StockConnectHkexInstrumentIdentity).with_for_update()
+                )
+                .scalars()
+                .all()
+            }
+            present_ids = set(stable_ids)
+            for source_security_id, identity in tracked.items():
+                if source_security_id not in present_ids:
+                    _record_hkex_lifecycle_day(
+                        session,
+                        identity=identity,
+                        snapshot_date=snapshot_date,
+                        snapshot_end=snapshot_end,
+                        status_code="RETIRED",
+                        event_kind="HKEX_MASTER_ABSENT",
+                        source_batch_id=source_batch_id,
+                        evidence_ref=source.raw_uri,
+                        now=now,
+                    )
+                    if snapshot_date > identity.last_seen_on:
+                        identity.updated_at = now
+                        session.execute(
+                            update(MarketInstrument)
+                            .where(
+                                MarketInstrument.instrument_id == identity.instrument_id,
+                                MarketInstrument.tradable_to.is_(None),
+                            )
+                            .values(tradable_to=snapshot_date)
+                        )
+            for value in values:
+                source_security_id = value.source_security_id
+                if source_security_id is None or (
+                    value.source_instrument_code not in target_source_codes
+                    and source_security_id not in tracked
+                ):
+                    continue
+                identity = tracked.get(source_security_id)
+                if identity is None:
+                    identity = _create_hkex_identity(
+                        session,
+                        value=value,
+                        venue_id=venue_id,
+                        source_batch_id=source_batch_id,
+                        snapshot_end=snapshot_end,
+                        now=now,
+                    )
+                    tracked[source_security_id] = identity
+                    # 标识与生命周期版本通过复合外键引用实体，但 ORM 未声明对象关系；先落身份根，
+                    # 避免最终 flush 将版本行排在 `market_entity` 前而触发外键失败。
+                    session.flush()
+                else:
+                    _observe_hkex_identity(
+                        session,
+                        identity=identity,
+                        snapshot_date=snapshot_date,
+                        snapshot_end=snapshot_end,
+                        source_batch_id=source_batch_id,
+                        now=now,
+                    )
+                _record_hkex_identifier_day(
+                    session,
+                    identity=identity,
+                    venue_id=venue_id,
+                    value=value,
+                    snapshot_end=snapshot_end,
+                    source_batch_id=source_batch_id,
+                    now=now,
+                )
+                _record_hkex_lifecycle_day(
+                    session,
+                    identity=identity,
+                    snapshot_date=snapshot_date,
+                    snapshot_end=snapshot_end,
+                    status_code="ACTIVE",
+                    event_kind="HKEX_MASTER_PRESENT",
+                    source_batch_id=source_batch_id,
+                    evidence_ref=source.raw_uri,
+                    now=now,
+                )
+                resolved[value.source_instrument_code] = UUID(str(identity.instrument_id))
+        return resolved
+
     def publish_active_securities(
         self,
         *,
@@ -296,7 +448,7 @@ class SqlAlchemyStockConnectMarketDataRepository(
         records: Sequence[StockConnectActiveSecurity],
         source: StockConnectSourceObservation,
     ) -> PublishedStockConnectActiveSecurities:
-        """发布活跃榜；每行均需精确工具身份和同日当前通道统计 release。"""
+        """发布活跃榜；近期身份必须精确，历史证据缺口则显式隔离并保留来源代码。"""
         values = tuple(records)
         if not values or len({(value.trade_date, value.rank_no) for value in values}) != len(
             values
@@ -324,14 +476,18 @@ class SqlAlchemyStockConnectMarketDataRepository(
                 code=_ACTIVE_METHODOLOGY,
                 semantic_family="reported-stock-connect-active-security",
                 mapping_version=_ACTIVE_MAPPING,
-                documentation_ref="docs/service-data-sync/0022-stock-connect/index.html",
+                documentation_ref=(
+                    "docs/service-web/0010-stock-connect-center/service-data-sync.html"
+                ),
             )
             market_methodology_id = ensure_methodology(
                 session,
                 code=_MARKET_METHODOLOGY,
                 semantic_family="reported-stock-connect-channel-daily",
                 mapping_version=_MARKET_MAPPING,
-                documentation_ref="docs/service-data-sync/0022-stock-connect/index.html",
+                documentation_ref=(
+                    "docs/service-web/0010-stock-connect-center/service-data-sync.html"
+                ),
             )
             source_dataset_id = ensure_source_dataset(
                 session,
@@ -432,12 +588,18 @@ class SqlAlchemyStockConnectMarketDataRepository(
                         channel=channel.channel,
                         direction=channel.direction,
                         instrument_id=item.instrument_id,
+                        source_instrument_code=item.value.source_instrument_code,
+                        source_instrument_name=item.value.source_instrument_name,
+                        identity_status=(
+                            "RESOLVED" if item.instrument_id is not None else "SOURCE_UNRESOLVED"
+                        ),
                         market_stat_release_id=item.market_stat_release_id,
                         rank_no=item.value.rank_no,
                         buy_amount=item.value.buy_amount,
                         sell_amount=item.value.sell_amount,
                         turnover_amount=item.value.turnover_amount,
                         currency=item.value.currency,
+                        field_availability=dict(item.value.field_availability),
                         methodology_version_id=candidate.methodology_version_id,
                         release_id=release_id,
                         revision_no=item.revision_no,
@@ -487,6 +649,249 @@ def _approved_source(
     return approval
 
 
+def _ensure_hkex_venue(session: Session) -> UUID:
+    """幂等确保 HKEX 场所字典存在，正式名称和时区不由证券文件猜测。"""
+    existing = session.execute(
+        select(TradingVenue.venue_id).where(TradingVenue.code == "HKEX")
+    ).scalar_one_or_none()
+    if existing is not None:
+        return UUID(str(existing))
+    venue_id = uuid5(NAMESPACE_URL, "quant-v2:trading-venue:HKEX")
+    session.add(
+        TradingVenue(
+            venue_id=venue_id,
+            mic="XHKG",
+            code="HKEX",
+            name="Hong Kong Exchanges and Clearing Limited",
+            timezone="Asia/Hong_Kong",
+            country="HK",
+            active=True,
+        )
+    )
+    session.flush()
+    return venue_id
+
+
+def _create_hkex_identity(
+    session: Session,
+    *,
+    value: StockConnectInstrumentMaster,
+    venue_id: UUID,
+    source_batch_id: UUID,
+    snapshot_end: date,
+    now: datetime,
+) -> StockConnectHkexInstrumentIdentity:
+    """仅用官方稳定证券 ID 创建永久实体；代码和名称不会进入 UUID 输入。"""
+    if value.source_security_id is None:
+        raise AssertionError("HKEX stable security id is required to create identity")
+    instrument_id = uuid5(
+        NAMESPACE_URL,
+        f"quant-v2:HKEX:EQUITY:security-id:{value.source_security_id}",
+    )
+    session.add(
+        MarketEntity(
+            entity_id=instrument_id,
+            entity_kind="EQUITY",
+            created_at=now,
+            retired_at=None,
+        )
+    )
+    session.add(
+        MarketInstrument(
+            instrument_id=instrument_id,
+            instrument_kind="EQUITY",
+            primary_venue_id=venue_id,
+            tradable_from=value.effective_from,
+            tradable_to=snapshot_end,
+        )
+    )
+    identity = StockConnectHkexInstrumentIdentity(
+        source_security_id=value.source_security_id,
+        instrument_id=instrument_id,
+        first_seen_on=value.effective_from,
+        last_seen_on=value.effective_from,
+        first_source_batch_id=source_batch_id,
+        last_source_batch_id=source_batch_id,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(identity)
+    return identity
+
+
+def _observe_hkex_identity(
+    session: Session,
+    *,
+    identity: StockConnectHkexInstrumentIdentity,
+    snapshot_date: date,
+    snapshot_end: date,
+    source_batch_id: UUID,
+    now: datetime,
+) -> None:
+    """合并乱序快照的观察边界，并让顶层工具覆盖已确认的最早至最新日期。"""
+    identity.first_seen_on = min(identity.first_seen_on, snapshot_date)
+    identity.last_seen_on = max(identity.last_seen_on, snapshot_date)
+    identity.last_source_batch_id = source_batch_id
+    identity.updated_at = now
+    instrument = session.get(MarketInstrument, identity.instrument_id)
+    if instrument is None:
+        raise ValueError("HKEX stable identity has no market instrument")
+    instrument.tradable_from = (
+        snapshot_date
+        if instrument.tradable_from is None
+        else min(instrument.tradable_from, snapshot_date)
+    )
+    instrument.tradable_to = (
+        snapshot_end
+        if instrument.tradable_to is None
+        else max(instrument.tradable_to, snapshot_end)
+    )
+
+
+def _record_hkex_identifier_day(
+    session: Session,
+    *,
+    identity: StockConnectHkexInstrumentIdentity,
+    venue_id: UUID,
+    value: StockConnectInstrumentMaster,
+    snapshot_end: date,
+    source_batch_id: UUID,
+    now: datetime,
+) -> None:
+    """为快照业务日写一个半开代码版本，稳定实体与代码复用因此互不混淆。"""
+    current = (
+        session.execute(
+            select(InstrumentIdentifierVersion)
+            .where(
+                InstrumentIdentifierVersion.entity_kind == "EQUITY",
+                InstrumentIdentifierVersion.identifier_scheme == _IDENTIFIER_SCHEME,
+                or_(
+                    InstrumentIdentifierVersion.entity_id == identity.instrument_id,
+                    and_(
+                        InstrumentIdentifierVersion.venue_id == venue_id,
+                        InstrumentIdentifierVersion.identifier_value
+                        == value.source_instrument_code,
+                    ),
+                ),
+                InstrumentIdentifierVersion.effective_from <= value.effective_from,
+                (InstrumentIdentifierVersion.effective_to.is_(None))
+                | (InstrumentIdentifierVersion.effective_to > value.effective_from),
+                InstrumentIdentifierVersion.known_to.is_(None),
+            )
+            .with_for_update()
+        )
+        .scalars()
+        .all()
+    )
+    exact = [
+        item
+        for item in current
+        if UUID(str(item.entity_id)) == UUID(str(identity.instrument_id))
+        and item.venue_id == venue_id
+        and item.identifier_value == value.source_instrument_code
+        and item.effective_from == value.effective_from
+        and item.effective_to == snapshot_end
+    ]
+    if len(exact) > 1:
+        raise ValueError("HKEX stable identity has duplicate current code versions")
+    if exact:
+        return
+    for item in current:
+        session.execute(
+            update(InstrumentIdentifierVersion)
+            .where(InstrumentIdentifierVersion.version_id == item.version_id)
+            .values(known_to=now)
+        )
+    session.add(
+        InstrumentIdentifierVersion(
+            version_id=uuid5(
+                NAMESPACE_URL,
+                "quant-v2:HKEX:identifier:"
+                f"{identity.source_security_id}:{value.source_instrument_code}:"
+                f"{value.effective_from.isoformat()}:{source_batch_id}",
+            ),
+            entity_id=identity.instrument_id,
+            entity_kind="EQUITY",
+            venue_id=venue_id,
+            identifier_scheme=_IDENTIFIER_SCHEME,
+            identifier_value=value.source_instrument_code,
+            effective_from=value.effective_from,
+            effective_to=snapshot_end,
+            known_from=now,
+            known_to=None,
+            source_time_precision="DATE_ONLY",
+            source_batch_id=source_batch_id,
+        )
+    )
+
+
+def _record_hkex_lifecycle_day(
+    session: Session,
+    *,
+    identity: StockConnectHkexInstrumentIdentity,
+    snapshot_date: date,
+    snapshot_end: date,
+    status_code: str,
+    event_kind: str,
+    source_batch_id: UUID,
+    evidence_ref: str,
+    now: datetime,
+) -> None:
+    """按完整快照在场或缺席写日期化生命周期，乱序回补不会重新打开错误区间。"""
+    current = (
+        session.execute(
+            select(InstrumentLifecycleVersion)
+            .where(
+                InstrumentLifecycleVersion.entity_id == identity.instrument_id,
+                InstrumentLifecycleVersion.effective_from <= snapshot_date,
+                (InstrumentLifecycleVersion.effective_to.is_(None))
+                | (InstrumentLifecycleVersion.effective_to > snapshot_date),
+                InstrumentLifecycleVersion.known_to.is_(None),
+            )
+            .with_for_update()
+        )
+        .scalars()
+        .all()
+    )
+    exact = [
+        item
+        for item in current
+        if item.status_code == status_code
+        and item.effective_from == snapshot_date
+        and item.effective_to == snapshot_end
+    ]
+    if len(exact) > 1:
+        raise ValueError("HKEX stable identity has duplicate lifecycle versions")
+    if exact:
+        return
+    for item in current:
+        session.execute(
+            update(InstrumentLifecycleVersion)
+            .where(InstrumentLifecycleVersion.version_id == item.version_id)
+            .values(known_to=now)
+        )
+    session.add(
+        InstrumentLifecycleVersion(
+            version_id=uuid5(
+                NAMESPACE_URL,
+                "quant-v2:HKEX:lifecycle:"
+                f"{identity.source_security_id}:{snapshot_date.isoformat()}:"
+                f"{status_code}:{source_batch_id}",
+            ),
+            entity_id=identity.instrument_id,
+            entity_kind="EQUITY",
+            status_code=status_code,
+            event_kind=event_kind,
+            effective_from=snapshot_date,
+            effective_to=snapshot_end,
+            known_from=now,
+            known_to=None,
+            evidence_ref=evidence_ref,
+            source_batch_id=source_batch_id,
+        )
+    )
+
+
 def _resolve_regime(
     session: Session, *, channel: StockConnectChannel, trade_date: date
 ) -> StockConnectDisclosureRegime:
@@ -509,6 +914,72 @@ def _resolve_regime(
     return rows[0]
 
 
+def _ensure_default_regimes(
+    session: Session,
+    *,
+    channel: StockConnectChannel,
+    methodology_version_id: UUID,
+) -> None:
+    """幂等登记已评审官方披露制度，避免全新环境依赖人工 SQL 才能首次发布。"""
+    existing = session.execute(
+        select(StockConnectDisclosureRegime.regime_id).where(
+            StockConnectDisclosureRegime.channel == channel.channel,
+            StockConnectDisclosureRegime.direction == channel.direction,
+        )
+    ).first()
+    if existing is not None:
+        return
+    common_fields = [
+        "buy_amount",
+        "sell_amount",
+        "turnover_amount",
+        "trade_count",
+        "etf_turnover_amount",
+    ]
+    if channel.direction == "NORTHBOUND":
+        regimes = (
+            (
+                date(2014, 11, 17) if channel.channel == "SH" else date(2016, 12, 5),
+                date(2024, 8, 19),
+                common_fields,
+                "HKEX Stock Connect Daily Statistics disclosure before 2024-08-19",
+            ),
+            (
+                date(2024, 8, 19),
+                None,
+                ["turnover_amount", "trade_count", "etf_turnover_amount"],
+                "HKEX Northbound disclosure adjustment effective 2024-08-19",
+            ),
+        )
+    else:
+        regimes = (
+            (
+                date(2014, 11, 17) if channel.channel == "SH" else date(2016, 12, 5),
+                None,
+                common_fields,
+                "HKEX Stock Connect Southbound Daily Statistics disclosure",
+            ),
+        )
+    for effective_from, effective_to, available_fields, evidence_ref in regimes:
+        stable_key = (
+            f"stock-connect-regime:{channel.channel}:{channel.direction}:"
+            f"{effective_from.isoformat()}"
+        )
+        session.add(
+            StockConnectDisclosureRegime(
+                regime_id=uuid5(NAMESPACE_URL, stable_key),
+                channel=channel.channel,
+                direction=channel.direction,
+                effective_from=effective_from,
+                effective_to=effective_to,
+                available_fields=available_fields,
+                methodology_version_id=methodology_version_id,
+                evidence_ref=evidence_ref,
+            )
+        )
+    session.flush()
+
+
 def _validate_regime_value(
     value: StockConnectMarketDaily, regime: StockConnectDisclosureRegime
 ) -> None:
@@ -523,6 +994,8 @@ def _validate_regime_value(
         "turnover_amount": value.turnover_amount,
         "net_buy_amount": value.net_buy_amount,
         "quota_balance": value.quota_balance,
+        "trade_count": value.trade_count,
+        "etf_turnover_amount": value.etf_turnover_amount,
     }
     if any(amount is not None and field not in available for field, amount in reported.items()):
         raise ValueError("stock-connect value contradicts disclosure regime")
@@ -552,7 +1025,7 @@ def _current_market(
 
 def _resolve_active_instrument(
     session: Session, *, channel: StockConnectChannel, value: StockConnectActiveSecurity
-) -> UUID:
+) -> UUID | None:
     """按方向使用股票权威身份或港股工具身份解析，不能把相同代码跨市场合并。"""
     if channel.direction == "NORTHBOUND":
         exchange = "SSE" if channel.channel == "SH" else "SZSE"
@@ -588,6 +1061,11 @@ def _resolve_active_instrument(
                     InstrumentIdentifierVersion,
                     InstrumentIdentifierVersion.entity_id == MarketInstrument.instrument_id,
                 )
+                .join(
+                    StockConnectHkexInstrumentIdentity,
+                    StockConnectHkexInstrumentIdentity.instrument_id
+                    == MarketInstrument.instrument_id,
+                )
                 .join(TradingVenue, TradingVenue.venue_id == InstrumentIdentifierVersion.venue_id)
                 .where(
                     MarketInstrument.instrument_kind == "EQUITY",
@@ -605,9 +1083,11 @@ def _resolve_active_instrument(
             .all()
         )
     candidates = {UUID(str(row)) for row in rows}
-    if len(candidates) != 1:
-        raise ValueError("stock-connect active instrument identity is missing or ambiguous")
-    return candidates.pop()
+    if len(candidates) > 1:
+        raise ValueError("stock-connect active instrument identity is ambiguous")
+    if candidates:
+        return candidates.pop()
+    return None
 
 
 def _resolve_market_release(
@@ -836,6 +1316,9 @@ def _market_hash(value: StockConnectMarketDaily, regime_id: UUID) -> str:
             "turnoverAmount": _decimal(value.turnover_amount),
             "netBuyAmount": _decimal(value.net_buy_amount),
             "quotaBalance": _decimal(value.quota_balance),
+            "tradeCount": value.trade_count,
+            "etfTurnoverAmount": _decimal(value.etf_turnover_amount),
+            "fieldAvailability": dict(value.field_availability),
             "currency": value.currency,
             "availabilityStatus": value.availability_status,
             "regimeId": str(regime_id),
@@ -844,19 +1327,23 @@ def _market_hash(value: StockConnectMarketDaily, regime_id: UUID) -> str:
 
 
 def _active_hash(
-    value: StockConnectActiveSecurity, instrument_id: UUID, market_stat_release_id: UUID
+    value: StockConnectActiveSecurity,
+    instrument_id: UUID | None,
+    market_stat_release_id: UUID,
 ) -> str:
     """计算包含精确工具和统计依赖 release 的活跃榜摘要，依赖变更不会静默漂移。"""
     return _hash_payload(
         {
             "instrumentCode": value.source_instrument_code,
+            "instrumentName": value.source_instrument_name,
             "tradeDate": value.trade_date.isoformat(),
             "rankNo": value.rank_no,
             "buyAmount": _decimal(value.buy_amount),
             "sellAmount": _decimal(value.sell_amount),
             "turnoverAmount": _decimal(value.turnover_amount),
             "currency": value.currency,
-            "instrumentId": str(instrument_id),
+            "instrumentId": None if instrument_id is None else str(instrument_id),
+            "fieldAvailability": dict(value.field_availability),
             "marketStatReleaseId": str(market_stat_release_id),
         }
     )

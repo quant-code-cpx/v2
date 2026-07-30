@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Protocol
 from uuid import UUID
 
@@ -16,6 +16,7 @@ from service_data_sync.domain.corporate import (
     EarningsExpressMetric,
     EarningsGuidanceMetric,
 )
+from service_data_sync.domain.equity import EquityIdentifier
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +46,7 @@ class PublishedCorporateEvents:
     data_version: UUID
     inserted_count: int
     unchanged_count: int
+    excluded_count: int = 0
 
 
 class CorporateEventsRepository(Protocol):
@@ -57,6 +59,9 @@ class CorporateEventsRepository(Protocol):
         guidance_metrics: Sequence[EarningsGuidanceMetric],
         express_metrics: Sequence[EarningsExpressMetric],
         source: CorporateSourceObservation,
+        start: date,
+        end: date,
+        identifier: EquityIdentifier | None = None,
     ) -> PublishedCorporateEvents:
-        """发布文档证据及其 P0 指标，禁止以聚合当前值覆盖旧公告版本。"""
+        """发布公告窗口及逐证券覆盖；单证券空窗必须由完整代码身份版本证明。"""
         ...

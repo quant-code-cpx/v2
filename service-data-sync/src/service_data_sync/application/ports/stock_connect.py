@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -13,7 +13,10 @@ from uuid import UUID
 
 from service_data_sync.domain.stock_connect import (
     StockConnectActiveSecurity,
+    StockConnectCalendarDay,
     StockConnectChannel,
+    StockConnectChannelStatus,
+    StockConnectInstrumentMaster,
     StockConnectMarketDaily,
 )
 
@@ -83,4 +86,53 @@ class StockConnectActiveSecurityRepository(Protocol):
         source: StockConnectSourceObservation,
     ) -> PublishedStockConnectActiveSecurities:
         """发布日终活跃榜；无法精确解析 A/H 或跨市场工具时隔离而不按代码猜测。"""
+        ...
+
+
+class StockConnectMarketRepository(
+    StockConnectMarketDailyRepository,
+    StockConnectActiveSecurityRepository,
+    Protocol,
+):
+    """组合通道统计、活跃榜和港股稳定身份，供单日完整包应用服务使用。"""
+
+    def ensure_hkex_instruments(
+        self,
+        *,
+        records: Sequence[StockConnectInstrumentMaster],
+        target_source_codes: set[str],
+        source: StockConnectSourceObservation,
+    ) -> dict[str, UUID]:
+        """以官方稳定证券 ID 维护已跟踪港股身份，并返回本次可解析代码。"""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class PublishedStockConnectBundle:
+    """描述互联互通通道完整包的稳定版本与幂等结果。"""
+
+    bundle_release_id: UUID
+    data_version: str
+    reused: bool
+
+
+class StockConnectCenterRepository(Protocol):
+    """负责把已发布统计、活跃榜、日历和状态原子组装为完整通道包。"""
+
+    def publish_bundle(
+        self,
+        *,
+        channel: StockConnectChannel,
+        overview_generation_id: UUID,
+        overview_channels: Sequence[str],
+        market_data_version: UUID,
+        active_data_version: UUID | None,
+        calendar: StockConnectCalendarDay,
+        calendar_source_ref: Mapping[str, object],
+        calendar_observed_at: datetime,
+        status: StockConnectChannelStatus,
+        quality_issues: Sequence[Mapping[str, str]],
+        source_refs: Sequence[Mapping[str, object]],
+    ) -> PublishedStockConnectBundle:
+        """在 generation 目标集合内发布一个真实交易日通道包。"""
         ...

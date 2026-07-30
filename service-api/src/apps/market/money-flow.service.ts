@@ -50,6 +50,9 @@ export class MoneyFlowService {
     ifNoneMatch: string | undefined,
     requestId: string,
   ): Promise<MoneyFlowConditionalRead<MoneyFlowDailyPage>> {
+    if (query.dataVersion === undefined) {
+      throw new BadRequestException('equity money-flow requires dataVersion');
+    }
     return this.listDaily(
       path,
       query,
@@ -146,6 +149,7 @@ export class MoneyFlowService {
       bucket: query.bucket,
       start: query.start,
       end: query.end,
+      dataVersion: query.dataVersion,
       knownAt: query.knownAt,
       cursor: query.cursor,
       limit: query.limit,

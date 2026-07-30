@@ -31,6 +31,16 @@ def test_decoder_keeps_disclosure_unavailable_distinct_from_zero() -> None:
                     "quotaBalance": None,
                     "currency": "CNY",
                     "availabilityStatus": "DISCLOSURE_UNAVAILABLE",
+                    "tradeCount": None,
+                    "etfTurnoverAmount": None,
+                    "fieldAvailability": {
+                        "buyAmount": "NOT_DISCLOSED_BY_REGIME",
+                        "sellAmount": "NOT_DISCLOSED_BY_REGIME",
+                        "turnoverAmount": "SOURCE_MISSING",
+                        "netBuyAmount": "NOT_DISCLOSED_BY_REGIME",
+                        "tradeCount": "SOURCE_MISSING",
+                        "etfTurnoverAmount": "SOURCE_MISSING",
+                    },
                 },
                 {
                     "tradeDate": "2026-07-29",
@@ -41,6 +51,16 @@ def test_decoder_keeps_disclosure_unavailable_distinct_from_zero() -> None:
                     "quotaBalance": "100",
                     "currency": "CNY",
                     "availabilityStatus": "COMPLETE",
+                    "tradeCount": None,
+                    "etfTurnoverAmount": None,
+                    "fieldAvailability": {
+                        "buyAmount": "REPORTED",
+                        "sellAmount": "REPORTED",
+                        "turnoverAmount": "REPORTED",
+                        "netBuyAmount": "REPORTED",
+                        "tradeCount": "SOURCE_MISSING",
+                        "etfTurnoverAmount": "SOURCE_MISSING",
+                    },
                 },
             ],
         }

@@ -26,7 +26,14 @@ from sqlalchemy import (
     UniqueConstraint,
     desc,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, DATERANGE, TSTZRANGE, ExcludeConstraint, Range
+from sqlalchemy.dialects.postgresql import (
+    ARRAY,
+    DATERANGE,
+    JSONB,
+    TSTZRANGE,
+    ExcludeConstraint,
+    Range,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -438,23 +445,37 @@ class StockConnectChannelDailyRevision(CanonicalRevisionMixin, Base):
         comment="解释该日字段可用性的制度版本 UUID。",
     )
     buy_amount: Mapped[Decimal | None] = mapped_column(
-        Numeric(24, 4), nullable=True, comment="通道买入金额；未披露时为空。"
+        Numeric(38, 6), nullable=True, comment="通道买入金额；未披露时为空，单位为基础货币单位。"
     )
     sell_amount: Mapped[Decimal | None] = mapped_column(
-        Numeric(24, 4), nullable=True, comment="通道卖出金额；未披露时为空。"
+        Numeric(38, 6), nullable=True, comment="通道卖出金额；未披露时为空，单位为基础货币单位。"
     )
     turnover_amount: Mapped[Decimal | None] = mapped_column(
-        Numeric(24, 4), nullable=True, comment="通道成交金额；未披露时为空。"
+        Numeric(38, 6), nullable=True, comment="通道成交金额；未披露时为空，单位为基础货币单位。"
     )
     net_buy_amount: Mapped[Decimal | None] = mapped_column(
-        Numeric(24, 4), nullable=True, comment="通道净买入额；未披露时为空。"
+        Numeric(38, 6), nullable=True, comment="通道净买入额；未披露时为空，不能由成交额推导。"
     )
     quota_balance: Mapped[Decimal | None] = mapped_column(
-        Numeric(24, 4), nullable=True, comment="通道额度余额；制度不披露时为空。"
+        Numeric(38, 6), nullable=True, comment="通道额度余额；制度不披露时为空且币种固定为人民币。"
     )
     currency: Mapped[str] = mapped_column(String(3), nullable=False, comment="金额币种 ISO 代码。")
     availability_status: Mapped[str] = mapped_column(
         String(24), nullable=False, comment="完整、部分披露或制度性不可用状态。"
+    )
+    trade_count: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, comment="来源直报成交笔数；来源未提供时为空。"
+    )
+    etf_turnover_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(38, 6), nullable=True, comment="来源直报 ETF 成交额；未提供时为空。"
+    )
+    field_availability: Mapped[dict[str, str]] = mapped_column(
+        JSONB, nullable=False, comment="逐字段披露、制度不可用或来源缺失状态。"
+    )
+    center_schema_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="迁移前历史为零，新互联互通中心 publication 写入版本一。",
     )
 
 
@@ -496,11 +517,22 @@ class StockConnectActiveSecurityRevision(CanonicalRevisionMixin, Base):
         String(8), nullable=False, comment="沪股通或深股通通道代码。"
     )
     direction: Mapped[str] = mapped_column(String(16), nullable=False, comment="北向或南向方向。")
-    instrument_id: Mapped[UUID] = mapped_column(
+    instrument_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("market_instrument.instrument_id", ondelete="RESTRICT"),
-        nullable=False,
-        comment="已准确解析的跨市场可交易工具 UUID。",
+        nullable=True,
+        comment="已准确解析的跨市场工具 UUID；仅历史证据不足时允许为空。",
+    )
+    source_instrument_code: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+        comment="官方活跃榜原始证券代码；迁移前历史 revision 可为空且不得进入新完整包。",
+    )
+    source_instrument_name: Mapped[str | None] = mapped_column(
+        String(160), nullable=True, comment="官方活跃榜或 Securities Master 展示名称。"
+    )
+    identity_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, comment="已解析或历史身份不可解析状态。"
     )
     market_stat_release_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -514,15 +546,18 @@ class StockConnectActiveSecurityRevision(CanonicalRevisionMixin, Base):
     )
     rank_no: Mapped[int] = mapped_column(Integer, nullable=False, comment="来源活跃榜名次。")
     buy_amount: Mapped[Decimal | None] = mapped_column(
-        Numeric(24, 4), nullable=True, comment="证券买入金额；未披露时为空。"
+        Numeric(38, 6), nullable=True, comment="证券买入金额；未披露时为空。"
     )
     sell_amount: Mapped[Decimal | None] = mapped_column(
-        Numeric(24, 4), nullable=True, comment="证券卖出金额；未披露时为空。"
+        Numeric(38, 6), nullable=True, comment="证券卖出金额；未披露时为空。"
     )
     turnover_amount: Mapped[Decimal | None] = mapped_column(
-        Numeric(24, 4), nullable=True, comment="证券通道成交金额；未披露时为空。"
+        Numeric(38, 6), nullable=True, comment="证券通道成交金额；未披露时为空。"
     )
     currency: Mapped[str] = mapped_column(String(3), nullable=False, comment="金额币种 ISO 代码。")
+    field_availability: Mapped[dict[str, str]] = mapped_column(
+        JSONB, nullable=False, comment="排行逐字段披露、制度不可用或来源缺失状态。"
+    )
 
 
 class StockConnectHoldingSnapshot(CanonicalRevisionMixin, Base):

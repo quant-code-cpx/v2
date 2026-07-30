@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1280" />
+    <title>基金与 ETF 中心 · service-web 技术方案</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17202a;
+        --muted: #637083;
+        --line: #dfe4ea;
+        --soft: #f6f8fa;
+        --brand: #1367d1;
+        --good: #087f5b;
+        --warn: #9a6700;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: #eef1f5;
+        font:
+          14px/1.65 Inter,
+          "PingFang SC",
+          "Microsoft YaHei",
+          sans-serif;
+      }
+      .shell {
+        width: 1180px;
+        margin: 32px auto;
+        background: #fff;
+        border: 1px solid var(--line);
+        box-shadow: 0 16px 40px rgba(23, 32, 42, 0.08);
+      }
+      header {
+        padding: 42px 48px 32px;
+        border-bottom: 1px solid var(--line);
+      }
+      main {
+        padding: 8px 48px 48px;
+      }
+      section {
+        padding: 30px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      section:last-child {
+        border-bottom: 0;
+      }
+      h1 {
+        margin: 8px 0 12px;
+        font-size: 34px;
+        line-height: 1.25;
+      }
+      h2 {
+        margin: 0 0 16px;
+        font-size: 23px;
+      }
+      h3 {
+        margin: 24px 0 10px;
+        font-size: 17px;
+      }
+      p,
+      ul,
+      ol {
+        margin: 10px 0;
+      }
+      code {
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: #edf2f7;
+        color: #0d4f9c;
+        font:
+          12px/1.6 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 11px 12px;
+        border: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: var(--soft);
+        font-size: 12px;
+        color: #445065;
+      }
+      .eyebrow {
+        color: var(--brand);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .lead {
+        max-width: 940px;
+        color: #445065;
+        font-size: 16px;
+      }
+      .meta,
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+      }
+      .meta div,
+      .card {
+        padding: 16px;
+        border: 1px solid var(--line);
+        background: var(--soft);
+      }
+      .meta strong {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+      .callout {
+        margin: 16px 0;
+        padding: 14px 16px;
+        border-left: 4px solid var(--brand);
+        background: #eef6ff;
+      }
+      .callout.good {
+        border-color: var(--good);
+        background: #eefaf5;
+      }
+      .callout.warn {
+        border-color: var(--warn);
+        background: #fff8e5;
+      }
+      .status {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #e8f3ff;
+        color: #0d4f9c;
+        font-weight: 700;
+        font-size: 11px;
+      }
+      footer {
+        padding: 22px 48px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+      }
+      @media print {
+        body {
+          background: #fff;
+        }
+        .shell {
+          width: auto;
+          margin: 0;
+          border: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <article class="shell">
+      <header>
+        <div class="eyebrow">service-web · Implemented / 验证中</div>
+        <h1>基金与 ETF 中心：PC Web 技术方案</h1>
+        <p class="lead">
+          新增基金分类入口、ETF 目录与 ETF 详情三条 PC 路由。产品运行时只调用
+          service-api； 无真实 publication
+          就显示无发布状态，禁止内置产品清单、业务数值或图表点兜底。
+        </p>
+        <div class="meta">
+          <div><strong>入口</strong><code>/market/funds</code></div>
+          <div><strong>目录</strong><code>/market/etfs</code></div>
+          <div>
+            <strong>详情</strong><code>/market/etfs/:exchange/:symbol</code>
+          </div>
+        </div>
+      </header>
+      <main>
+        <section>
+          <h2>1. 页面与路由边界</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>路由</th>
+                <th>页面职责</th>
+                <th>真实数据依赖</th>
+                <th>降级</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>/market/funds</code></td>
+                <td>六类基金能力入口；一期只有 ETF 可进入。</td>
+                <td>不展示产品数量、收益或规模，因此无需聚合数据。</td>
+                <td>
+                  场外公募、LOF、REITs、货币基金、其他交易所基金标“尚未接入”。
+                </td>
+              </tr>
+              <tr>
+                <td><code>/market/etfs</code></td>
+                <td>
+                  单交易所 ETF profile 目录、真实筛选、排序和 cursor 分页。
+                </td>
+                <td>profile v2 publication。</td>
+                <td>
+                  无 publication、来源不可用、筛选空结果三种文案严格区分。
+                </td>
+              </tr>
+              <tr>
+                <td><code>/market/etfs/:exchange/:symbol</code></td>
+                <td>身份、状态、日线、NAV/价格比较与 publication 时间。</td>
+                <td>profile 成功后并发 bar、NAV、state。</td>
+                <td>
+                  每卡独立失败；profile 无法解析 entityRef 时不发后三个请求。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="callout">
+            ETF 独立于股票中心。只复用 AppShell、筛选控件、KLineChart/ECharts
+            容器和远程状态组件； 不复用股票公司资料、资金流 DTO 或代码分类逻辑。
+          </div>
+        </section>
+
+        <section>
+          <h2>2. 数据适配与远程状态</h2>
+          <h3>2.1 EtfMarketDataAdapter</h3>
+          <ul>
+            <li>
+              集中定义四个 dataset 的 schemaVersion 2 请求 builder、Zod record
+              校验和 API Problem Details 映射。
+            </li>
+            <li>
+              exchange 仅接受 URL 中的
+              <code>SSE|SZSE</code>；小写或其他值均失败关闭；symbol
+              仅作为代码，不参与基金类别/场所推断。
+            </li>
+            <li>
+              profile 返回稳定 entityRef 后才 enable
+              bar/NAV/state；页面组件不读取原始 envelope 或 provider 字段。
+            </li>
+            <li>
+              每个 adapter 结果同时携带
+              records、availability、release、sources、quality、coverage、warnings，UI
+              不创建综合 dataVersion。
+            </li>
+            <li>
+              <code>CURRENTLY_UNSUPPORTED</code> 是可渲染的成功状态。货币市场
+              ETF 的 NAV 卡显示
+              “当前口径暂不支持”，保留产品、价格与状态区域，不把收益型净值解释成单位净值。
+            </li>
+          </ul>
+          <h3>2.2 TanStack Query keys</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>数据</th>
+                <th>query key</th>
+                <th>失败边界</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>目录</td>
+                <td><code>['market-data','etf','profiles',filters]</code></td>
+                <td>
+                  目录区；完整 filters 包含交易所、关键词、排序、cursor
+                  与固定页大小。
+                </td>
+              </tr>
+              <tr>
+                <td>详情身份</td>
+                <td>
+                  <code>['market-data','etf','profile',exchange,symbol]</code>
+                </td>
+                <td>详情身份区；成功解析 entityRef 后才启用后三项。</td>
+              </tr>
+              <tr>
+                <td>日线</td>
+                <td><code>['market-data','etf','bars',entityRef]</code></td>
+                <td>KLineChart 卡与收盘价。</td>
+              </tr>
+              <tr>
+                <td>NAV</td>
+                <td><code>['market-data','etf','navs',entityRef]</code></td>
+                <td>NAV 卡和比较图 NAV 系列。</td>
+              </tr>
+              <tr>
+                <td>状态</td>
+                <td><code>['market-data','etf','states',entityRef]</code></td>
+                <td>三维状态条；缺一维只影响该维。</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section>
+          <h2>3. 列表、详情与图表</h2>
+          <div class="grid">
+            <div class="card">
+              <strong>列表</strong>
+              <p>
+                默认 SSE、50 行；开放交易所、代码前缀/名称包含筛选，排序仅
+                symbol/displayName。官方目录生命周期不可靠，因此当前不开放状态筛选。禁止逐行查行情。
+              </p>
+            </div>
+            <div class="card">
+              <strong>详情</strong>
+              <p>
+                身份和四份 publication
+                时间优先；管理人/跟踪指数没有真实字段则显示未发布；后续模块完全隐藏。
+              </p>
+            </div>
+            <div class="card">
+              <strong>图表</strong>
+              <p>
+                日线只用 KLineChart；NAV/价格比较只用 ECharts；无 records
+                时传空数组并展示状态，不生成点。
+              </p>
+            </div>
+          </div>
+          <ul>
+            <li>
+              NAV
+              与收盘价并列原值、双轴、<code>connectNulls=false</code>；日期不一致提示，不补点、不计算折溢价。
+            </li>
+            <li>
+              K 线明确 UNADJUSTED；tooltip 展示 volumeUnit、currency 和各自
+              publication。
+            </li>
+            <li>
+              图表懒加载并在路由离开时
+              dispose；同时提供可键盘访问的最新记录摘要。
+            </li>
+            <li>
+              不展示规模、跟踪误差、折溢价、换手率、资金流、PCF、事件数值，直到对应真实
+              dataset 全链路上线。
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>4. URL、缓存与性能</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>主题</th>
+                <th>明确设计</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>列表 URL</td>
+                <td>
+                  <code
+                    >?exchange=SZSE&amp;q=…&amp;sort=displayName&amp;order=desc&amp;cursor=…&amp;page=2</code
+                  >；默认值省略；筛选、排序或交易所变化清 cursor；丢弃不可靠的
+                  listingStatus 参数。
+                </td>
+              </tr>
+              <tr>
+                <td>详情 URL</td>
+                <td>
+                  route params 是唯一分享身份；一期固定读取最近 365
+                  个日历日，不声明尚未实现的 range/panel 状态。
+                </td>
+              </tr>
+              <tr>
+                <td>缓存</td>
+                <td>
+                  profile/state staleTime 60 秒，bar/NAV 5 分钟；共享
+                  QueryClient 最多重试一次；无 publication
+                  是成功空响应且不轮询。
+                </td>
+              </tr>
+              <tr>
+                <td>负载</td>
+                <td>
+                  列表 50 条；bar/NAV 各最多 366 点；图表引擎不进入 App 初始
+                  bundle。
+                </td>
+              </tr>
+              <tr>
+                <td>cursor</td>
+                <td>
+                  不解析 opaque cursor；409 或带 cursor 的 400 validation-error
+                  时清除 cursor 回第一页、保留筛选并提示“目录已更新”。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section>
+          <h2>5. 可访问性、测试与真实数据门禁</h2>
+          <ul>
+            <li>
+              桌面最小 1280×720，目标
+              1440×900；无移动布局、暗色壳层、响应式重排或装饰渐变。
+            </li>
+            <li>
+              筛选均有可见
+              label；表格行支持键盘进入详情；状态不只用颜色；图表有结构化摘要。
+            </li>
+            <li>
+              单元测试覆盖请求 builder、Zod、formatters、availability
+              文案；组件测试覆盖四查询部分成功、货币 ETF NAV 当前不支持和 cursor
+              失效。
+            </li>
+            <li>
+              E2E 在空数据库先验证真实无 publication 状态，再运行同步链，从 API
+              返回的第一条 ETF 导航详情。
+            </li>
+            <li>
+              测试不得硬编码 ETF
+              symbol、名称、NAV、价格或图点；断言值从捕获的公开 API 响应派生。
+            </li>
+            <li>
+              生产构建扫描禁止引用市场概览/标的分析的现有测试数据模块、provider
+              URL 或 data-sync 内部地址。
+            </li>
+          </ul>
+          <div class="callout good">
+            可编辑原型也遵守同一门禁：没有本地真实 publication
+            时只呈现真实空态和失败态； KLineChart/ECharts
+            可初始化空数据容器，但不放置任何虚构产品或数值。
+          </div>
+          <p>
+            <span class="status">Implemented / 验证中</span>
+            页面、查询、状态、性能和真实数据门禁均已落入生产代码与测试。
+          </p>
+        </section>
+      </main>
+      <footer>
+        关联总方案：<a href="./index.html">基金与 ETF 中心跨服务技术方案</a> ·
+        API：<a href="./service-api.html">service-api 技术方案</a> · 同步：<a
+          href="./service-data-sync.html"
+          >service-data-sync 技术方案</a
+        >
+      </footer>
+    </article>
+  </body>
+</html>

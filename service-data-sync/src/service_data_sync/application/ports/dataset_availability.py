@@ -6,13 +6,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Protocol
 
 
 @dataclass(frozen=True, slots=True)
 class DatasetAvailability:
-    """表示一个精确请求分区当前的空集或来源不可用结果。
+    """表示一个精确请求分区当前的空集、来源不可用或明确暂不支持结果。
 
     它不是一行全零业务数据。
     `availability` 表示结果类别，`reason_code` 说明原因，`observed_at` 记录该结论何时得到。
@@ -21,6 +21,9 @@ class DatasetAvailability:
     availability: str
     reason_code: str
     observed_at: datetime
+    entity_partition: str | None = None
+    coverage_from: date | None = None
+    coverage_to: date | None = None
 
 
 class DatasetAvailabilityRepository(Protocol):
@@ -38,8 +41,11 @@ class DatasetAvailabilityRepository(Protocol):
         reason_code: str,
         provider_id: str | None,
         observed_at: datetime,
+        entity_partition: str | None = None,
+        coverage_from: date | None = None,
+        coverage_to: date | None = None,
     ) -> DatasetAvailability:
-        """写入空集或来源不可用观察，并使同分区旧观察失效。"""
+        """写入空集、来源不可用或明确暂不支持观察，并使同分区旧观察失效。"""
         ...
 
     def clear(self, *, dataset: str, partition_key: str, cleared_at: datetime) -> None:

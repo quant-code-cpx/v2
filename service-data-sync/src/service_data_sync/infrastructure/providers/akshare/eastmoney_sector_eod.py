@@ -13,6 +13,7 @@ import json
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import akshare as ak
 
@@ -27,6 +28,7 @@ from service_data_sync.domain.sector import SectorScheme
 _CAPABILITY = "sector.quote.eod.snapshot.raw"
 _SCHEMA = "quant-v2.sector-eod-snapshot.v1"
 _ADAPTER_VERSION = "akshare-1.18.78-eastmoney-sector-eod-v1"
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
 _REQUIRED_COLUMNS = frozenset(
     {
         "排名",
@@ -155,7 +157,11 @@ def _schema_fingerprint(columns: tuple[str, ...]) -> str:
 
 
 def _request_values(request: SourceRequest) -> tuple[SectorScheme, date]:
-    """解析仅含 scheme 与目标交易日的中立请求，不伪造上游日期过滤能力。"""
+    """解析当天 scheme/date 请求，不伪造上游不具备的历史日期过滤能力。
+
+    东财批量名称接口只返回当前横截面；过去或未来 `tradeDate` 必须在调用 SDK 前
+    拒绝，避免把今天观察错误标记为历史 EOD 快照。
+    """
     if request.capability != _CAPABILITY:
         raise ProviderError(
             ProviderErrorCode.INVALID_REQUEST,
@@ -164,13 +170,21 @@ def _request_values(request: SourceRequest) -> tuple[SectorScheme, date]:
         )
     parameters = dict(request.parameters)
     try:
-        return SectorScheme(parameters["sectorScheme"]), date.fromisoformat(parameters["tradeDate"])
+        scheme = SectorScheme(parameters["sectorScheme"])
+        trade_date = date.fromisoformat(parameters["tradeDate"])
     except (KeyError, ValueError) as error:
         raise ProviderError(
             ProviderErrorCode.INVALID_REQUEST,
             "invalid sector eod request",
             retryable=False,
         ) from error
+    if trade_date != datetime.now(_SHANGHAI).date():
+        raise ProviderError(
+            ProviderErrorCode.INVALID_REQUEST,
+            "historical sector eod snapshots require archived replay",
+            retryable=False,
+        )
+    return scheme, trade_date
 
 
 def _fetch_snapshot(*, scheme: SectorScheme) -> Any:

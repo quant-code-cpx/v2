@@ -7,32 +7,19 @@
 
 from __future__ import annotations
 
-import asyncio
-import random
 from datetime import date, timedelta
-from typing import NoReturn
 from zoneinfo import ZoneInfo
 
 from celery import Celery, Task
 
-from service_data_sync.application.equity.daily_bar_sync import EquityDailyBarSyncService
-from service_data_sync.application.equity.market_extension_sync import (
-    EquityAdjustmentFactorSyncService,
-    EquityCompanyProfileSyncService,
-    EquityCorporateActionSyncService,
-    EquityPeriodBarSyncService,
-)
-from service_data_sync.application.ports.data_source import ProviderError
-from service_data_sync.bootstrap.container import build_container, build_source_registry
+from service_data_sync.bootstrap.container import build_container
 from service_data_sync.bootstrap.settings import Settings
 from service_data_sync.domain.equity import EquityBarPeriod, EquityIdentifier
-from service_data_sync.infrastructure.database.connection import DatabaseClient
-from service_data_sync.infrastructure.object_storage.client import ObjectStorageClient
-from service_data_sync.infrastructure.object_storage.raw_payload_store import (
-    FailureEvidenceDataSource,
-    S3RawPayloadStore,
-    retain_failure_evidence,
+from service_data_sync.infrastructure.data_operations.control_plane import (
+    DataOperationsControlPlane,
+    build_catalog,
 )
+from service_data_sync.infrastructure.data_operations.legacy_submission import submit_system_command
 from service_data_sync.infrastructure.persistence.equity_market_data_repository import (
     SqlAlchemyEquityMarketDataRepository,
 )
@@ -45,8 +32,6 @@ _REFERENCE_CAPABILITIES = frozenset(
 )
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _HISTORY_START = date(1990, 12, 19)
-_PROVIDER_MAX_RETRIES = 3
-_PROVIDER_MAX_BACKOFF_SECONDS = 60
 _PROVIDER_RATE_LIMIT = "30/m"
 
 
@@ -115,7 +100,6 @@ def register_equity_market_tasks(app: Celery, *, settings: Settings) -> None:
             bind=True,
             name=_BAR_TASK,
             shared=False,
-            max_retries=_PROVIDER_MAX_RETRIES,
             rate_limit=_PROVIDER_RATE_LIMIT,
             acks_late=True,
         )
@@ -125,22 +109,16 @@ def register_equity_market_tasks(app: Celery, *, settings: Settings) -> None:
             period: str,
             start: str,
             end: str,
-        ) -> dict[str, int | str]:
-            """同步一个明确证券和周期窗口，三个周期使用各自数据源 `capability`。
-
-            ``acks_late`` 允许工作进程中断后重投相同窗口；发布仓储据此把内容未变化的
-            重试计为 `unchanged`，而不是生成新的 `revision`。
-            """
-            try:
-                return _sync_bar_once(
-                    settings=settings,
-                    instrument=instrument,
-                    period=period,
-                    start=start,
-                    end=end,
-                )
-            except ProviderError as error:
-                _retry_provider_error(task, error)
+        ) -> dict[str, object]:
+            """把单证券周期任务转换为 command；Celery 重投不会直接调用 canonical 用例。"""
+            del task
+            return _sync_bar_once(
+                settings=settings,
+                instrument=instrument,
+                period=period,
+                start=start,
+                end=end,
+            )
 
     if _REFERENCE_TASK in app.tasks:
         return
@@ -149,7 +127,6 @@ def register_equity_market_tasks(app: Celery, *, settings: Settings) -> None:
         bind=True,
         name=_REFERENCE_TASK,
         shared=False,
-        max_retries=_PROVIDER_MAX_RETRIES,
         rate_limit=_PROVIDER_RATE_LIMIT,
         acks_late=True,
     )
@@ -159,21 +136,16 @@ def register_equity_market_tasks(app: Celery, *, settings: Settings) -> None:
         capability: str,
         start: str | None,
         end: str | None,
-    ) -> dict[str, int | str]:
-        """同步一个证券的因子、公司行动或概况。
-
-        三类参考数据有不同修订与空值语义，按 `capability` 单独执行，绝不在任务层融合。
-        """
-        try:
-            return _sync_reference_once(
-                settings=settings,
-                instrument=instrument,
-                capability=capability,
-                start=start,
-                end=end,
-            )
-        except ProviderError as error:
-            _retry_provider_error(task, error)
+    ) -> dict[str, object]:
+        """把参考数据任务转换为 command；真正 retry 由 control-plane run 管理。"""
+        del task
+        return _sync_reference_once(
+            settings=settings,
+            instrument=instrument,
+            capability=capability,
+            start=start,
+            end=end,
+        )
 
 
 def _sync_bar_once(
@@ -183,66 +155,39 @@ def _sync_bar_once(
     period: str,
     start: str,
     end: str,
-) -> dict[str, int | str]:
-    """执行一次单证券周期行情同步，并确保外部客户端在失败前关闭。
-
-    每个周期必须精确匹配自己的 `capability`；周月数据不从日线聚合，以保留供应商原生
-    K 线口径和后续修订。
-    """
+) -> dict[str, object]:
+    """把单证券周期参数映射为严格 INSTRUMENT selector 并提交 command。"""
     if not settings.equity_market_enabled:
         raise RuntimeError("equity market sync is disabled")
     selected_period = EquityBarPeriod(period)
     identifier = EquityIdentifier.parse(instrument)
-    start_date = date.fromisoformat(start)
-    end_date = date.fromisoformat(end)
-    registry = build_source_registry(settings)
-    providers = registry.for_capability(selected_period.capability)
-    if len(providers) != 1:
-        raise RuntimeError("exactly one equity bar provider must be enabled")
-    database = DatabaseClient.from_settings(settings)
-    object_storage = ObjectStorageClient.from_settings(settings)
+    container = build_container(settings)
     try:
-        repository = SqlAlchemyEquityMarketDataRepository(database)
-        raw_store = S3RawPayloadStore(object_storage)
-        if selected_period is EquityBarPeriod.DAY_1:
-            # 日线与周/月线的仓储和质量规则不同，选择对应应用服务而非共用转换分支。
-            result = retain_failure_evidence(
-                raw_store,
-                # 任务失败时才把来源响应写入 S3，成功时释放暂存字节。
-                lambda: asyncio.run(
-                    EquityDailyBarSyncService(
-                        source=FailureEvidenceDataSource(providers[0], raw_store),
-                        repository=repository,
-                        raw_payload_store=raw_store,
-                    ).sync(identifier=identifier, start=start_date, end=end_date)
-                ),
-            )
-        else:
-            result = retain_failure_evidence(
-                raw_store,
-                # 任务失败时才把来源响应写入 S3，成功时释放暂存字节。
-                lambda: asyncio.run(
-                    EquityPeriodBarSyncService(
-                        source=FailureEvidenceDataSource(providers[0], raw_store),
-                        repository=repository,
-                        raw_payload_store=raw_store,
-                    ).sync(
-                        identifier=identifier,
-                        period=selected_period,
-                        start=start_date,
-                        end=end_date,
-                    )
-                ),
-            )
+        control_plane = DataOperationsControlPlane(
+            database=container.database,
+            catalog=build_catalog(settings, container.source_registry),
+            source_registry=container.source_registry,
+            trading_calendar=container.trading_calendar,
+        )
+        return submit_system_command(
+            control_plane,
+            target={
+                "datasetCode": selected_period.capability,
+                "mode": "DATE_RANGE",
+                "selector": {
+                    "kind": "INSTRUMENT",
+                    "exchange": identifier.exchange.value,
+                    "symbol": identifier.symbol,
+                },
+                "dateFrom": date.fromisoformat(start).isoformat(),
+                "dateTo": date.fromisoformat(end).isoformat(),
+                "observationDate": None,
+            },
+            reason="兼容个股行情 Celery 提交",
+            request_prefix="legacy-equity-market-task",
+        )
     finally:
-        object_storage.close()
-        database.close()
-    return {
-        "capability": selected_period.capability,
-        "inserted": result.inserted_count,
-        "unchanged": result.unchanged_count,
-        "availability": result.availability,
-    }
+        container.close()
 
 
 def _sync_reference_once(
@@ -252,95 +197,41 @@ def _sync_reference_once(
     capability: str,
     start: str | None,
     end: str | None,
-) -> dict[str, int | str]:
-    """执行一次单证券参考数据同步，并按 capability 选择独立用例。
-
-    只有一个数据源声明此 `capability` 时才可执行；任务层不能在多个来源之间任选其一。
-    """
+) -> dict[str, object]:
+    """把参考数据参数映射为严格 INSTRUMENT selector 并提交 command。"""
     if not settings.equity_market_enabled:
         raise RuntimeError("equity market sync is disabled")
     if capability not in _REFERENCE_CAPABILITIES:
         raise ValueError("unsupported equity reference capability")
     identifier = EquityIdentifier.parse(instrument)
-    registry = build_source_registry(settings)
-    providers = registry.for_capability(capability)
-    if len(providers) != 1:
-        raise RuntimeError("exactly one equity reference provider must be enabled")
-    database = DatabaseClient.from_settings(settings)
-    object_storage = ObjectStorageClient.from_settings(settings)
+    container = build_container(settings)
     try:
-        repository = SqlAlchemyEquityMarketDataRepository(database)
-        raw_store = S3RawPayloadStore(object_storage)
-        if capability == "equity.adjustment_factor":
-            # 累计因子会影响后续复权序列，应用服务需要完整指定窗口而非默认最近几天。
-            result = retain_failure_evidence(
-                raw_store,
-                # 任务失败时才把来源响应写入 S3，成功时释放暂存字节。
-                lambda: asyncio.run(
-                    EquityAdjustmentFactorSyncService(
-                        source=FailureEvidenceDataSource(providers[0], raw_store),
-                        repository=repository,
-                        raw_payload_store=raw_store,
-                    ).sync(
-                        identifier=identifier,
-                        start=_required_date(start),
-                        end=_required_date(end),
-                    )
-                ),
-            )
-        elif capability == "equity.corporate_action":
-            result = retain_failure_evidence(
-                raw_store,
-                # 任务失败时才把来源响应写入 S3，成功时释放暂存字节。
-                lambda: asyncio.run(
-                    EquityCorporateActionSyncService(
-                        source=FailureEvidenceDataSource(providers[0], raw_store),
-                        repository=repository,
-                        raw_payload_store=raw_store,
-                    ).sync(
-                        identifier=identifier,
-                        start=_required_date(start),
-                        end=_required_date(end),
-                    )
-                ),
-            )
-        else:
-            result = retain_failure_evidence(
-                raw_store,
-                # 任务失败时才把来源响应写入 S3，成功时释放暂存字节。
-                lambda: asyncio.run(
-                    EquityCompanyProfileSyncService(
-                        source=FailureEvidenceDataSource(providers[0], raw_store),
-                        repository=repository,
-                        raw_payload_store=raw_store,
-                    ).sync(identifier=identifier)
-                ),
-            )
+        control_plane = DataOperationsControlPlane(
+            database=container.database,
+            catalog=build_catalog(settings, container.source_registry),
+            source_registry=container.source_registry,
+            trading_calendar=container.trading_calendar,
+        )
+        is_profile = capability == "equity.profile"
+        return submit_system_command(
+            control_plane,
+            target={
+                "datasetCode": capability,
+                "mode": "INCREMENTAL" if is_profile else "DATE_RANGE",
+                "selector": {
+                    "kind": "INSTRUMENT",
+                    "exchange": identifier.exchange.value,
+                    "symbol": identifier.symbol,
+                },
+                "dateFrom": None if is_profile else _required_date(start).isoformat(),
+                "dateTo": None if is_profile else _required_date(end).isoformat(),
+                "observationDate": None,
+            },
+            reason="兼容个股参考数据 Celery 提交",
+            request_prefix="legacy-equity-reference-task",
+        )
     finally:
-        object_storage.close()
-        database.close()
-    return {
-        "capability": capability,
-        "inserted": result.inserted_count,
-        "unchanged": result.unchanged_count,
-    }
-
-
-def _retry_provider_error(task: Task, error: ProviderError) -> NoReturn:
-    """仅重试适配器明确标记的瞬时失败，并使用有上限的指数全抖动。
-
-    全抖动从零到当前上界随机选择，避免大量证券在同一指数退避时刻再次触发限流。
-    """
-    if not error.retryable:
-        raise error
-    retry_index = int(task.request.retries)
-    ceiling = min(_PROVIDER_MAX_BACKOFF_SECONDS, 2**retry_index)
-    countdown = random.randint(0, ceiling)
-    raise task.retry(
-        exc=error,
-        countdown=countdown,
-        max_retries=_PROVIDER_MAX_RETRIES,
-    )
+        container.close()
 
 
 def _period_for_capability(capability: str) -> EquityBarPeriod | None:

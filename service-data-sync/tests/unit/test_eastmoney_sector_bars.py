@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from service_data_sync.application.ports.data_source import SourceRequest
+from service_data_sync.application.ports.data_source import ProviderError, SourceRequest
 from service_data_sync.infrastructure.providers.akshare import eastmoney_sector_bars
 from service_data_sync.infrastructure.providers.akshare.eastmoney_sector_bars import (
     AkshareEastmoneySectorBarsAdapter,
@@ -134,3 +134,58 @@ def test_adapter_reads_catalog_with_scheme_specific_upstream_function(
     assert payload["sectorScheme"] == scheme
     assert payload["sectors"] == [{"code": "BK0475", "name": "证券"}]
     assert batch.raw_payload is not None
+
+
+def test_adapter_rejects_historical_catalog_observation_before_calling_sdk() -> None:
+    """当前目录 adapter 必须拒绝历史观察日，不能把今天目录标记为过去事实。"""
+    adapter = AkshareEastmoneySectorBarsAdapter(request_timeout_seconds=5)
+
+    with pytest.raises(ProviderError, match="invalid sector-catalog request") as captured:
+        asyncio.run(
+            adapter.fetch(
+                SourceRequest(
+                    capability="sector.catalog.raw",
+                    parameters=(
+                        ("sectorScheme", "eastmoney.industry"),
+                        ("observationDate", "2000-01-01"),
+                    ),
+                )
+            )
+        )
+
+    assert captured.value.retryable is False
+
+
+def test_catalog_retries_transient_disconnect_within_total_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """目录瞬断最多重试三次，同一请求恢复后仍发布真实来源行。"""
+    attempts = 0
+    frame = FakeFrame([{"板块代码": "BK1507", "板块名称": "宠物食品"}])
+
+    def flaky_catalog() -> FakeFrame:
+        """前两次模拟连接断开，第三次返回真实字段形状。"""
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise ConnectionError("remote disconnected")
+        return frame
+
+    monkeypatch.setattr(eastmoney_sector_bars, "_FETCH_RETRY_BASE_SECONDS", 0)
+    monkeypatch.setattr(
+        eastmoney_sector_bars.ak,
+        "stock_board_industry_name_em",
+        flaky_catalog,
+    )
+
+    batch = asyncio.run(
+        AkshareEastmoneySectorBarsAdapter(request_timeout_seconds=5).fetch(
+            SourceRequest(
+                capability="sector.catalog.raw",
+                parameters=(("sectorScheme", "eastmoney.industry"),),
+            )
+        )
+    )
+
+    assert attempts == 3
+    assert json.loads(batch.payload)["sectors"] == [{"code": "BK1507", "name": "宠物食品"}]

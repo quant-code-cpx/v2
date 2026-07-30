@@ -55,6 +55,7 @@ def register_financial_routes(
     not_found_problem: Callable[[], Exception],
     validation_problem: Callable[[str], Exception],
     cursor_problem: Callable[[], Exception],
+    snapshot_problem: Callable[[], Exception],
     cursor_secret: bytes,
     repository: FinancialReadRepository | None,
 ) -> None:
@@ -73,6 +74,7 @@ def register_financial_routes(
             Query(alias="methodologyCode", pattern=r"^[a-z][a-z0-9_.-]{2,79}$"),
         ],
         methodology_version: Annotated[int, Query(alias="methodologyVersion", ge=1)],
+        data_version: Annotated[UUID, Query(alias="dataVersion")],
         statement_type: Annotated[
             list[StatementType] | None,
             Query(alias="statementType", min_length=1, max_length=3),
@@ -101,7 +103,11 @@ def register_financial_routes(
             capability="financial.report",
             methodology_code=methodology_code,
             methodology_version=methodology_version,
+            expected_data_version=data_version,
+            as_of=as_of,
+            known_at=known_at,
             unavailable_problem=unavailable_problem,
+            snapshot_problem=snapshot_problem,
         )
         # 上一步在仓储缺失时已经抛出统一问题；此处收窄类型以安全调用已发布读取端口。
         assert repository is not None
@@ -212,6 +218,7 @@ def register_financial_routes(
         exchange: Annotated[ExchangeCode, Path()],
         symbol: Annotated[str, Path(pattern=r"^[0-9]{6}$")],
         report_ref: UUID,
+        data_version: Annotated[UUID, Query(alias="dataVersion")],
         metric: Annotated[list[str] | None, Query(min_length=1, max_length=100)] = None,
         as_of: Annotated[date | None, Query(alias="asOf")] = None,
         known_at: Annotated[datetime | None, Query(alias="knownAt")] = None,
@@ -226,7 +233,11 @@ def register_financial_routes(
             exchange=Exchange(exchange),
             symbol=symbol,
             report_ref=report_ref,
+            expected_data_version=data_version,
+            as_of=as_of,
+            known_at=known_at,
             unavailable_problem=unavailable_problem,
+            snapshot_problem=snapshot_problem,
         )
         # 发布选择成功后仓储必然存在；断言仅向类型检查表达此 fail-closed 前置条件。
         assert repository is not None
@@ -327,6 +338,7 @@ def register_financial_routes(
             Query(alias="methodologyCode", pattern=r"^[a-z][a-z0-9_.-]{2,79}$"),
         ],
         methodology_version: Annotated[int, Query(alias="methodologyVersion", ge=1)],
+        data_version: Annotated[UUID, Query(alias="dataVersion")],
         metric: Annotated[list[str], Query(min_length=1, max_length=50)],
         basis: Annotated[list[PeriodBasis] | None, Query(min_length=1, max_length=4)] = None,
         report_period_from: Annotated[date | None, Query(alias="reportPeriodFrom")] = None,
@@ -356,7 +368,11 @@ def register_financial_routes(
             capability=capability,
             methodology_code=methodology_code,
             methodology_version=methodology_version,
+            expected_data_version=data_version,
+            as_of=as_of,
+            known_at=known_at,
             unavailable_problem=unavailable_problem,
+            snapshot_problem=snapshot_problem,
         )
         assert repository is not None
         view_as_of, view_known_at = _report_view_times_or_problem(
@@ -467,6 +483,7 @@ def register_financial_routes(
             Query(alias="methodologyCode", pattern=r"^[a-z][a-z0-9_.-]{2,79}$"),
         ],
         methodology_version: Annotated[int, Query(alias="methodologyVersion", ge=1)],
+        data_version: Annotated[UUID, Query(alias="dataVersion")],
         metric: Annotated[list[ValuationMetric], Query(min_length=1, max_length=5)],
         start: date,
         end: date,
@@ -486,7 +503,11 @@ def register_financial_routes(
             capability="financial.valuation",
             methodology_code=methodology_code,
             methodology_version=methodology_version,
+            expected_data_version=data_version,
+            as_of=as_of,
+            known_at=known_at,
             unavailable_problem=unavailable_problem,
+            snapshot_problem=snapshot_problem,
         )
         assert repository is not None
         view_as_of, view_known_at = _report_view_times_or_problem(
@@ -579,9 +600,13 @@ def _current_publication_or_unavailable(
     capability: FinancialCapability,
     methodology_code: str,
     methodology_version: int,
+    expected_data_version: UUID,
+    as_of: date | None,
+    known_at: datetime | None,
     unavailable_problem: Callable[[], Exception],
+    snapshot_problem: Callable[[], Exception],
 ) -> FinancialPublicationSnapshot:
-    """只接受精确的当前已验证发布；仓储故障和缺失都统一为不泄漏细节的不可用。"""
+    """按双时态身份只接受状态门控的精确当前发布。"""
     if repository is None:
         raise unavailable_problem()
     try:
@@ -591,11 +616,15 @@ def _current_publication_or_unavailable(
             capability=capability,
             methodology_code=methodology_code,
             methodology_version=methodology_version,
+            as_of=as_of,
+            known_at=known_at,
         )
     except FinancialReadUnavailable as error:
         raise unavailable_problem() from error
     if publication is None:
-        raise unavailable_problem()
+        raise snapshot_problem()
+    if publication.data_version != expected_data_version:
+        raise snapshot_problem()
     return publication
 
 
@@ -605,9 +634,13 @@ def _current_report_publication_or_unavailable(
     exchange: Exchange,
     symbol: str,
     report_ref: UUID,
+    expected_data_version: UUID,
+    as_of: date | None,
+    known_at: datetime | None,
     unavailable_problem: Callable[[], Exception],
+    snapshot_problem: Callable[[], Exception],
 ) -> FinancialPublicationSnapshot:
-    """从公开报表引用反查当前生产发布，避免详情接口接收可混用的方法学参数。"""
+    """从公开报表引用反查并校验状态门控的精确当前发布。"""
     if repository is None:
         raise unavailable_problem()
     try:
@@ -615,11 +648,15 @@ def _current_report_publication_or_unavailable(
             exchange=exchange,
             symbol=symbol,
             report_ref=report_ref,
+            as_of=as_of,
+            known_at=known_at,
         )
     except FinancialReadUnavailable as error:
         raise unavailable_problem() from error
     if publication is None:
-        raise unavailable_problem()
+        raise snapshot_problem()
+    if publication.data_version != expected_data_version:
+        raise snapshot_problem()
     return publication
 
 

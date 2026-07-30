@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -78,8 +79,9 @@ class FinancialDerivedMetricService:
         symbol: str,
         derivation_run_id: UUID,
         computed_at: datetime,
+        before_final_publication: Callable[[], None] | None = None,
     ) -> FinancialDerivationResult:
-        """冻结当前报表版本、计算公式并在来源版本未变化时原子发布。"""
+        """冻结当前报表版本、计算公式，并在来源未变化时以可选栅栏回调原子发布。"""
         if computed_at.tzinfo is None:
             raise ValueError("computed_at must include a timezone")
         snapshot = self._repository.load_inputs(exchange=exchange, symbol=symbol)
@@ -89,6 +91,7 @@ class FinancialDerivedMetricService:
             metrics=metrics,
             derivation_run_id=derivation_run_id,
             computed_at=computed_at,
+            before_final_publication=before_final_publication,
         )
         return FinancialDerivationResult(
             publication=publication,

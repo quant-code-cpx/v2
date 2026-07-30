@@ -36,15 +36,36 @@ from service_data_sync.infrastructure.providers.akshare.sina_adjustment_factors 
 class FakeFrame:
     """提供 AKShare DataFrame 测试所需的最小接口。"""
 
-    def __init__(self, records: list[dict[str, object]]) -> None:
-        """保存上游记录并暴露空值状态。"""
+    def __init__(
+        self,
+        records: list[dict[str, object]],
+        *,
+        columns: tuple[str, ...] | None = None,
+    ) -> None:
+        """保存上游记录、列集合并暴露空值状态。"""
         self.records = records
+        self.columns = columns if columns is not None else tuple(records[0]) if records else ()
         self.empty = not records
 
     def to_dict(self, *, orient: str) -> list[dict[str, object]]:
         """只接受 adapter 使用的 records 方向。"""
         assert orient == "records"
         return self.records
+
+
+class FakeResponse:
+    """提供东财显式空窗复核所需的最小 HTTP 响应。"""
+
+    def __init__(self, payload: bytes) -> None:
+        """保存确定性 JSON 原始响应。"""
+        self.content = payload
+
+    def raise_for_status(self) -> None:
+        """测试响应固定为成功 HTTP 状态。"""
+
+    def json(self) -> object:
+        """解析并返回原始 JSON 对象。"""
+        return json.loads(self.content)
 
 
 def test_period_adapter_calls_weekly_interface_and_converts_lots_to_shares(
@@ -60,12 +81,16 @@ def test_period_adapter_calls_weekly_interface_and_converts_lots_to_shares(
             [
                 {
                     "日期": date(2026, 7, 24),
+                    "股票代码": "600519",
                     "开盘": 10,
+                    "收盘": 11,
                     "最高": 12,
                     "最低": 9,
-                    "收盘": 11,
                     "成交量": 10,
                     "成交额": 10_500,
+                    "振幅": 3,
+                    "涨跌幅": 1,
+                    "涨跌额": 0.1,
                     "换手率": 2,
                 }
             ]
@@ -92,7 +117,108 @@ def test_period_adapter_calls_weekly_interface_and_converts_lots_to_shares(
     assert captured["adjust"] == ""
     assert payload["bars"][0]["volumeShares"] == "1000"
     assert payload["bars"][0]["turnoverRate"] == "0.02"
-    assert batch.schema_fingerprint is not None
+    assert batch.upstream_source == "eastmoney-stock-kline"
+    assert batch.adapter_version == "akshare-1.18.78-stock_zh_a_hist-v3"
+    assert batch.schema_fingerprint == eastmoney_equity_period_bars._SCHEMA_FINGERPRINT
+    assert captured["timeout"] == 2.0
+    assert adapter.supported_exchanges == frozenset(
+        {
+            eastmoney_equity_period_bars.Exchange.SSE,
+            eastmoney_equity_period_bars.Exchange.SZSE,
+            eastmoney_equity_period_bars.Exchange.BSE,
+        }
+    )
+
+
+def test_period_adapter_returns_proven_empty_window_and_rejects_schema_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """冻结列齐全时允许零记录周期窗口，缺列时必须失败关闭。"""
+    frames = [
+        FakeFrame([], columns=eastmoney_equity_period_bars._EXPECTED_COLUMNS),
+        FakeFrame([], columns=("日期",)),
+    ]
+
+    def fake_history(**_kwargs: object) -> FakeFrame:
+        """按顺序返回可证明空窗口与结构漂移空响应。"""
+        return frames.pop(0)
+
+    monkeypatch.setattr(eastmoney_equity_period_bars.ak, "stock_zh_a_hist", fake_history)
+    adapter = AkshareEastmoneyEquityPeriodBarsAdapter(request_timeout_seconds=2)
+    request = SourceRequest(
+        capability="equity.bar.1mo.raw",
+        parameters=(
+            ("instrument", "SSE.600519"),
+            ("period", "1mo"),
+            ("start", "2026-07-01"),
+            ("end", "2026-07-28"),
+        ),
+    )
+
+    batch = asyncio.run(adapter.fetch(request))
+    assert json.loads(batch.payload)["bars"] == []
+    assert batch.schema_fingerprint == eastmoney_equity_period_bars._SCHEMA_FINGERPRINT
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(adapter.fetch(request))
+    assert captured.value.code is ProviderErrorCode.SCHEMA
+    assert captured.value.retryable is False
+
+
+def test_period_adapter_requires_identity_bound_raw_proof_for_sdk_no_columns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """固定 SDK 无列空响应只有经原始成功响应回显证券身份后才能成为合法空窗。"""
+    frame = FakeFrame([], columns=())
+    responses = [
+        b'{"rc":0,"data":{"market":1,"code":"600519","klines":[]}}',
+        b'{"rc":0,"data":null}',
+    ]
+    captured: dict[str, object] = {}
+
+    def fake_history(**_kwargs: object) -> FakeFrame:
+        """模拟固定 SDK 在无 `klines` 时返回的无列 DataFrame。"""
+        return frame
+
+    def fake_get(url: str, **kwargs: object) -> FakeResponse:
+        """返回一次身份绑定空列表和一次无法证明空窗的响应。"""
+        captured["url"] = url
+        captured.update(kwargs)
+        return FakeResponse(responses.pop(0))
+
+    monkeypatch.setattr(eastmoney_equity_period_bars.ak, "stock_zh_a_hist", fake_history)
+    monkeypatch.setattr(eastmoney_equity_period_bars.requests, "get", fake_get)
+    adapter = AkshareEastmoneyEquityPeriodBarsAdapter(request_timeout_seconds=2)
+    request = SourceRequest(
+        capability="equity.bar.1w.raw",
+        parameters=(
+            ("instrument", "SSE.600519"),
+            ("period", "1w"),
+            ("start", "2026-07-25"),
+            ("end", "2026-07-26"),
+        ),
+    )
+
+    batch = asyncio.run(adapter.fetch(request))
+
+    assert batch.raw_payload == b'{"rc":0,"data":{"market":1,"code":"600519","klines":[]}}'
+    assert json.loads(batch.payload)["bars"] == []
+    assert captured["url"] == eastmoney_equity_period_bars._EMPTY_PROOF_URL
+    assert captured["params"] == {
+        "fields1": eastmoney_equity_period_bars._EMPTY_PROOF_FIELDS_1,
+        "fields2": eastmoney_equity_period_bars._EMPTY_PROOF_FIELDS_2,
+        "ut": eastmoney_equity_period_bars._EMPTY_PROOF_TOKEN,
+        "klt": "102",
+        "fqt": "0",
+        "secid": "1.600519",
+        "beg": "20260725",
+        "end": "20260726",
+    }
+    assert captured["timeout"] == 2.0
+
+    with pytest.raises(ProviderError) as failed:
+        asyncio.run(adapter.fetch(request))
+    assert failed.value.code is ProviderErrorCode.SCHEMA
+    assert failed.value.retryable is False
 
 
 def test_factor_adapter_filters_window_and_keeps_positive_exact_factor(
@@ -214,6 +340,100 @@ def test_action_and_profile_adapters_map_nullable_fields(
     assert action["cashDividendPer10"] == "10"
     assert profile["englishName"] is None
     assert profile["establishedOn"] == "1999-11-20"
+
+
+@pytest.mark.parametrize("candidate_date", (None, "不是日期"))
+def test_action_adapter_rejects_target_candidate_without_reconcilable_date(
+    monkeypatch: pytest.MonkeyPatch,
+    candidate_date: object,
+) -> None:
+    """目标证券公司行动候选没有可解析日期时必须失败，不能发布合法空覆盖。"""
+
+    def fake_actions(**_kwargs: object) -> FakeFrame:
+        """返回一条无法证明位于请求窗口外的目标证券坏候选。"""
+        return FakeFrame(
+            [
+                {
+                    "报告期": candidate_date,
+                    "业绩披露日期": None,
+                    "预案公告日": None,
+                    "股权登记日": None,
+                    "除权除息日": None,
+                    "最新公告日期": None,
+                    "方案进度": "实施",
+                }
+            ]
+        )
+
+    monkeypatch.setattr(
+        eastmoney_corporate_actions.ak,
+        "stock_fhps_detail_em",
+        fake_actions,
+    )
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(
+            AkshareEastmoneyCorporateActionsAdapter(request_timeout_seconds=2).fetch(
+                SourceRequest(
+                    capability="equity.corporate_action",
+                    parameters=(
+                        ("instrument", "SSE.600519"),
+                        ("start", "2026-01-01"),
+                        ("end", "2026-12-31"),
+                    ),
+                )
+            )
+        )
+
+    assert captured.value.code is ProviderErrorCode.SCHEMA
+    assert captured.value.retryable is False
+
+
+@pytest.mark.parametrize(
+    "records",
+    (
+        [],
+        [
+            {
+                "报告期": date(2024, 12, 31),
+                "业绩披露日期": date(2025, 4, 1),
+                "预案公告日": None,
+                "股权登记日": None,
+                "除权除息日": None,
+                "最新公告日期": None,
+                "方案进度": "实施",
+            }
+        ],
+    ),
+)
+def test_action_adapter_keeps_proven_empty_window_as_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    records: list[dict[str, object]],
+) -> None:
+    """供应商真空集或日期明确在窗外时，仍允许产生可验证的空事件批次。"""
+
+    def fake_actions(**_kwargs: object) -> FakeFrame:
+        """返回参数化的真实空或可明确排除候选。"""
+        return FakeFrame(records)
+
+    monkeypatch.setattr(
+        eastmoney_corporate_actions.ak,
+        "stock_fhps_detail_em",
+        fake_actions,
+    )
+    batch = asyncio.run(
+        AkshareEastmoneyCorporateActionsAdapter(request_timeout_seconds=2).fetch(
+            SourceRequest(
+                capability="equity.corporate_action",
+                parameters=(
+                    ("instrument", "SSE.600519"),
+                    ("start", "2026-01-01"),
+                    ("end", "2026-12-31"),
+                ),
+            )
+        )
+    )
+
+    assert json.loads(batch.payload)["actions"] == []
 
 
 @pytest.mark.parametrize(

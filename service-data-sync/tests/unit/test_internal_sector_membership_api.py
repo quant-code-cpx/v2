@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
@@ -31,6 +31,7 @@ class FakeMembershipRepository:
 
     def __init__(self) -> None:
         """构造行业 release、板块、证券和两条稳定排序成员。"""
+        self.calls: list[str] = []
         self.sector = StoredSector(
             sector_key=1,
             sector_id=uuid4(),
@@ -49,12 +50,30 @@ class FakeMembershipRepository:
             carried_forward_sector_count=0,
             published_at=datetime(2026, 7, 27, 11, tzinfo=UTC),
         )
+        self.same_day_release = replace(
+            self.release,
+            release_id=uuid4(),
+            data_version=uuid4(),
+            published_at=self.release.published_at + timedelta(minutes=5),
+        )
         self.equity = StoredMembershipEquity(
             instrument_id=uuid4(),
             exchange=Exchange.SSE,
             symbol="600000",
             name="浦发银行",
             listing_status="LISTED",
+        )
+        self.old_equity = replace(
+            self.equity,
+            instrument_id=uuid4(),
+            name="代码复用前证券",
+        )
+        self.old_sector = StoredSector(
+            sector_key=2,
+            sector_id=uuid4(),
+            identifier=SectorIdentifier(SectorScheme.EASTMONEY_INDUSTRY, "BK0001"),
+            name="历史行业",
+            status="ACTIVE",
         )
         self.constituents = (
             StoredMembershipConstituent(
@@ -78,10 +97,20 @@ class FakeMembershipRepository:
         )
 
     def get_release(
-        self, *, scheme: SectorScheme, as_of: datetime | None
+        self,
+        *,
+        scheme: SectorScheme,
+        as_of: datetime | None,
+        data_version: UUID | None = None,
     ) -> StoredSectorMembershipRelease | None:
-        """只为行业返回当前固定 release，并回显请求时刻。"""
+        """按精确版本返回同业务时点的 release，并回显旧式请求时刻。"""
+        self.calls.append("release")
         if scheme is not SectorScheme.EASTMONEY_INDUSTRY:
+            return None
+        if data_version is not None:
+            for release in (self.release, self.same_day_release):
+                if release.data_version == data_version:
+                    return replace(release, requested_as_of=as_of)
             return None
         return replace(self.release, requested_as_of=as_of)
 
@@ -114,16 +143,22 @@ class FakeMembershipRepository:
             )
         return rows[:limit]
 
-    def get_release_equity(
-        self, *, release_id: object, exchange: Exchange, symbol: str
+    def resolve_equity_identity(
+        self,
+        *,
+        exchange: Exchange,
+        symbol: str,
+        identity_as_of: date | None,
+        known_at: datetime | None,
     ) -> StoredMembershipEquity | None:
-        """仅解析 release 中已确认的证券身份。"""
-        if release_id == self.release.release_id and (exchange, symbol) == (
-            self.equity.exchange,
-            self.equity.symbol,
-        ):
-            return self.equity
-        return None
+        """按独立身份业务日解析代码复用前后证券，并记录知识时刻。"""
+        self.calls.append("identity")
+        del known_at
+        if (exchange, symbol) != (self.equity.exchange, self.equity.symbol):
+            return None
+        if identity_as_of is not None and identity_as_of < date(2020, 1, 1):
+            return self.old_equity
+        return self.equity
 
     def list_equity_memberships(
         self,
@@ -134,19 +169,27 @@ class FakeMembershipRepository:
         limit: int,
     ) -> tuple[StoredEquityMembership, ...]:
         """返回反向归属，已知证券无后续页时保留空 cursor。"""
-        if release_id != self.release.release_id or instrument_id != self.equity.instrument_id:
+        self.calls.append("memberships")
+        if release_id not in {self.release.release_id, self.same_day_release.release_id}:
             return ()
-        if after_sector_code is not None:
+        if instrument_id == self.old_equity.instrument_id:
+            sectors = (self.old_sector, self.sector)
+        elif instrument_id == self.equity.instrument_id:
+            sectors = (self.sector,)
+        else:
             return ()
-        return (
+        rows = tuple(
             StoredEquityMembership(
-                sector=self.sector,
+                sector=sector,
                 observed_from=datetime(2026, 7, 20, 10, tzinfo=UTC),
                 observed_to=None,
                 snapshot_observed_at=datetime(2026, 7, 27, 10, tzinfo=UTC),
                 carried_forward=False,
-            ),
-        )[:limit]
+            )
+            for sector in sectors
+            if after_sector_code is None or sector.identifier.code > after_sector_code
+        )
+        return rows[:limit]
 
 
 def test_membership_api_pages_fixed_release_and_honors_etag(configured_environment) -> None:
@@ -170,7 +213,9 @@ def test_membership_api_pages_fixed_release_and_honors_etag(configured_environme
     assert first.json()["items"][0]["instrumentId"] == str(repository.equity.instrument_id)
     assert first.json()["release"]["membershipSemantics"] == "observed"
     assert first.json()["nextCursor"] is not None
+    assert first.headers["x-data-version"] == str(repository.release.data_version)
     assert cached.status_code == 304
+    assert cached.headers["x-data-version"] == str(repository.release.data_version)
 
     repository.release = replace(repository.release, data_version=uuid4())
     expired = client.get(f"{endpoint}&cursor={first.json()['nextCursor']}", headers=headers)
@@ -194,12 +239,151 @@ def test_membership_api_reads_reverse_membership_and_rejects_naive_as_of(
         )
     )
     headers = {"Authorization": f"Bearer {settings.internal_api_bearer_token.get_secret_value()}"}
-    endpoint = "/internal/v1/equities/SSE/600000/sectors?scheme=eastmoney.industry"
+    endpoint = (
+        "/internal/v1/equities/SSE/600000/sectors?scheme=eastmoney.industry"
+        f"&dataVersion={repository.release.data_version}&identityAsOf=2026-07-29"
+    )
 
     response = client.get(endpoint, headers=headers)
     naive = client.get(f"{endpoint}&asOf=2026-07-27T10:00:00", headers=headers)
 
     assert response.status_code == 200
     assert response.json()["equity"]["listingStatus"] == "LISTED"
+    assert response.json()["identityAsOf"] == "2026-07-29"
+    assert response.json()["dataVersion"] == str(repository.release.data_version)
     assert response.json()["items"][0]["code"] == "BK0475"
+    assert response.headers["x-data-version"] == str(repository.release.data_version)
     assert naive.status_code == 400
+
+
+def test_reverse_membership_pins_release_and_resolves_code_reuse_before_reading_facts(
+    configured_environment,
+) -> None:
+    """精确 release 与身份时点必须独立，旧代码身份不得读到复用后的新证券归属。"""
+    del configured_environment
+    settings = load_settings()
+    repository = FakeMembershipRepository()
+    client = TestClient(
+        create_app(
+            settings=settings,
+            repository=cast(SectorMarketDataRepository, object()),
+            membership_repository=cast(SectorMembershipRepository, repository),
+        )
+    )
+    headers = {"Authorization": f"Bearer {settings.internal_api_bearer_token.get_secret_value()}"}
+    base = (
+        "/internal/v1/equities/SSE/600000/sectors?scheme=eastmoney.industry"
+        f"&dataVersion={repository.same_day_release.data_version}"
+        "&knownAt=2026-07-30T00:00:00Z"
+    )
+
+    old = client.get(f"{base}&identityAsOf=2019-12-31&limit=1", headers=headers)
+    old_cursor = old.json()["nextCursor"]
+    new = client.get(f"{base}&identityAsOf=2026-07-29", headers=headers)
+    crossed_cursor = client.get(
+        f"{base}&identityAsOf=2026-07-29&limit=1&cursor={old_cursor}",
+        headers=headers,
+    )
+
+    assert old.status_code == 200
+    assert old.json()["identityAsOf"] == "2019-12-31"
+    assert old.json()["dataVersion"] == str(repository.same_day_release.data_version)
+    assert old.json()["release"]["dataVersion"] == str(repository.same_day_release.data_version)
+    assert old.json()["equity"]["name"] == "代码复用前证券"
+    assert old.json()["items"][0]["code"] == "BK0001"
+    assert old_cursor is not None
+    assert new.status_code == 200
+    assert new.json()["equity"]["name"] == "浦发银行"
+    assert new.json()["items"][0]["code"] == "BK0475"
+    assert crossed_cursor.status_code == 409
+    assert crossed_cursor.json()["code"] == "snapshot-expired"
+    assert repository.calls[:3] == ["identity", "release", "memberships"]
+
+
+def test_reverse_membership_rejects_missing_exact_release(
+    configured_environment,
+) -> None:
+    """调用方指定的 publication 不存在时必须冲突失败，不能静默回退到当前 release。"""
+    del configured_environment
+    settings = load_settings()
+    repository = FakeMembershipRepository()
+    client = TestClient(
+        create_app(
+            settings=settings,
+            repository=cast(SectorMarketDataRepository, object()),
+            membership_repository=cast(SectorMembershipRepository, repository),
+        )
+    )
+    headers = {"Authorization": f"Bearer {settings.internal_api_bearer_token.get_secret_value()}"}
+
+    response = client.get(
+        "/internal/v1/equities/SSE/600000/sectors?scheme=eastmoney.industry"
+        f"&dataVersion={uuid4()}&identityAsOf=2026-07-29",
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "snapshot-expired"
+    assert repository.calls == ["identity", "release"]
+
+
+def test_reverse_membership_requires_both_snapshot_and_identity_anchor(
+    configured_environment,
+) -> None:
+    """证券反向归属缺少任一精确锚点时必须在执行仓储查询前失败。"""
+    del configured_environment
+    settings = load_settings()
+    repository = FakeMembershipRepository()
+    client = TestClient(
+        create_app(
+            settings=settings,
+            repository=cast(SectorMarketDataRepository, object()),
+            membership_repository=cast(SectorMembershipRepository, repository),
+        )
+    )
+    headers = {"Authorization": f"Bearer {settings.internal_api_bearer_token.get_secret_value()}"}
+    endpoint = "/internal/v1/equities/SSE/600000/sectors?scheme=eastmoney.industry"
+
+    missing_version = client.get(f"{endpoint}&identityAsOf=2026-07-29", headers=headers)
+    missing_identity = client.get(
+        f"{endpoint}&dataVersion={repository.release.data_version}",
+        headers=headers,
+    )
+
+    assert missing_version.status_code == 400
+    assert missing_identity.status_code == 400
+    assert repository.calls == []
+
+
+def test_reverse_membership_etag_and_cursor_bind_resolved_permanent_identity(
+    configured_environment,
+) -> None:
+    """同一日期身份更正后 ETag 必须变化，旧身份游标也不能续读新永久证券。"""
+    del configured_environment
+    settings = load_settings()
+    repository = FakeMembershipRepository()
+    client = TestClient(
+        create_app(
+            settings=settings,
+            repository=cast(SectorMarketDataRepository, object()),
+            membership_repository=cast(SectorMembershipRepository, repository),
+        )
+    )
+    headers = {"Authorization": f"Bearer {settings.internal_api_bearer_token.get_secret_value()}"}
+    endpoint = (
+        "/internal/v1/equities/SSE/600000/sectors?scheme=eastmoney.industry"
+        f"&dataVersion={repository.release.data_version}&identityAsOf=2019-12-31&limit=1"
+    )
+
+    before = client.get(endpoint, headers=headers)
+    old_cursor = before.json()["nextCursor"]
+    repository.old_equity = replace(repository.old_equity, instrument_id=uuid4())
+    after = client.get(endpoint, headers=headers)
+    crossed = client.get(f"{endpoint}&cursor={old_cursor}", headers=headers)
+
+    assert before.status_code == 200
+    assert after.status_code == 200
+    assert before.headers["etag"] != after.headers["etag"]
+    assert old_cursor is not None
+    assert crossed.status_code == 409
+    assert crossed.json()["code"] == "snapshot-expired"

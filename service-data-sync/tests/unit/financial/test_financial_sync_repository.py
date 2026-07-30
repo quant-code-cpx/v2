@@ -11,6 +11,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from pytest import MonkeyPatch
 from sqlalchemy.orm import Session
 
+from service_data_sync.application.ports.canonical_release import PublishedCanonicalRelease
 from service_data_sync.application.ports.financial_sync import (
     FinancialCapability,
     FinancialFactInput,
@@ -25,6 +26,7 @@ from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.database.models.financial.financial_report_revision import (
     FinancialReportRevision,
 )
+from service_data_sync.infrastructure.persistence import financial_sync_repository
 from service_data_sync.infrastructure.persistence.financial_sync_repository import (
     SqlAlchemyFinancialSyncRepository,
     _content_hash,
@@ -187,11 +189,28 @@ def test_publication_state_hashes_all_current_rows_not_only_latest_input() -> No
     assert len(session.statements) == 3
 
 
-def test_publish_reuses_current_version_when_content_is_unchanged() -> None:
-    """无 canonical 变化时不得替代当前 publication，却仍返回当前 dataVersion。"""
+def test_publish_reuses_current_release_when_content_is_unchanged(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """无 canonical 变化时复用已绑定 release 的当前 publication 与 dataVersion。"""
     repository = _repository()
     current_version = UUID("10000000-0000-4000-8000-000000000001")
-    session = FakeSession([current_version])
+    release_bridge = Mock(
+        return_value=PublishedCanonicalRelease(
+            release_id=UUID("20000000-0000-4000-8000-000000000001"),
+            data_version=current_version,
+            reused_release=True,
+            reused_publication=True,
+            published_at=datetime(2026, 7, 28, 8, tzinfo=UTC),
+        )
+    )
+    monkeypatch.setattr(
+        financial_sync_repository,
+        "_current_release_records",
+        Mock(return_value=((), date(2026, 3, 31), date(2026, 3, 31))),
+    )
+    monkeypatch.setattr(financial_sync_repository, "publish_legacy_snapshot", release_bridge)
+    session = FakeSession([])
 
     result = repository._publish(
         cast(Session, session),
@@ -199,23 +218,42 @@ def test_publish_reuses_current_version_when_content_is_unchanged() -> None:
         security_id=8,
         methodology_id=_METHODOLOGY_ID,
         effective_as_of=date(2026, 4, 29),
-        source=_source(),
         changed_count=0,
         row_count=2,
         content_sha256="a" * 64,
+        source_batch_id=UUID("30000000-0000-4000-8000-000000000001"),
         now=datetime(2026, 7, 28, 8, tzinfo=UTC),
     )
 
     assert result.data_version == current_version
     assert result.inserted_count == 0
     assert result.unchanged_count == 2
-    assert len(session.statements) == 1
+    assert session.statements == []
+    assert release_bridge.call_args.kwargs["dataset_code"] == "financial.report"
 
 
-def test_publish_replaces_current_pointer_when_canonical_content_changes() -> None:
-    """变化内容必须先替代旧通用指针，再插入同一 dataVersion 的财务发布明细。"""
+def test_publish_creates_financial_detail_for_new_canonical_release(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """新 canonical release 统一替代消费者指针，并追加同一真实版本的财务发布明细。"""
     repository = _repository()
-    session = FakeSession([None, None, None, None])
+    data_version = UUID("40000000-0000-4000-8000-000000000001")
+    release_bridge = Mock(
+        return_value=PublishedCanonicalRelease(
+            release_id=UUID("50000000-0000-4000-8000-000000000001"),
+            data_version=data_version,
+            reused_release=False,
+            reused_publication=False,
+            published_at=datetime(2026, 7, 28, 8, tzinfo=UTC),
+        )
+    )
+    monkeypatch.setattr(
+        financial_sync_repository,
+        "_current_release_records",
+        Mock(return_value=((), date(2026, 7, 27), date(2026, 7, 27))),
+    )
+    monkeypatch.setattr(financial_sync_repository, "publish_legacy_snapshot", release_bridge)
+    session = FakeSession([None])
 
     result = repository._publish(
         cast(Session, session),
@@ -223,20 +261,20 @@ def test_publish_replaces_current_pointer_when_canonical_content_changes() -> No
         security_id=8,
         methodology_id=_METHODOLOGY_ID,
         effective_as_of=date(2026, 7, 27),
-        source=_source(),
         changed_count=1,
         row_count=5,
         content_sha256="b" * 64,
+        source_batch_id=UUID("60000000-0000-4000-8000-000000000001"),
         now=datetime(2026, 7, 28, 8, tzinfo=UTC),
     )
 
     assert result.capability == "financial.valuation"
+    assert result.data_version == data_version
     assert result.inserted_count == 1
     assert result.unchanged_count == 4
     rendered = "\n".join(session.statements)
-    assert "UPDATE dataset_publication" in rendered
-    assert "INSERT INTO dataset_publication" in rendered
     assert "INSERT INTO financial_publication" in rendered
+    assert release_bridge.call_args.kwargs["dataset_code"] == "financial.valuation"
 
 
 def test_repository_uses_deterministic_methodology_and_active_metric_definitions() -> None:
@@ -297,6 +335,51 @@ def test_repository_uses_deterministic_methodology_and_active_metric_definitions
     assert created_metric_id == 33
     assert existing_metric_id == 33
     assert security_id == 8
+
+
+def test_financial_identity_uses_current_selector_not_pre_listing_report_period(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """招股前真实报告期仍归属当前唯一证券身份，不能被误判为当时已经上市。"""
+    captured: dict[str, object] = {}
+
+    def resolve_current_identity(
+        connection: Session,
+        *,
+        exchange: Exchange,
+        symbol: str,
+        fact_dates: tuple[date, ...],
+        known_at: datetime,
+    ) -> int:
+        """捕获仓储交给统一身份解析器的业务日期。"""
+        captured.update(
+            connection=connection,
+            exchange=exchange,
+            symbol=symbol,
+            fact_dates=fact_dates,
+            known_at=known_at,
+        )
+        return 8
+
+    monkeypatch.setattr(
+        financial_sync_repository,
+        "require_single_confirmed_identity_on_connection",
+        resolve_current_identity,
+    )
+    repository = _repository()
+    known_at = datetime(2026, 7, 30, 16, tzinfo=UTC)
+
+    security_id = repository._security_id(
+        cast(Session, object()),
+        exchange=Exchange.SSE,
+        symbol="600519",
+        fact_dates=(date(1998, 12, 31), date(2026, 6, 30)),
+        known_at=known_at,
+    )
+
+    assert security_id == 8
+    assert captured["fact_dates"] == (date(2026, 7, 31),)
+    assert captured["known_at"] == known_at
 
 
 def test_repository_tracks_revision_numbers_checkpoint_and_quality_evidence() -> None:

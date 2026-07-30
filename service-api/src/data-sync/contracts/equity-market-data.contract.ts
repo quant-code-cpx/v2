@@ -142,6 +142,7 @@ export const equityCorporateActionPageSchema = z
 export const equityCompanyProfileSchema = z
   .object({
     ...publicationFields,
+    identityAsOf: dateSchema,
     revision: z.number().int().positive(),
     profile: z
       .object({

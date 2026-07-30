@@ -25,8 +25,27 @@ from .canonical import (
     RawPayloadManifest,
     SourceDataset,
 )
+from .delivery_manifest import (
+    DataOperationDeliveryManifest,
+    DataOperationDeliveryManifestPage,
+    StockConnectStatusCoverageBoundaryLock,
+)
 
 # 个股身份、生命周期和日线行情。
+from .equity.backfill import (
+    EquityBackfillChildResult,
+    EquityBackfillChildSpec,
+    EquityBackfillChildState,
+    EquityBackfillPartitionCheckpoint,
+    EquityBackfillPlan,
+    EquityBackfillPlanIdentity,
+    EquityBackfillPlanPage,
+    EquityBackfillPlanSeal,
+    EquityBackfillPlanSource,
+    EquityBackfillPlanState,
+    EquityReferenceGenerationAttempt,
+    EquityReferenceGenerationStep,
+)
 from .equity.identity.equity_identifier_version import EquityIdentifierVersion
 from .equity.identity.equity_identity_quarantine import EquityIdentityQuarantine
 from .equity.identity.equity_instrument import EquityInstrument
@@ -43,6 +62,15 @@ from .equity.market_data.equity_daily_bar import EquityDailyBar
 from .equity.market_data.equity_monthly_bar import EquityMonthlyBar
 from .equity.market_data.equity_sync_checkpoint import EquitySyncCheckpoint
 from .equity.market_data.equity_weekly_bar import EquityWeeklyBar
+from .equity.workspace import (
+    EquityDiscoveryAvailability,
+    EquityDiscoveryMembership,
+    EquityDiscoverySnapshot,
+    EquityShareCapitalRevision,
+    EquityTradingStatusRevision,
+    SwMembershipItem,
+    SwMembershipRelease,
+)
 from .etf import (
     EtfActionVersion,
     EtfDailyBarRevision,
@@ -108,15 +136,32 @@ from .market import (
     MarketEntity,
     MarketEntityRelationVersion,
     MarketInstrument,
+    MarketOverviewActiveBundle,
+    MarketOverviewBundle,
+    MarketOverviewBundleComponent,
+    MarketOverviewComponentRelease,
+    MarketOverviewCurrentPointer,
+    MarketOverviewDerivationInputPointer,
+    MarketOverviewPointerTransition,
     MarketSessionVersion,
     RestrictedUnlockLot,
     ShareCapitalComponent,
     ShareholderHoldingAction,
     StockConnectActiveSecurityRevision,
+    StockConnectBundlePublication,
+    StockConnectBundleRollbackAudit,
+    StockConnectCalendarObservation,
     StockConnectChannelDailyRevision,
+    StockConnectChannelStatusRevision,
     StockConnectDisclosureRegime,
+    StockConnectHkexInstrumentIdentity,
     StockConnectHoldingItem,
     StockConnectHoldingSnapshot,
+    StockConnectOverviewGeneration,
+    StockConnectOverviewGenerationComponent,
+    StockConnectOverviewPublication,
+    StockConnectReadinessCalendarDay,
+    StockConnectReadinessSnapshot,
     TradingDisclosureReasonMapVersion,
     TradingVenue,
 )
@@ -135,6 +180,23 @@ from .money_flow import (
     MoneyFlowSeries,
     MoneyFlowUniverseVersion,
 )
+from .operations import (
+    DataOperationCommand,
+    DataOperationEvent,
+    DataOperationExecutionSlot,
+    DataOperationHealthCheck,
+    DataOperationHealthCheckTarget,
+    DataOperationHealthEvaluation,
+    DataOperationHealthIssue,
+    DataOperationIdempotency,
+    DataOperationPartition,
+    DataOperationPreflight,
+    DataOperationRun,
+    DataOperationRunSourceBatch,
+    DataOperationSchedule,
+    DataOperationScheduleFire,
+    DataOperationScheduleRevision,
+)
 from .provenance.source_batch import SourceBatch
 
 # 发布版本与质量问题。
@@ -142,6 +204,8 @@ from .publication.data_quality_issue import DataQualityIssue
 from .publication.dataset_availability_observation import DatasetAvailabilityObservation
 from .publication.dataset_publication import DatasetPublication
 from .publication.dataset_publication_component import DatasetPublicationComponent
+from .publication.equity_bar_window_coverage import EquityBarWindowCoverage
+from .publication.equity_event_window_coverage import EquityEventWindowCoverage
 
 # 板块目录与日、周、月行情。
 from .sector.catalog.sector_entity import SectorEntity
@@ -203,6 +267,13 @@ ALL_MODELS: tuple[type[Base], ...] = (
     MarketEntityRelationVersion,
     MarketCalendarDay,
     MarketSessionVersion,
+    MarketOverviewActiveBundle,
+    MarketOverviewComponentRelease,
+    MarketOverviewBundle,
+    MarketOverviewBundleComponent,
+    MarketOverviewCurrentPointer,
+    MarketOverviewDerivationInputPointer,
+    MarketOverviewPointerTransition,
     FundLegalEntity,
     FundShareClass,
     EtfListing,
@@ -232,15 +303,57 @@ ALL_MODELS: tuple[type[Base], ...] = (
     StockConnectDisclosureRegime,
     StockConnectChannelDailyRevision,
     StockConnectActiveSecurityRevision,
+    StockConnectCalendarObservation,
+    StockConnectChannelStatusRevision,
+    StockConnectBundleRollbackAudit,
+    StockConnectBundlePublication,
+    StockConnectHkexInstrumentIdentity,
+    StockConnectOverviewGeneration,
+    StockConnectOverviewGenerationComponent,
+    StockConnectOverviewPublication,
+    StockConnectReadinessCalendarDay,
+    StockConnectReadinessSnapshot,
     StockConnectHoldingSnapshot,
     StockConnectHoldingItem,
     SourceBatch,
     SyncRun,
     SyncPartition,
+    DataOperationDeliveryManifest,
+    DataOperationDeliveryManifestPage,
+    StockConnectStatusCoverageBoundaryLock,
+    DataOperationIdempotency,
+    DataOperationPreflight,
+    DataOperationCommand,
+    DataOperationRun,
+    DataOperationRunSourceBatch,
+    DataOperationPartition,
+    DataOperationExecutionSlot,
+    DataOperationEvent,
+    DataOperationHealthCheck,
+    DataOperationHealthCheckTarget,
+    DataOperationHealthEvaluation,
+    DataOperationHealthIssue,
+    DataOperationSchedule,
+    DataOperationScheduleRevision,
+    DataOperationScheduleFire,
     DatasetPublication,
     DatasetAvailabilityObservation,
+    EquityBarWindowCoverage,
+    EquityEventWindowCoverage,
     DatasetPublicationComponent,
     DataQualityIssue,
+    EquityBackfillPlan,
+    EquityBackfillPlanState,
+    EquityReferenceGenerationAttempt,
+    EquityReferenceGenerationStep,
+    EquityBackfillPlanIdentity,
+    EquityBackfillPlanSource,
+    EquityBackfillPlanPage,
+    EquityBackfillPlanSeal,
+    EquityBackfillChildSpec,
+    EquityBackfillChildState,
+    EquityBackfillPartitionCheckpoint,
+    EquityBackfillChildResult,
     EquityInstrument,
     EquityIdentifierVersion,
     EquityNameVersion,
@@ -257,6 +370,13 @@ ALL_MODELS: tuple[type[Base], ...] = (
     EquityAdjustmentFactor,
     EquityCorporateActionVersion,
     EquitySyncCheckpoint,
+    EquityTradingStatusRevision,
+    EquityShareCapitalRevision,
+    SwMembershipRelease,
+    SwMembershipItem,
+    EquityDiscoverySnapshot,
+    EquityDiscoveryMembership,
+    EquityDiscoveryAvailability,
     EtfProfileVersion,
     EtfTrackingRelationVersion,
     EtfDailyBarRevision,

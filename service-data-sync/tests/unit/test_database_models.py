@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sqlalchemy import String
+
 from service_data_sync.infrastructure.database.models.registry import ALL_MODELS, Base
 
 
@@ -34,6 +36,13 @@ def test_registry_explicitly_exposes_every_logical_business_table() -> None:
         "market_entity_relation_version",
         "market_calendar_day",
         "market_session_version",
+        "market_overview_component_release",
+        "market_overview_bundle",
+        "market_overview_bundle_component",
+        "market_overview_current_pointer",
+        "market_overview_active_bundle",
+        "market_overview_pointer_transition",
+        "market_overview_derivation_input_pointer",
         "fund_legal_entity",
         "fund_share_class",
         "etf_listing",
@@ -69,18 +78,60 @@ def test_registry_explicitly_exposes_every_logical_business_table() -> None:
         "margin_eligibility_revision",
         "margin_system_risk_daily_revision",
         "stock_connect_disclosure_regime",
+        "stock_connect_calendar_observation",
         "stock_connect_channel_daily_revision",
+        "stock_connect_channel_status_revision",
         "stock_connect_active_security_revision",
+        "stock_connect_bundle_publication",
+        "stock_connect_bundle_rollback_audit",
+        "stock_connect_hkex_instrument_identity",
+        "stock_connect_overview_generation",
+        "stock_connect_overview_generation_component",
+        "stock_connect_readiness_snapshot",
+        "stock_connect_readiness_calendar_day",
+        "stock_connect_overview_publication",
         "stock_connect_holding_snapshot",
         "stock_connect_holding_item",
         "source_batch",
         "sync_run",
         "sync_partition",
-        "dataset_publication",
-        "dataset_publication_component",
-        "dataset_availability_observation",
-        "data_quality_issue",
-        "equity_instrument",
+        "data_operation_delivery_manifest",
+        "data_operation_delivery_manifest_page",
+        "stock_connect_status_coverage_boundary_lock",
+        "data_operation_idempotency",
+        "data_operation_preflight",
+            "data_operation_command",
+            "data_operation_run",
+            "data_operation_run_source_batch",
+            "data_operation_partition",
+        "data_operation_execution_slot",
+        "data_operation_event",
+        "data_operation_health_check",
+        "data_operation_health_check_target",
+        "data_operation_health_evaluation",
+        "data_operation_health_issue",
+        "data_operation_schedule",
+        "data_operation_schedule_revision",
+        "data_operation_schedule_fire",
+            "dataset_publication",
+            "dataset_publication_component",
+            "dataset_availability_observation",
+            "equity_bar_window_coverage",
+            "equity_event_window_coverage",
+            "data_quality_issue",
+            "equity_backfill_plan",
+            "equity_backfill_plan_state",
+            "equity_reference_generation_attempt",
+            "equity_reference_generation_step",
+            "equity_backfill_plan_identity",
+            "equity_backfill_plan_source",
+            "equity_backfill_plan_page",
+            "equity_backfill_plan_seal",
+            "equity_backfill_child_spec",
+            "equity_backfill_child_state",
+            "equity_backfill_partition_checkpoint",
+            "equity_backfill_child_result",
+            "equity_instrument",
         "equity_identifier_version",
         "equity_name_version",
         "equity_listing_status_version",
@@ -96,6 +147,13 @@ def test_registry_explicitly_exposes_every_logical_business_table() -> None:
         "equity_adjustment_factor",
         "equity_corporate_action_version",
         "equity_sync_checkpoint",
+        "equity_trading_status_revision",
+        "equity_share_capital_revision",
+        "sw_membership_release",
+        "sw_membership_item",
+        "equity_discovery_snapshot",
+        "equity_discovery_membership",
+        "equity_discovery_availability",
         "financial_methodology",
         "financial_metric_definition",
         "financial_report",
@@ -292,6 +350,26 @@ def test_derivative_models_keep_real_contracts_and_reported_prices_separate() ->
         "ck_derivative_daily_bar_ohlc",
         "ck_derivative_daily_bar_non_negative_position",
     }
+
+
+def test_etf_v2_public_text_columns_match_the_typed_contract_widths() -> None:
+    """ETF v2 可公开文本在 ORM 层保持同一上限，不能依赖数据库额外余量或隐式截断。"""
+    assert _string_length("etf_profile_version", "display_name") == 160
+    assert _string_length("etf_profile_version", "etf_type") == 80
+    assert _string_length("etf_profile_version", "management_mode") == 80
+    assert _string_length("etf_profile_version", "manager_name") == 160
+    assert _string_length("etf_profile_version", "custodian_name") == 160
+    assert _string_length("etf_daily_bar_revision", "volume_unit") == 40
+    assert _string_length("etf_daily_bar_revision", "trade_status") == 80
+    assert _string_length("etf_status_revision", "status_code") == 80
+    assert _string_length("etf_status_revision", "reason") == 500
+
+
+def _string_length(table_name: str, column_name: str) -> int | None:
+    """读取已确认的字符串列宽，使模型断言同时通过运行时和静态类型门禁。"""
+    column_type = Base.metadata.tables[table_name].c[column_name].type
+    assert isinstance(column_type, String)
+    return column_type.length
 
 
 def test_every_model_has_chinese_database_comments() -> None:

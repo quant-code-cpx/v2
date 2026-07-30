@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -48,18 +50,16 @@ def test_adapter_uses_one_industry_batch_and_hides_vendor_rank(
         return frame
 
     monkeypatch.setattr(eastmoney_sector_eod.ak, "stock_board_industry_name_em", fake_fetch)
+    current_date = _current_shanghai_date()
     batch = asyncio.run(
         AkshareEastmoneySectorEodAdapter(request_timeout_seconds=5).fetch(
-            SourceRequest(
-                capability="sector.quote.eod.snapshot.raw",
-                parameters=(("sectorScheme", "eastmoney.industry"), ("tradeDate", "2026-07-27")),
-            )
+            _request("eastmoney.industry", trade_date=current_date.isoformat())
         )
     )
 
     payload = json.loads(batch.payload)
     assert calls == 1
-    assert payload["tradeDate"] == "2026-07-27"
+    assert payload["tradeDate"] == current_date.isoformat()
     assert payload["quotes"] == [
         {
             "code": "BK0475",
@@ -96,10 +96,7 @@ def test_adapter_quarantines_missing_required_vendor_column(
     with pytest.raises(ProviderError, match="schema changed"):
         asyncio.run(
             AkshareEastmoneySectorEodAdapter(request_timeout_seconds=5).fetch(
-                SourceRequest(
-                    capability="sector.quote.eod.snapshot.raw",
-                    parameters=(("sectorScheme", "eastmoney.concept"), ("tradeDate", "2026-07-27")),
-                )
+                _request("eastmoney.concept")
             )
         )
 
@@ -120,13 +117,7 @@ def test_adapter_quarantines_unapproved_extra_vendor_column(
     with pytest.raises(ProviderError, match="schema changed"):
         asyncio.run(
             AkshareEastmoneySectorEodAdapter(request_timeout_seconds=5).fetch(
-                SourceRequest(
-                    capability="sector.quote.eod.snapshot.raw",
-                    parameters=(
-                        ("sectorScheme", "eastmoney.industry"),
-                        ("tradeDate", "2026-07-27"),
-                    ),
-                )
+                _request("eastmoney.industry")
             )
         )
 
@@ -153,13 +144,7 @@ def test_adapter_quarantines_empty_batch_before_normalization(
     with pytest.raises(ProviderError, match="no sector eod quotes"):
         asyncio.run(
             AkshareEastmoneySectorEodAdapter(request_timeout_seconds=5).fetch(
-                SourceRequest(
-                    capability="sector.quote.eod.snapshot.raw",
-                    parameters=(
-                        ("sectorScheme", "eastmoney.industry"),
-                        ("tradeDate", "2026-07-27"),
-                    ),
-                )
+                _request("eastmoney.industry")
             )
         )
 
@@ -170,6 +155,33 @@ def test_numeric_normalizers_reject_nan_and_fractional_counts() -> None:
         eastmoney_sector_eod._optional_decimal_text("NaN")
     with pytest.raises(ValueError, match="non-negative integer"):
         eastmoney_sector_eod._optional_count("1.5")
+
+
+def test_adapter_rejects_non_current_observation_before_calling_sdk() -> None:
+    """当前横截面 adapter 必须拒绝过去/未来观察日，不能把今日响应写成历史事实。"""
+    adapter = AkshareEastmoneySectorEodAdapter(request_timeout_seconds=5)
+    historical = date(2000, 1, 1).isoformat()
+
+    with pytest.raises(ProviderError, match="historical") as captured:
+        asyncio.run(adapter.fetch(_request("eastmoney.industry", trade_date=historical)))
+
+    assert captured.value.retryable is False
+
+
+def _request(scheme: str, *, trade_date: str | None = None) -> SourceRequest:
+    """构造当前或明确历史观察日的受控 EOD adapter 请求。"""
+    return SourceRequest(
+        capability="sector.quote.eod.snapshot.raw",
+        parameters=(
+            ("sectorScheme", scheme),
+            ("tradeDate", trade_date or _current_shanghai_date().isoformat()),
+        ),
+    )
+
+
+def _current_shanghai_date() -> date:
+    """返回与 adapter 相同的上海当前日期，避免测试依赖宿主机 UTC 边界。"""
+    return datetime.now(ZoneInfo("Asia/Shanghai")).date()
 
 
 def _record() -> dict[str, Any]:

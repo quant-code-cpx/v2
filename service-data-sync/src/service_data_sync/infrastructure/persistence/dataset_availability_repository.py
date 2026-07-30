@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import uuid4
 
 from sqlalchemy import update
@@ -42,17 +42,33 @@ class SqlAlchemyDatasetAvailabilityRepository(DatasetAvailabilityRepository):
         reason_code: str,
         provider_id: str | None,
         observed_at: datetime,
+        entity_partition: str | None = None,
+        coverage_from: date | None = None,
+        coverage_to: date | None = None,
     ) -> DatasetAvailability:
         """原子替换同分区当前观测；相同来源时刻重试保持幂等。
 
-        `empty` 与 `source_unavailable` 必须由调用方显式区分，后者不能被消费端当成数据零值。
+        三种状态必须由调用方显式区分；暂不支持和来源故障都不能被消费端当成数据零值。
         """
-        if availability not in {"empty", "source_unavailable"}:
+        if availability not in {"empty", "source_unavailable", "currently_unsupported"}:
             raise ValueError("dataset availability is invalid")
         if not dataset.strip() or not partition_key.strip() or not reason_code.strip():
             raise ValueError("dataset availability identity is invalid")
         if observed_at.tzinfo is None:
             raise ValueError("observed_at must include a timezone")
+        coverage_values = (entity_partition, coverage_from, coverage_to)
+        if any(value is None for value in coverage_values) != all(
+            value is None for value in coverage_values
+        ):
+            raise ValueError("dataset availability coverage must be complete or absent")
+        if entity_partition is not None and (
+            not entity_partition.strip()
+            or len(entity_partition) > 160
+            or coverage_from is None
+            or coverage_to is None
+            or coverage_from > coverage_to
+        ):
+            raise ValueError("dataset availability coverage is invalid")
         with self._database.transaction() as connection:
             # 先结束旧观察，再写新观察，使任意时刻最多只有一条当前可用性结论。
             connection.execute(
@@ -70,6 +86,9 @@ class SqlAlchemyDatasetAvailabilityRepository(DatasetAvailabilityRepository):
                     observation_id=uuid4(),
                     dataset=dataset,
                     partition_key=partition_key,
+                    entity_partition=entity_partition,
+                    coverage_from=coverage_from,
+                    coverage_to=coverage_to,
                     availability=availability,
                     reason_code=reason_code,
                     provider_id=provider_id,
@@ -83,6 +102,9 @@ class SqlAlchemyDatasetAvailabilityRepository(DatasetAvailabilityRepository):
                         "availability": availability,
                         "reason_code": reason_code,
                         "provider_id": provider_id,
+                        "entity_partition": entity_partition,
+                        "coverage_from": coverage_from,
+                        "coverage_to": coverage_to,
                         "superseded_at": None,
                         "detail": None,
                     },
@@ -92,6 +114,9 @@ class SqlAlchemyDatasetAvailabilityRepository(DatasetAvailabilityRepository):
             availability=availability,
             reason_code=reason_code,
             observed_at=observed_at,
+            entity_partition=entity_partition,
+            coverage_from=coverage_from,
+            coverage_to=coverage_to,
         )
 
     def clear(self, *, dataset: str, partition_key: str, cleared_at: datetime) -> None:

@@ -25,6 +25,8 @@
   个人部署的最小通用 query 网关已按 ADR-0023 实现，领域化 DTO、细粒度权限、缓存与导出仍为后续工作。
 - [0006：数据运维控制面 API 方案](0006-data-operations-control-plane/index.html) — Proposed；
   定义 POST-only 管理契约、RBAC、submission/outbox 可靠投递、幂等与双层审计投影。
+- [沪深港通中心 service-api 方案](../service-web/0010-stock-connect-center/service-api.html) — Proposed；
+  方案目录按跨服务模块统一归档，定义四条认证、限流、条件读取的公开 POST API。
 
 ## 跨服务关联方案
 
@@ -54,6 +56,10 @@
   批量导出仍按方案逐步收敛。
 - [拟议机器合同](../contracts/data-sync-market-data-v1.yaml) 与
   [ADR-0020](../decisions/0020-data-sync-market-data-access.md) 均为 Proposed。
+- [沪深港通与跨境互联互通中心](../service-web/0010-stock-connect-center/index.html) — Proposed；
+  service-api 只消费
+  [0024 内部契约](../contracts/0024-data-sync-stock-connect-internal.openapi.yaml)，并按
+  [0025 公开契约](../contracts/0025-service-api-stock-connect.openapi.yaml) 对 Web 暴露领域化 POST 查询。
 
 以上能力均由 `service-api` 经版本化 internal HTTP 读取；不得为读取方便复制 canonical Prisma 表、
 直连同步数据库或把 Redis 作为权威数据源。

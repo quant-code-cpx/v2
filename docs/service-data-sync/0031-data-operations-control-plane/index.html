@@ -2536,10 +2536,13 @@ QUEUED ──领取 lease/fence──▶ RUNNING ──▶ SUCCEEDED | PARTIAL |
             <code>requestHash</code>；未知结果不得换 key 重试。
           </li>
           <li>
-            同步项含 <code>datasetCode</code>、<code>mode</code>、可选
-            <code>dateFrom/dateTo</code> 或 <code>observationDate</code>；v1
-            同一 preflight/submit 请求内 datasetCode 必须唯一，重复目标返回
-            422。
+            同步项含 <code>datasetCode</code>、<code>mode</code>、严格业务
+            <code>selector</code>、可选 <code>dateFrom/dateTo</code> 或
+            <code>observationDate</code>。selector 只能是 capability 声明允许的
+            GLOBAL、INSTRUMENT、SECTOR、SCHEME、EXCHANGE、CONTRACT、ETF、MARGIN、
+            STOCK_CONNECT、TRADING_EVENT 或 INDEX 判别结构；它不接受 Provider 参数、URI
+            或凭据，并在 Run 受理时冻结。v1 同一 preflight/submit 请求内 datasetCode
+            必须唯一，重复目标返回 422。
           </li>
           <li>
             cancel/retry 必须带
@@ -2910,8 +2913,9 @@ QUEUED ──领取 lease/fence──▶ RUNNING ──▶ SUCCEEDED | PARTIAL |
             v1 以 datasetCode 为计划唯一键，数据库
             <code>UNIQUE(dataset_key)</code> 覆盖启用和禁用计划。 同数据集重复
             create 返回 409；update 必须保持原 datasetCode，禁止把既有
-            scheduleId 改绑到另一数据集。需要替换时只能更新同一记录及其
-            revision。
+            scheduleId 改绑到另一数据集。计划还冻结一个 capability.selectorKinds
+            允许的严格 selector，scheduler 仅把该 selector 连同解析日期转换为 command；
+            需要替换时只能更新同一记录及其 revision。
           </li>
           <li>
             迁移时按现有静态时间建立禁用计划；核对 nextRunAt

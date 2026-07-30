@@ -21,7 +21,11 @@ from service_data_sync.application.equity.market_extension_sync import (
     decode_corporate_action_batch,
     decode_period_bar_batch,
 )
-from service_data_sync.application.ports.data_source import ProviderBatch, ProviderError
+from service_data_sync.application.ports.data_source import (
+    ProviderBatch,
+    ProviderError,
+    ProviderErrorCode,
+)
 from service_data_sync.application.ports.market_data import (
     PublishedEquityDataset,
     StoredEquityInstrument,
@@ -60,6 +64,9 @@ class FakeSource:
             raw_payload=b'{"raw":true}',
             raw_content_type="application/json",
             observed_at=datetime(2026, 7, 28, tzinfo=UTC),
+            upstream_source="upstream-test",
+            adapter_version="fake-v1",
+            schema_fingerprint="a" * 64,
         )
 
 
@@ -108,10 +115,12 @@ class FakeRepository:
         self.calls.append((kind, kwargs))
         identifier = kwargs["identifier"]
         assert isinstance(identifier, EquityIdentifier)
+        rows = kwargs.get("bars")
+        row_count = len(rows) if isinstance(rows, tuple) else 1
         return PublishedEquityDataset(
             data_version=uuid4(),
             published_at=datetime(2026, 7, 28, tzinfo=UTC),
-            inserted_count=1,
+            inserted_count=row_count,
             unchanged_count=0,
             instrument=StoredEquityInstrument(
                 security_id=1,
@@ -120,6 +129,11 @@ class FakeRepository:
                 name="贵州茅台",
                 listing_status="LISTED",
             ),
+            coverage_version=uuid4() if kind == "period" else None,
+            source_batch_id=uuid4() if kind == "period" else None,
+            publication_kind=("DATA" if row_count else "ZERO_RECORD_COVERAGE")
+            if kind == "period"
+            else None,
         )
 
 
@@ -163,11 +177,84 @@ def test_period_sync_archives_raw_and_publishes_direct_weekly_rows() -> None:
     )
 
     assert result.capability == "equity.bar.1w.raw"
-    assert len(raw_store.values) == 1
+    assert len(raw_store.values) == 2
     assert repository.calls[0][0] == "period"
     bars = repository.calls[0][1]["bars"]
     assert isinstance(bars, tuple)
     assert bars[0].period is EquityBarPeriod.WEEK_1
+    assert repository.calls[0][1]["start"] == date(2026, 7, 1)
+    assert repository.calls[0][1]["end"] == date(2026, 7, 28)
+
+
+def test_period_sync_publishes_proven_empty_window_with_source_lineage() -> None:
+    """空周期载荷仍归档真实来源，并返回零记录 publication 与 coverage。"""
+    identifier = EquityIdentifier.parse("SSE.600519")
+    source = FakeSource(
+        "equity.bar.1mo.raw",
+        _payload(
+            "quant-v2.equity-period-bar.v1",
+            identifier,
+            period="1mo",
+            bars=[],
+        ),
+    )
+    repository = FakeRepository()
+    raw_store = FakeRawStore()
+
+    result = asyncio.run(
+        EquityPeriodBarSyncService(
+            source=source,
+            repository=repository,  # type: ignore[arg-type]
+            raw_payload_store=raw_store,  # type: ignore[arg-type]
+        ).sync(
+            identifier=identifier,
+            period=EquityBarPeriod.MONTH_1,
+            start=date(2026, 7, 1),
+            end=date(2026, 7, 28),
+        )
+    )
+
+    assert result.inserted_count == 0
+    assert result.publication_kind == "ZERO_RECORD_COVERAGE"
+    assert result.coverage_version is not None
+    assert result.source_batch_id is not None
+    assert repository.calls[0][1]["bars"] == ()
+    assert len(raw_store.values) == 2
+
+
+class UnavailablePeriodSource(FakeSource):
+    """模拟已经声明能力但抓取暂时失败的周期来源。"""
+
+    async def fetch(self, request: object) -> ProviderBatch:
+        """返回可重试不可用错误，不能被应用层转换成合法空窗口。"""
+        del request
+        raise ProviderError(ProviderErrorCode.UNAVAILABLE, "provider unavailable", retryable=True)
+
+
+def test_period_sync_does_not_turn_source_failure_into_empty_coverage() -> None:
+    """来源不可用必须传播失败，仓储和成功证据存储均不得被调用。"""
+    identifier = EquityIdentifier.parse("SSE.600519")
+    repository = FakeRepository()
+    raw_store = FakeRawStore()
+    source = UnavailablePeriodSource("equity.bar.1w.raw", b"")
+
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(
+            EquityPeriodBarSyncService(
+                source=source,
+                repository=repository,  # type: ignore[arg-type]
+                raw_payload_store=raw_store,  # type: ignore[arg-type]
+            ).sync(
+                identifier=identifier,
+                period=EquityBarPeriod.WEEK_1,
+                start=date(2026, 7, 1),
+                end=date(2026, 7, 28),
+            )
+        )
+
+    assert captured.value.code is ProviderErrorCode.UNAVAILABLE
+    assert repository.calls == []
+    assert raw_store.values == []
 
 
 def test_factor_action_and_profile_sync_publish_typed_values() -> None:
@@ -258,22 +345,15 @@ def test_factor_action_and_profile_sync_publish_typed_values() -> None:
     profile = cast(EquityCompanyProfile, repository.calls[2][1]["profile"])
     assert factors[0].cumulative_factor == Decimal("2.5")
     assert actions[0].cash_dividend_per_10 == Decimal("10")
+    assert repository.calls[1][1]["start"] == date(2025, 1, 1)
+    assert repository.calls[1][1]["end"] == date(2026, 7, 28)
     assert profile.industry == "白酒"
-    assert len(raw_store.values) == 3
+    assert len(raw_store.values) == 6
 
 
 @pytest.mark.parametrize(
     ("decoder", "payload"),
     [
-        (
-            "period",
-            {
-                "schema": "quant-v2.equity-period-bar.v1",
-                "instrument": "SSE.600519",
-                "period": "1mo",
-                "bars": [],
-            },
-        ),
         (
             "factor",
             {
@@ -310,7 +390,7 @@ def test_decoders_reject_empty_or_invalid_canonical_payload(
     decoder: str,
     payload: dict[str, object],
 ) -> None:
-    """标准载荷的空关键集合、非正因子、坏日期和空公司名必须隔离。"""
+    """标准载荷的非正因子、坏日期和空公司名必须隔离。"""
     identifier = EquityIdentifier.parse("SSE.600519")
     encoded = json.dumps(payload).encode()
 

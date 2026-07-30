@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -44,11 +44,14 @@ class RecordingDerivationRepository:
         metrics: Sequence[DerivedFinancialMetricInput],
         derivation_run_id: UUID,
         computed_at: datetime,
+        before_final_publication: Callable[[], None] | None = None,
     ) -> FinancialDerivedPublication:
         """记录空或非空目标集，模拟仓储原子推进独立派生 publication。"""
         assert snapshot is self.snapshot
         assert derivation_run_id == UUID("70000000-0000-4000-8000-000000000001")
         assert computed_at == datetime(2026, 7, 28, 9, tzinfo=UTC)
+        if before_final_publication is not None:
+            before_final_publication()
         self.published_metrics = tuple(metrics)
         return FinancialDerivedPublication(
             data_version=UUID("80000000-0000-4000-8000-000000000001"),

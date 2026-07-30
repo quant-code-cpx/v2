@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from uuid import UUID
 
 from service_data_sync.application.ports.data_source import (
@@ -49,15 +51,29 @@ class SectorCatalogSyncService:
         self._repository = repository
         self._raw_payload_store = raw_payload_store
 
-    async def sync(self, *, scheme: SectorScheme) -> SectorCatalogSyncResult:
-        """归档上游完整目录，再原子激活可公开读取的板块身份。"""
+    async def sync(
+        self,
+        *,
+        scheme: SectorScheme,
+        observation_date: date | None = None,
+        before_final_publication: Callable[[], None] | None = None,
+    ) -> SectorCatalogSyncResult:
+        """归档上游完整目录，再原子激活可公开读取的板块身份。
+
+        控制面执行器仅在最后一个 canonical 分区传入回调；回调必须紧邻 publication
+        事务，以便 run 终态、全局槽释放与目录发布处于同一提交边界。
+        """
         capability = scheme.catalog_capability
         if capability not in self._source.capabilities():
             raise ProviderError(
                 ProviderErrorCode.INVALID_REQUEST, "unsupported capability", retryable=False
             )
+        parameters: tuple[tuple[str, str], ...] = (("sectorScheme", scheme.value),)
+        if observation_date is not None:
+            # 当前目录来源没有历史参数；显式观察日只用于 adapter 拒绝把今天快照伪装为历史。
+            parameters += (("observationDate", observation_date.isoformat()),)
         batch = await self._source.fetch(
-            SourceRequest(capability=capability, parameters=(("sectorScheme", scheme.value),))
+            SourceRequest(capability=capability, parameters=parameters)
         )
         entries = decode_sector_catalog_batch(batch.payload, scheme=scheme)
         raw_payload = batch.raw_payload if batch.raw_payload is not None else batch.payload
@@ -75,6 +91,8 @@ class SectorCatalogSyncService:
                 payload=raw_payload,
             )
         )
+        if before_final_publication is not None:
+            before_final_publication()
         publication = self._repository.publish_catalog(
             scheme=scheme,
             entries=entries,

@@ -46,6 +46,7 @@ export class FinancialDataClient {
   public listReports(input: {
     exchange: string;
     symbol: string;
+    dataVersion: string;
     statementTypes?: readonly string[] | undefined;
     periodBases?: readonly string[] | undefined;
     scope?: string | undefined;
@@ -80,6 +81,7 @@ export class FinancialDataClient {
   public getReport(input: {
     exchange: string;
     symbol: string;
+    dataVersion: string;
     reportRef: string;
     metrics?: readonly string[] | undefined;
     asOf?: string | undefined;
@@ -109,6 +111,7 @@ export class FinancialDataClient {
   public listMetrics(input: {
     exchange: string;
     symbol: string;
+    dataVersion: string;
     origin: string;
     methodologyCode: string;
     methodologyVersion: number;
@@ -143,6 +146,7 @@ export class FinancialDataClient {
   public listValuations(input: {
     exchange: string;
     symbol: string;
+    dataVersion: string;
     methodologyCode: string;
     methodologyVersion: number;
     metrics: readonly string[];
@@ -191,7 +195,7 @@ export class FinancialDataClient {
       if (!validEtag(etag) || !validDataVersion(dataVersion)) throw dependencyUnavailable();
       return { status: 304, etag, dataVersion };
     }
-    if (!response.ok) throw upstreamProblem(response);
+    if (!response.ok) throw await upstreamProblem(response);
     try {
       const internalBody = internalSchema.parse(await response.json());
       const publicBody = project(internalBody);
@@ -245,12 +249,14 @@ function methodologyParameters(input: {
 function setTemporalPageParameters(
   parameters: URLSearchParams,
   input: {
+    dataVersion: string;
     asOf?: string | undefined;
     knownAt?: string | undefined;
     cursor?: string | undefined;
     limit: number;
   },
 ): void {
+  parameters.set('dataVersion', input.dataVersion);
   setOptional(parameters, 'asOf', input.asOf);
   setOptional(parameters, 'knownAt', input.knownAt);
   setOptional(parameters, 'cursor', input.cursor);
@@ -448,7 +454,7 @@ function dependencyUnavailable(retryAfter?: number): PublicProblemException {
 }
 
 /** 将允许公开的内部状态映射为稳定 Problem Details，不透传下游正文。 */
-function upstreamProblem(response: Response): PublicProblemException {
+async function upstreamProblem(response: Response): Promise<PublicProblemException> {
   if (response.status === 400) {
     return new PublicProblemException(
       HttpStatus.BAD_REQUEST,
@@ -464,10 +470,22 @@ function upstreamProblem(response: Response): PublicProblemException {
     );
   }
   if (response.status === 409) {
+    let code = 'cursor-mismatch';
+    try {
+      const body = z
+        .object({ code: z.string() })
+        .passthrough()
+        .parse(await response.json());
+      if (body.code === 'snapshot-expired') code = 'snapshot-expired';
+    } catch {
+      // 下游错误正文不是可信合同；未知 409 保持既有游标冲突语义。
+    }
     return new PublicProblemException(
       HttpStatus.CONFLICT,
-      'cursor-mismatch',
-      'Financial cursor does not match the requested snapshot',
+      code,
+      code === 'snapshot-expired'
+        ? 'Published financial snapshot changed'
+        : 'Financial cursor does not match the requested snapshot',
     );
   }
   if (response.status === 429) {

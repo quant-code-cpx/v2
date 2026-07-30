@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1440, initial-scale=1">
+  <title>市场概览与行业板块｜可编辑原型</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f4f6f8;
+      --paper: #ffffff;
+      --soft: #f9fafb;
+      --line: #dfe3e8;
+      --text: #1c252e;
+      --muted: #637381;
+      --primary: #6d5ce7;
+      --primary-soft: #f0edff;
+      --up: #ff5630;
+      --up-soft: #fff1ed;
+      --down: #22c55e;
+      --down-soft: #eafaf0;
+      --warning: #b76e00;
+      --warning-soft: #fff7e6;
+      --error: #b42318;
+      --error-soft: #fff1f0;
+      --info: #0b63ce;
+      --info-soft: #eaf3ff;
+      --shadow: 0 8px 24px rgba(28, 37, 46, .07);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-width: 1200px; height: 100%; overflow: hidden; }
+    body { background: var(--canvas); color: var(--text); font: 13px/1.45 Inter, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+    .app { display: grid; grid-template-columns: 300px minmax(0, 1fr); width: 1440px; height: 900px; background: var(--canvas); }
+    .sidebar { display: flex; flex-direction: column; border-right: 1px solid var(--line); background: #fff; }
+    .logo { height: 72px; display: flex; align-items: center; gap: 12px; padding: 0 26px; border-bottom: 1px solid #edf0f2; font-size: 17px; font-weight: 850; letter-spacing: .02em; }
+    .logo-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; background: var(--primary); color: #fff; font-weight: 900; }
+    .nav { padding: 20px 16px; }
+    .nav-group { padding: 14px 12px 8px; color: #919eab; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+    .nav-item { height: 44px; display: flex; align-items: center; gap: 12px; margin-bottom: 4px; padding: 0 14px; border-radius: 8px; color: var(--muted); font-weight: 650; }
+    .nav-item.active { background: var(--primary-soft); color: #5848c9; }
+    .nav-icon { width: 18px; text-align: center; font-size: 15px; }
+    .sidebar-note { margin: auto 18px 20px; padding: 13px 14px; border: 1px solid #e7e4fb; border-radius: 10px; background: #fbfaff; color: #5848c9; font-size: 11px; }
+    .main { min-width: 0; }
+    .topbar { height: 72px; display: flex; align-items: center; justify-content: space-between; padding: 0 32px 0 40px; border-bottom: 1px solid var(--line); background: #fff; }
+    .crumb { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
+    .crumb b { color: var(--text); }
+    .top-actions { display: flex; align-items: center; gap: 12px; }
+    .search { width: 230px; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; color: #919eab; background: #fff; }
+    .avatar { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: #edf0f2; color: var(--muted); font-weight: 800; }
+    .content { height: 828px; overflow: hidden; padding: 22px 32px 28px 40px; }
+    .page { display: none; height: 100%; }
+    .page.active { display: block; }
+    .page-head { height: 48px; display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
+    h1 { margin: 0 0 3px; font-size: 23px; line-height: 1.2; letter-spacing: -.015em; }
+    .subtitle { color: var(--muted); font-size: 11px; }
+    .status-row { display: flex; gap: 8px; align-items: center; }
+    .chip { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; padding: 3px 9px; border-radius: 6px; background: #edf0f2; color: var(--muted); font-size: 11px; font-weight: 750; white-space: nowrap; }
+    .chip.ok { background: var(--down-soft); color: #147a3d; }
+    .chip.warn { background: var(--warning-soft); color: var(--warning); }
+    .chip.info { background: var(--info-soft); color: var(--info); }
+    .chip.primary { background: var(--primary-soft); color: #5848c9; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .outline-btn { height: 32px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font-weight: 700; }
+    .cards { display: grid; gap: 12px; }
+    .card { border: 1px solid var(--line); border-radius: 16px; background: #fff; box-shadow: 0 4px 16px rgba(28, 37, 46, .04); }
+    .card-pad { padding: 15px 16px; }
+    .section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 11px; }
+    .section-title h2 { margin: 0; font-size: 14px; }
+    .section-title span { color: var(--muted); font-size: 10px; }
+    .indices { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 12px; }
+    .index-card { height: 102px; position: relative; overflow: hidden; padding: 13px 14px; }
+    .index-name { color: var(--muted); font-size: 11px; }
+    .index-value { margin-top: 4px; font-size: 21px; font-weight: 850; letter-spacing: -.02em; }
+    .delta { margin-top: 2px; font-size: 11px; font-weight: 800; }
+    .up { color: var(--up); }
+    .down { color: var(--down); }
+    .flat { color: var(--muted); }
+    .spark { position: absolute; right: 11px; bottom: 10px; width: 88px; height: 35px; }
+    .spark path { fill: none; stroke-width: 2; }
+    .spark.up path { stroke: var(--up); }
+    .spark.down path { stroke: var(--down); }
+    .market-grid { grid-template-columns: 1.05fr .95fr 1.3fr; margin-bottom: 12px; }
+    .market-grid > .card { height: 164px; }
+    .turnover-main { display: flex; align-items: flex-end; gap: 7px; margin-bottom: 8px; }
+    .big { font-size: 25px; font-weight: 850; letter-spacing: -.02em; }
+    .tiny { color: var(--muted); font-size: 10px; }
+    .venue-row { display: flex; justify-content: space-between; padding-top: 8px; border-top: 1px solid #edf0f2; color: var(--muted); }
+    .breadth-bar { display: flex; height: 9px; overflow: hidden; margin: 10px 0 13px; border-radius: 5px; background: #edf0f2; }
+    .breadth-bar i:nth-child(1) { width: 54%; background: var(--up); }
+    .breadth-bar i:nth-child(2) { width: 4%; background: #919eab; }
+    .breadth-bar i:nth-child(3) { width: 42%; background: var(--down); }
+    .breadth-values { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; }
+    .breadth-values b { display: block; font-size: 17px; }
+    .limit-row { display: flex; justify-content: center; gap: 16px; margin-top: 9px; font-size: 11px; }
+    .flow-row { display: grid; grid-template-columns: 104px 1fr; gap: 12px; align-items: center; }
+    .donut { width: 94px; height: 94px; position: relative; }
+    .donut svg { position: absolute; inset: 0; width: 94px; height: 94px; transform: rotate(-90deg); }
+    .donut-label { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; text-align: center; font-size: 10px; font-weight: 800; }
+    .flow-stat { padding: 5px 0; border-bottom: 1px solid #edf0f2; }
+    .flow-stat:last-child { border-bottom: 0; }
+    .lower-grid { grid-template-columns: 1.05fr 1.05fr 1.15fr; }
+    .lower-grid > .card { height: 258px; }
+    .rank-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .rank-table th { height: 26px; color: #919eab; font-size: 9px; font-weight: 700; text-align: left; }
+    .rank-table td { height: 32px; border-top: 1px solid #f0f2f4; }
+    .rank-table td:last-child, .rank-table th:last-child { text-align: right; }
+    .rank { width: 20px; color: #919eab; }
+    .leader { max-width: 76px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+    .tabs { display: flex; gap: 5px; padding: 3px; border-radius: 8px; background: var(--soft); }
+    .tab { padding: 4px 8px; border-radius: 6px; color: var(--muted); font-size: 10px; font-weight: 700; }
+    .tab.active { background: #fff; color: var(--text); box-shadow: 0 1px 4px rgba(28,37,46,.08); }
+    .signal { display: flex; gap: 9px; padding: 9px 0; border-top: 1px solid #edf0f2; }
+    .signal:first-of-type { border-top: 0; }
+    .signal-icon { flex: 0 0 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: var(--warning-soft); color: var(--warning); font-weight: 900; }
+    .signal b { display: block; margin-bottom: 2px; font-size: 11px; }
+    .signal p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.4; }
+    .unavailable-box { height: 105px; display: grid; place-items: center; padding: 12px; border: 1px dashed #ccd2d8; border-radius: 10px; background: var(--soft); text-align: center; color: var(--muted); }
+    .unavailable-box b { display: block; margin-bottom: 4px; color: var(--text); font-size: 11px; }
+    .unavailable-box p { margin: 0; font-size: 9px; line-height: 1.5; }
+    .unavailable-box.large { height: 197px; }
+    .probe-badge { position: absolute; right: 11px; bottom: 10px; color: var(--muted); font-size: 8px; }
+    .prototype-label { position: fixed; right: 18px; bottom: 14px; z-index: 10; padding: 6px 10px; border: 1px solid #e7e4fb; border-radius: 7px; background: rgba(255,255,255,.94); color: #5848c9; font-size: 10px; font-weight: 800; }
+
+    .sector-head { height: 62px; display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+    .sector-id { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+    .sector-id h1 { margin: 0; }
+    .metric-strip { grid-template-columns: repeat(6, minmax(0, 1fr)); margin-bottom: 12px; }
+    .metric-card { height: 75px; padding: 11px 13px; }
+    .metric-card .label { color: var(--muted); font-size: 9px; }
+    .metric-card .value { margin-top: 6px; font-size: 17px; font-weight: 850; }
+    .sector-main { display: grid; grid-template-columns: 1.55fr .85fr; gap: 12px; margin-bottom: 12px; }
+    .chart-card { height: 356px; padding: 15px 16px 12px; }
+    .chart-toolbar { display: flex; align-items: center; justify-content: space-between; height: 28px; margin-bottom: 4px; }
+    .chart-toolbar h2 { margin: 0; font-size: 14px; }
+    .chart-area { height: 285px; display: grid; grid-template-columns: 1fr 42px; }
+    .chart-svg { width: 100%; height: 285px; }
+    .chart-axis { display: flex; flex-direction: column; justify-content: space-between; padding: 3px 0 18px; color: #919eab; font-size: 8px; text-align: right; }
+    .analysis-card { height: 356px; padding: 15px 16px; }
+    .analysis-tabs { display: flex; gap: 7px; margin-bottom: 12px; }
+    .analysis-tab { padding: 5px 8px; border-radius: 6px; background: var(--soft); color: var(--muted); font-size: 9px; }
+    .analysis-tab.active { background: var(--primary-soft); color: #5848c9; font-weight: 800; }
+    .bar-chart { height: 170px; display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; padding: 15px 7px 18px; border-bottom: 1px solid #edf0f2; }
+    .bar-chart i { flex: 1; min-width: 10px; border-radius: 4px 4px 0 0; background: #bbb4f4; }
+    .analysis-notes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 11px; }
+    .mini-stat { padding: 8px; border-radius: 8px; background: var(--soft); }
+    .mini-stat span { display: block; color: var(--muted); font-size: 9px; }
+    .mini-stat b { font-size: 14px; }
+    .constituent { height: 237px; padding: 14px 16px; }
+    .const-grid { display: grid; grid-template-columns: 1.3fr .9fr; gap: 16px; }
+    .const-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    .const-table th { color: #919eab; font-size: 9px; text-align: left; }
+    .const-table td, .const-table th { height: 28px; border-top: 1px solid #edf0f2; }
+    .const-table th { border-top: 0; }
+    .const-table td:last-child, .const-table th:last-child { text-align: right; }
+    .note-box { padding: 11px 12px; border: 1px solid #e7e4fb; border-radius: 9px; background: #fbfaff; color: #5848c9; font-size: 10px; line-height: 1.55; }
+    .lineage { margin-top: 9px; }
+    .lineage div { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #edf0f2; font-size: 9px; }
+    .lineage div:last-child { border-bottom: 0; }
+
+    .states-head { height: 56px; margin-bottom: 12px; }
+    .states-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .state-card { height: 228px; padding: 16px; }
+    .state-top { display: flex; align-items: center; justify-content: space-between; }
+    .state-top h2 { margin: 0; font-size: 14px; }
+    .state-body { height: 118px; display: grid; place-items: center; margin: 14px 0 10px; border: 1px dashed #ccd2d8; border-radius: 10px; background: var(--soft); text-align: center; }
+    .state-body .symbol { font-size: 26px; color: #919eab; }
+    .state-body strong { display: block; margin: 4px 0; font-size: 12px; }
+    .state-body p { max-width: 250px; margin: 0; color: var(--muted); font-size: 9px; }
+    .state-footer { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 9px; }
+    .state-card.error .state-body { border-color: #f2c0bc; background: var(--error-soft); }
+    .state-card.error .symbol { color: var(--error); }
+    .state-card.warning .state-body { border-color: #f0d49b; background: var(--warning-soft); }
+    .state-card.warning .symbol { color: var(--warning); }
+    .state-card.research .state-body { border-color: #cfc9f7; background: var(--primary-soft); }
+    .state-card.research .symbol { color: var(--primary); }
+    .state-summary { display: flex; align-items: center; justify-content: space-between; height: 76px; margin-top: 14px; padding: 0 18px; border: 1px solid #f0d49b; border-radius: 14px; background: var(--warning-soft); }
+    .state-summary strong { display: block; font-size: 13px; }
+    .state-summary p { margin: 3px 0 0; color: var(--muted); font-size: 10px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="logo"><span class="logo-mark">Q</span><span>QUANT V2</span></div>
+      <div class="nav">
+        <div class="nav-group">市场研究</div>
+        <div class="nav-item active"><span class="nav-icon">⌁</span>市场概览</div>
+        <div class="nav-item"><span class="nav-icon">▦</span>行业与板块</div>
+        <div class="nav-item"><span class="nav-icon">⌗</span>股票中心</div>
+        <div class="nav-group">数据服务</div>
+        <div class="nav-item"><span class="nav-icon">◫</span>数据运维</div>
+        <div class="nav-item"><span class="nav-icon">◎</span>数据质量</div>
+        <div class="nav-group">管理</div>
+        <div class="nav-item"><span class="nav-icon">◇</span>账户与安全</div>
+      </div>
+      <div class="sidebar-note"><b>真实数据原型</b><br>隔离探针 · 非 production publication<br>固定 1440 × 900 桌面画布</div>
+    </aside>
+    <main class="main">
+      <div class="topbar">
+        <div class="crumb"><span>市场研究</span><span>/</span><b id="crumb-title">市场概览</b></div>
+        <div class="top-actions">
+          <div class="search">⌕ 搜索股票、指数、板块</div>
+          <span class="chip info">数据状态</span>
+          <div class="avatar">CP</div>
+        </div>
+      </div>
+      <div class="content">
+        <section class="page" id="market-page">
+          <div class="page-head">
+            <div><h1>市场概览</h1><div class="subtitle">真实隔离探针快照 · 市场日 2026-07-29 · 非当前 production publication</div></div>
+            <div class="status-row">
+              <span class="chip ok"><i class="dot"></i>已收盘</span>
+              <span class="chip warn"><i class="dot"></i>隔离探针</span>
+              <span class="chip">探针 2026-07-30</span>
+              <button class="outline-btn">↻ 刷新</button>
+            </div>
+          </div>
+          <div class="cards indices">
+            <div class="card index-card"><div class="index-name">上证指数 · sh000001</div><div class="index-value">3,828.469</div><div class="delta up">+15.154　+0.397%</div><svg class="spark up" viewBox="0 0 88 35"><path d="M1 4 L11 31 L20 24 L30 8 L39 8 L49 5 L58 20 L68 10 L77 20 L87 16"/></svg><span class="probe-badge">真实近 10 日收盘</span></div>
+            <div class="card index-card"><div class="index-name">深证成指 · sz399001</div><div class="index-value">13,658.443</div><div class="delta up">+148.764　+1.101%</div><svg class="spark up" viewBox="0 0 88 35"><path d="M1 4 L11 26 L20 28 L30 10 L39 16 L49 14 L58 24 L68 13 L77 31 L87 27"/></svg><span class="probe-badge">真实近 10 日收盘</span></div>
+            <div class="card index-card"><div class="index-name">沪深300 · sh000300</div><div class="index-value">4,600.262</div><div class="delta up">+30.739　+0.673%</div><svg class="spark up" viewBox="0 0 88 35"><path d="M1 9 L11 31 L20 22 L30 4 L39 7 L49 5 L58 16 L68 9 L77 26 L87 22"/></svg><span class="probe-badge">真实近 10 日收盘</span></div>
+            <div class="card index-card"><div class="index-name">创业板指 · sz399006</div><div class="index-value">3,378.696</div><div class="delta up">+51.666　+1.553%</div><svg class="spark up" viewBox="0 0 88 35"><path d="M1 4 L11 23 L20 22 L30 4 L39 13 L49 13 L58 20 L68 12 L77 31 L87 27"/></svg><span class="probe-badge">真实近 10 日收盘</span></div>
+          </div>
+          <div class="cards market-grid">
+            <div class="card card-pad">
+              <div class="section-title"><h2>沪深成交</h2><span>单位：亿元</span></div>
+              <div class="turnover-main"><span class="big">22,956.01</span><span class="up">较昨日 +13.37%</span></div>
+              <div class="tiny">真实股票横截面；与指数成交口径差 −0.043%</div>
+              <div class="venue-row"><span>沪市 10,865.28</span><span>深市 12,090.73</span></div>
+            </div>
+            <div class="card card-pad">
+              <div class="section-title"><h2>市场宽度</h2><span>全市场股票</span></div>
+              <div class="breadth-bar"><i style="width:76.85%"></i><i style="width:1.19%"></i><i style="width:21.96%"></i></div>
+              <div class="breadth-values"><span><b class="up">4,252</b><small>上涨</small></span><span><b class="flat">66</b><small>平盘</small></span><span><b class="down">1,215</b><small>下跌</small></span></div>
+              <div class="limit-row"><span>涨停 —</span><span>跌停 —</span><span class="tiny">未形成可信 publication</span></div>
+            </div>
+            <div class="card card-pad">
+              <div class="section-title"><h2>市场资金流</h2><span class="chip warn">真实探针失败</span></div>
+              <div class="unavailable-box"><div><b>未展示资金流数值</b><p>Eastmoney 端点 RemoteDisconnected；不存在可信 production publication。<br>目标链固定为 Tushare <code>moneyflow_mkt_dc</code>。</p></div></div>
+            </div>
+          </div>
+          <div class="cards lower-grid">
+            <div class="card card-pad">
+              <div class="section-title"><h2>行业强弱</h2><div class="tabs"><span class="tab active">最强</span><span class="tab">最弱</span></div></div>
+              <div class="unavailable-box large"><div><b>行业排行未形成真实 publication</b><p>行业目录、历史和成分隔离探针均出现 RemoteDisconnected。<br>不使用示例板块或随机涨跌幅。</p></div></div>
+            </div>
+            <div class="card card-pad">
+              <div class="section-title"><h2>概念强弱</h2><div class="tabs"><span class="tab active">最强</span><span class="tab">最弱</span></div></div>
+              <div class="unavailable-box large"><div><b>概念排行未形成真实 publication</b><p>概念目录端点返回 502。<br>目标链固定为 Tushare <code>dc_index/dc_daily</code>。</p></div></div>
+            </div>
+            <div class="card card-pad">
+              <div class="section-title"><h2>值得关注</h2><span>规则化信号 · EOD</span></div>
+              <div class="signal"><div class="signal-icon">↗</div><div><b>上涨家数占 76.85%</b><p>4,252 / 5,533；真实横截面，未达到 v1 的 80% 极端阈值</p></div></div>
+              <div class="signal"><div class="signal-icon">¥</div><div><b>沪深成交较前日 +13.37%</b><p>22,965.79 亿 vs 20,257.81 亿；未达到 v1 的 20% 放量阈值</p></div></div>
+              <div class="signal"><div class="signal-icon">i</div><div><b>板块与资金探针不可用</b><p>真实失败如实呈现；未用假值补卡</p></div></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="sector-page">
+          <div class="sector-head">
+            <div>
+              <div class="sector-id"><h1>半导体</h1><span class="chip primary">东财行业</span><span class="chip">BK0475</span></div>
+              <div class="subtitle">市场 / 行业与板块 / 东财行业 / 半导体 · BK0475 是真实目录身份；数值未形成 production publication</div>
+            </div>
+            <div class="status-row"><span class="chip warn"><i class="dot"></i>真实探针失败</span><span class="chip">RemoteDisconnected</span><button class="outline-btn">↻ 重试</button></div>
+          </div>
+          <div class="cards metric-strip">
+            <div class="card metric-card"><div class="label">最新值</div><div class="value">—</div></div>
+            <div class="card metric-card"><div class="label">涨跌幅</div><div class="value">—</div></div>
+            <div class="card metric-card"><div class="label">换手率</div><div class="value">—</div></div>
+            <div class="card metric-card"><div class="label">成交额 / 市值</div><div class="value">—</div></div>
+            <div class="card metric-card"><div class="label">上涨 / 下跌</div><div class="value">— / —</div></div>
+            <div class="card metric-card"><div class="label">领涨股</div><div class="value">—</div></div>
+          </div>
+          <div class="sector-main">
+            <div class="card chart-card">
+              <div class="chart-toolbar"><h2>板块行情 <span class="chip primary">KLineChart</span></h2><div class="tabs"><span class="tab active">日 K</span><span class="tab">周 K</span><span class="tab">月 K</span></div></div>
+              <div class="chart-area">
+                <div class="unavailable-box" style="grid-column:1/-1;height:285px"><div><b>K 线未展示</b><p>AKShare 1.18.78 · Eastmoney 板块历史端点 RemoteDisconnected。<br>真实 production 接入后由 KLineChart 渲染 <code>dc_daily</code>；此处不绘制示意蜡烛。</p></div></div>
+              </div>
+            </div>
+            <div class="card analysis-card">
+              <div class="section-title"><h2>强弱分析 <span class="chip info">ECharts</span></h2><span>同 scheme 可比</span></div>
+              <div class="analysis-tabs"><span class="analysis-tab active">持续性</span><span class="analysis-tab">成交额</span><span class="analysis-tab">资金流</span></div>
+              <div class="unavailable-box" style="height:255px"><div><b>ECharts 分析未展示</b><p>没有连续真实 sector publication，无法计算 5/20 日持续性、成交或资金流。<br>样本不足时保持空态，不补零。</p></div></div>
+            </div>
+          </div>
+          <div class="card constituent">
+            <div class="section-title"><h2>当前观察成分</h2><span>真实探针失败 · 不展示示例股票</span></div>
+            <div class="const-grid">
+              <div class="unavailable-box" style="height:155px"><div><b>成分端点 RemoteDisconnected</b><p>没有真实成员 publication；不使用虚构股票代码、名称、价格或成交额。</p></div></div>
+              <div>
+                <div class="note-box"><b>个股边界</b><br>这里只提供板块内市场摘要。点击股票后进入 0007 股票中心；本模块不复制个股行情、财务或事件详情。</div>
+                <div class="lineage"><div><span>板块 EOD</span><b>unavailable</b></div><div><span>K 线 publication</span><b>unavailable</b></div><div><span>成分 publication</span><b>unavailable</b></div></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="states-page">
+          <div class="states-head">
+            <h1>跨 publication 复杂状态</h1>
+            <div class="subtitle">首页完整包原子可见；详情组件独立表达空、错、旧、研究与不可比较；不使用伪造零值</div>
+          </div>
+          <div class="states-grid">
+            <div class="card state-card">
+              <div class="state-top"><h2>市场首页完整包</h2><span class="chip">T 日未就绪</span></div>
+              <div class="state-body"><div><div class="symbol">∅</div><strong>2026-07-30 完整包尚未发布</strong><p>继续服务 2026-07-29 的上一份真实 complete bundle</p></div></div>
+              <div class="state-footer"><span>不拼 T 日半包</span><button class="outline-btn">查看最新完整日</button></div>
+            </div>
+            <div class="card state-card error">
+              <div class="state-top"><h2>概念排行</h2><span class="chip" style="background:var(--error-soft);color:var(--error)">读取失败</span></div>
+              <div class="state-body"><div><div class="symbol">×</div><strong>板块排行读取失败</strong><p>其他市场卡片保持可用；错误 requestId 已记录</p></div></div>
+              <div class="state-footer"><span>局部错误</span><button class="outline-btn">局部重试</button></div>
+            </div>
+            <div class="card state-card warning">
+              <div class="state-top"><h2>T 日市场资金流</h2><span class="chip warn">组件缺失</span></div>
+              <div class="state-body"><div><div class="symbol">!</div><strong>DC 大盘资金流尚未通过质量门</strong><p>bundle coordinator 不推进 07-30 current pointer</p></div></div>
+              <div class="state-footer"><span>东财大盘资金流（DC）</span><span>不显示半成品</span></div>
+            </div>
+            <div class="card state-card research">
+              <div class="state-top"><h2>供应商资金排行</h2><span class="chip primary">Research</span></div>
+              <div class="state-body"><div><div class="symbol">⌁</div><strong>尚未通过生产门禁</strong><p>排行完整性无法证明，公开读取 fail-closed</p></div></div>
+              <div class="state-footer"><span>不展示研究数值</span><button class="outline-btn">查看方法学</button></div>
+            </div>
+            <div class="card state-card warning">
+              <div class="state-top"><h2>申万 vs 东财</h2><span class="chip warn">不可比较</span></div>
+              <div class="state-body"><div><div class="symbol">≠</div><strong>行业体系不可直接等同</strong><p>没有经证据验证、版本化的 crosswalk</p></div></div>
+              <div class="state-footer"><span>分别浏览</span><span>不做统一排行</span></div>
+            </div>
+            <div class="card state-card">
+              <div class="state-top"><h2>板块持续性</h2><span class="chip">样本不足</span></div>
+              <div class="state-body"><div><div class="symbol">…</div><strong>有效样本 3 / 20 日</strong><p>板块新建或 publication 缺口，暂不输出持续性结论</p></div></div>
+              <div class="state-footer"><span>显示样本证据</span><span>不补零</span></div>
+            </div>
+          </div>
+          <div class="state-summary">
+            <div><strong>首页：上一完整包可用；详情：部分可用</strong><p>T 日半包不对首页可见；概念详情失败、research 排行和样本不足分别局部呈现。</p></div>
+            <div class="status-row"><span class="chip ok">上一完整包</span><span class="chip warn">T 日校验中</span><span class="chip" style="background:var(--error-soft);color:var(--error)">1 详情失败</span><button class="outline-btn">重试失败组件</button></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <div class="prototype-label">0008 · 可编辑 HTML · 真实隔离探针 / 不可用状态</div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const view = params.get("view") || "market";
+    const pageMap = {
+      market: ["market-page", "市场概览"],
+      sector: ["sector-page", "东财行业 / 半导体"],
+      states: ["states-page", "复杂状态"]
+    };
+    const selected = pageMap[view] || pageMap.market;
+    document.getElementById(selected[0]).classList.add("active");
+    document.getElementById("crumb-title").textContent = selected[1];
+  </script>
+</body>
+</html>

@@ -1,0 +1,126 @@
+/// 定义数据运维主动操作的稳定类别；仅表示 API 授权与交付意图。
+enum DataOperationAction {
+  SYNC_SUBMIT
+  SYNC_CANCEL
+  SYNC_RETRY
+  HEALTH_CHECK_SUBMIT
+  SCHEDULE_UPSERT
+  SCHEDULE_SET_ENABLED
+}
+
+/// 定义 API 到 data-sync 的可靠交付状态，不表示同步任务的权威状态。
+enum DataOperationDeliveryStatus {
+  PENDING
+  DELIVERING
+  ACCEPTED
+  REJECTED
+  DEAD_LETTER
+}
+
+/// 定义公开操作动作的投影结论，与权威资源终态分开保存。
+enum DataOperationResult {
+  UNKNOWN
+  QUEUED
+  RUNNING
+  CANCEL_REQUESTED
+  SUCCEEDED
+  PARTIAL
+  FAILED
+  CANCELLED
+  INTERRUPTED
+  SKIPPED
+  REJECTED
+}
+
+/// 定义 data-sync 权威资源的公开跳转类别。
+enum DataOperationAuthorityType {
+  COMMAND
+  RUN
+  HEALTH_CHECK
+  SCHEDULE
+}
+
+/// 定义 API HTTP outbox 自身的交付生命周期。
+enum ApiOutboxState {
+  PENDING
+  DELIVERING
+  DELIVERED
+  DEAD_LETTER
+}
+
+/// 保存已授权的数据运维意图、公开幂等记录和非权威执行投影。
+model DataOperationSubmission {
+  id                String                      @id @default(uuid()) @db.Uuid
+  actorId           String?                     @map("actor_id") @db.Uuid
+  actorRole         Role                        @map("actor_role")
+  action            DataOperationAction
+  idempotencyKey    String                      @map("idempotency_key")
+  requestHash       String                      @map("request_hash") @db.Char(64)
+  sanitizedRequest  Json                        @map("sanitized_request")
+  actorRef          String                      @map("actor_ref")
+  reason            String
+  deliveryStatus    DataOperationDeliveryStatus @default(PENDING) @map("delivery_status")
+  operationResult   DataOperationResult         @default(UNKNOWN) @map("operation_result")
+  authorityType     DataOperationAuthorityType? @map("authority_type")
+  authorityId       String?                     @map("authority_id") @db.Uuid
+  queuePosition     Int?                        @map("queue_position")
+  requestId         String                      @map("request_id")
+  safeError         Json?                       @map("safe_error")
+  version           Int                         @default(1)
+  authorizedAt      DateTime                    @default(now()) @map("authorized_at")
+  updatedAt         DateTime                    @updatedAt @map("updated_at")
+  completedAt       DateTime?                   @map("completed_at")
+  lastObservedAt    DateTime?                   @map("last_observed_at")
+  actor             User?                       @relation("actor_data_operation_submissions", fields: [actorId], references: [id], onDelete: SetNull)
+  outbox            ApiOutbox?
+
+  @@unique([actorId, idempotencyKey])
+  @@index([deliveryStatus, updatedAt, id])
+  @@index([authorityType, authorityId])
+  @@index([actorRef])
+  @@index([requestId])
+  @@map("data_operation_submissions")
+}
+
+/// 保存冻结的内部 HTTP 请求与租约，确保未知结果始终复用同一幂等键。
+model ApiOutbox {
+  id                        String         @id @default(uuid()) @db.Uuid
+  submissionId              String         @unique @map("submission_id") @db.Uuid
+  downstreamIdempotencyKey  String         @unique @map("downstream_idempotency_key")
+  internalPath              String         @map("internal_path")
+  canonicalPayload          Json           @map("canonical_payload")
+  state                     ApiOutboxState @default(PENDING)
+  attemptCount              Int            @default(0) @map("attempt_count")
+  nextAttemptAt             DateTime       @default(now()) @map("next_attempt_at")
+  leaseOwner                String?        @map("lease_owner")
+  leaseUntil                DateTime?      @map("lease_until")
+  lastProblemCode           String?        @map("last_problem_code")
+  lastAttemptAt             DateTime?      @map("last_attempt_at")
+  deliveredAt               DateTime?      @map("delivered_at")
+  createdAt                 DateTime       @default(now()) @map("created_at")
+  updatedAt                 DateTime       @updatedAt @map("updated_at")
+  submission                DataOperationSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([state, nextAttemptAt, id])
+  @@index([leaseUntil])
+  @@map("api_outboxes")
+}
+
+/// 保存跨本地 Submission 与 data-sync 系统事件的联合游标状态，不复制业务事实。
+model DataOperationSearchCursor {
+  id                String    @id @default(uuid()) @db.Uuid
+  actorId           String    @map("actor_id") @db.Uuid
+  fingerprint       String
+  occurredTo        DateTime  @map("occurred_to")
+  localAuthorizedAt DateTime? @map("local_authorized_at")
+  localId           String?   @map("local_id") @db.Uuid
+  eventCursor       String?   @map("event_cursor")
+  localExhausted    Boolean   @default(false) @map("local_exhausted")
+  eventExhausted    Boolean   @default(false) @map("event_exhausted")
+  version           Int       @default(1)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([actorId, updatedAt])
+  @@map("data_operation_search_cursors")
+}

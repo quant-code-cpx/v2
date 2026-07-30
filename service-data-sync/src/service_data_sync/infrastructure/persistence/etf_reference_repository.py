@@ -63,7 +63,7 @@ _PROFILE_DATASET = "fund.etf.profile.reported"
 _STATUS_DATASET = "fund.etf.trading_state.reported"
 _PROFILE_METHODOLOGY = "etf-profile-reported"
 _STATUS_METHODOLOGY = "etf-trading-state-reported"
-_PROFILE_MAPPING = "etf-profile-v1"
+_PROFILE_MAPPING = "etf-profile-v2"
 _STATUS_MAPPING = "etf-trading-state-v1"
 
 
@@ -79,6 +79,9 @@ class _PreparedProfile:
     value: EtfProfile
     etf_id: UUID
     content_hash: str
+    effective_to: date | None
+    superseded: EtfProfileVersion | None
+    clone_prior_segment: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +135,7 @@ class SqlAlchemyEtfReferenceRepository(EtfReferenceRepository):
                 domain="etf",
                 grain="ETF listing + profile effective range",
                 now=now,
+                schema_version=2,
             )
             methodology_id = ensure_methodology(
                 session,
@@ -160,20 +164,50 @@ class SqlAlchemyEtfReferenceRepository(EtfReferenceRepository):
                 for value in values
             }
             current = _current_profiles(session, venue=venue, methodology_version_id=methodology_id)
+            current_by_etf: dict[UUID, list[EtfProfileVersion]] = {}
+            for (current_etf_id, _effective_from), row in current.items():
+                current_by_etf.setdefault(current_etf_id, []).append(row)
             prepared[:] = []
             for value in values:
                 etf_id = resolved[value.etf.qualified_key]
-                key = (etf_id, value.effective_from)
                 content_hash = _profile_hash(value)
-                existing = current.get(key)
-                if existing is None or content_hash != existing.content_hash:
-                    prepared.append(
-                        _PreparedProfile(
-                            value=value,
-                            etf_id=etf_id,
-                            content_hash=content_hash,
-                        )
+                timelines = sorted(
+                    current_by_etf.get(etf_id, []),
+                    key=lambda row: row.effective_from,
+                )
+                active = next(
+                    (
+                        row
+                        for row in reversed(timelines)
+                        if row.effective_from <= value.effective_from
+                        and (row.effective_to is None or row.effective_to > value.effective_from)
+                    ),
+                    None,
+                )
+                if active is not None and _stored_profile_state_hash(active) == _profile_state_hash(
+                    value
+                ):
+                    continue
+                next_effective = next(
+                    (
+                        row.effective_from
+                        for row in timelines
+                        if row.effective_from > value.effective_from
+                    ),
+                    None,
+                )
+                prepared.append(
+                    _PreparedProfile(
+                        value=value,
+                        etf_id=etf_id,
+                        content_hash=content_hash,
+                        effective_to=active.effective_to if active is not None else next_effective,
+                        superseded=active,
+                        clone_prior_segment=(
+                            active is not None and active.effective_from < value.effective_from
+                        ),
                     )
+                )
             partition_key = f"venue:{venue}"
             normalization_run_id = record_normalization_run(
                 session,
@@ -206,22 +240,60 @@ class SqlAlchemyEtfReferenceRepository(EtfReferenceRepository):
             if source_batch_id is None:
                 raise AssertionError("ETF profile preparation did not resolve source batch")
             for item in prepared:
-                session.execute(
-                    update(EtfProfileVersion)
-                    .where(
-                        EtfProfileVersion.etf_id == item.etf_id,
-                        EtfProfileVersion.effective_from == item.value.effective_from,
-                        EtfProfileVersion.methodology_version_id
-                        == candidate.methodology_version_id,
-                        EtfProfileVersion.known_to.is_(None),
+                if item.superseded is not None:
+                    session.execute(
+                        update(EtfProfileVersion)
+                        .where(
+                            EtfProfileVersion.profile_version_id
+                            == item.superseded.profile_version_id,
+                            EtfProfileVersion.known_to.is_(None),
+                        )
+                        .values(known_to=candidate.created_at)
                     )
-                    .values(known_to=candidate.created_at)
-                )
+                if item.clone_prior_segment and item.superseded is not None:
+                    prior_id = uuid4()
+                    session.execute(
+                        insert(EtfProfileVersion).values(
+                            profile_version_id=prior_id,
+                            etf_id=item.superseded.etf_id,
+                            display_name=item.superseded.display_name,
+                            etf_type=item.superseded.etf_type,
+                            management_mode=item.superseded.management_mode,
+                            manager_name=item.superseded.manager_name,
+                            custodian_name=item.superseded.custodian_name,
+                            established_on=item.superseded.established_on,
+                            listed_on=item.superseded.listed_on,
+                            delisted_on=item.superseded.delisted_on,
+                            quote_currency=item.superseded.quote_currency,
+                            nav_currency=item.superseded.nav_currency,
+                            listing_status=item.superseded.listing_status,
+                            effective_from=item.superseded.effective_from,
+                            effective_to=item.value.effective_from,
+                            known_from=candidate.created_at,
+                            known_to=None,
+                            source_time_precision=item.superseded.source_time_precision,
+                            methodology_version_id=candidate.methodology_version_id,
+                            release_id=release_id,
+                            source_batch_id=item.superseded.source_batch_id,
+                            content_hash=item.superseded.content_hash,
+                        )
+                    )
+                    record_manifest(
+                        session,
+                        normalization_run_id=candidate.normalization_run_id,
+                        record_key_hash=_hash(
+                            f"{item.etf_id}:{item.superseded.effective_from.isoformat()}"
+                        ),
+                        canonical_table=EtfProfileVersion.__tablename__,
+                        canonical_pk={"profileVersionId": str(prior_id)},
+                        content_hash=item.superseded.content_hash,
+                    )
                 row_id = uuid4()
                 session.execute(
                     insert(EtfProfileVersion).values(
                         profile_version_id=row_id,
                         etf_id=item.etf_id,
+                        display_name=item.value.display_name,
                         etf_type=item.value.etf_type,
                         management_mode=item.value.management_mode,
                         manager_name=item.value.manager_name,
@@ -233,7 +305,7 @@ class SqlAlchemyEtfReferenceRepository(EtfReferenceRepository):
                         nav_currency=item.value.nav_currency,
                         listing_status=item.value.listing_status,
                         effective_from=item.value.effective_from,
-                        effective_to=None,
+                        effective_to=item.effective_to,
                         known_from=candidate.created_at,
                         known_to=None,
                         source_time_precision=item.value.source_time_precision,
@@ -293,6 +365,7 @@ class SqlAlchemyEtfReferenceRepository(EtfReferenceRepository):
                 domain="etf",
                 grain="ETF listing + status dimension + effective range",
                 now=now,
+                schema_version=2,
             )
             methodology_id = ensure_methodology(
                 session,
@@ -466,13 +539,21 @@ def _ensure_etf_listing_identity(
     source_batch_id: UUID,
     now: datetime,
 ) -> UUID:
-    """在目录首次看见 ETF 时创建最小身份链；已有唯一代码版本则只复用其工具 UUID。"""
+    """在目录首次看见 ETF 时创建最小身份链，并用官方上市日修复过晚的代码起点。"""
     try:
-        return _resolve_etf_id(
+        instrument_id = _resolve_etf_id(
             session,
             etf=profile.etf,
             fact_date=profile.effective_from,
         )
+        _backfill_etf_identifier_start(
+            session,
+            profile=profile,
+            instrument_id=instrument_id,
+            source_batch_id=source_batch_id,
+            now=now,
+        )
+        return instrument_id
     except ValueError as error:
         # 歧义代码代表既有数据完整性问题，不能把它误当作“缺失”再插入另一套身份。
         if _etf_identity_candidates(
@@ -554,7 +635,8 @@ def _ensure_etf_listing_identity(
             venue_id=venue_id,
             identifier_scheme=_IDENTIFIER_SCHEME,
             identifier_value=profile.etf.symbol,
-            effective_from=profile.effective_from,
+            # 只有交易所目录明确给出上市日时才允许回溯代码有效期；否则保守使用本次观察日。
+            effective_from=profile.listed_on or profile.effective_from,
             effective_to=None,
             known_from=now,
             known_to=None,
@@ -563,6 +645,86 @@ def _ensure_etf_listing_identity(
         )
     )
     return instrument_id
+
+
+def _backfill_etf_identifier_start(
+    session: Session,
+    *,
+    profile: EtfProfile,
+    instrument_id: UUID,
+    source_batch_id: UUID,
+    now: datetime,
+) -> None:
+    """以交易所明确上市日追加代码知识修订，使目录后接入时仍能安全承接历史事实。"""
+    if profile.listed_on is None:
+        return
+    venue_id = session.execute(
+        select(TradingVenue.venue_id).where(TradingVenue.code == profile.etf.venue)
+    ).scalar_one()
+    current = session.execute(
+        select(InstrumentIdentifierVersion).where(
+            InstrumentIdentifierVersion.entity_id == instrument_id,
+            InstrumentIdentifierVersion.entity_kind == "ETF_LISTING",
+            InstrumentIdentifierVersion.venue_id == venue_id,
+            InstrumentIdentifierVersion.identifier_scheme == _IDENTIFIER_SCHEME,
+            InstrumentIdentifierVersion.identifier_value == profile.etf.symbol,
+            InstrumentIdentifierVersion.effective_from <= profile.effective_from,
+            (InstrumentIdentifierVersion.effective_to.is_(None))
+            | (InstrumentIdentifierVersion.effective_to > profile.effective_from),
+            InstrumentIdentifierVersion.known_to.is_(None),
+        )
+    ).scalar_one()
+    if profile.listed_on >= current.effective_from:
+        return
+    conflicting = session.execute(
+        select(InstrumentIdentifierVersion.version_id).where(
+            InstrumentIdentifierVersion.entity_kind == "ETF_LISTING",
+            InstrumentIdentifierVersion.venue_id == venue_id,
+            InstrumentIdentifierVersion.identifier_scheme == _IDENTIFIER_SCHEME,
+            InstrumentIdentifierVersion.identifier_value == profile.etf.symbol,
+            InstrumentIdentifierVersion.entity_id != instrument_id,
+            InstrumentIdentifierVersion.effective_from < current.effective_from,
+            (InstrumentIdentifierVersion.effective_to.is_(None))
+            | (InstrumentIdentifierVersion.effective_to > profile.listed_on),
+            InstrumentIdentifierVersion.known_to.is_(None),
+        )
+    ).first()
+    if conflicting is not None:
+        # 代码复用历史存在交叠时必须交由数据治理确认，不能把当前工具自动覆盖到旧工具区间。
+        raise ValueError("ETF listing history conflicts with the reported listing date")
+    session.execute(
+        update(MarketInstrument)
+        .where(
+            MarketInstrument.instrument_id == instrument_id,
+            (MarketInstrument.tradable_from.is_(None))
+            | (MarketInstrument.tradable_from > profile.listed_on),
+        )
+        .values(tradable_from=profile.listed_on)
+    )
+    session.execute(
+        update(InstrumentIdentifierVersion)
+        .where(
+            InstrumentIdentifierVersion.version_id == current.version_id,
+            InstrumentIdentifierVersion.known_to.is_(None),
+        )
+        .values(known_to=now)
+    )
+    session.execute(
+        insert(InstrumentIdentifierVersion).values(
+            version_id=uuid4(),
+            entity_id=current.entity_id,
+            entity_kind=current.entity_kind,
+            venue_id=current.venue_id,
+            identifier_scheme=current.identifier_scheme,
+            identifier_value=current.identifier_value,
+            effective_from=profile.listed_on,
+            effective_to=current.effective_to,
+            known_from=now,
+            known_to=None,
+            source_time_precision=profile.source_time_precision,
+            source_batch_id=source_batch_id,
+        )
+    )
 
 
 def _etf_identity_candidates(session: Session, *, etf: EtfIdentifier, fact_date: date) -> set[UUID]:
@@ -745,6 +907,7 @@ def _profile_hash(value: EtfProfile) -> str:
     return _payload_hash(
         {
             "etf": value.etf.qualified_key,
+            "displayName": value.display_name,
             "etfType": value.etf_type,
             "managementMode": value.management_mode,
             "managerName": value.manager_name,
@@ -756,6 +919,46 @@ def _profile_hash(value: EtfProfile) -> str:
             "navCurrency": value.nav_currency,
             "listingStatus": value.listing_status,
             "effectiveFrom": value.effective_from.isoformat(),
+            "sourceTimePrecision": value.source_time_precision,
+        }
+    )
+
+
+def _profile_state_hash(value: EtfProfile) -> str:
+    """忽略观察日起点比较产品状态，连续日相同目录不能制造重叠业务版本。"""
+    return _payload_hash(
+        {
+            "displayName": value.display_name,
+            "etfType": value.etf_type,
+            "managementMode": value.management_mode,
+            "managerName": value.manager_name,
+            "custodianName": value.custodian_name,
+            "establishedOn": _date(value.established_on),
+            "listedOn": _date(value.listed_on),
+            "delistedOn": _date(value.delisted_on),
+            "quoteCurrency": value.quote_currency,
+            "navCurrency": value.nav_currency,
+            "listingStatus": value.listing_status,
+            "sourceTimePrecision": value.source_time_precision,
+        }
+    )
+
+
+def _stored_profile_state_hash(value: EtfProfileVersion) -> str:
+    """把已存资料投影到与来源领域对象相同的状态摘要口径。"""
+    return _payload_hash(
+        {
+            "displayName": value.display_name,
+            "etfType": value.etf_type,
+            "managementMode": value.management_mode,
+            "managerName": value.manager_name,
+            "custodianName": value.custodian_name,
+            "establishedOn": _date(value.established_on),
+            "listedOn": _date(value.listed_on),
+            "delistedOn": _date(value.delisted_on),
+            "quoteCurrency": value.quote_currency,
+            "navCurrency": value.nav_currency,
+            "listingStatus": value.listing_status,
             "sourceTimePrecision": value.source_time_precision,
         }
     )

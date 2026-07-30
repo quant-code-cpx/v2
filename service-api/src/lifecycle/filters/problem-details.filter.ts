@@ -82,7 +82,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
   private codeFrom(payload: string | object | undefined, status: number): string {
     if (payload && typeof payload === 'object') {
       const code = (payload as ProblemResponse).code;
-      if (typeof code === 'string' && /^[a-z][a-z0-9-]*$/.test(code)) {
+      if (typeof code === 'string' && /^[A-Za-z][A-Za-z0-9_-]*$/.test(code)) {
         return code;
       }
     }

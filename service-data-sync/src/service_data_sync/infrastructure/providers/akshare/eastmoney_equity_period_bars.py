@@ -15,6 +15,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import akshare as ak
+import requests
 
 from service_data_sync.application.ports.data_source import (
     ProviderBatch,
@@ -22,14 +23,70 @@ from service_data_sync.application.ports.data_source import (
     ProviderErrorCode,
     SourceRequest,
 )
-from service_data_sync.domain.equity import EquityBarPeriod, EquityIdentifier
+from service_data_sync.domain.equity import EquityBarPeriod, EquityIdentifier, Exchange
 
 _CAPABILITIES = frozenset({"equity.bar.1w.raw", "equity.bar.1mo.raw"})
 _SCHEMA = "quant-v2.equity-period-bar.v1"
+_AKSHARE_VERSION = "1.18.78"
+_ADAPTER_VERSION = "akshare-1.18.78-stock_zh_a_hist-v3"
+_UPSTREAM_SOURCE = "eastmoney-stock-kline"
+_EMPTY_PROOF_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+_EMPTY_PROOF_FIELDS_1 = "f1,f2,f3,f4,f5,f6"
+_EMPTY_PROOF_FIELDS_2 = "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f116"
+_EMPTY_PROOF_TOKEN = "7eea3edcaed734bea9cbfc24409ed989"
+_EMPTY_PROOF_MAX_BYTES = 1024 * 1024
+_EXPECTED_COLUMNS = (
+    "日期",
+    "股票代码",
+    "开盘",
+    "收盘",
+    "最高",
+    "最低",
+    "成交量",
+    "成交额",
+    "振幅",
+    "涨跌幅",
+    "涨跌额",
+    "换手率",
+)
+_SCHEMA_FINGERPRINT = hashlib.sha256(
+    json.dumps(
+        {
+            "sdk": "akshare",
+            "sdkVersion": _AKSHARE_VERSION,
+            "function": "stock_zh_a_hist",
+            "columns": _EXPECTED_COLUMNS,
+            "units": {
+                "volume": "lot",
+                "amount": "CNY",
+                "turnover": "percent",
+            },
+            "emptyProof": {
+                "url": _EMPTY_PROOF_URL,
+                "fields1": _EMPTY_PROOF_FIELDS_1,
+                "fields2": _EMPTY_PROOF_FIELDS_2,
+                "successRc": 0,
+                "identityFields": ("data.market", "data.code"),
+                "emptyField": "data.klines=[]",
+            },
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+).hexdigest()
 _UPSTREAM_PERIOD = {
     EquityBarPeriod.WEEK_1: "weekly",
     EquityBarPeriod.MONTH_1: "monthly",
 }
+_EMPTY_PROOF_PERIOD = {
+    EquityBarPeriod.WEEK_1: "102",
+    EquityBarPeriod.MONTH_1: "103",
+}
+
+
+class _EmptyProofSchemaError(ValueError):
+    """表示东财空窗复核响应不满足冻结成功合同。"""
 
 
 class AkshareEastmoneyEquityPeriodBarsAdapter:
@@ -39,6 +96,7 @@ class AkshareEastmoneyEquityPeriodBarsAdapter:
     """
 
     provider_id = "akshare-eastmoney-equity-period"
+    supported_exchanges = frozenset({Exchange.SSE, Exchange.SZSE, Exchange.BSE})
 
     def __init__(self, *, request_timeout_seconds: int) -> None:
         """保存阻塞式 AKShare 周/月请求的墙钟超时。"""
@@ -50,7 +108,14 @@ class AkshareEastmoneyEquityPeriodBarsAdapter:
 
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
         """获取一个周线或月线包含端窗口，并输出中立标准载荷。"""
+        if getattr(ak, "__version__", None) != _AKSHARE_VERSION:
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "unsupported AKShare SDK version",
+                retryable=False,
+            )
         identifier, period, start, end = _request_values(request)
+        empty_raw_payload: bytes | None = None
         try:
             async with asyncio.timeout(self._request_timeout_seconds):
                 # `period` 直接传给上游接口；本适配器没有任何日线读取或聚合依赖。
@@ -63,20 +128,40 @@ class AkshareEastmoneyEquityPeriodBarsAdapter:
                     adjust="",
                     timeout=float(self._request_timeout_seconds),
                 )
+                # 固定 SDK 在 `klines` 为空时返回无列 DataFrame；仅以同请求原始成功响应
+                # 中的精确空列表补证，`data=null`、错证券或异常响应都不得变成合法空窗。
+                if bool(frame.empty) and not tuple(str(column) for column in frame.columns):
+                    empty_raw_payload = await asyncio.to_thread(
+                        _fetch_explicit_empty_evidence,
+                        identifier=identifier,
+                        period=period,
+                        start=start,
+                        end=end,
+                        timeout_seconds=self._request_timeout_seconds,
+                    )
         except TimeoutError as error:
             raise ProviderError(
                 ProviderErrorCode.UNAVAILABLE, "provider request timed out", retryable=True
+            ) from error
+        except _EmptyProofSchemaError as error:
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "provider empty-window proof changed",
+                retryable=False,
             ) from error
         except Exception as error:
             raise ProviderError(
                 ProviderErrorCode.UNAVAILABLE, "provider request failed", retryable=True
             ) from error
-        if frame.empty:
-            raise ProviderError(
-                ProviderErrorCode.SCHEMA, "provider returned no period bars", retryable=False
-            )
         try:
-            raw_records = frame.to_dict(orient="records")
+            if empty_raw_payload is not None:
+                # SDK 丢失的列集合已经由同请求原始响应中的成功码、身份与空列表补齐。
+                raw_records = []
+            else:
+                # 非空或带列空表都必须逐列匹配固定 SDK 的最终投影顺序。
+                if tuple(str(column) for column in frame.columns) != _EXPECTED_COLUMNS:
+                    raise ValueError("provider columns do not match frozen schema")
+                raw_records = frame.to_dict(orient="records")
             bars = [_normalize_record(record) for record in raw_records]
         except (KeyError, TypeError, ValueError, InvalidOperation) as error:
             raise ProviderError(
@@ -92,16 +177,20 @@ class AkshareEastmoneyEquityPeriodBarsAdapter:
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode()
-        raw_payload = json.dumps(
-            {
-                "instrument": identifier.qualified_symbol,
-                "period": period.value,
-                "records": raw_records,
-            },
-            ensure_ascii=False,
-            default=_json_default,
-            separators=(",", ":"),
-        ).encode()
+        raw_payload = (
+            empty_raw_payload
+            if empty_raw_payload is not None
+            else json.dumps(
+                {
+                    "instrument": identifier.qualified_symbol,
+                    "period": period.value,
+                    "records": raw_records,
+                },
+                ensure_ascii=False,
+                default=_json_default,
+                separators=(",", ":"),
+            ).encode()
+        )
         return ProviderBatch(
             provider_id=self.provider_id,
             capability=request.capability,
@@ -110,11 +199,9 @@ class AkshareEastmoneyEquityPeriodBarsAdapter:
             content_type="application/vnd.quant-v2.equity-period-bar+json",
             raw_payload=raw_payload,
             raw_content_type="application/json",
-            upstream_source="eastmoney-stock-kline",
-            adapter_version="akshare-1.18.78-v1",
-            schema_fingerprint=hashlib.sha256(
-                json.dumps(sorted(raw_records[0]), ensure_ascii=False).encode()
-            ).hexdigest(),
+            upstream_source=_UPSTREAM_SOURCE,
+            adapter_version=_ADAPTER_VERSION,
+            schema_fingerprint=_SCHEMA_FINGERPRINT,
         )
 
 
@@ -143,6 +230,48 @@ def _request_values(
             retryable=False,
         )
     return identifier, period, start, end
+
+
+def _fetch_explicit_empty_evidence(
+    *,
+    identifier: EquityIdentifier,
+    period: EquityBarPeriod,
+    start: date,
+    end: date,
+    timeout_seconds: int,
+) -> bytes:
+    """复发固定 SDK 的同一东财请求，并只接受带身份回显的显式空 `klines`。"""
+    market_code = 1 if identifier.symbol.startswith("6") else 0
+    response = requests.get(
+        _EMPTY_PROOF_URL,
+        params={
+            "fields1": _EMPTY_PROOF_FIELDS_1,
+            "fields2": _EMPTY_PROOF_FIELDS_2,
+            "ut": _EMPTY_PROOF_TOKEN,
+            "klt": _EMPTY_PROOF_PERIOD[period],
+            "fqt": "0",
+            "secid": f"{market_code}.{identifier.symbol}",
+            "beg": start.strftime("%Y%m%d"),
+            "end": end.strftime("%Y%m%d"),
+        },
+        timeout=float(timeout_seconds),
+    )
+    response.raise_for_status()
+    raw_payload = bytes(response.content)
+    if not raw_payload or len(raw_payload) > _EMPTY_PROOF_MAX_BYTES:
+        raise _EmptyProofSchemaError("empty-window proof payload size is invalid")
+    body = response.json()
+    if not isinstance(body, dict) or body.get("rc") != 0:
+        raise _EmptyProofSchemaError("empty-window proof has no successful result code")
+    data = body.get("data")
+    if (
+        not isinstance(data, dict)
+        or str(data.get("code")) != identifier.symbol
+        or data.get("market") != market_code
+        or data.get("klines") != []
+    ):
+        raise _EmptyProofSchemaError("empty-window proof does not match identity and window")
+    return raw_payload
 
 
 def _normalize_record(record: dict[str, Any]) -> dict[str, str | None]:

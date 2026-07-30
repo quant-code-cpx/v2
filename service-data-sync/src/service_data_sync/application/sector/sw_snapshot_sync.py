@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -61,8 +62,17 @@ class SwSnapshotSyncService:
         self._repository = repository
         self._raw_payload_store = raw_payload_store
 
-    async def sync(self, *, snapshot_date: date) -> SwSnapshotSyncResult:
-        """抓取一个当天完整快照，先归档 raw 和标准载荷再原子发布。"""
+    async def sync(
+        self,
+        *,
+        snapshot_date: date,
+        before_final_publication: Callable[[], None] | None = None,
+    ) -> SwSnapshotSyncResult:
+        """抓取一个当天完整快照，先归档 raw 和标准载荷再原子发布。
+
+        fenced 控制面在最终 publication 事务开始前传入回调，确保 taxonomy、估值、
+        checkpoint 与控制面 run 终态不能被已失效 worker 分别提交。
+        """
         if _CAPABILITY not in self._source.capabilities():
             raise ProviderError(
                 ProviderErrorCode.INVALID_REQUEST,
@@ -77,13 +87,24 @@ class SwSnapshotSyncService:
         )
         snapshot = decode_sw_snapshot(batch.payload, expected_date=snapshot_date)
         source = _archive_batch(batch=batch, payload_store=self._raw_payload_store)
+        if before_final_publication is not None:
+            before_final_publication()
         return SwSnapshotSyncResult(
             publications=self._repository.publish_snapshot(snapshot=snapshot, source=source),
             replayed=False,
         )
 
-    def replay(self, *, snapshot_date: date) -> SwSnapshotSyncResult:
-        """从指定日期 checkpoint 的标准载荷恢复，不再次访问上游。"""
+    def replay(
+        self,
+        *,
+        snapshot_date: date,
+        before_final_publication: Callable[[], None] | None = None,
+    ) -> SwSnapshotSyncResult:
+        """从指定日期 checkpoint 的标准载荷恢复，不再次访问上游。
+
+        重放同样可能改变 canonical publication，故接受与实时抓取一致的 fenced
+        终态回调，不能因不访问来源而绕开全局执行槽。
+        """
         checkpoint = self._repository.get_checkpoint(snapshot_date=snapshot_date)
         if checkpoint is None:
             raise ValueError("SW replay checkpoint is not available")
@@ -108,6 +129,8 @@ class SwSnapshotSyncService:
             adapter_version=checkpoint.adapter_version,
             schema_fingerprint=checkpoint.schema_fingerprint,
         )
+        if before_final_publication is not None:
+            before_final_publication()
         return SwSnapshotSyncResult(
             publications=self._repository.publish_snapshot(snapshot=snapshot, source=source),
             replayed=True,

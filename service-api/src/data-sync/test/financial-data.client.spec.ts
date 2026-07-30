@@ -23,6 +23,7 @@ describe('FinancialDataClient', () => {
     const result = await client.listReports({
       exchange: 'SSE',
       symbol: '600519',
+      dataVersion,
       statementTypes: ['INCOME_STATEMENT'],
       periodBases: ['YEAR_TO_DATE'],
       methodologyCode: 'eastmoney.statement',
@@ -45,6 +46,7 @@ describe('FinancialDataClient', () => {
     const url = requestedUrl(target);
     expect(url.pathname).toBe('/internal/v1/equities/SSE/600519/financial-reports');
     expect(url.searchParams.getAll('statementType')).toEqual(['INCOME_STATEMENT']);
+    expect(url.searchParams.get('dataVersion')).toBe(dataVersion);
     expect(url.searchParams.get('cursor')).toBe('next-page');
     expect(init?.headers).toMatchObject({
       Authorization: `Bearer ${config.dataSyncInternalBearerToken}`,
@@ -64,6 +66,7 @@ describe('FinancialDataClient', () => {
     const metrics = await client.listMetrics({
       exchange: 'SSE',
       symbol: '600519',
+      dataVersion,
       origin: 'PLATFORM_DERIVED',
       methodologyCode: 'platform.financial-derivation',
       methodologyVersion: 1,
@@ -75,6 +78,7 @@ describe('FinancialDataClient', () => {
     const valuations = await client.listValuations({
       exchange: 'SSE',
       symbol: '600519',
+      dataVersion,
       methodologyCode: 'eastmoney.valuation',
       methodologyVersion: 1,
       metrics: ['pe_ttm'],
@@ -104,6 +108,7 @@ describe('FinancialDataClient', () => {
     const result = await client.getReport({
       exchange: 'SSE',
       symbol: '600519',
+      dataVersion,
       reportRef: '00000000-0000-4000-8000-000000000002',
       limit: 100,
       ifNoneMatch: '"current"',
@@ -127,6 +132,7 @@ describe('FinancialDataClient', () => {
     await retryClient.listReports({
       exchange: 'SSE',
       symbol: '600519',
+      dataVersion,
       methodologyCode: 'eastmoney.statement',
       methodologyVersion: 1,
       limit: 20,
@@ -144,6 +150,7 @@ describe('FinancialDataClient', () => {
       invalidClient.listReports({
         exchange: 'SSE',
         symbol: '600519',
+        dataVersion,
         methodologyCode: 'eastmoney.statement',
         methodologyVersion: 1,
         limit: 20,
@@ -170,6 +177,7 @@ describe('FinancialDataClient', () => {
       conflictClient.listReports({
         exchange: 'SSE',
         symbol: '600519',
+        dataVersion,
         methodologyCode: 'eastmoney.statement',
         methodologyVersion: 1,
         limit: 20,
@@ -178,6 +186,30 @@ describe('FinancialDataClient', () => {
     ).rejects.toMatchObject({
       status: HttpStatus.CONFLICT,
       response: { code: 'cursor-mismatch' },
+    });
+
+    const snapshotClient = new FinancialDataClient(
+      config,
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ code: 'snapshot-expired', detail: 'secret' }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/problem+json' },
+        }),
+      ),
+    );
+    await expect(
+      snapshotClient.listReports({
+        exchange: 'SSE',
+        symbol: '600519',
+        dataVersion,
+        methodologyCode: 'eastmoney.statement',
+        methodologyVersion: 1,
+        limit: 20,
+        requestId: 'req-snapshot-expired',
+      }),
+    ).rejects.toMatchObject({
+      status: HttpStatus.CONFLICT,
+      response: { code: 'snapshot-expired' },
     });
   });
 
@@ -197,6 +229,7 @@ describe('FinancialDataClient', () => {
       unavailableClient.listReports({
         exchange: 'SSE',
         symbol: '600519',
+        dataVersion,
         methodologyCode: 'eastmoney.statement',
         methodologyVersion: 1,
         limit: 20,
@@ -224,6 +257,7 @@ describe('FinancialDataClient', () => {
       weakEtagClient.listReports({
         exchange: 'SSE',
         symbol: '600519',
+        dataVersion,
         methodologyCode: 'eastmoney.statement',
         methodologyVersion: 1,
         limit: 20,
