@@ -35,13 +35,14 @@ _DATE_DATASETS = frozenset(
         "equity.adjustment_factor",
     }
 )
-_CURRENT_DATASETS = frozenset(
+_CURRENT_REFRESH_DATASETS = frozenset(
     {
         "equity.profile",
         "equity.share_capital.reported",
         "financial.report",
         "financial.provider-metric",
         "financial.valuation",
+        "financial.derived-metric",
     }
 )
 _EVENT_DATASETS = frozenset(
@@ -54,9 +55,7 @@ _EVENT_DATASETS = frozenset(
 _PLANNED_DATASETS = frozenset(
     {
         *_DATE_DATASETS,
-        *_CURRENT_DATASETS,
         "equity.corporate_action",
-        "financial.derived-metric",
         *_EVENT_DATASETS,
         "equity.discovery.eod",
     }
@@ -120,14 +119,10 @@ def _reference_bundle(
                 )
             ),
             "effectiveAsOf": (
-                market_as_of
-                if dataset_code == "equity.trading_status.1d"
-                else snapshot_observed_on
+                market_as_of if dataset_code == "equity.trading_status.1d" else snapshot_observed_on
             ).isoformat(),
             "observedOn": (
-                market_as_of
-                if dataset_code == "equity.trading_status.1d"
-                else snapshot_observed_on
+                market_as_of if dataset_code == "equity.trading_status.1d" else snapshot_observed_on
             ).isoformat(),
             "sourceBatchIds": [
                 str(
@@ -318,14 +313,9 @@ def test_targets_intents_sources_and_submission_identity_align_exactly() -> None
                 sources[dataset_code].supported_exchanges
             )
             expected_semantics = (
-                "CURRENT_AT_EXECUTION"
-                if dataset_code in _CURRENT_DATASETS
-                else (
-                    "DERIVED_FROM_EXACT_INPUTS"
-                    if dataset_code
-                    in {"financial.derived-metric", "equity.discovery.eod"}
-                    else "FROZEN_PLAN_BOUNDARY"
-                )
+                "DERIVED_FROM_EXACT_INPUTS"
+                if dataset_code == "equity.discovery.eod"
+                else "FROZEN_PLAN_BOUNDARY"
             )
             assert intent["observationSemantics"] == expected_semantics
             assert child.source_hashes[dataset_code] == sources[dataset_code].source_snapshot_hash
@@ -337,8 +327,8 @@ def test_targets_intents_sources_and_submission_identity_align_exactly() -> None
         assert child.submission_id == expected_submission_id
 
 
-def test_current_targets_are_low_cardinality_but_report_dependency_stays_independent() -> None:
-    """无派生依赖的当前 target 可合并，财务报表仍独立决定派生指标是否可运行。"""
+def test_current_only_targets_are_explicitly_separate_from_historical_plan() -> None:
+    """当前快照不能混入长历史计划，必须记录为独立刷新命令族。"""
     as_of = date(2024, 3, 15)
     sources = _sources(default_earliest=date(2024, 1, 1))
     identity = _identity(
@@ -350,30 +340,20 @@ def test_current_targets_are_low_cardinality_but_report_dependency_stays_indepen
     )
 
     topology = _build(as_of=as_of, identities=(identity,), sources=sources)
-    grouped = next(
-        child
-        for child in topology.children
-        if set(_dataset_codes(child))
-        == {
-            "equity.profile",
-            "equity.share_capital.reported",
-            "financial.provider-metric",
-            "financial.valuation",
-        }
-    )
-    report = next(
-        child
-        for child in topology.children
-        if _dataset_codes(child) == ("financial.report",)
-    )
-    derived = next(
-        child
-        for child in topology.children
-        if _dataset_codes(child) == ("financial.derived-metric",)
-    )
+    planned_codes = {
+        dataset_code for child in topology.children for dataset_code in _dataset_codes(child)
+    }
+    exclusions = {
+        str(item["datasetCode"]): item
+        for item in topology.exclusions
+        if item["datasetCode"] in _CURRENT_REFRESH_DATASETS
+    }
 
-    assert grouped.child_key not in derived.dependency_keys
-    assert derived.dependency_keys == (report.child_key,)
+    assert planned_codes.isdisjoint(_CURRENT_REFRESH_DATASETS)
+    assert set(exclusions) == _CURRENT_REFRESH_DATASETS
+    assert all(
+        item["reasonCode"] == "CURRENT_SOURCE_SEPARATE_REFRESH" for item in exclusions.values()
+    )
 
 
 def test_reference_bundle_rejects_mixed_dates_and_duplicate_partitions() -> None:
@@ -400,6 +380,25 @@ def test_reference_bundle_rejects_mixed_dates_and_duplicate_partitions() -> None
             bundle,
             manifest=duplicate_manifest,
             manifest_hash=_sha256_json(list(duplicate_manifest)),
+        ).validate()
+
+
+def test_reference_bundle_rejects_legacy_null_component_release() -> None:
+    """旧 publication 即使有 dataVersion，缺少 canonical release 也不能封存为恢复输入。"""
+    snapshot = date(2024, 3, 16)
+    market = date(2024, 3, 15)
+    bundle = _reference_bundle(
+        snapshot_observed_on=snapshot,
+        market_as_of=market,
+    )
+    legacy_manifest = tuple(dict(component) for component in bundle.manifest)
+    legacy_manifest[0]["releaseId"] = None
+
+    with pytest.raises(ValueError, match="component identity is invalid"):
+        replace(
+            bundle,
+            manifest=legacy_manifest,
+            manifest_hash=_sha256_json(list(legacy_manifest)),
         ).validate()
 
 
@@ -455,8 +454,8 @@ def test_dataset_specific_source_boundaries_clip_market_and_event_targets() -> N
         assert child.window_to == as_of
 
 
-def test_closed_identity_excludes_current_only_and_derived_datasets() -> None:
-    """关闭身份仍保留合法历史 child，但不得调用当前快照或派生能力。"""
+def test_closed_identity_keeps_only_legal_historical_children() -> None:
+    """关闭身份仍保留合法历史 child，当前来源不属于历史计划。"""
     as_of = date(2024, 3, 15)
     sources = _sources(default_earliest=date(2020, 1, 1))
     identity = _identity(
@@ -468,25 +467,19 @@ def test_closed_identity_excludes_current_only_and_derived_datasets() -> None:
     )
 
     topology = _build(as_of=as_of, identities=(identity,), sources=sources)
-    forbidden = {*_CURRENT_DATASETS, "financial.derived-metric"}
     identity_targets = {
         dataset_code
         for child in topology.children
         if child.identity_ordinal == identity.ordinal
         for dataset_code in _dataset_codes(child)
     }
-    exclusions = {
-        str(item["datasetCode"]): item
-        for item in topology.exclusions
-        if item["identifierVersionId"] == str(identity.identifier_version_id)
-        and item["datasetCode"] in forbidden
+    assert identity_targets == {
+        "equity.adjustment_factor",
+        "equity.bar.1d.raw",
+        "equity.bar.1mo.raw",
+        "equity.bar.1w.raw",
+        "equity.corporate_action",
     }
-
-    assert identity_targets.isdisjoint(forbidden)
-    assert set(exclusions) == forbidden
-    assert all(
-        item["reasonCode"] == "IDENTITY_NOT_ACTIVE_AT_PLAN_AS_OF" for item in exclusions.values()
-    )
 
 
 def test_code_reuse_keeps_both_versions_and_clips_each_effective_interval() -> None:
@@ -525,12 +518,10 @@ def test_code_reuse_keeps_both_versions_and_clips_each_effective_interval() -> N
 
     assert all(historical_by_identity.values())
     assert max(
-        child.window_to or date.min
-        for child in historical_by_identity[old_identity.ordinal]
+        child.window_to or date.min for child in historical_by_identity[old_identity.ordinal]
     ) == date(2023, 6, 30)
     assert min(
-        child.window_from or date.max
-        for child in historical_by_identity[new_identity.ordinal]
+        child.window_from or date.max for child in historical_by_identity[new_identity.ordinal]
     ) == date(2023, 7, 1)
     frozen_versions = {
         str(intent["identity"]["identifierVersionId"])
@@ -588,9 +579,7 @@ def test_dependency_audit_requires_existing_acyclic_dag() -> None:
             sources,
         )
 
-    event_children = [
-        child for child in topology.children if child.phase == "GLOBAL_EVENT"
-    ][:2]
+    event_children = [child for child in topology.children if child.phase == "GLOBAL_EVENT"][:2]
     first, second = event_children
     cyclic_first = replace(first, dependency_keys=(second.child_key,))
     cyclic_second = replace(second, dependency_keys=(first.child_key,))
@@ -660,8 +649,7 @@ def test_historical_ranges_use_one_low_cardinality_child_per_dataset() -> None:
         child
         for child in topology.children
         if any(
-            dataset_code
-            in {*_DATE_DATASETS, "equity.corporate_action", *_EVENT_DATASETS}
+            dataset_code in {*_DATE_DATASETS, "equity.corporate_action", *_EVENT_DATASETS}
             for dataset_code in _dataset_codes(child)
         )
     ]
@@ -704,10 +692,8 @@ def test_dual_plan_dates_route_current_and_market_families_independently() -> No
     assert topology.reference_bundle.snapshot_observed_on == snapshot_observed_on
     assert topology.reference_bundle.market_as_of == market_as_of
     assert all(
-        intent["referenceBundleDataVersion"]
-        == str(topology.reference_bundle.data_version)
-        and intent["referenceManifestHash"]
-        == topology.reference_bundle.manifest_hash
+        intent["referenceBundleDataVersion"] == str(topology.reference_bundle.data_version)
+        and intent["referenceManifestHash"] == topology.reference_bundle.manifest_hash
         for child in topology.children
         for intent in child.intents
     )

@@ -139,6 +139,12 @@ class EquityBarWindowCoverage(Base):
         nullable=False,
         comment="真实数据或零记录覆盖对应的 immutable canonical publication。",
     )
+    data_version: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("dataset_publication.data_version", ondelete="RESTRICT"),
+        nullable=False,
+        comment="与 publication_id 严格配对的消费者不可变数据版本。",
+    )
     source_batch_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("source_batch.source_batch_id", ondelete="RESTRICT"),

@@ -30,7 +30,7 @@ from service_data_sync.domain.index import (
     IndexIdentifier,
 )
 
-_ADAPTER_VERSION = "akshare-1.18.78-csindex-index-snapshot-v1"
+_ADAPTER_VERSION = "akshare-1.18.81-csindex-index-snapshot-v2"
 _CATALOG_SCHEMA = "quant-v2.index-catalog-snapshot.v1"
 _CONSTITUENT_SCHEMA = "quant-v2.index-constituent-observed-snapshot.v1"
 _WEIGHT_SCHEMA = "quant-v2.index-weight-close-observed-snapshot.v1"
@@ -227,7 +227,7 @@ def _normalize_payload(
 def _normalize_catalog_entry(record: dict[str, Any]) -> dict[str, object]:
     """映射目录的稳定身份和可选元数据，不猜测缺失生命周期字段。"""
     entry = IndexCatalogEntry(
-        identifier=IndexIdentifier(IndexAdministrator.CSI, _six_digit(record["指数代码"])),
+        identifier=IndexIdentifier(IndexAdministrator.CSI, _index_code(record["指数代码"])),
         name=_required_text(record["指数简称"]),
     )
     return {
@@ -276,6 +276,28 @@ def _six_digit(value: object) -> str:
         normalized = normalized.zfill(6)
     if len(normalized) != 6 or not normalized.isdigit():
         raise ValueError("source code must be six digits")
+    return normalized
+
+
+def _index_code(value: object) -> str:
+    """保留短数字代码前导零，并接受中证、国证目录实证的六码至八码身份。
+
+    中证目录包含 ``H00999``、``L11150`` 与 ``SHHKSI``，国证目录还包含 ``AITCNYG`` 与
+    ``39926401``；它们均是实证的 ASCII 大写字母数字代码。该规则只服务目录的指数身份，
+    成分证券继续使用 `_six_digit`，从而不放宽证券代码质量门。
+    """
+    normalized = _required_text(value)
+    if normalized.isdigit() and len(normalized) <= 6:
+        normalized = normalized.zfill(6)
+    if (
+        not 6 <= len(normalized) <= 8
+        or not normalized.isascii()
+        or not normalized.isalnum()
+        or normalized != normalized.upper()
+    ):
+        raise ValueError(
+            "source index code must contain 6 to 8 uppercase ASCII alphanumeric characters"
+        )
     return normalized
 
 
@@ -329,7 +351,12 @@ def _optional_decimal_text(value: object) -> str | None:
 
 
 def _optional_non_negative_int(value: object) -> int | None:
-    """解析可选样本数量，拒绝小数、布尔值和负数。"""
+    """解析可选样本数量，只接受数值上严格等于整数的非负来源值。
+
+    `AKShare` 1.18.81 会将中证目录的 ``样本数量`` 投影为 ``300.0`` 一类浮点展示值。
+    该兼容只接受有限且没有小数部分的十进制，不能把 ``300.5`` 四舍五入为样本数，避免
+    将来源口径漂移静默写入 canonical 观察。
+    """
     if value is None:
         return None
     if isinstance(value, bool):
@@ -337,10 +364,13 @@ def _optional_non_negative_int(value: object) -> int | None:
     normalized = _optional_text(value)
     if normalized is None:
         return None
-    result = int(normalized)
-    if result < 0 or str(result) != normalized:
+    try:
+        decimal = Decimal(normalized)
+    except InvalidOperation as error:
+        raise ValueError("source count must be a non-negative integer") from error
+    if not decimal.is_finite() or decimal < 0 or decimal != decimal.to_integral_value():
         raise ValueError("source count must be a non-negative integer")
-    return result
+    return int(decimal)
 
 
 def _schema_fingerprint(records: list[dict[str, Any]]) -> str:

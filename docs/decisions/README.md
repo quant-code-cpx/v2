@@ -49,4 +49,5 @@ NNNN-short-title.md
 - [0024：数据运维控制面与全局串行同步](0024-data-operations-control-plane.md) — Proposed
 - [0025：沪深港通官方来源与原子 bundle 边界](0025-stock-connect-official-source-and-bundle-boundary.md) — Accepted
 - [0027：市场概览原子发布与生产数据源边界](0027-market-overview-atomic-publication-and-source-boundary.md) — Accepted
+- [0028：首批 A 股 equity 来源审计元数据不阻断控制面](0028-source-metadata-nonblocking-data-operations.md) — Accepted
 - [0026：ETF 中心 typed market-data 全链路边界](0026-etf-center-typed-market-data-boundary.md) — Proposed

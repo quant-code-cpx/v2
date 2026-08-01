@@ -99,7 +99,7 @@ class AkshareEastmoneyCorporateActionsAdapter:
             raw_payload=raw_payload,
             raw_content_type="application/json",
             upstream_source="eastmoney-share-bonus",
-            adapter_version="akshare-1.18.78-v1",
+            adapter_version="akshare-1.18.81-v1",
             schema_fingerprint=hashlib.sha256(
                 json.dumps(keys, ensure_ascii=False).encode()
             ).hexdigest(),

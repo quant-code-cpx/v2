@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from typing import cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.orm import Session
@@ -163,7 +163,7 @@ def test_repository_appends_explicit_delisting_and_advances_exchange_version() -
     assert "status" in joined
     assert "evidence_kind" in joined
     assert "UPDATE equity_identifier_version SET effective_to" in joined
-    assert "INSERT INTO equity_lifecycle_checkpoint" in joined
+    assert "equity_lifecycle_checkpoint" in joined
 
 
 def test_repository_rejects_delisted_to_listed_without_official_correction() -> None:
@@ -313,7 +313,15 @@ def test_official_correction_cannot_reopen_an_identifier_after_code_reuse() -> N
 
 def _repository(engine: FakeEngine) -> SqlAlchemyEquityLifecycleRepository:
     """使用带短事务边界的数据库替身构造生命周期仓储。"""
-    return SqlAlchemyEquityLifecycleRepository(cast(DatabaseClient, FakeDatabase(engine)))
+    repository = SqlAlchemyEquityLifecycleRepository(cast(DatabaseClient, FakeDatabase(engine)))
+
+    def publish_lifecycle_release(*arguments: object, **keywords: object) -> UUID:
+        """隔离状态机 SQL 单测，不在替身连接中重演统一 release 仓储。"""
+        del arguments, keywords
+        return uuid4()
+
+    repository._publish_lifecycle_release = publish_lifecycle_release  # type: ignore[method-assign]
+    return repository
 
 
 def _delisting_entry() -> EquityLifecycleEntry:

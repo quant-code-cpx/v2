@@ -89,6 +89,11 @@ class TradingVenue(Base):
     active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, comment="场所是否仍接受新数据能力接入。"
     )
+    reference_seed_revision: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+        comment="创建该固定参考场所的 Alembic 修订号；非迁移创建场所保持为空。",
+    )
 
 
 class MarketEntity(Base):

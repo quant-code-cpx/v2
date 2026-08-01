@@ -9,7 +9,8 @@ info:
   description: >-
     service-data-sync 拥有的数据目录、同步命令、运行、健康评估、自动计划和运维事件合同。
     命令与运行状态以 data-sync PostgreSQL 为权威；Celery/Redis 仅负责唤醒和交付。
-    所有写操作均幂等，调用方不得在未知结果后更换 Idempotency-Key。
+    所有写操作均幂等，调用方不得在未知结果后更换 Idempotency-Key。对首批 A 股 equity target，来源审批、
+    rights/license、归属等字段仅为审计元数据，不得决定 preflight、command、checkpoint、publication 或技术验收。
 servers:
   - url: http://data-sync-api:8000
 security:
@@ -476,7 +477,7 @@ components:
           schema:
             $ref: "#/components/schemas/DatasetDetail"
     Preflight:
-      description: 同步预检结果；不代表锁定、批准或执行成功
+      description: 同步预检结果；不代表锁定或执行成功。首批 A 股 equity target 的来源审计状态不参与结果判定
       headers:
         X-Request-Id:
           $ref: "#/components/headers/RequestId"
@@ -800,6 +801,7 @@ components:
           minimum: 1
         approvalStatus:
           enum: [RESEARCH, CANDIDATE, APPROVED, SUSPENDED, UNSUPPORTED]
+          description: 首批 A 股 equity target 的来源审计分类；用于 lineage 展示，不参与 command、checkpoint、publication 或技术验收判定
         role:
           enum: [PRIMARY, FALLBACK, SHADOW]
         effective:

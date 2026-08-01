@@ -49,8 +49,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_equity_backfill_partition_kind",
         "equity_backfill_partition_checkpoint",
-        "checkpoint_kind IN "
-        "('DATA_VERSION','BAR_COVERAGE_VERSION','EVENT_COVERAGE_VERSION')",
+        "checkpoint_kind IN ('DATA_VERSION','BAR_COVERAGE_VERSION','EVENT_COVERAGE_VERSION')",
     )
     op.create_table(
         "data_operation_run_source_batch",
@@ -390,14 +389,10 @@ def downgrade() -> None:
         $$;
         """
     )
-    op.execute(
-        "DROP TRIGGER trg_equity_reference_step_guard "
-        "ON equity_reference_generation_step"
-    )
+    op.execute("DROP TRIGGER trg_equity_reference_step_guard ON equity_reference_generation_step")
     op.execute("DROP FUNCTION guard_equity_reference_step_change()")
     op.execute(
-        "DROP TRIGGER trg_equity_reference_attempt_guard "
-        "ON equity_reference_generation_attempt"
+        "DROP TRIGGER trg_equity_reference_attempt_guard ON equity_reference_generation_attempt"
     )
     op.execute("DROP FUNCTION guard_equity_reference_attempt_change()")
     op.drop_index(

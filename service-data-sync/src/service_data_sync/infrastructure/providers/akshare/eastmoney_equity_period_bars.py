@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -27,8 +28,8 @@ from service_data_sync.domain.equity import EquityBarPeriod, EquityIdentifier, E
 
 _CAPABILITIES = frozenset({"equity.bar.1w.raw", "equity.bar.1mo.raw"})
 _SCHEMA = "quant-v2.equity-period-bar.v1"
-_AKSHARE_VERSION = "1.18.78"
-_ADAPTER_VERSION = "akshare-1.18.78-stock_zh_a_hist-v3"
+_AKSHARE_VERSION = "1.18.81"
+_ADAPTER_VERSION = "akshare-1.18.81-stock_zh_a_hist-v4"
 _UPSTREAM_SOURCE = "eastmoney-stock-kline"
 _EMPTY_PROOF_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 _EMPTY_PROOF_FIELDS_1 = "f1,f2,f3,f4,f5,f6"
@@ -83,6 +84,17 @@ _EMPTY_PROOF_PERIOD = {
     EquityBarPeriod.WEEK_1: "102",
     EquityBarPeriod.MONTH_1: "103",
 }
+# 东财网关偶发主动断连；只重试明确的传输异常，不能把坏字段或身份响应伪装成网络抖动。
+_PERIOD_FETCH_MAX_ATTEMPTS = 3
+_PERIOD_FETCH_RETRY_BASE_SECONDS = 0.5
+_TRANSPORT_ERRORS = (
+    requests.exceptions.ChunkedEncodingError,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    BrokenPipeError,
+    ConnectionAbortedError,
+    ConnectionResetError,
+)
 
 
 class _EmptyProofSchemaError(ValueError):
@@ -96,7 +108,9 @@ class AkshareEastmoneyEquityPeriodBarsAdapter:
     """
 
     provider_id = "akshare-eastmoney-equity-period"
-    supported_exchanges = frozenset({Exchange.SSE, Exchange.SZSE, Exchange.BSE})
+    # 当前冻结的 `AKShare`/东财探针只证明沪深两市周期线可用；北交所必须由独立、已批准
+    # 的来源合同（例如未来单独注册的来源）声明支持，不能因同一 SDK 名称而静默兜底。
+    supported_exchanges = frozenset({Exchange.SSE, Exchange.SZSE})
 
     def __init__(self, *, request_timeout_seconds: int) -> None:
         """保存阻塞式 AKShare 周/月请求的墙钟超时。"""
@@ -116,33 +130,40 @@ class AkshareEastmoneyEquityPeriodBarsAdapter:
             )
         identifier, period, start, end = _request_values(request)
         empty_raw_payload: bytes | None = None
+        deadline = asyncio.get_running_loop().time() + self._request_timeout_seconds
         try:
-            async with asyncio.timeout(self._request_timeout_seconds):
-                # `period` 直接传给上游接口；本适配器没有任何日线读取或聚合依赖。
-                frame = await asyncio.to_thread(
-                    ak.stock_zh_a_hist,
+            # `period` 直接传给上游接口；本适配器没有任何日线读取或聚合依赖。
+            frame = await _call_with_transport_retry(
+                deadline=deadline,
+                operation=lambda timeout_seconds: ak.stock_zh_a_hist(
                     symbol=identifier.symbol,
                     period=_UPSTREAM_PERIOD[period],
                     start_date=start.strftime("%Y%m%d"),
                     end_date=end.strftime("%Y%m%d"),
                     adjust="",
-                    timeout=float(self._request_timeout_seconds),
-                )
-                # 固定 SDK 在 `klines` 为空时返回无列 DataFrame；仅以同请求原始成功响应
-                # 中的精确空列表补证，`data=null`、错证券或异常响应都不得变成合法空窗。
-                if bool(frame.empty) and not tuple(str(column) for column in frame.columns):
-                    empty_raw_payload = await asyncio.to_thread(
-                        _fetch_explicit_empty_evidence,
+                    timeout=timeout_seconds,
+                ),
+            )
+            # 固定 SDK 在 `klines` 为空时返回无列 DataFrame；仅以同请求原始成功响应
+            # 中的精确空列表补证，`data=null`、错证券或异常响应都不得变成合法空窗。
+            if bool(frame.empty) and not tuple(str(column) for column in frame.columns):
+                empty_raw_payload = await _call_with_transport_retry(
+                    deadline=deadline,
+                    operation=lambda timeout_seconds: _fetch_explicit_empty_evidence(
                         identifier=identifier,
                         period=period,
                         start=start,
                         end=end,
-                        timeout_seconds=self._request_timeout_seconds,
-                    )
+                        timeout_seconds=timeout_seconds,
+                    ),
+                )
         except TimeoutError as error:
             raise ProviderError(
                 ProviderErrorCode.UNAVAILABLE, "provider request timed out", retryable=True
             ) from error
+        except ProviderError:
+            # 已分类错误具有数据合同语义，绝不能因传输重试包装成可重试不可用。
+            raise
         except _EmptyProofSchemaError as error:
             raise ProviderError(
                 ProviderErrorCode.SCHEMA,
@@ -205,6 +226,41 @@ class AkshareEastmoneyEquityPeriodBarsAdapter:
         )
 
 
+async def _call_with_transport_retry(
+    *,
+    deadline: float,
+    operation: Callable[[float], Any],
+) -> Any:
+    """在单一总墙钟预算内重试东财的短暂传输中断。
+
+    每次调用使用同一证券、周期与日期窗；`ProviderError`、字段解析和身份证明失败均不会重试，
+    以防确定性坏响应延迟失败或被错误写成空数据。
+    """
+    loop = asyncio.get_running_loop()
+    for attempt in range(_PERIOD_FETCH_MAX_ATTEMPTS):
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            raise TimeoutError("period-bar provider total request budget exhausted")
+        try:
+            async with asyncio.timeout(remaining):
+                return await asyncio.to_thread(operation, remaining)
+        except Exception as error:
+            if (
+                isinstance(error, ProviderError)
+                or not isinstance(error, _TRANSPORT_ERRORS)
+                or attempt + 1 >= _PERIOD_FETCH_MAX_ATTEMPTS
+            ):
+                raise
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError("period-bar provider total request budget exhausted") from error
+            # 退避时间同样从总预算扣除，不能让三次尝试突破调用方配置的墙钟上限。
+            delay = min(_PERIOD_FETCH_RETRY_BASE_SECONDS * (2**attempt), remaining)
+            if delay > 0:
+                await asyncio.sleep(delay)
+    raise AssertionError("period-bar transport retry loop must return or raise")
+
+
 def _request_values(
     request: SourceRequest,
 ) -> tuple[EquityIdentifier, EquityBarPeriod, date, date]:
@@ -223,6 +279,14 @@ def _request_values(
         raise ProviderError(
             ProviderErrorCode.INVALID_REQUEST, "invalid period-bar request", retryable=False
         ) from error
+    if identifier.exchange not in AkshareEastmoneyEquityPeriodBarsAdapter.supported_exchanges:
+        # 未经证明的交易所不能触发网络请求；调用方会据冻结来源支持矩阵记为
+        # `SOURCE_EXCHANGE_UNAVAILABLE`，而不是把端点缺数写成合法零记录 coverage。
+        raise ProviderError(
+            ProviderErrorCode.CURRENTLY_UNSUPPORTED,
+            "EastMoney period bars do not support this exchange in the frozen source contract",
+            retryable=False,
+        )
     if period is EquityBarPeriod.DAY_1 or period.capability != request.capability or start > end:
         raise ProviderError(
             ProviderErrorCode.INVALID_REQUEST,
@@ -238,7 +302,7 @@ def _fetch_explicit_empty_evidence(
     period: EquityBarPeriod,
     start: date,
     end: date,
-    timeout_seconds: int,
+    timeout_seconds: float,
 ) -> bytes:
     """复发固定 SDK 的同一东财请求，并只接受带身份回显的显式空 `klines`。"""
     market_code = 1 if identifier.symbol.startswith("6") else 0

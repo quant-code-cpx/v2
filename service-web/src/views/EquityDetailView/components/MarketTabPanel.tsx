@@ -35,6 +35,21 @@ export function MarketTabPanel({ model }: { model: EquityDetailModel }) {
     isApiError(model.barsQuery.error) &&
     model.barsQuery.error.status === 503 &&
     model.barsQuery.error.code === "publication-unavailable";
+  const coverageUnavailable =
+    isApiError(model.barsQuery.error) &&
+    model.barsQuery.error.status === 409 &&
+    model.barsQuery.error.code === "coverage-unavailable";
+  const snapshotExpired =
+    isApiError(model.barsQuery.error) &&
+    model.barsQuery.error.status === 409 &&
+    model.barsQuery.error.code === "snapshot-expired";
+  /**
+   * 当前请求已经没有 publication、精确覆盖或固定快照时，绝不回显 Query 缓存的旧窗口正文。
+   * TanStack Query 会在刷新失败时保留 last-good data；继续把它交给 KLineChart 会把已失效行情
+   * 误呈现为当前查询结果。
+   */
+  const bars =
+    coverageUnavailable || publicationUnavailable || snapshotExpired ? undefined : model.bars;
 
   /** 切换到未复权并保留当前物理周期和日期范围。 */
   const useUnadjusted = () => model.updateState({ adjust: "none" });
@@ -97,9 +112,26 @@ export function MarketTabPanel({ model }: { model: EquityDetailModel }) {
           {publicationUnavailable ? (
             <DatasetUnavailable title={`${model.state.period} 行情`} status={barsStatus} />
           ) : null}
+          {coverageUnavailable ? (
+            <Alert
+              severity="warning"
+              action={
+                <Button color="inherit" size="small" onClick={() => void model.barsQuery.refetch()}>
+                  重试行情
+                </Button>
+              }
+            >
+              <Typography variant="subtitle2">当前窗口尚无精确 K 线覆盖</Typography>
+              <Typography variant="body2" sx={{ mt: 0.5 }}>
+                coverage-unavailable · 页面不会以邻近日期、其他物理周期或 last-good
+                数据替代本次请求。
+              </Typography>
+            </Alert>
+          ) : null}
           {model.barsQuery.isError &&
           !model.barsQuery.isFetchNextPageError &&
-          !publicationUnavailable ? (
+          !publicationUnavailable &&
+          !coverageUnavailable ? (
             <Stack spacing={1}>
               <DatasetError
                 title="K 线行情"
@@ -117,8 +149,8 @@ export function MarketTabPanel({ model }: { model: EquityDetailModel }) {
           ) : null}
           {model.barsQuery.isFetchingNextPage ? (
             <Alert severity="info" sx={{ mb: 1 }}>
-              正在沿同一 publication 的签名 cursor 加载完整历史；已校验{" "}
-              {model.bars?.items.length ?? 0} 条。
+              正在沿同一 publication 的签名 cursor 加载完整历史；已校验 {bars?.items.length ?? 0}{" "}
+              条。
             </Alert>
           ) : null}
           {model.barsQuery.isFetchNextPageError ? (
@@ -128,58 +160,80 @@ export function MarketTabPanel({ model }: { model: EquityDetailModel }) {
               retry={() => void model.barsQuery.fetchNextPage()}
             />
           ) : null}
-          {model.bars?.nextCursor !== null &&
+          {bars !== undefined &&
+          bars.nextCursor !== null &&
           !model.barsQuery.hasNextPage &&
           !model.barsQuery.isFetchingNextPage ? (
             <Alert severity="warning" sx={{ mb: 1 }}>
               当前窗口超过 16,000 条浏览器缓存预算；请改用近 1 年或近 3 年窗口。
             </Alert>
           ) : null}
-          {model.bars?.availability === "EMPTY" ? (
+          {bars?.publicationKind === "ZERO_RECORD_COVERAGE" ? (
             <Alert severity="info">
-              当前物理周期和日期窗口没有行情记录；publication 已存在，不视为依赖故障。
+              当前物理周期和日期窗口已有精确零记录覆盖；它不是
+              NO_PUBLICATION，也没有用零值生成行情。
             </Alert>
           ) : null}
-          {model.bars?.availability === "SOURCE_UNAVAILABLE" ? (
+          {bars?.availability === "SOURCE_UNAVAILABLE" ? (
             <Alert severity="warning" sx={{ mb: 1 }}>
-              行情来源本次同步不可用（{model.bars.reasonCode ?? "SOURCE_UNAVAILABLE"}）；
-              如下数据仅为 last-good publication。
+              行情来源本次同步不可用（{bars.reasonCode ?? "SOURCE_UNAVAILABLE"}）； 如下数据仅为
+              last-good publication。
             </Alert>
           ) : null}
-          {model.bars?.stale ? (
+          {bars?.stale ? (
             <Alert severity="info" sx={{ mb: 1 }}>
               新发布检查失败，当前 K 线保留最后合格版本，只读展示。
             </Alert>
           ) : null}
-          {model.bars !== undefined && model.bars.items.length > 0 ? (
+          {bars !== undefined && bars.items.length > 0 ? (
             <Suspense fallback={<Skeleton variant="rounded" height={480} />}>
               <EquityKlineChart
                 exchange={model.exchange ?? ""}
                 symbol={model.symbol}
                 period={model.state.period}
-                page={model.bars}
+                page={bars}
               />
             </Suspense>
           ) : null}
-          {model.bars?.dataVersion !== null && model.bars?.dataVersion !== undefined ? (
-            <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-              <Chip size="small" label={`dataVersion ${model.bars.dataVersion}`} />
-              <Chip size="small" label={`publishedAt ${model.bars.publishedAt ?? "—"}`} />
-              <Chip
-                size="small"
-                label={
-                  model.state.adjust === "none"
-                    ? "未复权"
-                    : `${model.state.adjust} · adjustAsOf ${model.bars.adjustAsOf ?? "—"}`
-                }
-              />
-              {model.state.adjust === "none" ? null : (
+          {bars !== undefined ? (
+            <Stack spacing={0.5} sx={{ mt: 1.5 }} role="note" aria-label="K 线数据说明">
+              <Typography variant="caption" color="text.secondary">
+                数据说明 ·{bars.publicationKind === "DATA" ? " 数据精确覆盖" : " 零记录精确覆盖"}
+              </Typography>
+              <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", rowGap: 1 }}>
+                <Chip size="small" label={`dataVersion ${bars.dataVersion}`} />
+                <Chip size="small" label={`publishedAt ${bars.publishedAt}`} />
                 <Chip
                   size="small"
                   variant="outlined"
-                  label={`factorVersion ${model.bars.factorVersion ?? "—"} · formula v${model.bars.formulaVersion ?? "—"}`}
+                  label={`coverageVersion ${bars.coverageVersion}`}
                 />
-              )}
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={`publicationKind ${bars.publicationKind}`}
+                />
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={`sourceBatchId ${bars.sourceBatchId}`}
+                />
+                <Chip
+                  size="small"
+                  label={
+                    model.state.adjust === "none"
+                      ? "未复权"
+                      : `${model.state.adjust} · adjustAsOf ${bars.adjustAsOf ?? "—"}`
+                  }
+                />
+                {model.state.adjust === "none" ? null : (
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={`factorVersion ${bars.factorVersion ?? "—"} · formula v${bars.formulaVersion ?? "—"}`}
+                  />
+                )}
+              </Stack>
             </Stack>
           ) : null}
         </CardContent>

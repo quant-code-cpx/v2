@@ -5,13 +5,20 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime
+from typing import cast
 from uuid import uuid4
 
 import pytest
 
-from service_data_sync.application.index.shadow_sync import IndexShadowSyncService
+from service_data_sync.application.index.shadow_sync import (
+    IndexShadowSyncService,
+    decode_catalog_payload,
+)
 from service_data_sync.application.ports.data_source import ProviderBatch, ProviderError
-from service_data_sync.application.ports.index_shadow import StoredIndexShadowObservation
+from service_data_sync.application.ports.index_shadow import (
+    IndexCatalogObservationEntry,
+    StoredIndexShadowObservation,
+)
 from service_data_sync.domain.index import IndexAdministrator, IndexCapability, IndexIdentifier
 
 
@@ -78,7 +85,10 @@ def test_catalog_sync_archives_raw_and_normalized_before_recording_observation()
         {
             "schema": "quant-v2.index-catalog-snapshot.v1",
             "administrator": "CSI",
-            "records": [{"indexCode": "000300", "indexName": "沪深300", "constituentCount": 300}],
+            "records": [
+                {"indexCode": "000300", "indexName": "沪深300", "constituentCount": 300},
+                {"indexCode": "H00999", "indexName": "中证A500", "constituentCount": 500},
+            ],
         },
     )
     store = MemoryRawStore()
@@ -94,8 +104,53 @@ def test_catalog_sync_archives_raw_and_normalized_before_recording_observation()
     assert len(store.payloads) == 2
     assert len(repository.catalog_calls) == 1
     entries = repository.catalog_calls[0]["entries"]
-    assert len(entries) == 1  # type: ignore[arg-type]
+    catalog_entries = cast(tuple[IndexCatalogObservationEntry, ...], entries)
+    assert len(catalog_entries) == 2
+    assert {entry.identifier.code for entry in catalog_entries} == {"000300", "H00999"}
     assert repository.catalog_calls[0]["administrator"] == "CSI"
+
+
+@pytest.mark.parametrize("code", ("H00999", "L11150", "SHHKSI", "000300", "AITCNYG", "39926401"))
+def test_index_identifier_accepts_real_six_character_uppercase_alphanumeric_codes(
+    code: str,
+) -> None:
+    """指数身份接受真实中证目录的六码大写字母数字代码，同时保持精确原文。"""
+    assert IndexIdentifier(IndexAdministrator.CSI, code).code == code
+
+
+@pytest.mark.parametrize("code", ("h00999", "H0099", "H00999999", "H00-99", "中证A500"))
+def test_index_identifier_rejects_noncanonical_index_code_shapes(code: str) -> None:
+    """小写、非六码、符号或非 ASCII 代码都不能成为可持久化的指数身份。"""
+    with pytest.raises(ValueError, match="uppercase ASCII alphanumeric"):
+        IndexIdentifier(IndexAdministrator.CSI, code)
+
+
+def test_catalog_decoder_preserves_real_seven_and_eight_character_cnindex_codes() -> None:
+    """应用层目录解码不得将国证已确认的七至八码身份重新收窄为六码。"""
+    payload = json.dumps(
+        {
+            "schema": "quant-v2.index-catalog-snapshot.v1",
+            "administrator": "CNI",
+            "records": [
+                {
+                    "indexCode": "AITCNYG",
+                    "indexName": "中华陆股通行业龙头R",
+                    "constituentCount": 50,
+                },
+                {
+                    "indexCode": "39926401",
+                    "indexName": "创业软件R",
+                    "constituentCount": 50,
+                },
+            ],
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode()
+
+    entries = decode_catalog_payload(payload, administrator=IndexAdministrator.CNI)
+
+    assert [entry.identifier.code for entry in entries] == ["AITCNYG", "39926401"]
 
 
 def test_weight_sync_converts_confirmed_percentage_to_ratio_without_guessing_exchange() -> None:

@@ -23,6 +23,8 @@ from service_data_sync.application.ports.equity_master_read import (
     EquityMasterPublication,
     EquityMasterReadRepository,
     EquityMasterReadUnavailable,
+    EquityPublicationComponent,
+    EquitySourceAttribution,
     StoredEquityInstrument,
     StoredListingStatusPeriod,
 )
@@ -59,7 +61,7 @@ def register_equity_routes(
         selected_statuses = _statuses_or_problem(status)
         normalized_query = _query_or_problem(query)
         publication = _publication_or_problem(repository, selected_exchange)
-        effective_as_of, knowledge_cutoff = _selection_or_problem(
+        effective_as_of, requested_known_at = _selection_or_problem(
             publication, as_of=as_of, known_at=known_at
         )
         decoded_cursor = _cursor_or_problem(
@@ -76,7 +78,7 @@ def register_equity_routes(
             selector_as_of=as_of,
             selector_known_at=known_at,
             effective_as_of=effective_as_of,
-            knowledge_cutoff=knowledge_cutoff,
+            requested_known_at=requested_known_at,
         )
         try:
             rows = repository.list_instruments(
@@ -85,7 +87,7 @@ def register_equity_routes(
                 statuses=selected_statuses,
                 query=normalized_query,
                 as_of=effective_as_of,
-                known_at=knowledge_cutoff,
+                known_at=requested_known_at,
                 after_exchange=after_exchange,
                 after_symbol=after_symbol,
                 after_instrument_id=after_instrument_id,
@@ -103,7 +105,7 @@ def register_equity_routes(
                     "s": list(selected_statuses),
                     "q": normalized_query,
                     "a": effective_as_of.isoformat(),
-                    "n": _timestamp(knowledge_cutoff),
+                    "n": _timestamp(requested_known_at),
                     "ad": as_of is None,
                     "nd": known_at is None,
                     "e": page_rows[-1].identifier.exchange.value,
@@ -121,8 +123,11 @@ def register_equity_routes(
             "dataVersion": str(publication.data_version),
             "publishedAt": _timestamp(publication.published_at),
             "effectiveAsOf": effective_as_of.isoformat(),
-            "knowledgeCutoff": _timestamp(knowledge_cutoff),
+            "requestedKnownAt": _timestamp(requested_known_at),
             "publicationScope": publication.publication_scope,
+            "componentPublications": [
+                _publication_component_resource(component) for component in publication.components
+            ],
         }
         return _conditional_response(
             request=request,
@@ -136,7 +141,7 @@ def register_equity_routes(
                     "statuses": selected_statuses,
                     "query": normalized_query,
                     "asOf": effective_as_of.isoformat(),
-                    "knownAt": _timestamp(knowledge_cutoff),
+                    "knownAt": _timestamp(requested_known_at),
                     "cursor": cursor,
                     "limit": limit,
                 },
@@ -159,7 +164,7 @@ def register_equity_routes(
         """按当前开放或显式历史日期解析唯一证券并返回双时间详情。"""
         identifier = _identifier_or_problem(exchange, symbol)
         publication = _publication_or_problem(repository, identifier.exchange)
-        projection_as_of, knowledge_cutoff = _selection_or_problem(
+        projection_as_of, requested_known_at = _selection_or_problem(
             publication, as_of=as_of, known_at=known_at
         )
         instrument = _instrument_or_problem(
@@ -168,14 +173,18 @@ def register_equity_routes(
             identifier=identifier,
             identifier_as_of=as_of,
             projection_as_of=projection_as_of,
-            known_at=knowledge_cutoff,
+            known_at=requested_known_at,
         )
         body = {
             **_instrument_resource(instrument),
             "dataVersion": str(publication.data_version),
             "publishedAt": _timestamp(publication.published_at),
             "effectiveAsOf": projection_as_of.isoformat(),
-            "knowledgeCutoff": _timestamp(knowledge_cutoff),
+            "requestedKnownAt": _timestamp(requested_known_at),
+            "publicationScope": publication.publication_scope,
+            "componentPublications": [
+                _publication_component_resource(component) for component in publication.components
+            ],
         }
         return _conditional_response(
             request=request,
@@ -188,7 +197,7 @@ def register_equity_routes(
                     "exchange": identifier.exchange.value,
                     "symbol": identifier.symbol,
                     "asOf": None if as_of is None else as_of.isoformat(),
-                    "knownAt": _timestamp(knowledge_cutoff),
+                    "knownAt": _timestamp(requested_known_at),
                 },
             ),
             body=body,
@@ -220,7 +229,7 @@ def register_equity_routes(
                 )
         identifier = _identifier_or_problem(exchange, symbol)
         publication = _publication_or_problem(repository, identifier.exchange)
-        projection_as_of, knowledge_cutoff = _selection_or_problem(
+        projection_as_of, requested_known_at = _selection_or_problem(
             publication, as_of=as_of, known_at=known_at
         )
         decoded_cursor = _cursor_or_problem(
@@ -234,7 +243,7 @@ def register_equity_routes(
             identifier=identifier,
             identifier_as_of=as_of,
             projection_as_of=projection_as_of,
-            known_at=knowledge_cutoff,
+            known_at=requested_known_at,
         )
         after_effective_from, after_known_from, after_version_id = _history_position_or_problem(
             decoded_cursor,
@@ -244,7 +253,7 @@ def register_equity_routes(
             selector_as_of=as_of,
             selector_known_at=known_at,
             effective_as_of=projection_as_of,
-            knowledge_cutoff=knowledge_cutoff,
+            requested_known_at=requested_known_at,
             effective_from=effective_from,
             effective_to=effective_to,
         )
@@ -253,7 +262,7 @@ def register_equity_routes(
                 data_version=publication.data_version,
                 exchange=identifier.exchange,
                 security_id=instrument.security_id,
-                known_at=knowledge_cutoff,
+                known_at=requested_known_at,
                 effective_from=effective_from,
                 effective_to=effective_to,
                 after_effective_from=after_effective_from,
@@ -275,7 +284,7 @@ def register_equity_routes(
                     "a": projection_as_of.isoformat(),
                     "f": None if effective_from is None else effective_from.isoformat(),
                     "t": None if effective_to is None else effective_to.isoformat(),
-                    "n": _timestamp(knowledge_cutoff),
+                    "n": _timestamp(requested_known_at),
                     "ad": as_of is None,
                     "nd": known_at is None,
                     "d": page_rows[-1].effective_from.isoformat(),
@@ -295,7 +304,11 @@ def register_equity_routes(
             "nextCursor": next_cursor,
             "dataVersion": str(publication.data_version),
             "publishedAt": _timestamp(publication.published_at),
-            "knowledgeCutoff": _timestamp(knowledge_cutoff),
+            "requestedKnownAt": _timestamp(requested_known_at),
+            "publicationScope": publication.publication_scope,
+            "componentPublications": [
+                _publication_component_resource(component) for component in publication.components
+            ],
         }
         return _conditional_response(
             request=request,
@@ -311,7 +324,7 @@ def register_equity_routes(
                     "asOf": None if as_of is None else as_of.isoformat(),
                     "effectiveFrom": None if effective_from is None else effective_from.isoformat(),
                     "effectiveTo": None if effective_to is None else effective_to.isoformat(),
-                    "knownAt": _timestamp(knowledge_cutoff),
+                    "knownAt": _timestamp(requested_known_at),
                     "cursor": cursor,
                     "limit": limit,
                 },
@@ -330,7 +343,8 @@ def _publication_or_problem(
     except EquityMasterReadUnavailable as error:
         raise _unavailable_problem() from error
     if publication is None:
-        raise _unavailable_problem()
+        # 缺少已发布版本与底层读取故障必须有不同语义；前者允许消费者展示稳定的“尚无数据”状态。
+        raise _publication_unavailable_problem()
     return publication
 
 
@@ -340,7 +354,11 @@ def _selection_or_problem(
     as_of: date | None,
     known_at: datetime | None,
 ) -> tuple[date, datetime]:
-    """冻结请求的市场日期与知识截止时间，禁止越过发布版本。"""
+    """冻结市场日期和请求知识上界，组件实际 cutoff 始终独立保留。
+
+    未传 `knownAt` 时使用输入组件中最大的 cutoff 作为请求上界，再由仓储分别裁剪目录和
+    生命周期；响应只公开各组件自己的 cutoff，绝不伪造一个共同知识时间。
+    """
     effective_as_of = publication.effective_as_of if as_of is None else as_of
     if effective_as_of > publication.effective_as_of:
         raise InternalProblem(
@@ -348,19 +366,22 @@ def _selection_or_problem(
             code="validation-error",
             detail="asOf exceeds the selected publication",
         )
-    knowledge_cutoff = publication.knowledge_cutoff if known_at is None else known_at
-    if knowledge_cutoff.tzinfo is None:
+    component_cutoffs = tuple(component.knowledge_cutoff for component in publication.components)
+    if not component_cutoffs:
+        raise _unavailable_problem()
+    requested_known_at = max(component_cutoffs) if known_at is None else known_at
+    if requested_known_at.tzinfo is None:
         raise InternalProblem(
             status=400,
             code="validation-error",
             detail="knownAt must include a timezone",
         )
-    normalized_knowledge = knowledge_cutoff.astimezone(UTC)
-    if normalized_knowledge > publication.knowledge_cutoff.astimezone(UTC):
+    normalized_knowledge = requested_known_at.astimezone(UTC)
+    if normalized_knowledge > max(value.astimezone(UTC) for value in component_cutoffs):
         raise InternalProblem(
             status=400,
             code="validation-error",
-            detail="knownAt exceeds the selected publication",
+            detail="knownAt exceeds the selected resolved publication components",
         )
     if normalized_knowledge > datetime.now(UTC):
         raise InternalProblem(
@@ -490,7 +511,7 @@ def _list_position_or_problem(
     selector_as_of: date | None,
     selector_known_at: datetime | None,
     effective_as_of: date,
-    knowledge_cutoff: datetime,
+    requested_known_at: datetime,
 ) -> tuple[Exchange | None, str | None, UUID | None]:
     """先验证目录游标筛选投影，再区分过期版本并解析稳定位置。"""
     if cursor is None:
@@ -510,7 +531,7 @@ def _list_position_or_problem(
         raise _invalid_cursor_problem()
     _require_current_cursor_version(cursor, data_version=data_version)
     if cursor.get("a") != effective_as_of.isoformat() or cursor.get("n") != _timestamp(
-        knowledge_cutoff
+        requested_known_at
     ):
         raise _invalid_cursor_problem()
     cursor_exchange = cursor.get("e")
@@ -537,7 +558,7 @@ def _history_position_or_problem(
     selector_as_of: date | None,
     selector_known_at: datetime | None,
     effective_as_of: date,
-    knowledge_cutoff: datetime,
+    requested_known_at: datetime,
     effective_from: date | None,
     effective_to: date | None,
 ) -> tuple[date | None, datetime | None, UUID | None]:
@@ -561,7 +582,7 @@ def _history_position_or_problem(
         raise _invalid_cursor_problem()
     _require_current_cursor_version(cursor, data_version=data_version)
     if cursor.get("a") != effective_as_of.isoformat() or cursor.get("n") != _timestamp(
-        knowledge_cutoff
+        requested_known_at
     ):
         raise _invalid_cursor_problem()
     cursor_effective = cursor.get("d")
@@ -640,7 +661,7 @@ def _decode_base64url(value: str) -> bytes:
 
 
 def _instrument_resource(instrument: StoredEquityInstrument) -> dict[str, Any]:
-    """投影合同字段并隐藏 security_id、来源批次和质量细节。"""
+    """投影合同字段，隐藏 security_id 但公开可复验的来源、证据和质量摘要。"""
     return {
         "instrumentId": str(instrument.instrument_id),
         "identifier": {
@@ -651,6 +672,8 @@ def _instrument_resource(instrument: StoredEquityInstrument) -> dict[str, Any]:
             "datePrecision": instrument.identifier.date_precision,
             "knownFrom": _timestamp(instrument.identifier.known_from),
             "observedAt": _timestamp(instrument.identifier.observed_at),
+            "source": _source_resource(instrument.identifier.source),
+            "qualityStatus": instrument.identifier.quality_status,
         },
         "name": {
             "value": instrument.name.value,
@@ -659,6 +682,8 @@ def _instrument_resource(instrument: StoredEquityInstrument) -> dict[str, Any]:
             "datePrecision": instrument.name.date_precision,
             "knownFrom": _timestamp(instrument.name.known_from),
             "observedAt": _timestamp(instrument.name.observed_at),
+            "source": _source_resource(instrument.name.source),
+            "qualityStatus": instrument.name.quality_status,
         },
         "listing": {
             "status": instrument.listing.status,
@@ -669,12 +694,15 @@ def _instrument_resource(instrument: StoredEquityInstrument) -> dict[str, Any]:
             "datePrecision": instrument.listing.date_precision,
             "knownFrom": _timestamp(instrument.listing.known_from),
             "observedAt": _timestamp(instrument.listing.observed_at),
+            "evidenceKind": instrument.listing.evidence_kind,
+            "source": _source_resource(instrument.listing.source),
+            "qualityStatus": instrument.listing.quality_status,
         },
     }
 
 
 def _listing_period_resource(period: StoredListingStatusPeriod) -> dict[str, Any]:
-    """投影生命周期知识版本，不暴露内部 version_id 或证据字段。"""
+    """投影生命周期知识版本，公开证据类型和不含 raw URI 的来源锚点。"""
     return {
         "status": period.status,
         "effectiveFrom": period.effective_from.isoformat(),
@@ -683,6 +711,32 @@ def _listing_period_resource(period: StoredListingStatusPeriod) -> dict[str, Any
         "knownFrom": _timestamp(period.known_from),
         "knownTo": None if period.known_to is None else _timestamp(period.known_to),
         "observedAt": _timestamp(period.observed_at),
+        "evidenceKind": period.evidence_kind,
+        "source": _source_resource(period.source),
+        "qualityStatus": period.quality_status,
+    }
+
+
+def _publication_component_resource(component: EquityPublicationComponent) -> dict[str, Any]:
+    """投影 resolved 输入组件，明确保留各自的 cutoff、版本和质量状态。"""
+    return {
+        "componentKey": component.component_key,
+        "dataset": component.dataset,
+        "partitionKey": component.partition_key,
+        "dataVersion": str(component.data_version),
+        "publishedAt": _timestamp(component.published_at),
+        "effectiveAsOf": component.effective_as_of.isoformat(),
+        "knowledgeCutoff": _timestamp(component.knowledge_cutoff),
+        "qualityStatus": component.quality_status,
+    }
+
+
+def _source_resource(source: EquitySourceAttribution) -> dict[str, str | None]:
+    """投影事实来源，不暴露 provider URL、账户、Cookie 或原始响应位置。"""
+    return {
+        "sourceBatchId": None if source.source_batch_id is None else str(source.source_batch_id),
+        "providerId": source.provider_id,
+        "upstreamSource": source.upstream_source,
     }
 
 
@@ -754,4 +808,13 @@ def _unavailable_problem() -> InternalProblem:
         status=503,
         code="dependency-unavailable",
         detail="Equity master publication is unavailable",
+    )
+
+
+def _publication_unavailable_problem() -> InternalProblem:
+    """构造明确的无 publication 问题，不把它误报为数据库或网络故障。"""
+    return InternalProblem(
+        status=503,
+        code="publication-unavailable",
+        detail="Equity master publication is not available",
     )

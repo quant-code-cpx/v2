@@ -139,6 +139,66 @@ def test_coverage_loader_runs_once_per_family_for_full_frozen_roster(
     assert result.coverage_count == 1_000
 
 
+def test_coverage_progress_keeps_direct_canonical_data_version_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """普通公司行动的 coverage 进度不得覆盖仓储已登记的真实 dataVersion。"""
+    data_version = UUID("50000000-0000-4000-8000-000000000001")
+    execution = _RecordingFencedExecution(
+        checkpoint_kind="data-version",
+        checkpoint_position=str(data_version),
+    )
+
+    class _ReleaseRepository:
+        """返回覆盖 manifest 的消费者 publication，避免单测连接 PostgreSQL。"""
+
+        def publish_in_session(self, **kwargs: object) -> SimpleNamespace:
+            """返回固定 coverage publication，调用参数由其他单测覆盖。"""
+            del kwargs
+            return SimpleNamespace(data_version=uuid4())
+
+    def records_for(
+        session: Session,
+        frozen_identities: Sequence[EventCoverageIdentity],
+        family: str,
+    ) -> dict[EventCoverageIdentity, EventCoverageRecords]:
+        """返回一只证券的合法空公司行动窗口。"""
+        del session
+        assert family == "CORPORATE_ACTION"
+        return {
+            identity: EventCoverageRecords(records=(), fact_dates=())
+            for identity in frozen_identities
+        }
+
+    monkeypatch.setattr(coverage, "current_fenced_execution", lambda: execution)
+    monkeypatch.setattr(coverage, "record_normalization_run", lambda *args, **kwargs: uuid4())
+    monkeypatch.setattr(coverage, "_coverage_candidate", lambda *args, **kwargs: object())
+    monkeypatch.setattr(coverage, "_publication_id", lambda *args, **kwargs: uuid4())
+    monkeypatch.setattr(coverage, "_record_coverages", lambda *args, **kwargs: None)
+
+    coverage.publish_event_window_coverages(
+        cast(Session, object()),
+        release_repository=cast(SqlAlchemyCanonicalReleaseRepository, _ReleaseRepository()),
+        dataset_id=uuid4(),
+        dataset_code="equity.corporate_action",
+        methodology_version_id=uuid4(),
+        mapping_version="test-v1",
+        source=cast(TypedP0SourceObservation, _Source()),
+        source_batch_id=uuid4(),
+        identities=(_identity(1),),
+        coverage_scope="INSTRUMENT",
+        universe_hash="a" * 64,
+        families=("CORPORATE_ACTION",),
+        records_for=records_for,
+        now=datetime(2026, 8, 1, 14, tzinfo=UTC),
+    )
+
+    assert execution.checkpoint_kind == "data-version"
+    assert execution.checkpoint_position == str(data_version)
+    assert execution.completed_partitions == 1
+    assert execution.processed_records == 0
+
+
 def test_five_family_full_roster_current_query_stays_below_postgresql_bind_limit() -> None:
     """五族五千证券的 current 查询只按 roster 绑定，不会形成 12.5 万参数。"""
     session = _RecordingSession([[], []])
@@ -187,6 +247,22 @@ class _Source:
     upstream_source = "integration-provider"
     adapter_version = "integration-v1"
     schema_fingerprint = "c" * 64
+
+
+class _RecordingFencedExecution:
+    """记录 coverage 写入的控制面进度与既有 canonical checkpoint。"""
+
+    def __init__(self, *, checkpoint_kind: str, checkpoint_position: str) -> None:
+        """初始化普通 canonical 发布已写入的真实版本 checkpoint。"""
+        self.checkpoint_kind = checkpoint_kind
+        self.checkpoint_position = checkpoint_position
+        self.completed_partitions = 0
+        self.processed_records = 0
+
+    def record_publication_progress(self, *, record_count: int) -> None:
+        """模拟 coverage manifest 对控制面进度的唯一贡献。"""
+        self.completed_partitions += 1
+        self.processed_records += record_count
 
 
 def _coverage_write(

@@ -139,7 +139,7 @@ def decode_catalog_payload(
                 raise ValueError("catalog record is invalid")
             entries.append(
                 IndexCatalogObservationEntry(
-                    identifier=IndexIdentifier(administrator, _six_digit(record.get("indexCode"))),
+                    identifier=IndexIdentifier(administrator, _index_code(record.get("indexCode"))),
                     name=_text(record.get("indexName")),
                     full_name=_optional_text(record.get("fullName")),
                     base_date=_optional_date(record.get("baseDate")),
@@ -309,6 +309,27 @@ def _six_digit(value: object) -> str:
         normalized = normalized.zfill(6)
     if len(normalized) != 6 or not normalized.isdigit():
         raise ValueError("source code must contain six digits")
+    return normalized
+
+
+def _index_code(value: object) -> str:
+    """保留短数字代码前导零，并接受中证、国证实证的六码至八码大写字母数字身份。
+
+    该函数只用于指数目录身份；成分证券仍必须走 `_six_digit`，避免将指数代码形状错误扩展到
+    A 股证券身份。标准载荷中的小写或符号不是可静默修复的输入，必须作为 schema 失败返回。
+    """
+    normalized = _text(value)
+    if normalized.isdigit() and len(normalized) <= 6:
+        normalized = normalized.zfill(6)
+    if (
+        not 6 <= len(normalized) <= 8
+        or not normalized.isascii()
+        or not normalized.isalnum()
+        or normalized != normalized.upper()
+    ):
+        raise ValueError(
+            "source index code must contain 6 to 8 uppercase ASCII alphanumeric characters"
+        )
     return normalized
 
 

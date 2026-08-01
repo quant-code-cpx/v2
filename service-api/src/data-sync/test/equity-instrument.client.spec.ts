@@ -22,6 +22,12 @@ const internalEquity = {
     datePrecision: 'OFFICIAL_DATE',
     knownFrom: '2026-07-01T00:00:00Z',
     observedAt: '2026-07-01T00:00:00Z',
+    source: {
+      sourceBatchId: '00000000-0000-4000-8000-000000000010',
+      providerId: 'catalog-provider',
+      upstreamSource: 'eastmoney.equity-catalog',
+    },
+    qualityStatus: 'passed',
   },
   name: {
     value: '浦发银行',
@@ -30,6 +36,12 @@ const internalEquity = {
     datePrecision: 'OFFICIAL_DATE',
     knownFrom: '2026-07-01T00:00:00Z',
     observedAt: '2026-07-01T00:00:00Z',
+    source: {
+      sourceBatchId: '00000000-0000-4000-8000-000000000010',
+      providerId: 'catalog-provider',
+      upstreamSource: 'eastmoney.equity-catalog',
+    },
+    qualityStatus: 'passed',
   },
   listing: {
     status: 'LISTED',
@@ -40,6 +52,13 @@ const internalEquity = {
     datePrecision: 'OFFICIAL_DATE',
     knownFrom: '2026-07-01T00:00:00Z',
     observedAt: '2026-07-01T00:00:00Z',
+    evidenceKind: 'EXPLICIT_LISTING',
+    source: {
+      sourceBatchId: '00000000-0000-4000-8000-000000000011',
+      providerId: 'lifecycle-provider',
+      upstreamSource: 'sse.lifecycle',
+    },
+    qualityStatus: 'passed',
   },
 } as const;
 
@@ -48,7 +67,29 @@ const publication = {
   dataVersion: '00000000-0000-4000-8000-000000000002',
   publishedAt: '2026-07-01T00:00:00Z',
   effectiveAsOf: '2026-06-30',
-  knowledgeCutoff: '2026-07-01T00:00:00Z',
+  requestedKnownAt: '2026-07-01T00:00:00Z',
+  componentPublications: [
+    {
+      componentKey: 'catalog',
+      dataset: 'equity.master.catalog',
+      partitionKey: 'SSE',
+      dataVersion: '00000000-0000-4000-8000-000000000003',
+      publishedAt: '2026-07-01T00:00:00Z',
+      effectiveAsOf: '2026-06-30',
+      knowledgeCutoff: '2026-06-30T23:00:00Z',
+      qualityStatus: 'passed',
+    },
+    {
+      componentKey: 'lifecycle',
+      dataset: 'equity.lifecycle.explicit',
+      partitionKey: 'SSE',
+      dataVersion: '00000000-0000-4000-8000-000000000004',
+      publishedAt: '2026-07-01T00:00:00Z',
+      effectiveAsOf: '2026-06-30',
+      knowledgeCutoff: '2026-07-01T00:00:00Z',
+      qualityStatus: 'passed',
+    },
+  ],
 } as const;
 
 /** 覆盖内部合同校验、公开投影、请求关联和安全错误映射。 */
@@ -93,7 +134,13 @@ describe('EquityInstrumentClient', () => {
       expect(result.body.items[0]).toMatchObject({
         identifier: { exchange: 'SSE', symbol: '600000' },
         name: { value: '浦发银行' },
+        listing: {
+          evidenceKind: 'EXPLICIT_LISTING',
+          source: { upstreamSource: 'sse.lifecycle' },
+          qualityStatus: 'passed',
+        },
       });
+      expect(result.body.componentPublications).toHaveLength(2);
     }
 
     const [target, init] = fetcher.mock.calls[0] ?? [];
@@ -118,7 +165,7 @@ describe('EquityInstrumentClient', () => {
   /** 验证券详情路径和时间切片正确映射，且详情同样不泄漏内部 UUID。 */
   it('projects a temporal equity detail into the public contract', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ ...internalEquity, ...publication }), {
+      new Response(JSON.stringify({ ...internalEquity, ...publication, publicationScope: 'SSE' }), {
         status: 200,
         headers: {
           ETag: '"equity-v1"',
@@ -162,12 +209,21 @@ describe('EquityInstrumentClient', () => {
               knownFrom: '2026-07-01T00:00:00Z',
               knownTo: null,
               observedAt: '2026-07-01T00:00:00Z',
+              evidenceKind: 'EXPLICIT_LISTING',
+              source: {
+                sourceBatchId: '00000000-0000-4000-8000-000000000011',
+                providerId: 'lifecycle-provider',
+                upstreamSource: 'sse.lifecycle',
+              },
+              qualityStatus: 'passed',
             },
           ],
           nextCursor: null,
           dataVersion: publication.dataVersion,
           publishedAt: publication.publishedAt,
-          knowledgeCutoff: publication.knowledgeCutoff,
+          requestedKnownAt: publication.requestedKnownAt,
+          publicationScope: 'SSE',
+          componentPublications: publication.componentPublications,
         }),
         {
           status: 200,
@@ -199,6 +255,8 @@ describe('EquityInstrumentClient', () => {
       expect(result.body.items[0]).toMatchObject({
         status: 'LISTED',
         effectiveDatePrecision: 'OFFICIAL_DATE',
+        evidenceKind: 'EXPLICIT_LISTING',
+        source: { sourceBatchId: '00000000-0000-4000-8000-000000000011' },
       });
     }
     const [target] = fetcher.mock.calls[0] ?? [];
@@ -300,7 +358,7 @@ describe('EquityInstrumentClient', () => {
   /** 验证响应头与正文 publication 不一致时失败关闭，不能污染浏览器条件缓存。 */
   it('rejects a mismatched publication header', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ ...internalEquity, ...publication }), {
+      new Response(JSON.stringify({ ...internalEquity, ...publication, publicationScope: 'SSE' }), {
         status: 200,
         headers: {
           ETag: '"equity-v1"',

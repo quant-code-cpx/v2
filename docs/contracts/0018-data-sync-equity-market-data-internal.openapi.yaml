@@ -21,6 +21,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ExchangePath'
         - $ref: '#/components/parameters/SymbolPath'
+        - $ref: '#/components/parameters/DataVersion'
         - name: period
           in: query
           schema:
@@ -49,6 +50,7 @@ paths:
           schema:
             type: string
             format: date
+        - $ref: '#/components/parameters/FactorDataVersion'
         - $ref: '#/components/parameters/Cursor'
         - name: limit
           in: query
@@ -73,6 +75,11 @@ paths:
                 $ref: '#/components/schemas/EquityBarPage'
         '304':
           description: Representation is unchanged
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -90,6 +97,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ExchangePath'
         - $ref: '#/components/parameters/SymbolPath'
+        - $ref: '#/components/parameters/DataVersion'
         - name: start
           in: query
           required: false
@@ -115,12 +123,22 @@ paths:
       responses:
         '200':
           description: Published cumulative factors
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdjustmentFactorPage'
         '304':
           description: Representation is unchanged
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -138,6 +156,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ExchangePath'
         - $ref: '#/components/parameters/SymbolPath'
+        - $ref: '#/components/parameters/DataVersion'
         - name: start
           in: query
           required: false
@@ -163,12 +182,22 @@ paths:
       responses:
         '200':
           description: Published corporate actions
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CorporateActionPage'
         '304':
           description: Representation is unchanged
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -186,16 +215,28 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ExchangePath'
         - $ref: '#/components/parameters/SymbolPath'
+        - $ref: '#/components/parameters/DataVersion'
+        - $ref: '#/components/parameters/AsOf'
         - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
           description: Published company profile
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CompanyProfileResponse'
         '304':
           description: Representation is unchanged
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -223,6 +264,30 @@ components:
       schema:
         type: string
         pattern: '^[0-9]{6}$'
+    DataVersion:
+      name: dataVersion
+      in: query
+      required: true
+      description: Immutable publication selected by the matching data-status record.
+      schema:
+        type: string
+        format: uuid
+    FactorDataVersion:
+      name: factorDataVersion
+      in: query
+      required: false
+      description: Immutable adjustment-factor publication required for qfq or hfq bars.
+      schema:
+        type: string
+        format: uuid
+    AsOf:
+      name: asOf
+      in: query
+      required: false
+      description: Business effective date used to resolve the company-profile identity.
+      schema:
+        type: string
+        format: date
     Cursor:
       name: cursor
       in: query
@@ -266,7 +331,7 @@ components:
     NonNegativeDecimalString:
       type: string
       pattern: '^[0-9]+(?:\.[0-9]+)?$'
-    Publication:
+    ReferencePublication:
       type: object
       required:
         - exchange
@@ -291,8 +356,22 @@ components:
           type: string
           const: passed
         stale:
-          type: boolean
           const: false
+    BarPublication:
+      allOf:
+        - $ref: '#/components/schemas/ReferencePublication'
+        - type: object
+          required: [availability, observedAt, reasonCode]
+          properties:
+            availability:
+              type: string
+              enum: [AVAILABLE, SOURCE_UNAVAILABLE]
+            observedAt:
+              type: [string, 'null']
+              format: date-time
+            reasonCode:
+              type: [string, 'null']
+              maxLength: 80
     EquityBar:
       type: object
       additionalProperties: false
@@ -335,9 +414,12 @@ components:
           minimum: 1
     EquityBarPage:
       allOf:
-        - $ref: '#/components/schemas/Publication'
+        - $ref: '#/components/schemas/BarPublication'
         - type: object
           required:
+            - coverageVersion
+            - publicationKind
+            - sourceBatchId
             - period
             - adjustmentMode
             - adjustAsOf
@@ -346,6 +428,15 @@ components:
             - items
             - nextCursor
           properties:
+            coverageVersion:
+              type: string
+              format: uuid
+            publicationKind:
+              type: string
+              enum: [DATA, ZERO_RECORD_COVERAGE]
+            sourceBatchId:
+              type: string
+              format: uuid
             period:
               $ref: '#/components/schemas/BarPeriod'
             adjustmentMode:
@@ -370,7 +461,7 @@ components:
     AdjustmentFactor:
       type: object
       additionalProperties: false
-      required: [effectiveDate, cumulativeFactor, revision]
+      required: [effectiveDate, cumulativeFactor, revision, sourceBatchId]
       properties:
         effectiveDate:
           type: string
@@ -380,15 +471,41 @@ components:
         revision:
           type: integer
           minimum: 1
+        sourceBatchId:
+          type: string
+          format: uuid
+    AdjustmentFactorPublicationSource:
+      type: object
+      additionalProperties: false
+      required: [sourceBatchId, providerId, upstreamSource, adapterVersion]
+      description: Frozen publication source, present even when the requested factor window is empty.
+      properties:
+        sourceBatchId:
+          type: string
+          format: uuid
+        providerId:
+          type: string
+          minLength: 1
+          maxLength: 100
+        upstreamSource:
+          type: string
+          minLength: 1
+          maxLength: 100
+        adapterVersion:
+          type: string
+          minLength: 1
+          maxLength: 64
     AdjustmentFactorPage:
       allOf:
-        - $ref: '#/components/schemas/Publication'
+        - $ref: '#/components/schemas/ReferencePublication'
         - type: object
-          required: [factorVersion, items, nextCursor]
+          required: [factorVersion, source, items, nextCursor]
           properties:
             factorVersion:
               type: string
               format: uuid
+            source:
+              $ref: '#/components/schemas/AdjustmentFactorPublicationSource'
             items:
               type: array
               maxItems: 500
@@ -403,6 +520,7 @@ components:
       required:
         - actionId
         - revision
+        - sourceBatchId
         - reportPeriod
         - status
         - announcementDate
@@ -418,6 +536,9 @@ components:
         revision:
           type: integer
           minimum: 1
+        sourceBatchId:
+          type: string
+          format: uuid
         reportPeriod:
           type: string
           format: date
@@ -448,7 +569,7 @@ components:
             - type: 'null'
     CorporateActionPage:
       allOf:
-        - $ref: '#/components/schemas/Publication'
+        - $ref: '#/components/schemas/ReferencePublication'
         - type: object
           required: [items, nextCursor]
           properties:
@@ -515,13 +636,19 @@ components:
           type: [string, 'null']
     CompanyProfileResponse:
       allOf:
-        - $ref: '#/components/schemas/Publication'
+        - $ref: '#/components/schemas/ReferencePublication'
         - type: object
-          required: [revision, profile]
+          required: [identityAsOf, revision, sourceBatchId, profile]
           properties:
+            identityAsOf:
+              type: string
+              format: date
             revision:
               type: integer
               minimum: 1
+            sourceBatchId:
+              type: string
+              format: uuid
             profile:
               $ref: '#/components/schemas/CompanyProfile'
     Problem:

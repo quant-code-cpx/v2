@@ -167,6 +167,10 @@ services:
       context: ./service-data-sync
       dockerfile: Dockerfile
       target: development
+    volumes:
+      - ./service-data-sync/src:/app/src:ro
+      - ./service-data-sync/migrations:/app/migrations:ro
+      - ./service-data-sync/alembic.ini:/app/alembic.ini:ro
 
   data-sync-api:
     image: quant-v2/service-data-sync:dev

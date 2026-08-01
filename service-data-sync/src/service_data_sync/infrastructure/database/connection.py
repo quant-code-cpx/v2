@@ -95,9 +95,7 @@ class DatabaseClient:
         with self.session() as session:
             execution = current_fenced_execution()
             terminal_written_before = (
-                execution is not None
-                and execution.database is self
-                and execution.terminal_written
+                execution is not None and execution.database is self and execution.terminal_written
             )
             try:
                 # `try` 必须包住整个事务上下文，才能同时捕获业务体、finalizer 和 commit 失败。

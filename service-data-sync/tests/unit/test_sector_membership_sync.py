@@ -28,7 +28,11 @@ from service_data_sync.application.sector.membership_sync import (
     SectorMembershipSyncService,
     decode_sector_membership_batch,
 )
-from service_data_sync.domain.sector import SectorIdentifier, SectorScheme
+from service_data_sync.domain.sector import (
+    SectorIdentifier,
+    SectorMembershipCandidate,
+    SectorScheme,
+)
 
 
 class FakeRawPayloadStore:
@@ -60,6 +64,7 @@ class FakeRepository:
         self.release_calls: list[tuple[SectorScheme, date]] = []
         self.completed: list[StoredSector] = []
         self.failed: list[StoredSector] = []
+        self.candidate_batches: list[tuple[str, ...]] = []
         self.started_sectors: tuple[StoredSector, ...] | None = None
         self.finished_status: str | None = None
 
@@ -115,7 +120,9 @@ class FakeRepository:
         assert self.raw_store.payloads
         sector = kwargs["sector"]
         assert isinstance(sector, StoredSector)
+        candidates = cast(tuple[SectorMembershipCandidate, ...], kwargs["candidates"])
         self.snapshots.append(sector)
+        self.candidate_batches.append(tuple(candidate.source_symbol for candidate in candidates))
         return PublishedSectorMembershipSnapshot(
             snapshot_id=uuid4(),
             observed_at=datetime(2026, 7, 27, tzinfo=UTC),
@@ -201,6 +208,35 @@ class OneRetrySource(FakeSource):
         if self.calls == 1:
             raise ProviderError(ProviderErrorCode.UNAVAILABLE, "temporary outage", retryable=True)
         return await super().fetch(request)
+
+
+class BShareMixedSource(FakeSource):
+    """返回混有 B 股的原始成员响应，验证 A 股边界只过滤已知 B 股代码。"""
+
+    async def fetch(self, request: SourceRequest) -> ProviderBatch:
+        """构造包含深沪 B 股和其它六位代码的同一份标准、原始载荷。"""
+        code = dict(request.parameters)["sector"]
+        payload = (
+            "{"
+            '"schema":"quant-v2.sector-membership-snapshot.v1",'
+            '"sectorScheme":"eastmoney.industry",'
+            f'"sector":"{code}",'
+            '"members":['
+            '{"sourceSymbol":"600000","sourceName":"浦发银行"},'
+            '{"sourceSymbol":"200001","sourceName":"深市B股"},'
+            '{"sourceSymbol":"201001","sourceName":"深市B股二类"},'
+            '{"sourceSymbol":"900001","sourceName":"沪市B股"},'
+            '{"sourceSymbol":"123456","sourceName":"未知六位代码"}'
+            "]}"
+        ).encode()
+        return ProviderBatch(
+            provider_id=self.provider_id,
+            capability=request.capability,
+            payload=payload,
+            raw_payload=payload,
+            raw_content_type="application/json",
+            observed_at=datetime(2026, 7, 27, tzinfo=UTC),
+        )
 
 
 def test_sync_freezes_active_sectors_archives_raw_and_publishes_release() -> None:
@@ -319,6 +355,51 @@ def test_decode_rejects_duplicate_source_symbols() -> None:
             payload,
             identifier=SectorIdentifier(SectorScheme.EASTMONEY_INDUSTRY, "BK0001"),
         )
+
+
+def test_decode_excludes_only_explicit_b_share_prefixes() -> None:
+    """`200`、`201`、`900` 仅在 A 股候选边界排除，其它未知六位代码必须保留。"""
+    payload = (
+        b'{"schema":"quant-v2.sector-membership-snapshot.v1",'
+        b'"sectorScheme":"eastmoney.industry","sector":"BK0001",'
+        b'"members":[{"sourceSymbol":"600000","sourceName":"A"},'
+        b'{"sourceSymbol":"200001","sourceName":"B1"},'
+        b'{"sourceSymbol":"201001","sourceName":"B2"},'
+        b'{"sourceSymbol":"900001","sourceName":"B3"},'
+        b'{"sourceSymbol":"123456","sourceName":"unknown"}]}'
+    )
+
+    candidates, _ = decode_sector_membership_batch(
+        payload,
+        identifier=SectorIdentifier(SectorScheme.EASTMONEY_INDUSTRY, "BK0001"),
+    )
+
+    assert [candidate.source_symbol for candidate in candidates] == ["123456", "600000"]
+
+
+def test_sync_archives_original_b_share_rows_before_a_share_filter() -> None:
+    """B 股只退出 A 股 canonical；原始响应仍完整归档，且 release 阈值未被改写。"""
+    raw_store = FakeRawPayloadStore()
+    repository = FakeRepository(raw_store)
+
+    result = asyncio.run(
+        SectorMembershipSyncService(
+            source=BShareMixedSource(),
+            repository=cast(SectorMembershipRepository, repository),
+            raw_payload_store=raw_store,
+        ).sync_scheme(
+            scheme=SectorScheme.EASTMONEY_INDUSTRY,
+            observation_date=date(2026, 7, 27),
+            sector_codes=("BK0001",),
+        )
+    )
+
+    assert repository.candidate_batches == [("123456", "600000")]
+    assert len(raw_store.payloads) == 1
+    assert b'"sourceSymbol":"200001"' in raw_store.payloads[0].payload
+    assert b'"sourceSymbol":"201001"' in raw_store.payloads[0].payload
+    assert b'"sourceSymbol":"900001"' in raw_store.payloads[0].payload
+    assert result.release is not None
 
 
 def _sector(code: str, name: str, key: int) -> StoredSector:

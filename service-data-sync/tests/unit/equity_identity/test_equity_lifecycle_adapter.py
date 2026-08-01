@@ -5,12 +5,18 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime
+from io import BytesIO
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
+import requests
 
-from service_data_sync.application.ports.data_source import ProviderError, SourceRequest
+from service_data_sync.application.ports.data_source import (
+    ProviderError,
+    ProviderErrorCode,
+    SourceRequest,
+)
 from service_data_sync.infrastructure.providers.akshare.exchange_equity_lifecycle import (
     AkshareExchangeEquityLifecycleAdapter,
 )
@@ -19,21 +25,7 @@ _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 class FakeAkshareLifecycleClient:
-    """提供与 AKShare 1.18.78 已验证表头一致的确定性 fixture。"""
-
-    def stock_info_sz_delist(self, symbol: str) -> pd.DataFrame:
-        """模拟深交所终止上市集合。"""
-        assert symbol == "终止上市公司"
-        return pd.DataFrame(
-            [
-                {
-                    "证券代码": "000003",
-                    "证券简称": "PT金田Ａ",
-                    "上市日期": "1991-01-14",
-                    "终止上市日期": "2002-06-14",
-                }
-            ]
-        )
+    """提供与 AKShare 1.18.81 已验证表头一致的确定性 fixture。"""
 
     def stock_info_bj_name_code(self) -> pd.DataFrame:
         """模拟北交所在册证券及其官方上市日期。"""
@@ -86,6 +78,51 @@ class FakeSseResponse:
     def json(self) -> dict[str, object]:
         """返回完整官方响应对象。"""
         return self._document
+
+
+class FakeSzseResponse:
+    """生成包含深交所终止上市字段的最小 XLSX HTTP 响应。"""
+
+    def __init__(self) -> None:
+        """写入固定官方列，供 adapter 验证直连 XLSX 路径。"""
+        output = BytesIO()
+        pd.DataFrame(
+            [
+                {
+                    "证券代码": "000003",
+                    "证券简称": "PT金田Ａ",
+                    "上市日期": "1991-01-14",
+                    "终止上市日期": "2002-06-14",
+                }
+            ]
+        ).to_excel(output, index=False, engine="openpyxl")
+        self.status_code = 200
+        self.content = output.getvalue()
+
+
+class FakeSzseHttpClient:
+    """按脚本返回 TLS 失败或 XLSX 成功响应，并记录每次重试。"""
+
+    def __init__(self, responses: list[FakeSzseResponse | BaseException] | None = None) -> None:
+        """复制可消费的响应脚本；默认首次即成功。"""
+        self._responses = list(responses or [FakeSzseResponse()])
+        self.calls: list[tuple[dict[str, str], tuple[float, float]]] = []
+
+    def get(
+        self,
+        _url: str,
+        *,
+        params: dict[str, str],
+        headers: dict[str, str],
+        timeout: tuple[float, float],
+    ) -> FakeSzseResponse:
+        """记录官方参数与总预算派生 timeout，并按顺序给出脚本值。"""
+        del headers
+        self.calls.append((dict(params), timeout))
+        value = self._responses.pop(0)
+        if isinstance(value, BaseException):
+            raise value
+        return value
 
 
 class FakeSseHttpClient:
@@ -190,7 +227,7 @@ def test_adapter_reads_sse_a_stock_code_and_preserves_full_raw_evidence() -> Non
     assert raw["pages"][0]["result"][0]["B_STOCK_CODE"] == "-"
     assert raw["pages"][0]["result"][0]["STOCK_TYPE"] == "1"
     assert batch.upstream_source == "sse.terminated-listing"
-    assert batch.adapter_version == "akshare-1.18.78-official-exchange-lifecycle-v2"
+    assert batch.adapter_version == "akshare-1.18.81-official-exchange-lifecycle-v3"
     assert batch.schema_fingerprint is not None
     assert len(batch.schema_fingerprint) == 64
 
@@ -200,6 +237,7 @@ def test_adapter_maps_szse_explicit_delisting() -> None:
     adapter = AkshareExchangeEquityLifecycleAdapter(
         request_timeout_seconds=5,
         client=FakeAkshareLifecycleClient(),
+        szse_http_client=FakeSzseHttpClient(),
     )
     batch = asyncio.run(adapter.fetch(_request("SZSE")))
     entry = json.loads(batch.payload)["entries"][0]
@@ -209,6 +247,82 @@ def test_adapter_maps_szse_explicit_delisting() -> None:
     assert entry["status"] == "DELISTED"
     assert entry["effectiveOn"] == "2002-06-14"
     assert batch.upstream_source == "szse.terminated-listing"
+
+
+def test_adapter_keeps_szse_transport_inside_short_total_budget() -> None:
+    """剩余总预算不足一秒时，底层 HTTP timeout 不能被默认值放大。"""
+    transport = FakeSzseHttpClient()
+    adapter = AkshareExchangeEquityLifecycleAdapter(
+        request_timeout_seconds=0.5,
+        client=FakeAkshareLifecycleClient(),
+        szse_http_client=transport,
+    )
+
+    asyncio.run(adapter.fetch(_request("SZSE")))
+
+    _, (connect_timeout, read_timeout) = transport.calls[0]
+    assert 0 < connect_timeout <= read_timeout <= 0.5
+
+
+def test_adapter_retries_szse_tls_eof_within_total_request_budget() -> None:
+    """SZSE TLS 短断后只重试同一官方请求，并仍保留标准退市事实。"""
+    transport = FakeSzseHttpClient(
+        [
+            requests.exceptions.SSLError("UNEXPECTED_EOF_WHILE_READING"),
+            FakeSzseResponse(),
+        ]
+    )
+    adapter = AkshareExchangeEquityLifecycleAdapter(
+        request_timeout_seconds=5,
+        client=FakeAkshareLifecycleClient(),
+        szse_http_client=transport,
+    )
+
+    batch = asyncio.run(adapter.fetch(_request("SZSE")))
+
+    assert len(transport.calls) == 2
+    assert all(
+        connect_timeout <= read_timeout for _, (connect_timeout, read_timeout) in transport.calls
+    )
+    assert json.loads(batch.payload)["entries"][0]["symbol"] == "000003"
+
+
+def test_adapter_reports_szse_tls_eof_after_bounded_retry() -> None:
+    """SZSE 连续 TLS EOF 用可重试不可用失败退出，绝不伪造空或旧生命周期。"""
+    transport = FakeSzseHttpClient(
+        [requests.exceptions.SSLError("UNEXPECTED_EOF_WHILE_READING")] * 3
+    )
+    adapter = AkshareExchangeEquityLifecycleAdapter(
+        request_timeout_seconds=5,
+        client=FakeAkshareLifecycleClient(),
+        szse_http_client=transport,
+    )
+
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(adapter.fetch(_request("SZSE")))
+
+    assert captured.value.code is ProviderErrorCode.UNAVAILABLE
+    assert captured.value.retryable is True
+    assert len(transport.calls) == 3
+
+
+def test_adapter_rejects_szse_non_xlsx_without_transport_retry() -> None:
+    """SZSE 文件合同漂移立即隔离，不能被 TLS 重试逻辑改写为成功或不可用。"""
+    invalid_response = FakeSzseResponse()
+    invalid_response.content = b'{"message":"schema drift"}'
+    transport = FakeSzseHttpClient([invalid_response])
+    adapter = AkshareExchangeEquityLifecycleAdapter(
+        request_timeout_seconds=5,
+        client=FakeAkshareLifecycleClient(),
+        szse_http_client=transport,
+    )
+
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(adapter.fetch(_request("SZSE")))
+
+    assert captured.value.code is ProviderErrorCode.SCHEMA
+    assert captured.value.retryable is False
+    assert len(transport.calls) == 1
 
 
 def test_adapter_maps_bse_listing_without_inferring_absence() -> None:

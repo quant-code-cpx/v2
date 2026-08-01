@@ -79,7 +79,7 @@ class SqlAlchemyIndexShadowRepository(IndexShadowRepository):
             source_batch_id, run_id = _record_source_evidence(
                 session, source=source, partition_key=f"index.catalog:{administrator}", now=now
             )
-            normalization_run_id = _record_normalization(
+            normalization_run_id, normalization_created = _record_normalization(
                 session,
                 dataset_id=dataset_id,
                 run_id=run_id,
@@ -121,20 +121,22 @@ class SqlAlchemyIndexShadowRepository(IndexShadowRepository):
                     ]
                 )
             )
-            _record_quality(
-                session,
-                dataset_id=dataset_id,
-                partition_key=f"index.catalog:{administrator}",
-                normalization_run_id=normalization_run_id,
-                status="passed",
-                rule_code="index.shadow.catalog-non-empty",
-                severity="blocking",
-                passed=True,
-                actual_value=len(entries),
-                threshold_value=1,
-                affected_count=0,
-                now=now,
-            )
+            if normalization_created:
+                # 相同输入重放必须复用原有质量结论，避免同一规则在一个运行上重复写入。
+                _record_quality(
+                    session,
+                    dataset_id=dataset_id,
+                    partition_key=f"index.catalog:{administrator}",
+                    normalization_run_id=normalization_run_id,
+                    status="passed",
+                    rule_code="index.shadow.catalog-non-empty",
+                    severity="blocking",
+                    passed=True,
+                    actual_value=len(entries),
+                    threshold_value=1,
+                    affected_count=0,
+                    now=now,
+                )
         return StoredIndexShadowObservation(observation_id, len(entries), "passed")
 
     def record_snapshot(
@@ -171,7 +173,7 @@ class SqlAlchemyIndexShadowRepository(IndexShadowRepository):
             source_batch_id, run_id = _record_source_evidence(
                 session, source=source, partition_key=partition_key, now=now
             )
-            normalization_run_id = _record_normalization(
+            normalization_run_id, normalization_created = _record_normalization(
                 session,
                 dataset_id=dataset_id,
                 run_id=run_id,
@@ -212,20 +214,22 @@ class SqlAlchemyIndexShadowRepository(IndexShadowRepository):
                     ]
                 )
             )
-            _record_quality(
-                session,
-                dataset_id=dataset_id,
-                partition_key=partition_key,
-                normalization_run_id=normalization_run_id,
-                status=quality_status,
-                rule_code="index.shadow.source-exchange",
-                severity="warn",
-                passed=not any(item.source_exchange is None for item in items),
-                actual_value=sum(item.source_exchange is None for item in items),
-                threshold_value=0,
-                affected_count=sum(item.source_exchange is None for item in items),
-                now=now,
-            )
+            if normalization_created:
+                # 质量结论由确定性输入唯一决定；新来源观察只回链既有运行，不能再插入一份规则结果。
+                _record_quality(
+                    session,
+                    dataset_id=dataset_id,
+                    partition_key=partition_key,
+                    normalization_run_id=normalization_run_id,
+                    status=quality_status,
+                    rule_code="index.shadow.source-exchange",
+                    severity="warn",
+                    passed=not any(item.source_exchange is None for item in items),
+                    actual_value=sum(item.source_exchange is None for item in items),
+                    threshold_value=0,
+                    affected_count=sum(item.source_exchange is None for item in items),
+                    now=now,
+                )
         return StoredIndexShadowObservation(snapshot_id, len(items), quality_status)
 
 
@@ -397,15 +401,18 @@ def _record_normalization(
     partition_key: str,
     source: IndexShadowSourceObservation,
     now: datetime,
-) -> UUID:
-    """为单批标准载荷登记确定性规范化运行，失败路径不会创建观察头或发布版本。"""
-    normalization_run_id = uuid4()
-    input_set_hash = hashlib.sha256(
-        f"{source.raw_payload_sha256}:{source.normalized_payload_sha256}".encode()
-    ).hexdigest()
-    session.execute(
-        insert(NormalizationRun).values(
-            normalization_run_id=normalization_run_id,
+) -> tuple[UUID, bool]:
+    """建立或复用确定性规范化运行，并返回是否首次写入其质量结论。
+
+    每次上游抓取仍保留独立 `SourceBatch` 和该批次的双 `RawPayloadManifest`，因为观察时间本身
+    是审计证据；但相同数据集、分区、输入摘要和映射版本只能共享一个规范化运行与一套质量结果。
+    这样重试不会触发唯一约束或虚增质量记录，任一 raw 或标准载荷摘要变化仍会创建新研究态运行。
+    """
+    input_set_hash = _normalization_input_set_hash(source)
+    inserted = session.execute(
+        pg_insert(NormalizationRun)
+        .values(
+            normalization_run_id=uuid4(),
             dataset_id=dataset_id,
             partition_key=partition_key,
             run_id=run_id,
@@ -417,8 +424,29 @@ def _record_normalization(
             started_at=now,
             finished_at=now,
         )
-    )
-    return normalization_run_id
+        .on_conflict_do_nothing(
+            index_elements=("dataset_id", "partition_key", "input_set_hash", "mapping_version")
+        )
+        .returning(NormalizationRun.normalization_run_id)
+    ).scalar_one_or_none()
+    if inserted is not None:
+        return UUID(str(inserted)), True
+    existing = session.execute(
+        select(NormalizationRun.normalization_run_id).where(
+            NormalizationRun.dataset_id == dataset_id,
+            NormalizationRun.partition_key == partition_key,
+            NormalizationRun.input_set_hash == input_set_hash,
+            NormalizationRun.mapping_version == _MAPPING_VERSION,
+        )
+    ).scalar_one()
+    return UUID(str(existing)), False
+
+
+def _normalization_input_set_hash(source: IndexShadowSourceObservation) -> str:
+    """计算 raw 与标准化载荷共同决定的重放身份，避免只看单侧摘要错误复用。"""
+    return hashlib.sha256(
+        f"{source.raw_payload_sha256}:{source.normalized_payload_sha256}".encode()
+    ).hexdigest()
 
 
 def _record_quality(

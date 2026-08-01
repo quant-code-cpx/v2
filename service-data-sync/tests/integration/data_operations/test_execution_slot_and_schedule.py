@@ -31,6 +31,7 @@ from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.database.fenced_execution import (
     FencedExecution,
     FencingTokenLost,
+    current_fenced_execution,
     fenced_execution,
 )
 from service_data_sync.infrastructure.database.models.operations import (
@@ -387,7 +388,7 @@ def test_retryable_all_etfs_run_requeues_same_frozen_run_and_inherits_success(
     database: DatabaseClient,
 ) -> None:
     """可重试全集失败自动续跑同一 run，成功分区不重做且周期 tick 可继续领取。"""
-    clock = _Clock(datetime(2026, 7, 30, 9, tzinfo=UTC))
+    clock = _Clock(datetime.now(UTC) + timedelta(days=2, hours=9))
     dataset_code = "fund.etf.bar.1d.reported"
     _ensure_idle_slot(database)
     command_id, run_id = _insert_queued_run(
@@ -676,7 +677,7 @@ def test_yielded_long_run_moves_to_queue_tail_and_keeps_same_run(
     database: DatabaseClient,
 ) -> None:
     """内部批次让位后先执行已等待命令，再以同一 run 和累计进度续跑。"""
-    clock = _Clock(datetime(2026, 7, 30, 9, tzinfo=UTC))
+    clock = _Clock(datetime.now(UTC) + timedelta(days=2, hours=9))
     long_dataset = f"integration.stock-connect-long.{uuid4()}"
     short_dataset = f"integration.short.{uuid4()}"
     _ensure_idle_slot(database)
@@ -750,7 +751,7 @@ def test_postgres_slot_serializes_workers_reaps_lease_and_rejects_stale_fence(
     database: DatabaseClient,
 ) -> None:
     """验证双 worker 仅一人 claim，租约恢复后旧 token 不能写终态、checkpoint 或发布。"""
-    clock = _Clock(datetime(2026, 7, 29, 9, tzinfo=UTC))
+    clock = _Clock(datetime.now(UTC) + timedelta(days=2, hours=9))
     dataset_code = f"integration.slot.{uuid4()}"
     control_plane = _control_plane(database, clock, dataset_code)
     _ensure_idle_slot(database)
@@ -853,7 +854,7 @@ def test_many_normal_yields_do_not_consume_worker_loss_recovery_budget(
     database: DatabaseClient,
 ) -> None:
     """正常让位超过旧 attempt 上限后，首次真实租约丢失仍须恢复同一 run。"""
-    clock = _Clock(datetime(2026, 7, 30, 14, tzinfo=UTC))
+    clock = _Clock(datetime.now(UTC) + timedelta(days=2, hours=14))
     dataset_code = f"integration.recovery-budget.{uuid4()}"
     control_plane = _control_plane(database, clock, dataset_code)
     _ensure_idle_slot(database)
@@ -915,7 +916,7 @@ def test_dispatch_seals_actual_source_batch_on_the_control_run(
     database: DatabaseClient,
 ) -> None:
     """真实来源观察必须与控制面 run 同事务收敛，且数据库禁止事后改写关系。"""
-    clock = _Clock(datetime(2026, 7, 30, 14, tzinfo=UTC))
+    clock = _Clock(datetime.now(UTC) + timedelta(days=2, hours=14))
     dataset_code = f"integration.run-source.{uuid4()}"
     control_plane = _control_plane(database, clock, dataset_code)
     _ensure_idle_slot(database)
@@ -969,11 +970,73 @@ def test_dispatch_seals_actual_source_batch_on_the_control_run(
             )
 
 
+def test_failed_run_with_rolled_back_source_batch_seals_failed_terminal(
+    database: DatabaseClient,
+) -> None:
+    """执行器失败导致来源批次事务回滚时，控制面必须正常落账失败而不是抛未知批次异常。"""
+    # 时钟取未来日期：fenced execution 的 lease 用真实时间校验，落后时钟会让
+    # executor 内的 database.transaction() 在进入业务逻辑前就抛 FencingTokenLost。
+    clock = _Clock(datetime.now(UTC) + timedelta(days=2, hours=14))
+    dataset_code = f"integration.run-fail.{uuid4()}"
+    control_plane = _control_plane(database, clock, dataset_code)
+    _ensure_idle_slot(database)
+    _command_id, run_id = _insert_queued_run(
+        database,
+        dataset_code=dataset_code,
+        now=clock.now(),
+    )
+
+    def failing_executor(_claim: ExecutionClaim) -> ExecutionOutcome:
+        """与真实 canonical 路径一致：事务内登记来源批次后失败，使批次行随事务回滚。
+
+        批次 UUID 已进入 `FencedExecution` 内存，但对应行不存在；失败终态必须
+        忽略这些幽灵引用并正常落账，不能把失败原因掩盖成运行时崩溃。
+        """
+        execution = current_fenced_execution()
+        assert execution is not None
+        with database.transaction() as session:
+            execution.record_source_batch(
+                record_source_observation(
+                    session,
+                    provider_id="integration-provider",
+                    capability=dataset_code,
+                    source_payload_sha256="c" * 64,
+                    raw_uri="unretained://sha256/" + "c" * 64,
+                    observed_at=clock.now(),
+                    created_at=clock.now(),
+                    upstream_source="integration.real-upstream",
+                    adapter_version="integration-v1",
+                    schema_fingerprint="d" * 64,
+                )
+            )
+            # 模拟批次登记后的 canonical 写入失败：同一事务回滚。
+            raise RuntimeError("simulated canonical write failure")
+
+    control_plane.register_executor(dataset_code, failing_executor)
+    assert control_plane.dispatch_once("integration:run-fail") is True
+
+    with database.session() as session:
+        run = session.get(DataOperationRun, run_id)
+        assert run is not None
+        assert run.status == "FAILED"
+        assert run.error_json is not None
+        assert run.error_json["code"] == "execution-failed"
+        # 失败 run 不关联来源批次，也不能有幽灵批次链接。
+        assert (
+            session.execute(
+                select(DataOperationRunSourceBatch).where(
+                    DataOperationRunSourceBatch.run_id == run_id
+                )
+            ).first()
+            is None
+        )
+
+
 def test_scheduler_persists_misfire_audit_and_coalesces_one_command_per_fire(
     database: DatabaseClient,
 ) -> None:
     """验证 SKIP 与 RUN_ONCE/coalesce 产生可审计 fire，且 tick 只入 command 队列。"""
-    clock = _Clock(datetime(2026, 7, 31, 2, tzinfo=UTC))
+    clock = _Clock(datetime.now(UTC) + timedelta(days=2, hours=2))
     skip_dataset = f"integration.schedule.skip.{uuid4()}"
     run_once_dataset = f"integration.schedule.run-once.{uuid4()}"
     control_plane = _control_plane(database, clock, skip_dataset, run_once_dataset)

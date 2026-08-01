@@ -29,15 +29,28 @@ class IndexCapability(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class IndexIdentifier:
-    """表示管理人范围内稳定的六位指数代码，不以名称作为业务身份。"""
+    """表示管理人范围内稳定的六码至八码大写字母数字指数代码，不以名称作为业务身份。"""
 
     administrator: IndexAdministrator
     code: str
 
     def __post_init__(self) -> None:
-        """拒绝空白、非数字或长度不正确的来源指数代码。"""
-        if len(self.code) != 6 or not self.code.isdigit():
-            raise ValueError("index code must be six digits")
+        """拒绝非六码至八码、大写以外或含非 ASCII 字符的来源指数代码。
+
+        中证与国证真实目录同时包含 ``000300``、``H00999``、``AITCNYG`` 和 ``39926401``；
+        大小写是来源身份的一部分，因此不能自动大写或接受小写值，以免请求和持久化键在不同
+        边界发生静默合并。
+        """
+        if (
+            not isinstance(self.code, str)
+            or not 6 <= len(self.code) <= 8
+            or not self.code.isascii()
+            or not self.code.isalnum()
+            or self.code != self.code.upper()
+        ):
+            raise ValueError(
+                "index code must contain 6 to 8 uppercase ASCII alphanumeric characters"
+            )
 
     @property
     def qualified_key(self) -> str:

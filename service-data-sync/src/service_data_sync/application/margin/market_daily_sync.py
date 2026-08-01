@@ -29,6 +29,7 @@ from service_data_sync.domain.margin import MarginMarketDaily, MarginVenue
 
 _CAPABILITY = "market.margin.market.1d.reported"
 _SCHEMA = "quant-v2.margin-market-daily.v1"
+_MARKET_DAILY_VENUES = frozenset({"SSE", "SZSE"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,9 +61,15 @@ class MarginMarketDailySyncService:
     async def sync(
         self, *, venue: MarginVenue, start: date, end: date
     ) -> MarginMarketDailySyncResult:
-        """抓取一个场所的有界日频窗口，时间倒置和未声明 capability 立即失败。"""
+        """抓取沪深场所的有界日频窗口，北交所资格名单不得冒充市场汇总。"""
         if start > end:
             raise ValueError("start must not be after end")
+        if venue.code not in _MARKET_DAILY_VENUES:
+            raise ProviderError(
+                ProviderErrorCode.CURRENTLY_UNSUPPORTED,
+                "margin market daily is currently unsupported for this venue",
+                retryable=False,
+            )
         if _CAPABILITY not in self._source.capabilities():
             raise ProviderError(
                 ProviderErrorCode.INVALID_REQUEST,

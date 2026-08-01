@@ -10,6 +10,7 @@ from typing import Any
 from uuid import UUID, uuid5
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from service_data_sync.infrastructure.data_operations.control_plane import ExecutionClaim
 from service_data_sync.infrastructure.database.connection import DatabaseClient
@@ -53,10 +54,7 @@ def equity_backfill_partition_key(
     window_to: date,
 ) -> str:
     """生成不受重试 run UUID 影响的证券窗口稳定分区键。"""
-    return (
-        f"{dataset_code}:{exchange}:{symbol}:"
-        f"{window_from.isoformat()}:{window_to.isoformat()}"
-    )
+    return f"{dataset_code}:{exchange}:{symbol}:{window_from.isoformat()}:{window_to.isoformat()}"
 
 
 def completed_equity_bar_partitions(
@@ -132,8 +130,7 @@ def record_equity_bar_partition(
             or coverage.capability != claim.dataset_code
             or coverage.period != expected_period
             or coverage.security_id != int(identity["securityId"])
-            or coverage.identifier_version_id
-            != UUID(str(identity["identifierVersionId"]))
+            or coverage.identifier_version_id != UUID(str(identity["identifierVersionId"]))
             or selector.get("kind") != "INSTRUMENT"
             or selector.get("exchange") != identity.get("exchange")
             or selector.get("symbol") != identity.get("symbol")
@@ -152,6 +149,10 @@ def record_equity_bar_partition(
             or release is None
             or publication.dataset != claim.dataset_code
             or publication.data_version != data_version
+            # 不能只相信 `publication_id` 的间接关联：checkpoint 是跨服务读取的不可变
+            # 证据，必须在应用层再次证明 coverage 自己冻结的版本与调用结果、publication 相同。
+            or coverage.data_version != data_version
+            or coverage.data_version != publication.data_version
             or publication.quality_status != "passed"
             or coverage.source_batch_id not in normalized_source_ids
             or coverage.publication_kind != publication_kind
@@ -225,10 +226,7 @@ def equity_backfill_event_partition_keys(
     if families is None:
         raise ValueError("equity backfill event dataset is unsupported")
     return tuple(
-        (
-            f"{dataset_code}:{family}:"
-            f"{window_from.isoformat()}:{window_to.isoformat()}"
-        )
+        (f"{dataset_code}:{family}:{window_from.isoformat()}:{window_to.isoformat()}")
         for family in families
     )
 
@@ -302,9 +300,7 @@ def record_equity_event_partitions(
                         EquityEventWindowCoverage.event_family == family,
                         EquityEventWindowCoverage.coverage_from >= window_from,
                         EquityEventWindowCoverage.coverage_to <= window_to,
-                        EquityEventWindowCoverage.source_batch_id.in_(
-                            normalized_source_ids
-                        ),
+                        EquityEventWindowCoverage.source_batch_id.in_(normalized_source_ids),
                         EquityEventWindowCoverage.superseded_at.is_(None),
                     )
                     .order_by(
@@ -320,11 +316,7 @@ def record_equity_event_partitions(
             publication_ids = {coverage.publication_id for coverage in coverages}
             coverage_scopes = {coverage.coverage_scope for coverage in coverages}
             universe_hashes = {coverage.universe_hash for coverage in coverages}
-            if (
-                len(publication_ids) != 1
-                or len(coverage_scopes) != 1
-                or len(universe_hashes) != 1
-            ):
+            if len(publication_ids) != 1 or len(coverage_scopes) != 1 or len(universe_hashes) != 1:
                 raise RuntimeError("equity backfill event coverage roster is inconsistent")
             publication = session.get(
                 DatasetPublication,
@@ -342,21 +334,15 @@ def record_equity_event_partitions(
                 or publication.quality_status != "passed"
                 or publication.effective_as_of != window_to
             ):
-                raise RuntimeError(
-                    "equity backfill event publication cannot be verified"
-                )
-            coverage_versions = sorted(
-                {str(coverage.coverage_version) for coverage in coverages}
-            )
+                raise RuntimeError("equity backfill event publication cannot be verified")
+            coverage_versions = sorted({str(coverage.coverage_version) for coverage in coverages})
             aggregate_version = uuid5(
                 binding.child_id,
                 f"target:{target_index}:event-coverages:{':'.join(coverage_versions)}",
             )
             source_values = [str(value) for value in normalized_source_ids]
             record_count = sum(coverage.record_count for coverage in coverages)
-            publication_kind = (
-                "ZERO_RECORD_COVERAGE" if record_count == 0 else "DATA"
-            )
+            publication_kind = "ZERO_RECORD_COVERAGE" if record_count == 0 else "DATA"
             output = {
                 "datasetCode": claim.dataset_code,
                 "partitionKey": partition_key,
@@ -446,9 +432,7 @@ def finalize_equity_event_partitions(
     ):
         raise RuntimeError("equity backfill event partition seal is incomplete")
     all_source_ids = {
-        UUID(value)
-        for checkpoint in checkpoints
-        for value in checkpoint.source_batch_ids_json
+        UUID(value) for checkpoint in checkpoints for value in checkpoint.source_batch_ids_json
     }
     for source_batch_id in sorted(all_source_ids, key=str):
         if source_batch_id not in execution.source_batch_ids:
@@ -506,9 +490,7 @@ def finalize_equity_bar_partitions(
     ):
         raise RuntimeError("equity backfill partition seal is incomplete")
     all_source_ids = {
-        UUID(value)
-        for checkpoint in checkpoints
-        for value in checkpoint.source_batch_ids_json
+        UUID(value) for checkpoint in checkpoints for value in checkpoint.source_batch_ids_json
     }
     for source_batch_id in sorted(all_source_ids, key=str):
         if source_batch_id not in execution.source_batch_ids:
@@ -526,6 +508,11 @@ def finalize_equity_bar_partitions(
     try:
         with database.transaction() as session:
             execution.assert_current(session)
+            _assert_equity_bar_partition_evidence(
+                session,
+                claim=claim,
+                checkpoints=checkpoints,
+            )
             execution.finalize_if_armed(session)
     except Exception:
         # `finalize_if_armed` 在 commit 前写内存标记；提交或质量门失败必须一起清除，
@@ -534,6 +521,77 @@ def finalize_equity_bar_partitions(
         raise
     if not execution.terminal_written:
         raise RuntimeError("equity backfill partition seal did not finalize its run")
+
+
+def _assert_equity_bar_partition_evidence(
+    session: Session,
+    *,
+    claim: ExecutionClaim,
+    checkpoints: Sequence[EquityBackfillPartitionCheckpoint],
+) -> None:
+    """在写 child 成功终态前逐项复核 coverage、publication 与 dataVersion 的精确配对。"""
+    coverage_versions: list[UUID] = []
+    for checkpoint in checkpoints:
+        if (
+            checkpoint.checkpoint_kind != "BAR_COVERAGE_VERSION"
+            or checkpoint.coverage_version is None
+        ):
+            raise RuntimeError("equity backfill partition final evidence has invalid coverage kind")
+        coverage_versions.append(checkpoint.coverage_version)
+    if len(set(coverage_versions)) != len(coverage_versions):
+        raise RuntimeError("equity backfill partition final evidence reuses a coverage version")
+
+    rows = session.execute(
+        select(EquityBarWindowCoverage, DatasetPublication, DatasetRelease)
+        .join(
+            DatasetPublication,
+            DatasetPublication.publication_id == EquityBarWindowCoverage.publication_id,
+        )
+        .join(
+            DatasetRelease,
+            DatasetRelease.release_id == DatasetPublication.release_id,
+        )
+        .where(EquityBarWindowCoverage.coverage_version.in_(coverage_versions))
+    ).all()
+    evidence_by_version = {
+        coverage.coverage_version: (coverage, publication, release)
+        for coverage, publication, release in rows
+    }
+    if len(evidence_by_version) != len(coverage_versions):
+        raise RuntimeError("equity backfill partition final evidence is incomplete")
+
+    for checkpoint in checkpoints:
+        coverage_version = checkpoint.coverage_version
+        if coverage_version is None:
+            raise RuntimeError("equity backfill partition final evidence has no coverage version")
+        evidence = evidence_by_version.get(coverage_version)
+        if evidence is None:
+            raise RuntimeError("equity backfill partition final evidence is missing")
+        coverage, publication, release = evidence
+        try:
+            source_batch_ids = {UUID(value) for value in checkpoint.source_batch_ids_json}
+        except (TypeError, ValueError) as error:
+            raise RuntimeError(
+                "equity backfill partition final source batches are invalid"
+            ) from error
+        if (
+            coverage.capability != claim.dataset_code
+            or coverage.coverage_from != checkpoint.window_from
+            or coverage.coverage_to != checkpoint.window_to
+            or coverage.publication_id != checkpoint.publication_id
+            or coverage.data_version != checkpoint.data_version
+            or coverage.data_version != publication.data_version
+            or publication.dataset != claim.dataset_code
+            or publication.data_version != checkpoint.data_version
+            or publication.release_id != checkpoint.release_id
+            or release.release_id != checkpoint.release_id
+            or publication.quality_status != "passed"
+            or coverage.quality_status != "passed"
+            or coverage.source_batch_id not in source_batch_ids
+            or coverage.publication_kind != checkpoint.publication_kind
+            or coverage.record_count != checkpoint.record_count
+        ):
+            raise RuntimeError("equity backfill partition final output cannot be verified")
 
 
 class _Binding:
@@ -564,11 +622,7 @@ def _binding(database: DatabaseClient, *, claim: ExecutionClaim) -> _Binding:
                 EquityBackfillChildSpec.child_key == child_key,
             )
         )
-        command = (
-            None
-            if run is None
-            else session.get(DataOperationCommand, run.command_id)
-        )
+        command = None if run is None else session.get(DataOperationCommand, run.command_id)
         if (
             run is None
             or child is None

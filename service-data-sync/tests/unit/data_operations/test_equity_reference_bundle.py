@@ -50,9 +50,10 @@ def test_market_boundary_uses_previous_open_day_before_cutoff() -> None:
     friday = date(2024, 3, 15)
     orchestrator = _orchestrator(_Calendar({thursday: True, friday: True}))
 
-    assert orchestrator._boundaries(
-        datetime(2024, 3, 15, 16, 14, tzinfo=_SHANGHAI)
-    ) == (friday, thursday)
+    assert orchestrator._boundaries(datetime(2024, 3, 15, 16, 14, tzinfo=_SHANGHAI)) == (
+        friday,
+        thursday,
+    )
 
 
 def test_market_boundary_accepts_open_day_at_cutoff_and_weekend_keeps_friday() -> None:
@@ -60,16 +61,16 @@ def test_market_boundary_accepts_open_day_at_cutoff_and_weekend_keeps_friday() -
     friday = date(2024, 3, 15)
     saturday = date(2024, 3, 16)
     sunday = date(2024, 3, 17)
-    orchestrator = _orchestrator(
-        _Calendar({friday: True, saturday: False, sunday: False})
-    )
+    orchestrator = _orchestrator(_Calendar({friday: True, saturday: False, sunday: False}))
 
-    assert orchestrator._boundaries(
-        datetime(2024, 3, 15, 16, 15, tzinfo=_SHANGHAI)
-    ) == (friday, friday)
-    assert orchestrator._boundaries(
-        datetime(2024, 3, 17, 23, 59, tzinfo=_SHANGHAI)
-    ) == (sunday, friday)
+    assert orchestrator._boundaries(datetime(2024, 3, 15, 16, 15, tzinfo=_SHANGHAI)) == (
+        friday,
+        friday,
+    )
+    assert orchestrator._boundaries(datetime(2024, 3, 17, 23, 59, tzinfo=_SHANGHAI)) == (
+        sunday,
+        friday,
+    )
 
 
 def test_market_boundary_fails_closed_when_calendar_is_unknown() -> None:
@@ -81,9 +82,7 @@ def test_market_boundary_fails_closed_when_calendar_is_unknown() -> None:
         EquityReferenceGenerationError,
         match="authoritative trading calendar is unavailable",
     ):
-        orchestrator._boundaries(
-            datetime(2024, 3, 15, 18, 0, tzinfo=_SHANGHAI)
-        )
+        orchestrator._boundaries(datetime(2024, 3, 15, 18, 0, tzinfo=_SHANGHAI))
 
 
 def test_step_specs_freeze_all_reference_targets_without_mixed_dates() -> None:

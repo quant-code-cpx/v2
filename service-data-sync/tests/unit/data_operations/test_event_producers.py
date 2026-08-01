@@ -157,7 +157,13 @@ def test_event_executors_are_registered_and_pass_exact_instrument(
             callback = kwargs["before_final_publication"]
             assert callable(callback)
             callback()
-            return SimpleNamespace(inserted_count=2, unchanged_count=1, excluded_count=0)
+            return SimpleNamespace(
+                inserted_count=2,
+                unchanged_count=1,
+                excluded_count=0,
+                # canonical executor 按冻结 dataVersion 收尾事件分区，缺字段会崩。
+                data_version=uuid4(),
+            )
 
     provider = FakeEventProvider()
 

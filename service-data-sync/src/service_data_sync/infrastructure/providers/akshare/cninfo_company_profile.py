@@ -66,7 +66,9 @@ class AkshareCninfoCompanyProfileAdapter:
             )
         try:
             raw_records = frame.to_dict(orient="records")
-            # 当前接口应只给出一份概况；首行作为本次观测，其余行仍保留在失败证据中。
+            # 当前接口只能对应一份公司概况；多行无法证明哪行是当前事实，必须隔离而非任取首行。
+            if len(raw_records) != 1:
+                raise ValueError("company profile must contain exactly one record")
             profile = _normalize_record(raw_records[0])
         except (KeyError, TypeError, ValueError) as error:
             raise ProviderError(
@@ -96,7 +98,7 @@ class AkshareCninfoCompanyProfileAdapter:
             raw_payload=raw_payload,
             raw_content_type="application/json",
             upstream_source="cninfo-company-profile",
-            adapter_version="akshare-1.18.78-v1",
+            adapter_version="akshare-1.18.81-v1",
             schema_fingerprint=hashlib.sha256(
                 json.dumps(sorted(raw_records[0]), ensure_ascii=False).encode()
             ).hexdigest(),

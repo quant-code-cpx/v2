@@ -26,8 +26,8 @@ from service_data_sync.domain.equity import EquityIdentifier, Exchange
 
 _CAPABILITY = "equity.bar.1d.raw"
 _SCHEMA = "quant-v2.equity-daily-bar.v1"
-_AKSHARE_VERSION = "1.18.78"
-_ADAPTER_VERSION = "akshare-1.18.78-stock_zh_a_hist_tx-v2"
+_AKSHARE_VERSION = "1.18.81"
+_ADAPTER_VERSION = "akshare-1.18.81-stock_zh_a_hist_tx-v2"
 _UPSTREAM_SOURCE = "tencent-stock-kline"
 _EXPECTED_COLUMNS = (
     "date",

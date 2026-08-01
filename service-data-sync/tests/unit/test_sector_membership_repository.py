@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import UTC, date, datetime
 from typing import cast
@@ -9,7 +10,9 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import ClauseElement
 
+from service_data_sync.application.ports.canonical_release import PublishedCanonicalRelease
 from service_data_sync.application.ports.sector_market_data import StoredSector
 from service_data_sync.domain.equity import Exchange
 from service_data_sync.domain.sector import (
@@ -77,6 +80,11 @@ class FakeConnection(AbstractContextManager["FakeConnection"]):
         """记录 SQL，并按顺序返回预置结果或空写入结果。"""
         self.executions.append((statement, parameters))
         return self._responses.pop(0) if self._responses else FakeResult([])
+
+    def scalar(self, statement: object) -> None:
+        """记录查询当前 release 的标量读取；本伪连接默认不存在同 ID 领域 release。"""
+        self.executions.append((statement, None))
+        return None
 
 
 class FakeDatabase:
@@ -536,11 +544,21 @@ def test_publish_release_warns_for_warned_component_and_pins_manifest(
         del arguments, keywords
         return None
 
-    def publish(*arguments: object, **keywords: object) -> None:
-        """记录数据集指针写入时的 release 质量状态。"""
+    def publish(*arguments: object, **keywords: object) -> PublishedCanonicalRelease:
+        """模拟统一发布器在最终可见性前武装栅栏并返回真实 release 身份。"""
         del arguments
+        before = cast(object, keywords["before_final_publication"])
+        assert callable(before)
+        before()
         timeline.append("publication")
-        published.append((cast(SectorScheme, keywords["scheme"]), str(keywords["quality_status"])))
+        published.append((SectorScheme.EASTMONEY_INDUSTRY, str(keywords["quality_status"])))
+        return PublishedCanonicalRelease(
+            release_id=uuid4(),
+            data_version=uuid4(),
+            reused_release=False,
+            reused_publication=False,
+            published_at=cast(datetime, keywords["now"]),
+        )
 
     def arm_terminal() -> None:
         """记录控制面终态只在 reducer 已通过全部质量门后武装。"""
@@ -550,7 +568,7 @@ def test_publish_release_warns_for_warned_component_and_pins_manifest(
     monkeypatch.setattr(repository, "_active_sectors_on_connection", active)
     monkeypatch.setattr(repository, "_latest_complete_snapshot", latest)
     monkeypatch.setattr(repository, "_current_release", no_current)
-    monkeypatch.setattr(repository, "_publish_dataset", publish)
+    monkeypatch.setattr(sector_membership_repository, "publish_legacy_snapshot", publish)
 
     result = repository.publish_release(
         scheme=SectorScheme.EASTMONEY_INDUSTRY,
@@ -563,7 +581,88 @@ def test_publish_release_warns_for_warned_component_and_pins_manifest(
     assert result.fresh_sector_count == 2
     assert published == [(SectorScheme.EASTMONEY_INDUSTRY, "warned")]
     assert timeline == ["arm", "publication"]
-    assert len(connection.executions) == 3
+    assert len(connection.executions) == 0
+
+
+def test_publish_release_switches_domain_pointer_before_inserting_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """新 canonical release 应先关闭旧领域指针，避免 current 唯一索引与 publication 脱节。"""
+    connection = FakeConnection([])
+    repository = _repository(connection)
+    first = _sector("BK0001", 1)
+    second = _sector("BK0002", 2)
+    first_snapshot = _snapshot_row(date(2026, 7, 27), "passed")
+    second_snapshot = _snapshot_row(date(2026, 7, 27), "passed")
+    old_release_id = uuid4()
+    new_release_id = uuid4()
+    new_data_version = uuid4()
+
+    def lock(*arguments: object, **keywords: object) -> None:
+        """接受 scheme 级事务锁调用。"""
+        del arguments, keywords
+
+    def active(*arguments: object, **keywords: object) -> tuple[StoredSector, ...]:
+        """返回 reducer 事务内冻结的两个 ACTIVE 板块。"""
+        del arguments, keywords
+        return first, second
+
+    def latest(*arguments: object, **keywords: object) -> dict[str, object]:
+        """按板块键返回完整 snapshot。"""
+        del keywords
+        assert len(arguments) == 2
+        return first_snapshot if arguments[1] == first.sector_key else second_snapshot
+
+    def current(*arguments: object, **keywords: object) -> dict[str, object]:
+        """返回待被同事务替代的领域 current release。"""
+        del arguments, keywords
+        return _release_row(old_release_id, uuid4(), datetime(2026, 7, 27, 10, tzinfo=UTC))
+
+    def publish(*arguments: object, **keywords: object) -> PublishedCanonicalRelease:
+        """模拟统一发布器在新 publication 已落库后执行领域可见性回调。"""
+        del arguments
+        visibility = cast(
+            Callable[[Session, UUID, UUID, UUID], None],
+            keywords["write_visibility"],
+        )
+        visibility(
+            _as_connection(connection),
+            uuid4(),
+            new_data_version,
+            new_release_id,
+        )
+        return PublishedCanonicalRelease(
+            release_id=new_release_id,
+            data_version=new_data_version,
+            reused_release=False,
+            reused_publication=False,
+            published_at=cast(datetime, keywords["now"]),
+        )
+
+    monkeypatch.setattr(repository, "_lock_scheme", lock)
+    monkeypatch.setattr(repository, "_active_sectors_on_connection", active)
+    monkeypatch.setattr(repository, "_latest_complete_snapshot", latest)
+    monkeypatch.setattr(repository, "_current_release", current)
+    monkeypatch.setattr(sector_membership_repository, "publish_legacy_snapshot", publish)
+
+    result = repository.publish_release(
+        scheme=SectorScheme.EASTMONEY_INDUSTRY,
+        observation_date=date(2026, 7, 27),
+    )
+
+    assert result is not None
+    statements = [str(statement) for statement, _parameters in connection.executions]
+    old_pointer_update = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("UPDATE sector_membership_release")
+    )
+    new_manifest_insert = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("INSERT INTO sector_membership_release")
+    )
+    assert old_pointer_update < new_manifest_insert
 
 
 def test_quality_results_warn_for_midrange_churn_and_do_not_block_snapshot(
@@ -732,10 +831,13 @@ def test_release_match_and_dataset_pointer_publish_remain_versioned_and_atomic()
     """相同 manifest 只能复用同一 release；新数据版本必须成对替换通用发布指针。"""
     release_id = uuid4()
     snapshot_ids = tuple(sorted((uuid4(), uuid4())))
+    data_version = uuid4()
     connection = FakeConnection(
         [
             FakeResult([{"snapshot_id": snapshot_id} for snapshot_id in snapshot_ids]),
             FakeResult([{"quality_status": "passed"}]),
+            FakeResult([]),
+            FakeResult([]),
         ]
     )
     repository = _repository(connection)
@@ -750,13 +852,19 @@ def test_release_match_and_dataset_pointer_publish_remain_versioned_and_atomic()
     repository._publish_dataset(
         _as_connection(connection),
         scheme=SectorScheme.EASTMONEY_INDUSTRY,
-        data_version=uuid4(),
+        data_version=data_version,
         quality_status="warned",
         effective_as_of=date(2026, 7, 27),
         published_at=datetime(2026, 7, 27, 11, tzinfo=UTC),
     )
 
+    # release 血缘已由正式 release 记录保存；通用指针只原子 supersede 后插入新版本。
     assert len(connection.executions) == 4
+    pointer_statements = tuple(str(statement) for statement, _parameters in connection.executions[-2:])
+    assert "UPDATE dataset_publication" in pointer_statements[0]
+    assert "INSERT INTO dataset_publication" in pointer_statements[1]
+    insert_statement = cast(ClauseElement, connection.executions[-1][0])
+    assert insert_statement.compile().params["data_version"] == data_version
 
 
 def test_release_reducer_helpers_read_latest_complete_snapshot_and_current_manifest() -> None:
@@ -836,6 +944,7 @@ def _repository(connection: FakeConnection) -> SqlAlchemySectorMembershipReposit
     """构造只替换数据库会话边界的仓储实例，避免连接真实 PostgreSQL。"""
     repository = object.__new__(SqlAlchemySectorMembershipRepository)
     repository._database = FakeDatabase(connection)  # type: ignore[assignment]
+    repository._release_repository = object()  # type: ignore[assignment]
     return repository
 
 
@@ -899,4 +1008,6 @@ def _snapshot_row(observation_date: date, quality_status: str) -> dict[str, obje
         "observation_date": observation_date,
         "member_count": 10,
         "quality_status": quality_status,
+        "source_batch_id": uuid4(),
+        "content_sha256": bytes.fromhex("a" * 64),
     }

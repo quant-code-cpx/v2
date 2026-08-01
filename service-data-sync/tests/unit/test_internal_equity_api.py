@@ -12,6 +12,8 @@ from service_data_sync.application.ports.equity_master_read import (
     EquityMasterPublication,
     EquityMasterReadRepository,
     EquityMasterReadUnavailable,
+    EquityPublicationComponent,
+    EquitySourceAttribution,
     PublicationScope,
     StoredEquityInstrument,
     StoredListingStatusPeriod,
@@ -64,6 +66,8 @@ class FakeEquityRepository:
                 known_from=datetime(2026, 6, 1, tzinfo=UTC),
                 known_to=datetime(2026, 6, 20, tzinfo=UTC),
                 observed_at=datetime(2026, 6, 1, 1, tzinfo=UTC),
+                evidence_kind="CATALOG",
+                source=_catalog_source(),
             ),
             StoredListingStatusPeriod(
                 version_id=UUID("30000000-0000-4000-8000-000000000002"),
@@ -74,6 +78,8 @@ class FakeEquityRepository:
                 known_from=datetime(2026, 6, 20, tzinfo=UTC),
                 known_to=None,
                 observed_at=datetime(2026, 6, 20, 1, tzinfo=UTC),
+                evidence_kind="EXPLICIT_LISTING",
+                source=_lifecycle_source(),
             ),
         )
         self.find_identifier_as_of_calls: list[date | None] = []
@@ -93,8 +99,8 @@ class FakeEquityRepository:
             data_version=self.data_version,
             published_at=datetime(2026, 7, 2, 12, 5, tzinfo=UTC),
             effective_as_of=date(2026, 7, 1),
-            knowledge_cutoff=_CUTOFF,
             publication_scope=scope,
+            components=_publication_components(exchange),
         )
 
     def list_instruments(
@@ -256,7 +262,12 @@ def test_equity_list_pages_with_signed_cursor_etag_and_snapshot_conflict(
     assert first.json()["items"][0]["identifier"]["symbol"] == "600000"
     assert first.json()["publicationScope"] == "CN_A_STABLE"
     assert first.json()["effectiveAsOf"] == "2026-07-01"
-    assert first.json()["knowledgeCutoff"] == "2026-07-02T12:00:00Z"
+    assert first.json()["requestedKnownAt"] == "2026-07-02T12:00:00Z"
+    assert len(first.json()["componentPublications"]) == 6
+    assert first.json()["items"][0]["listing"]["evidenceKind"] == "EXPLICIT_LISTING"
+    assert first.json()["items"][0]["listing"]["source"]["sourceBatchId"] == str(
+        UUID("50000000-0000-4000-8000-000000000002")
+    )
     assert first.headers["x-data-version"] == str(_VERSION)
     assert first.headers["cache-control"] == "private, max-age=0, must-revalidate"
     assert second.status_code == 200
@@ -293,6 +304,7 @@ def test_equity_detail_resolves_explicit_or_current_identity_and_errors(
     assert detail.json()["instrumentId"] == str(_SECOND_ID)
     assert "securityId" not in detail.json()
     assert detail.json()["name"]["value"] == "贵州茅台"
+    assert detail.json()["listing"]["qualityStatus"] == "passed"
     assert repository.find_identifier_as_of_calls[0] == date(2026, 6, 30)
     assert repository.find_identifier_as_of_calls[2] is None
     assert cached.status_code == 304
@@ -391,7 +403,9 @@ def test_equity_routes_validate_filters_times_and_dependency_state(
     assert late_knowledge.status_code == 400
     assert unpublished.status_code == 503
     assert unpublished.headers["retry-after"] == "5"
+    assert unpublished.json()["code"] == "publication-unavailable"
     assert unavailable.status_code == 503
+    assert unavailable.json()["code"] == "dependency-unavailable"
     assert broken_list.status_code == 503
     assert broken_detail.status_code == 503
     assert broken_history.status_code == 503
@@ -430,6 +444,7 @@ def _instrument(
             date_precision="OFFICIAL_DATE",
             known_from=datetime(2026, 6, 1, tzinfo=UTC),
             observed_at=datetime(2026, 6, 1, 1, tzinfo=UTC),
+            source=_catalog_source(),
         ),
         name=TemporalEquityName(
             value=name,
@@ -438,6 +453,7 @@ def _instrument(
             date_precision="OFFICIAL_DATE",
             known_from=datetime(2026, 6, 1, tzinfo=UTC),
             observed_at=datetime(2026, 6, 1, 1, tzinfo=UTC),
+            source=_catalog_source(),
         ),
         listing=TemporalEquityListing(
             status="LISTED",
@@ -448,5 +464,54 @@ def _instrument(
             date_precision="OFFICIAL_DATE",
             known_from=datetime(2026, 6, 1, tzinfo=UTC),
             observed_at=datetime(2026, 6, 1, 1, tzinfo=UTC),
+            evidence_kind="EXPLICIT_LISTING",
+            source=_lifecycle_source(),
         ),
+    )
+
+
+def _publication_components(
+    exchange: Exchange | None,
+) -> tuple[EquityPublicationComponent, ...]:
+    """构造目录与生命周期独立 cutoff 的 resolved 输入清单。"""
+    exchanges = (exchange,) if exchange is not None else tuple(Exchange)
+    return tuple(
+        EquityPublicationComponent(
+            component_key=(kind if exchange is not None else f"{current_exchange.value}.{kind}"),
+            dataset=("equity.master.catalog" if kind == "catalog" else "equity.lifecycle.explicit"),
+            partition_key=current_exchange.value,
+            data_version=UUID(f"40000000-0000-4000-8000-0000000000{ordinal:02d}"),
+            published_at=datetime(2026, 7, 2, 12, 5, tzinfo=UTC),
+            effective_as_of=date(2026, 7, 1),
+            knowledge_cutoff=(
+                datetime(2026, 7, 2, 11, tzinfo=UTC) if kind == "catalog" else _CUTOFF
+            ),
+            quality_status="passed",
+        )
+        for ordinal, (current_exchange, kind) in enumerate(
+            (
+                (current_exchange, kind)
+                for current_exchange in exchanges
+                for kind in ("catalog", "lifecycle")
+            ),
+            start=1,
+        )
+    )
+
+
+def _catalog_source() -> EquitySourceAttribution:
+    """构造脱敏目录来源锚点。"""
+    return EquitySourceAttribution(
+        source_batch_id=UUID("50000000-0000-4000-8000-000000000001"),
+        provider_id="catalog-provider",
+        upstream_source="eastmoney.equity-catalog",
+    )
+
+
+def _lifecycle_source() -> EquitySourceAttribution:
+    """构造脱敏交易所生命周期来源锚点。"""
+    return EquitySourceAttribution(
+        source_batch_id=UUID("50000000-0000-4000-8000-000000000002"),
+        provider_id="lifecycle-provider",
+        upstream_source="sse.lifecycle",
     )

@@ -22,7 +22,9 @@ def test_existing_fact_writers_use_date_aware_identity_resolution() -> None:
         ),
         "sector_membership_repository.py": ("resolve_identity_on_connection",),
         "financial_sync_repository.py": ("require_single_confirmed_identity_on_connection",),
-        "equity_lifecycle_repository.py": ("require_single_confirmed_identity_on_connection",),
+        # 生命周期逐条处理官方事件，并保留 NOT_FOUND 冷启动路径；它使用同一事务内的
+        # 单日期解析器，不能套用要求全部日期已确认的批量写入 helper。
+        "equity_lifecycle_repository.py": ("resolve_identity_on_connection",),
         "money_flow_repository.py": ("require_single_confirmed_identity_on_connection",),
     }
 
@@ -54,7 +56,7 @@ def test_financial_reader_locks_request_time_identity_before_publication() -> No
     assert "FinancialPublication.effective_as_of" in source
     assert "FinancialPublication.knowledge_cutoff" in source
     assert (
-        "EquityIdentifierVersion.effective_range.op(\"@>\")(\n"
+        'EquityIdentifierVersion.effective_range.op("@>")(\n'
         "                    FinancialPublication.effective_as_of"
     ) not in source
     assert "EquityInstrument.exchange ==" not in source

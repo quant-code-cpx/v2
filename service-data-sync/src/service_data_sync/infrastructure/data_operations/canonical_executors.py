@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from functools import partial
@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from service_data_sync.application.corporate_events.sync import CorporateEventsSyncService
+from service_data_sync.application.derivative.daily_bar_sync import DerivativeDailyBarSyncService
 from service_data_sync.application.equity.daily_bar_sync import EquityDailyBarSyncService
 from service_data_sync.application.equity.lifecycle_sync import EquityLifecycleSyncService
 from service_data_sync.application.equity.market_extension_sync import (
@@ -43,7 +44,14 @@ from service_data_sync.application.etf.reference_sync import (
     EtfStatusSyncService,
 )
 from service_data_sync.application.financial.sync import FinancialSyncService
+from service_data_sync.application.index.shadow_sync import IndexShadowSyncService
+from service_data_sync.application.margin.market_daily_sync import MarginMarketDailySyncService
+from service_data_sync.application.margin.security_sync import (
+    MarginEligibilitySyncService,
+    MarginSecurityDailySyncService,
+)
 from service_data_sync.application.market_overview.sync import MarketOverviewSyncService
+from service_data_sync.application.money_flow.sync import MoneyFlowSyncService
 from service_data_sync.application.ports.data_source import (
     DataSourcePort,
     ProviderError,
@@ -59,6 +67,7 @@ from service_data_sync.application.ports.delivery_manifest import (
 from service_data_sync.application.ports.financial_sync import FinancialPublicationResult
 from service_data_sync.application.ports.market_overview import MarketOverviewRepository
 from service_data_sync.application.ports.sector_eod import SectorEodExecutionMode
+from service_data_sync.application.sector.bar_sync import SectorBarSyncService
 from service_data_sync.application.sector.catalog_sync import SectorCatalogSyncService
 from service_data_sync.application.sector.eod_schedule import (
     sector_eod_scheduler_target_date,
@@ -76,20 +85,31 @@ from service_data_sync.application.sector.sw_snapshot_sync import (
 from service_data_sync.application.stock_connect.bundle_sync import (
     StockConnectDailyBundleSyncService,
 )
+from service_data_sync.application.stock_connect_research.market_stat_sync import (
+    StockConnectMarketStatResearchSyncService,
+)
 from service_data_sync.application.trading_events.sync import (
     BlockTradeSyncService,
     DragonTigerSyncService,
 )
 from service_data_sync.bootstrap.container import ServiceContainer
 from service_data_sync.bootstrap.financial_derived import run_financial_derivation
+from service_data_sync.domain.derivative import DerivativeContractIdentifier
 from service_data_sync.domain.equity import EquityBarPeriod, EquityIdentifier, Exchange
 from service_data_sync.domain.etf import EtfIdentifier
-from service_data_sync.domain.sector import SectorScheme
+from service_data_sync.domain.index import IndexAdministrator, IndexCapability, IndexIdentifier
+from service_data_sync.domain.margin import MarginVenue
+from service_data_sync.domain.sector import (
+    SectorIdentifier,
+    SectorPeriod,
+    SectorScheme,
+)
 from service_data_sync.domain.stock_connect import StockConnectChannel
 from service_data_sync.infrastructure.data_operations.control_plane import (
     DataOperationsControlPlane,
     ExecutionClaim,
     ExecutionOutcome,
+    money_flow_source_capability,
 )
 from service_data_sync.infrastructure.data_operations.equity_backfill_checkpoint import (
     completed_equity_bar_partitions,
@@ -121,6 +141,9 @@ from service_data_sync.infrastructure.object_storage.raw_payload_store import (
     S3RawPayloadStore,
     retain_failure_evidence,
 )
+from service_data_sync.infrastructure.persistence import (
+    stock_connect_market_stat_research_repository as stock_connect_research_repository,
+)
 from service_data_sync.infrastructure.persistence.corporate_events_repository import (
     CorporateSourceApproval,
     SqlAlchemyCorporateEventsRepository,
@@ -130,6 +153,10 @@ from service_data_sync.infrastructure.persistence.dataset_availability_repositor
 )
 from service_data_sync.infrastructure.persistence.delivery_manifest_repository import (
     SqlAlchemyDeliveryManifestRepository,
+)
+from service_data_sync.infrastructure.persistence.derivative_market_data_repository import (
+    DerivativeSourceApproval,
+    SqlAlchemyDerivativeDailyBarRepository,
 )
 from service_data_sync.infrastructure.persistence.equity_discovery_repository import (
     SqlAlchemyEquityDiscoveryRepository,
@@ -142,6 +169,9 @@ from service_data_sync.infrastructure.persistence.equity_market_data_repository 
 )
 from service_data_sync.infrastructure.persistence.equity_master_repository import (
     SqlAlchemyEquityMasterRepository,
+)
+from service_data_sync.infrastructure.persistence.equity_master_resolved_repository import (
+    SqlAlchemyResolvedEquityMasterRepository,
 )
 from service_data_sync.infrastructure.persistence.equity_workspace_repository import (
     EquityWorkspaceSourceApproval,
@@ -162,8 +192,18 @@ from service_data_sync.infrastructure.persistence.etf_universe_repository import
 from service_data_sync.infrastructure.persistence.financial_sync_repository import (
     SqlAlchemyFinancialSyncRepository,
 )
+from service_data_sync.infrastructure.persistence.index_shadow_repository import (
+    SqlAlchemyIndexShadowRepository,
+)
+from service_data_sync.infrastructure.persistence.margin_market_data_repository import (
+    MarginSourceApproval,
+    SqlAlchemyMarginMarketDataRepository,
+)
 from service_data_sync.infrastructure.persistence.market_overview_repository import (
     SqlAlchemyMarketOverviewRepository,
+)
+from service_data_sync.infrastructure.persistence.money_flow_repository import (
+    SqlAlchemyMoneyFlowRepository,
 )
 from service_data_sync.infrastructure.persistence.sector_eod_repository import (
     SqlAlchemySectorEodRepository,
@@ -197,6 +237,7 @@ from ..database.models.equity.identity.equity_identifier_version import (
     EquityIdentifierVersion,
 )
 from ..database.models.equity.identity.equity_instrument import EquityInstrument
+from ..database.models.sector.catalog.sector_entity import SectorEntity
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +268,12 @@ _FINANCIAL_EXECUTIONS = {
 }
 _FINANCIAL_DERIVED_DATASET = "financial.derived-metric"
 _SECTOR_CATALOG_CAPABILITY = "sector.catalog.raw"
+_SECTOR_BAR_PERIODS: dict[str, SectorPeriod] = {
+    "sector.bar.1d.raw": SectorPeriod.DAY_1,
+    "sector.bar.1w.raw": SectorPeriod.WEEK_1,
+    "sector.bar.1mo.raw": SectorPeriod.MONTH_1,
+}
+_SECTOR_BAR_EXECUTION_BATCH_DAYS = 1
 _SECTOR_MEMBERSHIP_DATASET = "sector.membership.release"
 _SECTOR_MEMBERSHIP_CAPABILITY = "sector.membership.snapshot.raw"
 _SECTOR_EOD_CAPABILITY = "sector.quote.eod.snapshot.raw"
@@ -239,12 +286,27 @@ _ETF_EXECUTIONS: dict[str, tuple[str, str]] = {
     "fund.etf.bar.1d.reported": ("BARS", "fund.etf.bar.1d.raw"),
     "fund.etf.nav.1d.reported": ("NAV", "fund.etf.nav.1d.reported"),
 }
+_MARGIN_EXECUTIONS: dict[str, tuple[str, str]] = {
+    "market.margin.market.1d.reported": ("MARKET", "market.margin.market.1d.reported"),
+    "market.margin.security.1d.reported": ("SECURITY", "market.margin.security.1d.reported"),
+    "market.margin.eligibility.reported": ("ELIGIBILITY", "market.margin.eligibility.reported"),
+}
+_MARGIN_EXECUTION_BATCH_DAYS = 5
+_STOCK_CONNECT_RESEARCH_DATASET = "market.stock_connect.market_stat.research"
+_STOCK_CONNECT_RESEARCH_CAPABILITY = "market.stock_connect.market_stat.reported"
+_STOCK_CONNECT_RESEARCH_EXECUTION_BATCH_DAYS = 5
+_DERIVATIVE_DATASET = "derivative.bar.1d.reported"
+_DERIVATIVE_CAPABILITY = "derivative.bar.1d.reported"
+_DERIVATIVE_EXECUTION_BATCH_DAYS = 31
+_MONEY_FLOW_DAILY_DATASET = "money_flow.daily"
+_MONEY_FLOW_RANKING_DATASET = "money_flow.ranking"
 _EQUITY_TRADING_STATUS_CAPABILITY = "equity.trading_status.1d"
 _EQUITY_SHARE_CAPITAL_CAPABILITY = "equity.share_capital.reported"
 _EQUITY_DISCOVERY_DATASET = "equity.discovery.eod"
 _EQUITY_MASTER_DATASET = "equity.master.cn-a"
 _EQUITY_MASTER_CAPABILITY = "equity.master.catalog"
 _EQUITY_LIFECYCLE_CAPABILITY = "equity.lifecycle.explicit"
+_EQUITY_MASTER_RESOLVED_DATASET = "equity.master.resolved"
 _SW_MEMBERSHIP_CAPABILITY = "sector.sw2021.membership.snapshot"
 _STOCK_CONNECT_BUNDLE_DATASET = "market.stock_connect.overview.bundle"
 _STOCK_CONNECT_EXECUTION_BATCH_DAYS = 5
@@ -264,6 +326,38 @@ _STOCK_CONNECT_CAPABILITIES = frozenset(
         "market.stock_connect.channel_status.eod",
     }
 )
+_INDEX_DATASET_TARGETS: dict[str, tuple[IndexAdministrator, IndexCapability, bool]] = {
+    "index.csi.catalog.snapshot": (
+        IndexAdministrator.CSI,
+        IndexCapability.CATALOG_SNAPSHOT,
+        False,
+    ),
+    "index.csi.constituent.snapshot": (
+        IndexAdministrator.CSI,
+        IndexCapability.CONSTITUENT_SNAPSHOT,
+        True,
+    ),
+    "index.csi.weight.snapshot": (
+        IndexAdministrator.CSI,
+        IndexCapability.WEIGHT_SNAPSHOT,
+        True,
+    ),
+    "index.cni.catalog.snapshot": (
+        IndexAdministrator.CNI,
+        IndexCapability.CATALOG_SNAPSHOT,
+        False,
+    ),
+    "index.cni.constituent.snapshot": (
+        IndexAdministrator.CNI,
+        IndexCapability.CONSTITUENT_SNAPSHOT,
+        True,
+    ),
+    "index.cni.weight.snapshot": (
+        IndexAdministrator.CNI,
+        IndexCapability.WEIGHT_SNAPSHOT,
+        True,
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +367,14 @@ class _FrozenEquityIdentity:
     instrument_id: UUID
     identifier: EquityIdentifier
     identity_as_of: date
+
+
+@dataclass(frozen=True, slots=True)
+class _FrozenSectorBarIdentity:
+    """保存受理时冻结的板块主键与东财分类体系代码，重试不得重新枚举目录。"""
+
+    sector_key: int
+    identifier: SectorIdentifier
 
 
 def register_canonical_executors(
@@ -286,6 +388,10 @@ def register_canonical_executors(
     control_plane.register_executor(
         _EQUITY_LIFECYCLE_CAPABILITY,
         partial(_execute_equity_lifecycle, container=container),
+    )
+    control_plane.register_executor(
+        _EQUITY_MASTER_RESOLVED_DATASET,
+        partial(_execute_equity_master_resolved, container=container),
     )
     for dataset_code, period in _EQUITY_BAR_PERIODS.items():
         control_plane.register_executor(
@@ -314,6 +420,11 @@ def register_canonical_executors(
         "sector.catalog.raw",
         partial(_execute_sector_catalog, container=container),
     )
+    for dataset_code, period in _SECTOR_BAR_PERIODS.items():
+        control_plane.register_executor(
+            dataset_code,
+            partial(_execute_sector_bar, container=container, period=period),
+        )
     control_plane.register_executor(
         _SECTOR_MEMBERSHIP_DATASET,
         partial(_execute_sector_membership, container=container),
@@ -331,6 +442,38 @@ def register_canonical_executors(
             dataset_code,
             partial(_execute_etf, container=container, dataset_code=dataset_code),
         )
+    for dataset_code in _INDEX_DATASET_TARGETS:
+        control_plane.register_executor(
+            dataset_code,
+            partial(_execute_index_shadow, container=container, dataset_code=dataset_code),
+        )
+    for dataset_code, (operation, capability) in _MARGIN_EXECUTIONS.items():
+        control_plane.register_executor(
+            dataset_code,
+            partial(
+                _execute_margin,
+                container=container,
+                dataset_code=dataset_code,
+                operation=operation,
+                capability=capability,
+            ),
+        )
+    control_plane.register_executor(
+        _DERIVATIVE_DATASET,
+        partial(_execute_derivative_daily_bar, container=container),
+    )
+    control_plane.register_executor(
+        _MONEY_FLOW_DAILY_DATASET,
+        partial(_execute_money_flow, container=container),
+    )
+    control_plane.register_executor(
+        _MONEY_FLOW_RANKING_DATASET,
+        partial(_execute_money_flow, container=container),
+    )
+    control_plane.register_executor(
+        _STOCK_CONNECT_RESEARCH_DATASET,
+        partial(_execute_stock_connect_market_stat_research, container=container),
+    )
     control_plane.register_executor(
         _EQUITY_TRADING_STATUS_CAPABILITY,
         partial(_execute_equity_trading_status, container=container),
@@ -424,9 +567,7 @@ def _execute_corporate_events(
     unchanged = 0
     excluded = 0
     data_version: UUID | None = None
-    for index, (window_from, window_to, partition_keys) in enumerate(
-        partition_roster
-    ):
+    for index, (window_from, window_to, partition_keys) in enumerate(partition_roster):
         completed_in_window = set(partition_keys) & set(completed_keys)
         if completed_in_window:
             if completed_in_window != set(partition_keys):
@@ -475,9 +616,7 @@ def _execute_corporate_events(
                 execution=execution,
                 window_from=window_from,
                 window_to=window_to,
-                source_batch_ids=tuple(
-                    set(execution.source_batch_ids) - source_ids_before
-                ),
+                source_batch_ids=tuple(set(execution.source_batch_ids) - source_ids_before),
             )
     if is_backfill:
         finalize_equity_event_partitions(
@@ -562,15 +701,11 @@ def _execute_trading_events(
     unchanged = 0
     excluded = 0
     data_version: UUID | None = None
-    for index, (window_from, window_to, partition_keys) in enumerate(
-        partition_roster
-    ):
+    for index, (window_from, window_to, partition_keys) in enumerate(partition_roster):
         completed_in_window = set(partition_keys) & set(completed_keys)
         if completed_in_window:
             if completed_in_window != set(partition_keys):
-                raise RuntimeError(
-                    "equity backfill trading-event window has a partial checkpoint"
-                )
+                raise RuntimeError("equity backfill trading-event window has a partial checkpoint")
             continue
         if _cancel_requested(container):
             return ExecutionOutcome(
@@ -580,17 +715,18 @@ def _execute_trading_events(
                 processed_records=inserted + unchanged,
             )
         final_callback = (
-            execution.arm_terminal_write
-            if not is_backfill and index == len(windows) - 1
-            else None
+            execution.arm_terminal_write if not is_backfill and index == len(windows) - 1 else None
         )
         source_ids_before = frozenset(execution.source_batch_ids)
         if operation == "DRAGON_TIGER":
-            result = retain_failure_evidence(
-                raw_store,
-                lambda window_from=window_from,
-                window_to=window_to,
-                final_callback=final_callback: asyncio.run(
+
+            def sync_dragon_tiger_window(
+                window_from: date = window_from,
+                window_to: date = window_to,
+                final_callback: Callable[[], None] | None = final_callback,
+            ) -> Any:
+                """同步单个龙虎榜窗口，并把末窗口栅栏仅交给对应发布事务。"""
+                return asyncio.run(
                     DragonTigerSyncService(
                         source=source,
                         repository=repository,
@@ -601,14 +737,21 @@ def _execute_trading_events(
                         identifier=identifier,
                         before_final_publication=final_callback,
                     )
-                ),
-            )
-        elif operation == "BLOCK_TRADE":
+                )
+
             result = retain_failure_evidence(
                 raw_store,
-                lambda window_from=window_from,
-                window_to=window_to,
-                final_callback=final_callback: asyncio.run(
+                sync_dragon_tiger_window,
+            )
+        elif operation == "BLOCK_TRADE":
+
+            def sync_block_trade_window(
+                window_from: date = window_from,
+                window_to: date = window_to,
+                final_callback: Callable[[], None] | None = final_callback,
+            ) -> Any:
+                """同步单个大宗交易窗口，并把末窗口栅栏仅交给对应发布事务。"""
+                return asyncio.run(
                     BlockTradeSyncService(
                         source=source,
                         repository=repository,
@@ -619,7 +762,11 @@ def _execute_trading_events(
                         identifier=identifier,
                         before_final_publication=final_callback,
                     )
-                ),
+                )
+
+            result = retain_failure_evidence(
+                raw_store,
+                sync_block_trade_window,
             )
         else:
             raise ValueError("trading event operation is unsupported")
@@ -634,9 +781,7 @@ def _execute_trading_events(
                 execution=execution,
                 window_from=window_from,
                 window_to=window_to,
-                source_batch_ids=tuple(
-                    set(execution.source_batch_ids) - source_ids_before
-                ),
+                source_batch_ids=tuple(set(execution.source_batch_ids) - source_ids_before),
             )
     if is_backfill:
         finalize_equity_event_partitions(
@@ -701,10 +846,7 @@ def _execute_equity_master(
         )
         inserted += result.inserted_count
         unchanged += result.unchanged_count
-        # 三个 child publication 已分别通过数据库栅栏提交；聚合事务统一写入最终进度。
-        execution.record_publication_progress(
-            record_count=result.inserted_count + result.unchanged_count
-        )
+        # 每所 child release 会通过统一发布器精确记录一个控制面分区；这里不能再次累计。
     execution.arm_terminal_write()
     repository.publish_cn_a_aggregate()
     return ExecutionOutcome(
@@ -1290,6 +1432,784 @@ def _execute_equity_lifecycle(
         completed_partitions=len(exchanges),
         total_partitions=len(exchanges),
         processed_records=inserted + unchanged,
+    )
+
+
+def _execute_equity_master_resolved(
+    claim: ExecutionClaim, *, container: ServiceContainer
+) -> ExecutionOutcome:
+    """通过已注册 fenced executor 发布 providerless 的目录/生命周期 resolved 视图。"""
+    selector = claim.target.get("selector")
+    if (
+        claim.dataset_code != _EQUITY_MASTER_RESOLVED_DATASET
+        or claim.target.get("mode") != "FULL"
+        or not isinstance(selector, dict)
+        or selector.get("kind") != "GLOBAL"
+    ):
+        raise ValueError("equity resolved master target is unsupported")
+    if claim.source_snapshot and any(
+        value.get("sourceKind") != "INTERNAL_EXECUTOR" for value in claim.source_snapshot
+    ):
+        raise ValueError("equity resolved master must not bind an external provider")
+    if _cancel_requested(container):
+        return ExecutionOutcome(
+            status="CANCELLED",
+            completed_partitions=0,
+            total_partitions=1,
+        )
+    result = SqlAlchemyResolvedEquityMasterRepository(container.database).publish()
+    return ExecutionOutcome(
+        status="SUCCEEDED",
+        completed_partitions=1,
+        total_partitions=1,
+        processed_records=result.component_count,
+        checkpoint_kind="data-version",
+        checkpoint_position=str(result.data_version),
+    )
+
+
+def _execute_margin(
+    claim: ExecutionClaim,
+    *,
+    container: ServiceContainer,
+    dataset_code: str,
+    operation: str,
+    capability: str,
+) -> ExecutionOutcome:
+    """按冻结日期窗执行一段两融场所批次，并以持久化分区支持安全续跑。
+
+    每个 batch 都经 `DatabaseClient` 的 fencing 事务发布，随后才标记该窗口成功；不能
+    先推进水位再调用来源。窗口之间主动 `YIELDED`，避免深市逐日接口长期占用全局槽。
+    """
+    selector = claim.target.get("selector")
+    if (
+        claim.dataset_code != dataset_code
+        or not isinstance(selector, dict)
+        or selector.get("kind") != "MARGIN"
+        or selector.get("operation") != operation
+        or selector.get("security") is not None
+    ):
+        raise ValueError("margin dataset and selector do not match executor")
+    venue_code = selector.get("venue")
+    if not isinstance(venue_code, str):
+        raise ValueError("margin venue is invalid")
+    venue = MarginVenue(venue_code)
+    if operation == "ELIGIBILITY" and venue.code not in {"SZSE", "BSE"}:
+        raise ValueError("margin eligibility source is only available for SZSE or BSE")
+    if operation in {"MARKET", "SECURITY"} and venue.code not in {"SSE", "SZSE"}:
+        raise ValueError("margin market and security sources are only available for SSE or SZSE")
+    start, end = _akshare_batched_window(
+        claim,
+        dataset_code=dataset_code,
+        batch_days=_MARGIN_EXECUTION_BATCH_DAYS,
+    )
+    windows = _bounded_windows(start, end, _MARGIN_EXECUTION_BATCH_DAYS)
+    partition_by_window = {
+        window: _margin_partition(operation=operation, venue=venue, window=window)
+        for window in windows
+    }
+    partition_keys = frozenset(partition_by_window.values())
+    completed_before = _prepare_operation_partitions(
+        container,
+        run_id=claim.run_id,
+        partition_keys=partition_keys,
+        subject="margin date windows",
+    )
+    pending_windows = tuple(
+        window for window in windows if partition_by_window[window] not in completed_before
+    )
+    if not pending_windows:
+        return ExecutionOutcome(
+            status="SUCCEEDED",
+            completed_partitions=len(completed_before),
+            total_partitions=len(windows),
+        )
+    if _cancel_requested(container):
+        return ExecutionOutcome(
+            status="PARTIAL" if completed_before else "CANCELLED",
+            completed_partitions=len(completed_before),
+            total_partitions=len(windows),
+        )
+    window_from, window_to = pending_windows[0]
+    partition_key = partition_by_window[pending_windows[0]]
+    _record_operation_partition(
+        container,
+        run_id=claim.run_id,
+        partition_key=partition_key,
+        status="RUNNING",
+        error_code=None,
+    )
+    provider = _frozen_provider(claim.source_snapshot, container, capability)
+    repository = _margin_repository(container, provider_id=provider.provider_id)
+    raw_store = S3RawPayloadStore(container.object_storage)
+    source = FailureEvidenceDataSource(provider, raw_store)
+
+    def sync_margin_window() -> Any:
+        """调用唯一 operation 的既有同步用例，禁止跨数据集复用或补齐字段。"""
+        if operation == "MARKET":
+            return asyncio.run(
+                MarginMarketDailySyncService(
+                    source=source,
+                    repository=repository,
+                    raw_payload_store=raw_store,
+                ).sync(venue=venue, start=window_from, end=window_to)
+            )
+        if operation == "SECURITY":
+            return asyncio.run(
+                MarginSecurityDailySyncService(
+                    source=source,
+                    repository=repository,
+                    raw_payload_store=raw_store,
+                ).sync(venue=venue, start=window_from, end=window_to)
+            )
+        if operation == "ELIGIBILITY":
+            return asyncio.run(
+                MarginEligibilitySyncService(
+                    source=source,
+                    repository=repository,
+                    raw_payload_store=raw_store,
+                ).sync(venue=venue, start=window_from, end=window_to)
+            )
+        raise ValueError("margin operation is unsupported")
+
+    try:
+        retain_failure_evidence(raw_store, sync_margin_window)
+    except ProviderError as error:
+        _record_operation_partition(
+            container,
+            run_id=claim.run_id,
+            partition_key=partition_key,
+            status="FAILED",
+            error_code=_p0_partition_error_code(error.code.value),
+            error_retryable=error.retryable,
+        )
+        raise
+    except ValueError:
+        _record_operation_partition(
+            container,
+            run_id=claim.run_id,
+            partition_key=partition_key,
+            status="FAILED",
+            error_code="INVALID_SOURCE_DATA",
+            error_retryable=False,
+        )
+        raise
+    _record_operation_partition(
+        container,
+        run_id=claim.run_id,
+        partition_key=partition_key,
+        status="SUCCEEDED",
+        error_code=None,
+    )
+    completed, _failed = _operation_partition_counts(
+        container,
+        run_id=claim.run_id,
+        prefix="margin:",
+    )
+    execution = _required_execution()
+    outcome = ExecutionOutcome(
+        status="YIELDED" if len(pending_windows) > 1 else "SUCCEEDED",
+        completed_partitions=completed,
+        total_partitions=len(windows),
+        processed_records=execution.processed_records,
+        checkpoint_kind=execution.checkpoint_kind,
+        checkpoint_position=execution.checkpoint_position,
+    )
+    return outcome
+
+
+def _execute_index_shadow(
+    claim: ExecutionClaim,
+    *,
+    container: ServiceContainer,
+    dataset_code: str,
+) -> ExecutionOutcome:
+    """写入单一中证或国证当前研究快照，并禁止形成正式发布或历史有效区间。"""
+    selector = claim.target.get("selector")
+    expected = _INDEX_DATASET_TARGETS.get(dataset_code)
+    if (
+        claim.dataset_code != dataset_code
+        or claim.target.get("mode") != "FULL"
+        or expected is None
+        or not isinstance(selector, dict)
+        or selector.get("kind") != "INDEX"
+    ):
+        raise ValueError("index shadow dataset and selector do not match executor")
+    administrator, capability, requires_index_code = expected
+    index_code = selector.get("indexCode")
+    if (
+        selector.get("administrator") != administrator.value
+        or selector.get("capability") != capability.value
+        or (requires_index_code and not isinstance(index_code, str))
+        or (not requires_index_code and index_code is not None)
+    ):
+        raise ValueError("index shadow selector is invalid")
+    identifier = (
+        None
+        if index_code is None
+        else IndexIdentifier(administrator=administrator, code=index_code)
+    )
+    partition_key = _index_shadow_partition(
+        administrator=administrator,
+        capability=capability,
+        index_code=index_code,
+    )
+    completed_before = _prepare_operation_partitions(
+        container,
+        run_id=claim.run_id,
+        partition_keys=frozenset({partition_key}),
+        subject="index research snapshot",
+    )
+    if partition_key in completed_before:
+        return ExecutionOutcome(status="SUCCEEDED", completed_partitions=1, total_partitions=1)
+    if _cancel_requested(container):
+        return ExecutionOutcome(status="CANCELLED", completed_partitions=0, total_partitions=1)
+    _record_operation_partition(
+        container,
+        run_id=claim.run_id,
+        partition_key=partition_key,
+        status="RUNNING",
+        error_code=None,
+    )
+    provider = _frozen_provider(claim.source_snapshot, container, capability.value)
+    raw_store = S3RawPayloadStore(container.object_storage)
+    service = IndexShadowSyncService(
+        source=FailureEvidenceDataSource(provider, raw_store),
+        repository=SqlAlchemyIndexShadowRepository(container.database),
+        raw_payload_store=raw_store,
+    )
+    try:
+        if identifier is None:
+            result = retain_failure_evidence(
+                raw_store,
+                lambda: asyncio.run(service.sync_catalog(administrator=administrator)),
+            )
+        else:
+            result = retain_failure_evidence(
+                raw_store,
+                lambda: asyncio.run(
+                    service.sync_snapshot(identifier=identifier, capability=capability)
+                ),
+            )
+    except ProviderError as error:
+        _record_operation_partition(
+            container,
+            run_id=claim.run_id,
+            partition_key=partition_key,
+            status="FAILED",
+            error_code=_p0_partition_error_code(error.code.value),
+            error_retryable=error.retryable,
+        )
+        raise
+    except ValueError:
+        _record_operation_partition(
+            container,
+            run_id=claim.run_id,
+            partition_key=partition_key,
+            status="FAILED",
+            error_code="INVALID_SOURCE_DATA",
+            error_retryable=False,
+        )
+        raise
+    except Exception:
+        _record_operation_partition(
+            container,
+            run_id=claim.run_id,
+            partition_key=partition_key,
+            status="FAILED",
+            error_code="INDEX_RESEARCH_SYNC_FAILED",
+            error_retryable=True,
+            error_stage="PERSISTENCE",
+        )
+        raise
+    _record_operation_partition(
+        container,
+        run_id=claim.run_id,
+        partition_key=partition_key,
+        status="SUCCEEDED",
+        error_code=None,
+    )
+    # IndexShadowRepository 只写 research 观察和来源摘要；绝不调用 arm_terminal_write。
+    return ExecutionOutcome(
+        status="SUCCEEDED",
+        completed_partitions=1,
+        total_partitions=1,
+        processed_records=result.observation.item_count,
+    )
+
+
+def _execute_stock_connect_market_stat_research(
+    claim: ExecutionClaim,
+    *,
+    container: ServiceContainer,
+) -> ExecutionOutcome:
+    """按冻结日期窗和通道方向记录 AKShare 港通统计 research，不触碰官方完整包。"""
+    selector = claim.target.get("selector")
+    if (
+        claim.dataset_code != _STOCK_CONNECT_RESEARCH_DATASET
+        or not isinstance(selector, dict)
+        or selector.get("kind") != "STOCK_CONNECT_RESEARCH"
+        or selector.get("operation") != "MARKET_STAT"
+    ):
+        raise ValueError("stock-connect research dataset and selector do not match executor")
+    channel_value = selector.get("channel")
+    direction_value = selector.get("direction")
+    if not isinstance(channel_value, str) or channel_value not in {"ALL", "SH", "SZ"}:
+        raise ValueError("stock-connect research channel is invalid")
+    if direction_value not in {"NORTHBOUND", "SOUTHBOUND", None}:
+        raise ValueError("stock-connect research direction is invalid")
+    start, end = _akshare_batched_window(
+        claim,
+        dataset_code=_STOCK_CONNECT_RESEARCH_DATASET,
+        batch_days=_STOCK_CONNECT_RESEARCH_EXECUTION_BATCH_DAYS,
+    )
+    channels = ("SH", "SZ") if channel_value == "ALL" else (channel_value,)
+    directions = ("NORTHBOUND", "SOUTHBOUND") if direction_value is None else (direction_value,)
+    tasks = tuple(
+        (StockConnectChannel(channel=channel, direction=direction), window)
+        for window in _bounded_windows(start, end, _STOCK_CONNECT_RESEARCH_EXECUTION_BATCH_DAYS)
+        for channel in channels
+        for direction in directions
+    )
+    partition_by_task = {
+        task: _stock_connect_research_partition(channel=task[0], window=task[1]) for task in tasks
+    }
+    completed_before = _prepare_operation_partitions(
+        container,
+        run_id=claim.run_id,
+        partition_keys=frozenset(partition_by_task.values()),
+        subject="stock-connect research date windows",
+    )
+    pending = tuple(task for task in tasks if partition_by_task[task] not in completed_before)
+    if not pending:
+        return ExecutionOutcome(
+            status="SUCCEEDED",
+            completed_partitions=len(completed_before),
+            total_partitions=len(tasks),
+        )
+    if _cancel_requested(container):
+        return ExecutionOutcome(
+            status="PARTIAL" if completed_before else "CANCELLED",
+            completed_partitions=len(completed_before),
+            total_partitions=len(tasks),
+        )
+    channel, window = pending[0]
+    window_from, window_to = window
+    partition_key = partition_by_task[(channel, window)]
+    _record_operation_partition(
+        container,
+        run_id=claim.run_id,
+        partition_key=partition_key,
+        status="RUNNING",
+        error_code=None,
+    )
+    provider = _frozen_provider(
+        claim.source_snapshot,
+        container,
+        _STOCK_CONNECT_RESEARCH_CAPABILITY,
+    )
+    failure_evidence_store = S3RawPayloadStore(container.object_storage)
+    service = StockConnectMarketStatResearchSyncService(
+        source=provider,
+        repository=stock_connect_research_repository.SqlAlchemyStockConnectMarketStatResearchRepository(
+            container.database
+        ),
+        failure_evidence_store=failure_evidence_store,
+    )
+    try:
+        result = asyncio.run(service.sync(channel=channel, start=window_from, end=window_to))
+    except ProviderError as error:
+        _record_operation_partition(
+            container,
+            run_id=claim.run_id,
+            partition_key=partition_key,
+            status="FAILED",
+            error_code=_p0_partition_error_code(error.code.value),
+            error_retryable=error.retryable,
+        )
+        raise
+    except ValueError:
+        _record_operation_partition(
+            container,
+            run_id=claim.run_id,
+            partition_key=partition_key,
+            status="FAILED",
+            error_code="INVALID_SOURCE_DATA",
+            error_retryable=False,
+        )
+        raise
+    except Exception:
+        _record_operation_partition(
+            container,
+            run_id=claim.run_id,
+            partition_key=partition_key,
+            status="FAILED",
+            error_code="STOCK_CONNECT_RESEARCH_SYNC_FAILED",
+            error_retryable=True,
+            error_stage="PERSISTENCE",
+        )
+        raise
+    _record_operation_partition(
+        container,
+        run_id=claim.run_id,
+        partition_key=partition_key,
+        status="SUCCEEDED",
+        error_code=None,
+    )
+    completed, _failed = _operation_partition_counts(
+        container,
+        run_id=claim.run_id,
+        prefix="stock-connect-research:",
+    )
+    # Research 仓储只保存观察、来源摘要和质量，不生成 DatasetRelease、Publication 或 PIT。
+    return ExecutionOutcome(
+        status="YIELDED" if len(pending) > 1 else "SUCCEEDED",
+        completed_partitions=completed,
+        total_partitions=len(tasks),
+        processed_records=result.batch.inserted_count,
+    )
+
+
+def _execute_derivative_daily_bar(
+    claim: ExecutionClaim,
+    *,
+    container: ServiceContainer,
+) -> ExecutionOutcome:
+    """按冻结窗口同步一个真实期货合约，并以一窗一调度批次避免长历史任务独占。"""
+    selector = claim.target.get("selector")
+    if (
+        claim.dataset_code != _DERIVATIVE_DATASET
+        or not isinstance(selector, dict)
+        or selector.get("kind") != "CONTRACT"
+    ):
+        raise ValueError("derivative dataset requires a contract selector")
+    venue = selector.get("venue")
+    contract_code = selector.get("contract")
+    if not isinstance(venue, str) or not isinstance(contract_code, str):
+        raise ValueError("derivative contract selector is invalid")
+    contract = DerivativeContractIdentifier(venue=venue, contract_code=contract_code)
+    start, end = _akshare_batched_window(
+        claim,
+        dataset_code=_DERIVATIVE_DATASET,
+        batch_days=_DERIVATIVE_EXECUTION_BATCH_DAYS,
+    )
+    windows = _bounded_windows(start, end, _DERIVATIVE_EXECUTION_BATCH_DAYS)
+    partition_by_window = {
+        window: _derivative_partition(contract=contract, window=window) for window in windows
+    }
+    partition_keys = frozenset(partition_by_window.values())
+    completed_before = _prepare_operation_partitions(
+        container,
+        run_id=claim.run_id,
+        partition_keys=partition_keys,
+        subject="derivative contract date windows",
+    )
+    pending_windows = tuple(
+        window for window in windows if partition_by_window[window] not in completed_before
+    )
+    if not pending_windows:
+        return ExecutionOutcome(
+            status="SUCCEEDED",
+            completed_partitions=len(completed_before),
+            total_partitions=len(windows),
+        )
+    if _cancel_requested(container):
+        return ExecutionOutcome(
+            status="PARTIAL" if completed_before else "CANCELLED",
+            completed_partitions=len(completed_before),
+            total_partitions=len(windows),
+        )
+    window_from, window_to = pending_windows[0]
+    partition_key = partition_by_window[pending_windows[0]]
+    _record_operation_partition(
+        container,
+        run_id=claim.run_id,
+        partition_key=partition_key,
+        status="RUNNING",
+        error_code=None,
+    )
+    provider = _frozen_provider(claim.source_snapshot, container, _DERIVATIVE_CAPABILITY)
+    raw_store = S3RawPayloadStore(container.object_storage)
+    source = FailureEvidenceDataSource(provider, raw_store)
+    repository = _derivative_repository(container, provider_id=provider.provider_id)
+
+    def sync_derivative_window() -> Any:
+        """调用真实合约日线用例，连续合约或空身份不会进入仓储。"""
+        return asyncio.run(
+            DerivativeDailyBarSyncService(
+                source=source,
+                repository=repository,
+                raw_payload_store=raw_store,
+            ).sync(contract=contract, start=window_from, end=window_to)
+        )
+
+    try:
+        retain_failure_evidence(raw_store, sync_derivative_window)
+    except ProviderError as error:
+        _record_operation_partition(
+            container,
+            run_id=claim.run_id,
+            partition_key=partition_key,
+            status="FAILED",
+            error_code=_p0_partition_error_code(error.code.value),
+            error_retryable=error.retryable,
+        )
+        raise
+    except ValueError:
+        _record_operation_partition(
+            container,
+            run_id=claim.run_id,
+            partition_key=partition_key,
+            status="FAILED",
+            error_code="INVALID_SOURCE_DATA",
+            error_retryable=False,
+        )
+        raise
+    _record_operation_partition(
+        container,
+        run_id=claim.run_id,
+        partition_key=partition_key,
+        status="SUCCEEDED",
+        error_code=None,
+    )
+    completed, _failed = _operation_partition_counts(
+        container,
+        run_id=claim.run_id,
+        prefix="derivative:",
+    )
+    execution = _required_execution()
+    return ExecutionOutcome(
+        status="YIELDED" if len(pending_windows) > 1 else "SUCCEEDED",
+        completed_partitions=completed,
+        total_partitions=len(windows),
+        processed_records=execution.processed_records,
+        checkpoint_kind=execution.checkpoint_kind,
+        checkpoint_position=execution.checkpoint_position,
+    )
+
+
+def _execute_sector_bar(
+    claim: ExecutionClaim,
+    *,
+    container: ServiceContainer,
+    period: SectorPeriod,
+) -> ExecutionOutcome:
+    """执行一个冻结板块和一日窗口，失败留证且绝不把空响应发布为 K 线。"""
+    if claim.dataset_code != period.capability:
+        raise ValueError("sector bar dataset does not match executor period")
+    roster = _frozen_sector_bar_roster(claim)
+    start, end = _akshare_batched_window(
+        claim,
+        dataset_code=claim.dataset_code,
+        batch_days=_SECTOR_BAR_EXECUTION_BATCH_DAYS,
+    )
+    windows = _bounded_windows(start, end, _SECTOR_BAR_EXECUTION_BATCH_DAYS)
+    tasks = tuple((identity, window) for window in windows for identity in roster)
+    if not tasks:
+        raise ValueError("sector bar frozen roster must not be empty")
+    completed_before = _completed_operation_partitions(
+        container,
+        run_id=claim.run_id,
+        prefix="sector-bar:",
+    )
+    pending = next(
+        (
+            (identity, window)
+            for identity, window in tasks
+            if _sector_bar_partition(period=period, identity=identity, window=window)
+            not in completed_before
+        ),
+        None,
+    )
+    if pending is None:
+        return ExecutionOutcome(
+            status="SUCCEEDED",
+            completed_partitions=len(completed_before),
+            total_partitions=len(tasks),
+        )
+    identity, window = pending
+    partition_key = _sector_bar_partition(period=period, identity=identity, window=window)
+    _prepare_operation_partitions(
+        container,
+        run_id=claim.run_id,
+        partition_keys=frozenset({partition_key}),
+        subject="sector bar frozen roster",
+        allowed_existing_prefix="sector-bar:",
+        expected_total_partitions=len(tasks),
+    )
+    if _cancel_requested(container):
+        return ExecutionOutcome(
+            status="PARTIAL" if completed_before else "CANCELLED",
+            completed_partitions=len(completed_before),
+            total_partitions=len(tasks),
+        )
+    _record_operation_partition(
+        container,
+        run_id=claim.run_id,
+        partition_key=partition_key,
+        status="RUNNING",
+        error_code=None,
+    )
+    raw_store = S3RawPayloadStore(container.object_storage)
+    try:
+        _assert_frozen_sector_bar_identity(container, identity=identity)
+        provider = _frozen_provider(claim.source_snapshot, container, period.capability)
+        result = retain_failure_evidence(
+            raw_store,
+            lambda: asyncio.run(
+                SectorBarSyncService(
+                    source=FailureEvidenceDataSource(provider, raw_store),
+                    repository=SqlAlchemySectorMarketDataRepository(container.database),
+                ).sync(
+                    identifier=identity.identifier,
+                    period=period,
+                    start=window[0],
+                    end=window[1],
+                )
+            ),
+        )
+    except ProviderError as error:
+        _record_operation_partition(
+            container,
+            run_id=claim.run_id,
+            partition_key=partition_key,
+            status="FAILED",
+            error_code=_p0_partition_error_code(error.code.value),
+            error_retryable=error.retryable,
+        )
+        raise
+    except ValueError:
+        _record_operation_partition(
+            container,
+            run_id=claim.run_id,
+            partition_key=partition_key,
+            status="FAILED",
+            error_code="INVALID_SOURCE_DATA",
+            error_retryable=False,
+        )
+        raise
+    _record_operation_partition(
+        container,
+        run_id=claim.run_id,
+        partition_key=partition_key,
+        status="SUCCEEDED",
+        error_code=None,
+    )
+    completed, _failed = _operation_partition_counts(
+        container,
+        run_id=claim.run_id,
+        prefix="sector-bar:",
+    )
+    execution = _required_execution()
+    return ExecutionOutcome(
+        status="YIELDED" if completed < len(tasks) else "SUCCEEDED",
+        completed_partitions=completed,
+        total_partitions=len(tasks),
+        processed_records=result.inserted_count + result.unchanged_count,
+        checkpoint_kind=execution.checkpoint_kind,
+        checkpoint_position=execution.checkpoint_position,
+    )
+
+
+def _execute_money_flow(
+    claim: ExecutionClaim,
+    *,
+    container: ServiceContainer,
+) -> ExecutionOutcome:
+    """抓取一个冻结资金流方法学能力，完整性不足只落研究观察不伪造 publication。"""
+    if claim.dataset_code not in {_MONEY_FLOW_DAILY_DATASET, _MONEY_FLOW_RANKING_DATASET}:
+        raise ValueError("money-flow dataset is unsupported")
+    selector = claim.target.get("selector")
+    if not isinstance(selector, dict) or selector.get("kind") != "MONEY_FLOW":
+        raise ValueError("money-flow selector is invalid")
+    capability = money_flow_source_capability(claim.dataset_code, selector)
+    partition_key = _money_flow_partition(
+        claim=claim,
+        capability=capability,
+        selector=selector,
+    )
+    completed_before = _prepare_operation_partitions(
+        container,
+        run_id=claim.run_id,
+        partition_keys=frozenset({partition_key}),
+        subject="money-flow frozen target",
+        allowed_existing_prefix="money-flow:",
+        expected_total_partitions=1,
+    )
+    if partition_key in completed_before:
+        return ExecutionOutcome(status="SUCCEEDED", completed_partitions=1, total_partitions=1)
+    if _cancel_requested(container):
+        return ExecutionOutcome(
+            status="CANCELLED",
+            completed_partitions=0,
+            total_partitions=1,
+        )
+    _record_operation_partition(
+        container,
+        run_id=claim.run_id,
+        partition_key=partition_key,
+        status="RUNNING",
+        error_code=None,
+    )
+    raw_store = S3RawPayloadStore(container.object_storage)
+    try:
+        provider = _frozen_provider(claim.source_snapshot, container, capability)
+        parameters = _money_flow_parameters(
+            claim=claim,
+            container=container,
+            capability=capability,
+            selector=selector,
+        )
+        result = retain_failure_evidence(
+            raw_store,
+            lambda: asyncio.run(
+                MoneyFlowSyncService(
+                    source=FailureEvidenceDataSource(provider, raw_store),
+                    repository=SqlAlchemyMoneyFlowRepository(container.database),
+                ).sync(
+                    capability=capability,
+                    parameters=parameters,
+                    run_id=claim.run_id,
+                    partition_key=partition_key,
+                )
+            ),
+        )
+    except ProviderError as error:
+        _record_operation_partition(
+            container,
+            run_id=claim.run_id,
+            partition_key=partition_key,
+            status="FAILED",
+            error_code=_p0_partition_error_code(error.code.value),
+            error_retryable=error.retryable,
+        )
+        raise
+    except ValueError:
+        _record_operation_partition(
+            container,
+            run_id=claim.run_id,
+            partition_key=partition_key,
+            status="FAILED",
+            error_code="INVALID_SOURCE_DATA",
+            error_retryable=False,
+        )
+        raise
+    _record_operation_partition(
+        container,
+        run_id=claim.run_id,
+        partition_key=partition_key,
+        status="SUCCEEDED",
+        error_code=None,
+    )
+    publication = result.publication
+    # 当前两个 AKShare 方法学均为 research；来源成功入库不等于存在可公开的 canonical 版本。
+    return ExecutionOutcome(
+        status="SUCCEEDED" if publication.published else "PARTIAL",
+        completed_partitions=1,
+        total_partitions=1,
+        processed_records=(
+            publication.inserted_count + publication.revised_count + publication.unchanged_count
+        ),
     )
 
 
@@ -2269,7 +3189,10 @@ def _execute_equity_discovery(
     as_of = _latest_complete_trading_day(claim.target, container=container)
     execution = _required_execution()
     execution.arm_terminal_write()
-    result = SqlAlchemyEquityDiscoveryRepository(container.database).build(as_of=as_of)
+    result = SqlAlchemyEquityDiscoveryRepository(container.database).build(
+        as_of=as_of,
+        reference_manifest=_equity_backfill_reference_manifest(claim),
+    )
     return ExecutionOutcome(
         status="SUCCEEDED",
         completed_partitions=1,
@@ -2884,9 +3807,9 @@ def _execute_equity_bar(
         data_version = result.data_version
         coverage_version = result.coverage_version
         if is_backfill:
-            window_source_ids = (
-                set(execution.source_batch_ids) - source_ids_before
-            ) | {result.source_batch_id}
+            window_source_ids = (set(execution.source_batch_ids) - source_ids_before) | {
+                result.source_batch_id
+            }
             record_equity_bar_partition(
                 container.database,
                 claim=claim,
@@ -3320,7 +4243,17 @@ def _record_operation_partition(
             for key, value in values.items():
                 setattr(partition, key, value)
         session.flush()
-        if partition_key.startswith(("etf:", "venue:", "stock-connect:")):
+        if partition_key.startswith(
+            (
+                "etf:",
+                "venue:",
+                "stock-connect:",
+                "margin:",
+                "derivative:",
+                "sector-bar:",
+                "money-flow:",
+            )
+        ):
             statuses = session.scalars(
                 select(DataOperationPartition.status).where(
                     DataOperationPartition.run_id == run_id,
@@ -3354,22 +4287,25 @@ def _execute_equity_reference(
     data_version: UUID | None = None
     total_partitions = len(identifiers) * len(windows)
     execution = _required_execution()
-    is_event_backfill = (
-        capability == "equity.corporate_action" and _is_equity_backfill(claim)
-    )
-    event_partition_roster = tuple(
-        (
-            identifier,
-            window_from,
-            window_to,
-            equity_backfill_event_partition_keys(
-                dataset_code=claim.dataset_code,
-                window_from=window_from,
-                window_to=window_to,
-            ),
+    is_event_backfill = capability == "equity.corporate_action" and _is_equity_backfill(claim)
+    # 事件 coverage 只属于公司行动回填；参考数据不能借用事件 checkpoint 族。
+    event_partition_roster = (
+        tuple(
+            (
+                identifier,
+                window_from,
+                window_to,
+                equity_backfill_event_partition_keys(
+                    dataset_code=claim.dataset_code,
+                    window_from=window_from,
+                    window_to=window_to,
+                ),
+            )
+            for identifier in identifiers
+            for window_from, window_to in windows
         )
-        for identifier in identifiers
-        for window_from, window_to in windows
+        if is_event_backfill
+        else ()
     )
     expected_event_keys = frozenset(
         partition_key
@@ -3388,11 +4324,15 @@ def _execute_equity_reference(
     for identifier_index, identifier in enumerate(identifiers):
         for window_index, (window_from, window_to) in enumerate(windows):
             partition_index = identifier_index * len(windows) + window_index
-            partition_keys = equity_backfill_event_partition_keys(
-                dataset_code=claim.dataset_code,
-                window_from=window_from,
-                window_to=window_to,
-            ) if is_event_backfill else ()
+            partition_keys = (
+                equity_backfill_event_partition_keys(
+                    dataset_code=claim.dataset_code,
+                    window_from=window_from,
+                    window_to=window_to,
+                )
+                if is_event_backfill
+                else ()
+            )
             completed_in_window = set(partition_keys) & set(completed_event_keys)
             if completed_in_window:
                 if completed_in_window != set(partition_keys):
@@ -3417,10 +4357,7 @@ def _execute_equity_reference(
                 capability=capability,
                 start=window_from,
                 end=window_to,
-                final_write=(
-                    not is_event_backfill
-                    and partition_index == total_partitions - 1
-                ),
+                final_write=(not is_event_backfill and partition_index == total_partitions - 1),
                 source_snapshot=claim.source_snapshot,
             )
             inserted += result[0]
@@ -3434,9 +4371,7 @@ def _execute_equity_reference(
                     execution=execution,
                     window_from=window_from,
                     window_to=window_to,
-                    source_batch_ids=tuple(
-                        set(execution.source_batch_ids) - source_ids_before
-                    ),
+                    source_batch_ids=tuple(set(execution.source_batch_ids) - source_ids_before),
                 )
     if is_event_backfill:
         finalize_equity_event_partitions(
@@ -3445,8 +4380,7 @@ def _execute_equity_reference(
             execution=execution,
             ordered_partition_keys=tuple(
                 partition_key
-                for _identifier, _window_from, _window_to, partition_keys
-                in event_partition_roster
+                for _identifier, _window_from, _window_to, partition_keys in event_partition_roster
                 for partition_key in partition_keys
             ),
         )
@@ -3629,6 +4563,409 @@ def _trading_events_repository(
     )
 
 
+def _margin_repository(
+    container: ServiceContainer,
+    *,
+    provider_id: str,
+) -> SqlAlchemyMarginMarketDataRepository:
+    """构造仅允许已审核 AKShare 聚合来源的两融发布仓储，其他 provider 必须失败关闭。"""
+    if provider_id != "akshare":
+        raise ProviderError(
+            ProviderErrorCode.UNAVAILABLE,
+            "margin source approval is unavailable",
+            retryable=False,
+        )
+    approval = MarginSourceApproval(
+        provider_id=provider_id,
+        source_code="akshare_reviewed_public_market",
+        legal_name="AKShare 聚合的公开市场来源",
+        source_kind="aggregator",
+        rights_status="internal",
+        license_scope="internal_research_no_redistribution",
+    )
+    return SqlAlchemyMarginMarketDataRepository(
+        container.database,
+        approved_sources={provider_id: approval},
+    )
+
+
+def _derivative_repository(
+    container: ServiceContainer,
+    *,
+    provider_id: str,
+) -> SqlAlchemyDerivativeDailyBarRepository:
+    """构造仅允许已审核 AKShare 聚合来源的真实合约日线发布仓储。"""
+    if provider_id != "akshare":
+        raise ProviderError(
+            ProviderErrorCode.UNAVAILABLE,
+            "derivative source approval is unavailable",
+            retryable=False,
+        )
+    approval = DerivativeSourceApproval(
+        provider_id=provider_id,
+        source_code="akshare_reviewed_public_market",
+        legal_name="AKShare 聚合的公开市场来源",
+        source_kind="aggregator",
+        rights_status="internal",
+        license_scope="internal_research_no_redistribution",
+    )
+    return SqlAlchemyDerivativeDailyBarRepository(
+        container.database,
+        approved_sources={provider_id: approval},
+    )
+
+
+def _akshare_batched_window(
+    claim: ExecutionClaim,
+    *,
+    dataset_code: str,
+    batch_days: int,
+) -> tuple[date, date]:
+    """读取受理时冻结的日期窗口；仅旧兼容 run 才按其 target 解析当前锚点。"""
+    intent = claim.execution_intent
+    if isinstance(intent, dict) and any(
+        key in intent
+        for key in (
+            "akshareResolvedDateFrom",
+            "akshareResolvedDateTo",
+            "akshareExecutionBatchDays",
+        )
+    ):
+        start_text = intent.get("akshareResolvedDateFrom")
+        end_text = intent.get("akshareResolvedDateTo")
+        frozen_batch_days = intent.get("akshareExecutionBatchDays")
+        if (
+            not isinstance(start_text, str)
+            or not isinstance(end_text, str)
+            or frozen_batch_days != batch_days
+        ):
+            raise ValueError("AKShare batched execution intent is invalid")
+        start, end = date.fromisoformat(start_text), date.fromisoformat(end_text)
+    else:
+        start, end = _akshare_batched_target_window(claim.target)
+    if start > end or dataset_code not in {
+        *_MARGIN_EXECUTIONS,
+        _STOCK_CONNECT_RESEARCH_DATASET,
+        _DERIVATIVE_DATASET,
+        *_SECTOR_BAR_PERIODS,
+    }:
+        raise ValueError("AKShare batched execution window is invalid")
+    return start, end
+
+
+def _akshare_batched_target_window(target: dict[str, object]) -> tuple[date, date]:
+    """兼容旧系统命令的目标日期解析；新命令始终走冻结 intent 防止跨日漂移。"""
+    mode = target.get("mode")
+    anchor = datetime.now(_SHANGHAI).date()
+    if mode == "FULL":
+        return _HISTORY_START, anchor
+    if mode == "INCREMENTAL":
+        return anchor - timedelta(days=31), anchor
+    if mode == "DATE_RANGE":
+        start_text = target.get("dateFrom")
+        end_text = target.get("dateTo")
+        if isinstance(start_text, str) and isinstance(end_text, str):
+            return date.fromisoformat(start_text), date.fromisoformat(end_text)
+    if mode == "OBSERVATION_DATE":
+        observation = target.get("observationDate")
+        if isinstance(observation, str):
+            resolved = date.fromisoformat(observation)
+            return resolved, resolved
+    raise ValueError("AKShare batched target mode is unsupported")
+
+
+def _margin_partition(
+    *,
+    operation: str,
+    venue: MarginVenue,
+    window: tuple[date, date],
+) -> str:
+    """构造两融可恢复日期分区键，操作、场所和包含端窗口必须全部参与身份。"""
+    window_from, window_to = window
+    return f"margin:{operation}:{venue.code}:{window_from.isoformat()}:{window_to.isoformat()}"
+
+
+def _index_shadow_partition(
+    *,
+    administrator: IndexAdministrator,
+    capability: IndexCapability,
+    index_code: str | None,
+) -> str:
+    """构造管理人、能力和可空目录身份均参与的研究快照恢复分区。"""
+    scope = "catalog" if index_code is None else index_code
+    return f"index:{administrator.value}:{capability.value}:{scope}"
+
+
+def _stock_connect_research_partition(
+    *,
+    channel: StockConnectChannel,
+    window: tuple[date, date],
+) -> str:
+    """构造 AKShare 港通研究通道方向和包含端日期窗的可恢复分区。"""
+    window_from, window_to = window
+    return (
+        f"stock-connect-research:{channel.channel}_{channel.direction}:"
+        f"{window_from.isoformat()}:{window_to.isoformat()}"
+    )
+
+
+def _derivative_partition(
+    *,
+    contract: DerivativeContractIdentifier,
+    window: tuple[date, date],
+) -> str:
+    """构造真实合约日线的可恢复分区键，绝不以连续合约或产品简称替代身份。"""
+    window_from, window_to = window
+    return f"derivative:{contract.qualified_key}:{window_from.isoformat()}:{window_to.isoformat()}"
+
+
+def _sector_bar_partition(
+    *,
+    period: SectorPeriod,
+    identity: _FrozenSectorBarIdentity,
+    window: tuple[date, date],
+) -> str:
+    """按冻结主键、原生周期和一日窗口生成可恢复板块 K 线分区。"""
+    window_from, window_to = window
+    return (
+        f"sector-bar:{period.value}:{identity.sector_key}:"
+        f"{window_from.isoformat()}:{window_to.isoformat()}"
+    )
+
+
+def _frozen_sector_bar_roster(claim: ExecutionClaim) -> tuple[_FrozenSectorBarIdentity, ...]:
+    """解析并复核预检冻结的东财目录，不回读后来新增的板块。"""
+    intent = claim.execution_intent
+    required_keys = {
+        "sectorBarRoster",
+        "sectorBarRosterHash",
+        "akshareResolvedDateFrom",
+        "akshareResolvedDateTo",
+        "akshareExecutionBatchDays",
+    }
+    if not isinstance(intent, dict) or set(intent) != required_keys:
+        raise ValueError("sector bar execution intent is invalid")
+    roster_raw = intent.get("sectorBarRoster")
+    roster_hash = intent.get("sectorBarRosterHash")
+    if not isinstance(roster_raw, list) or not isinstance(roster_hash, str):
+        raise ValueError("sector bar frozen roster is invalid")
+    calculated_hash = hashlib.sha256(
+        json.dumps(
+            roster_raw,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    if calculated_hash != roster_hash:
+        raise ValueError("sector bar frozen roster hash does not match")
+    roster: list[_FrozenSectorBarIdentity] = []
+    for item in roster_raw:
+        if not isinstance(item, dict) or set(item) != {"sectorKey", "scheme", "sectorCode"}:
+            raise ValueError("sector bar frozen roster item is invalid")
+        sector_key = item.get("sectorKey")
+        scheme = item.get("scheme")
+        sector_code = item.get("sectorCode")
+        if (
+            not isinstance(sector_key, str)
+            or not sector_key.isdigit()
+            or int(sector_key) < 1
+            or not isinstance(scheme, str)
+            or not isinstance(sector_code, str)
+        ):
+            raise ValueError("sector bar frozen roster value is invalid")
+        try:
+            identifier = SectorIdentifier(SectorScheme(scheme), sector_code)
+        except ValueError as error:
+            raise ValueError("sector bar frozen roster identifier is invalid") from error
+        roster.append(_FrozenSectorBarIdentity(sector_key=int(sector_key), identifier=identifier))
+    if not roster:
+        raise ValueError("sector bar frozen roster must not be empty")
+    if len({item.sector_key for item in roster}) != len(roster) or len(
+        {item.identifier.qualified_key for item in roster}
+    ) != len(roster):
+        raise ValueError("sector bar frozen roster contains duplicate identities")
+    selector = claim.target.get("selector")
+    if not isinstance(selector, dict):
+        raise ValueError("sector bar target selector is invalid")
+    selector_kind = selector.get("kind")
+    if selector_kind == "GLOBAL":
+        return tuple(roster)
+    if selector_kind == "SCHEME" and isinstance(selector.get("scheme"), str):
+        if all(item.identifier.scheme.value == selector["scheme"] for item in roster):
+            return tuple(roster)
+    if (
+        selector_kind == "SECTOR"
+        and isinstance(selector.get("scheme"), str)
+        and isinstance(selector.get("sectorCode"), str)
+    ):
+        if len(roster) == 1 and (
+            roster[0].identifier.scheme.value == selector["scheme"]
+            and roster[0].identifier.code == selector["sectorCode"]
+        ):
+            return tuple(roster)
+    raise ValueError("sector bar frozen roster does not match target selector")
+
+
+def _assert_frozen_sector_bar_identity(
+    container: ServiceContainer,
+    *,
+    identity: _FrozenSectorBarIdentity,
+) -> None:
+    """确认冻结主键仍指向同一板块代码，防止目录修订后代码错配写入。"""
+    with container.database.session() as session:
+        row = (
+            session.execute(
+                select(SectorEntity.scheme, SectorEntity.sector_code).where(
+                    SectorEntity.sector_key == identity.sector_key
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+    if (
+        row is None
+        or str(row["scheme"]) != identity.identifier.scheme.value
+        or str(row["sector_code"]) != identity.identifier.code
+    ):
+        raise ValueError("sector bar frozen identity is no longer available")
+
+
+def _money_flow_partition(
+    *,
+    claim: ExecutionClaim,
+    capability: str,
+    selector: Mapping[str, object],
+) -> str:
+    """对冻结方法学目标取摘要，避免暴露名称同时隔离每日与排行观察。"""
+    descriptor = {
+        "datasetCode": claim.dataset_code,
+        "capability": capability,
+        "selector": selector,
+        "target": claim.target,
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            descriptor,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    return f"money-flow:{capability}:{digest}"
+
+
+def _money_flow_parameters(
+    *,
+    claim: ExecutionClaim,
+    container: ServiceContainer,
+    capability: str,
+    selector: Mapping[str, object],
+) -> tuple[tuple[str, str], ...]:
+    """把受控 selector 映射为唯一 adapter 参数，禁止透传供应商自由参数。"""
+    if capability != money_flow_source_capability(claim.dataset_code, selector):
+        raise ValueError("money-flow capability does not match frozen selector")
+    scope = selector.get("scope")
+    if claim.dataset_code == _MONEY_FLOW_DAILY_DATASET:
+        if selector.get("operation") != "DAILY":
+            raise ValueError("money-flow daily selector operation is invalid")
+        if scope == "EQUITY":
+            exchange = selector.get("exchange")
+            symbol = selector.get("symbol")
+            if not isinstance(exchange, str) or not isinstance(symbol, str):
+                raise ValueError("money-flow daily equity selector is invalid")
+            return (("exchange", exchange), ("symbol", symbol))
+        if scope == "SECTOR":
+            scheme = selector.get("scheme")
+            sector_code = selector.get("sectorCode")
+            if (
+                not isinstance(scheme, str)
+                or scheme != "eastmoney.industry"
+                or not isinstance(sector_code, str)
+            ):
+                raise ValueError("money-flow daily sector selector is invalid")
+            sector_name = _active_sector_name(
+                container,
+                scheme=scheme,
+                sector_code=sector_code,
+            )
+            return (("scheme", scheme), ("sectorName", sector_name))
+        if scope == "MARKET":
+            return (("marketCode", "cn-a"),)
+        raise ValueError("money-flow daily scope is invalid")
+    if claim.dataset_code != _MONEY_FLOW_RANKING_DATASET or selector.get("operation") != "RANKING":
+        raise ValueError("money-flow ranking selector operation is invalid")
+    observation = claim.target.get("observationDate")
+    if not isinstance(observation, str):
+        raise ValueError("money-flow ranking observation date is invalid")
+    observation_date = date.fromisoformat(observation)
+    if observation_date != datetime.now(_SHANGHAI).date():
+        # SDK 没有历史日期参数；跨日排队的旧 run 必须失败而非把今日页面标成昨日。
+        raise ValueError("money-flow ranking observation date is no longer current")
+    methodology = selector.get("methodology")
+    window = selector.get("window")
+    if not isinstance(window, str):
+        raise ValueError("money-flow ranking window is invalid")
+    if methodology == "EASTMONEY_ORDER_SIZE":
+        indicator = {
+            "TODAY": "今日",
+            "DAY_3": "3日",
+            "DAY_5": "5日",
+            "DAY_10": "10日",
+        }.get(window)
+        if indicator is None or scope not in {"EQUITY", "SECTOR"}:
+            raise ValueError("EastMoney money-flow ranking selector is invalid")
+        values: list[tuple[str, str]] = [("targetDate", observation), ("indicator", indicator)]
+        if scope == "SECTOR":
+            sector_type = selector.get("sectorType")
+            source_sector_type = {
+                "INDUSTRY": "行业资金流",
+                "CONCEPT": "概念资金流",
+                "REGION": "地域资金流",
+            }.get(str(sector_type))
+            if source_sector_type is None:
+                raise ValueError("EastMoney money-flow ranking sector type is invalid")
+            values.append(("sectorType", source_sector_type))
+        return tuple(values)
+    if methodology == "THS_TRADE_DIRECTION":
+        indicator = {
+            "INTRADAY": "即时",
+            "DAY_3": "3日排行",
+            "DAY_5": "5日排行",
+            "DAY_10": "10日排行",
+            "DAY_20": "20日排行",
+        }.get(window)
+        if indicator is None or scope not in {"EQUITY", "INDUSTRY", "CONCEPT"}:
+            raise ValueError("THS money-flow ranking selector is invalid")
+        return (("targetDate", observation), ("indicator", indicator))
+    raise ValueError("money-flow ranking methodology is invalid")
+
+
+def _active_sector_name(
+    container: ServiceContainer,
+    *,
+    scheme: str,
+    sector_code: str,
+) -> str:
+    """读取已激活的目录名称；东财接口所需名称绝不能由代码或猜测替代。"""
+    with container.database.session() as session:
+        name = session.execute(
+            select(SectorEntity.name).where(
+                SectorEntity.scheme == scheme,
+                SectorEntity.sector_code == sector_code,
+                SectorEntity.status == "ACTIVE",
+            )
+        ).scalar_one_or_none()
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("money-flow sector name is unavailable from active catalog")
+    return name.strip()
+
+
+def _p0_partition_error_code(reason_code: str) -> str:
+    """将稳定 provider 原因压缩为分区账本错误码，避免把响应正文写入运维记录。"""
+    return reason_code.upper().replace("-", "_")[:64]
+
+
 def _frozen_provider(
     source_snapshot: list[dict[str, Any]], container: ServiceContainer, capability: str
 ) -> DataSourcePort:
@@ -3748,6 +5085,43 @@ def _equity_backfill_window(claim: ExecutionClaim) -> tuple[date, date] | None:
     return start, end
 
 
+def _equity_backfill_reference_manifest(
+    claim: ExecutionClaim,
+) -> tuple[dict[str, Any], ...] | None:
+    """从已 claim 的 append-only 输入中取出唯一封印引用 bundle。
+
+    普通 discovery 刷新没有该输入，保留其当前 publication 语义；历史计划只允许控制面
+    注入的一个 bundle。这里同时核对私有 intent 的版本和摘要，避免执行器因手工构造的
+    `ExecutionClaim` 或错误拼接而在历史任务中静默退回 current 数据。
+    """
+    if not _is_equity_backfill(claim):
+        return None
+    intent = claim.execution_intent
+    assert isinstance(intent, Mapping)
+    bundles = [
+        item
+        for item in claim.input_manifest
+        if isinstance(item, Mapping) and item.get("kind") == "REFERENCE_BUNDLE"
+    ]
+    if len(bundles) != 1:
+        raise ValueError("equity backfill discovery requires one exact reference bundle")
+    bundle = bundles[0]
+    publication_id = bundle.get("publicationId")
+    data_version = bundle.get("dataVersion")
+    manifest_hash = bundle.get("manifestHash")
+    components = bundle.get("components")
+    if (
+        publication_id != intent.get("referenceBundlePublicationId")
+        or data_version != intent.get("referenceBundleDataVersion")
+        or manifest_hash != intent.get("referenceManifestHash")
+        or not isinstance(components, list)
+        or not components
+        or any(not isinstance(component, Mapping) for component in components)
+    ):
+        raise ValueError("equity backfill reference bundle does not match frozen intent")
+    return tuple(dict(component) for component in components)
+
+
 def _is_equity_backfill(claim: ExecutionClaim) -> bool:
     """判断当前 claim 是否来自数据库已封印的股票全量回填 child。"""
     return (
@@ -3756,9 +5130,7 @@ def _is_equity_backfill(claim: ExecutionClaim) -> bool:
     )
 
 
-def _bounded_windows(
-    start: date, end: date, maximum_days: int
-) -> tuple[tuple[date, date], ...]:
+def _bounded_windows(start: date, end: date, maximum_days: int) -> tuple[tuple[date, date], ...]:
     """把冻结范围确定性切为包含端窗口，供单 child checkpoint 恢复。"""
     if maximum_days < 1 or start > end:
         raise ValueError("bounded window arguments are invalid")

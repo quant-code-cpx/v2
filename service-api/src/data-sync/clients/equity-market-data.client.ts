@@ -6,9 +6,10 @@ import { AppConfigService } from '../../config/app-config.service.js';
 import type { ConditionalRead } from './equity-instrument.client.js';
 import {
   equityAdjustmentFactorPageSchema,
-  equityBarPageSchema,
   equityCompanyProfileSchema,
   equityCorporateActionPageSchema,
+  internalEquityBarPageSchema,
+  publicEquityBarPage,
   type EquityAdjustmentFactorPage,
   type EquityBarPage,
   type EquityCompanyProfile,
@@ -19,12 +20,15 @@ type FetchLike = typeof fetch;
 
 const conflictCodeSchema = z
   .object({
-    code: z.enum(['adjustment-unavailable', 'identity-boundary-conflict']),
+    code: z.enum(['adjustment-unavailable', 'coverage-unavailable', 'identity-boundary-conflict']),
   })
   .passthrough();
 
 type PublicConflictCode =
-  'adjustment-unavailable' | 'identity-resolution-conflict' | 'snapshot-expired';
+  | 'adjustment-unavailable'
+  | 'coverage-unavailable'
+  | 'identity-resolution-conflict'
+  | 'snapshot-expired';
 
 /** 通过内部只读 HTTP 契约访问方案 0011 市场数据，不连接同步数据库。 */
 @Injectable()
@@ -36,7 +40,7 @@ export class EquityMarketDataClient {
   ) {}
 
   /** 读取日、周或月独立行情及可选查询时复权结果。 */
-  public listBars(input: {
+  public async listBars(input: {
     exchange: string;
     symbol: string;
     dataVersion: string;
@@ -62,16 +66,20 @@ export class EquityMarketDataClient {
     setOptional(parameters, 'adjustAsOf', input.adjustAsOf);
     setOptional(parameters, 'factorDataVersion', input.factorDataVersion);
     setOptional(parameters, 'cursor', input.cursor);
-    return this.request(
+    const response = await this.request(
       path(input.exchange, input.symbol, `bars?${parameters.toString()}`),
       input.ifNoneMatch,
       input.requestId,
-      equityBarPageSchema,
+      internalEquityBarPageSchema,
     );
+    if (response.status === 304) return response;
+    assertRequestedDataVersion(response.body, input.dataVersion);
+    assertBarRequestBinding(input, response.body);
+    return { ...response, body: publicEquityBarPage(response.body) };
   }
 
   /** 读取稀疏累计后复权因子序列。 */
-  public listAdjustmentFactors(input: {
+  public async listAdjustmentFactors(input: {
     exchange: string;
     symbol: string;
     dataVersion: string;
@@ -89,16 +97,19 @@ export class EquityMarketDataClient {
     });
     setOptional(parameters, 'start', input.start);
     setOptional(parameters, 'cursor', input.cursor);
-    return this.request(
+    const response = await this.request(
       path(input.exchange, input.symbol, `adjustment-factors?${parameters.toString()}`),
       input.ifNoneMatch,
       input.requestId,
       equityAdjustmentFactorPageSchema,
     );
+    if (response.status === 304) return response;
+    assertRequestedDataVersion(response.body, input.dataVersion);
+    return response;
   }
 
   /** 读取分红送转事件当前 revision。 */
-  public listCorporateActions(input: {
+  public async listCorporateActions(input: {
     exchange: string;
     symbol: string;
     dataVersion: string;
@@ -116,16 +127,19 @@ export class EquityMarketDataClient {
     setOptional(parameters, 'start', input.start);
     setOptional(parameters, 'end', input.end);
     setOptional(parameters, 'cursor', input.cursor);
-    return this.request(
+    const response = await this.request(
       path(input.exchange, input.symbol, `corporate-actions?${parameters.toString()}`),
       input.ifNoneMatch,
       input.requestId,
       equityCorporateActionPageSchema,
     );
+    if (response.status === 304) return response;
+    assertRequestedDataVersion(response.body, input.dataVersion);
+    return response;
   }
 
   /** 读取当前公司概况。 */
-  public getCompanyProfile(input: {
+  public async getCompanyProfile(input: {
     exchange: string;
     symbol: string;
     dataVersion: string;
@@ -136,12 +150,15 @@ export class EquityMarketDataClient {
     const parameters = new URLSearchParams({ dataVersion: input.dataVersion });
     setOptional(parameters, 'asOf', input.asOf);
     const query = parameters.size === 0 ? '' : `?${parameters.toString()}`;
-    return this.request(
+    const response = await this.request(
       path(input.exchange, input.symbol, `company-profile${query}`),
       input.ifNoneMatch,
       input.requestId,
       equityCompanyProfileSchema,
     );
+    if (response.status === 304) return response;
+    assertRequestedDataVersion(response.body, input.dataVersion);
+    return response;
   }
 
   /** 发起带内部凭据、超时、关联标识与严格 schema 校验的 GET。 */
@@ -198,6 +215,36 @@ function setOptional(parameters: URLSearchParams, key: string, value: string | u
   if (value !== undefined) parameters.set(key, value);
 }
 
+/** 确保下游没有忽略调用方锁定的 publication 版本。 */
+function assertRequestedDataVersion(
+  body: { dataVersion: string | null },
+  requestedDataVersion: string,
+): void {
+  if (body.dataVersion !== requestedDataVersion) throw dependencyUnavailable();
+}
+
+/** 确保复权响应严格对应请求的版本、模式与前复权锚点。 */
+function assertBarRequestBinding(
+  input: {
+    adjust: string;
+    adjustAsOf?: string | undefined;
+    end: string;
+    factorDataVersion?: string | undefined;
+  },
+  body: EquityBarPage,
+): void {
+  if (body.adjustmentMode !== input.adjust) throw dependencyUnavailable();
+  if (input.adjust === 'none') {
+    if (body.factorVersion !== null || body.adjustAsOf !== null) throw dependencyUnavailable();
+    return;
+  }
+  if (input.factorDataVersion === undefined || body.factorVersion !== input.factorDataVersion) {
+    throw dependencyUnavailable();
+  }
+  const expectedAdjustAsOf = input.adjustAsOf ?? input.end;
+  if (body.adjustAsOf !== expectedAdjustAsOf) throw dependencyUnavailable();
+}
+
 /** 校验下游只返回受控强 ETag，防止弱校验器或非法字符进入公开响应头。 */
 function validEtag(value: string | null): value is string {
   return value !== null && /^"[^"\r\n]{1,252}"$/.test(value);
@@ -238,9 +285,11 @@ async function upstreamProblem(response: Response): Promise<PublicProblemExcepti
     const detail =
       code === 'adjustment-unavailable'
         ? 'Adjustment factors do not cover the requested range'
-        : code === 'identity-resolution-conflict'
-          ? 'Instrument identity is ambiguous for the requested date range'
-          : 'Published equity market snapshot changed';
+        : code === 'coverage-unavailable'
+          ? 'Requested period does not have exact published coverage'
+          : code === 'identity-resolution-conflict'
+            ? 'Instrument identity is ambiguous for the requested date range'
+            : 'Published equity market snapshot changed';
     return new PublicProblemException(HttpStatus.CONFLICT, code, detail);
   }
   if (response.status === 429) {

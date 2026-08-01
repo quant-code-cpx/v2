@@ -331,9 +331,7 @@ def test_repository_bootstraps_historical_delisting_and_allows_later_code_reuse(
     assert old_resolution.security_id is not None
     assert new_resolution.security_id is not None
     assert old_resolution.security_id != new_resolution.security_id
-    assert [
-        (row["effective_from"], row["effective_to"]) for row in identifier_rows
-    ] == [
+    assert [(row["effective_from"], row["effective_to"]) for row in identifier_rows] == [
         (date(2000, 1, 10), date(2010, 7, 1)),
         (date(2026, 7, 30), None),
     ]
@@ -341,10 +339,7 @@ def test_repository_bootstraps_historical_delisting_and_allows_later_code_reuse(
         "effective_from": date(2000, 1, 10),
         "effective_to": date(2010, 7, 1),
     }
-    assert [
-        (row["status"], row["effective_from"], row["effective_to"])
-        for row in status_rows
-    ] == [
+    assert [(row["status"], row["effective_from"], row["effective_to"]) for row in status_rows] == [
         ("LISTED", date(2000, 1, 10), date(2010, 6, 30)),
         ("DELISTED", date(2010, 6, 30), None),
     ]

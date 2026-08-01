@@ -13,14 +13,19 @@ from decimal import Decimal
 
 @dataclass(frozen=True, slots=True)
 class MarginVenue:
-    """表示 P0 已覆盖的沪深两融场所，北交所属于独立 P1 capability。"""
+    """表示两融场所身份；北交所当前只允许进入资格名单 capability。
+
+    `BSE` 的当日融资融券标的清单已有来源实证，但没有被本服务映射为场所汇总或
+    证券日明细。场所值对象只表达身份合法性，具体 capability 的准入仍由应用服务和
+    provider adapter 分别关闭，避免把资格清单误当成余额或成交明细。
+    """
 
     code: str
 
     def __post_init__(self) -> None:
-        """拒绝非沪深场所，避免把不同披露制度静默写入同一市场 dataset。"""
-        if self.code not in {"SSE", "SZSE"}:
-            raise ValueError("margin P0 venue must be SSE or SZSE")
+        """拒绝未治理场所，不让不同交易制度静默进入同一两融领域。"""
+        if self.code not in {"SSE", "SZSE", "BSE"}:
+            raise ValueError("margin venue must be SSE, SZSE, or BSE")
 
 
 @dataclass(frozen=True, slots=True)

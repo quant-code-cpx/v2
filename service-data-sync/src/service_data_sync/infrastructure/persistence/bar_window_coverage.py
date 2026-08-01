@@ -25,6 +25,7 @@ from service_data_sync.infrastructure.persistence.canonical_release_repository i
     SqlAlchemyCanonicalReleaseRepository,
 )
 from service_data_sync.infrastructure.persistence.event_window_coverage import (
+    EquityWindowIdentityUnavailable,
     resolve_event_coverage_identities,
 )
 from service_data_sync.infrastructure.persistence.legacy_canonical_release_bridge import (
@@ -84,7 +85,9 @@ def resolve_bar_window_identity(
         identifier=identifier,
     )
     if coverage_scope != "INSTRUMENT" or len(identities) != 1:
-        raise ValueError("bar window must resolve to one confirmed instrument identity")
+        raise EquityWindowIdentityUnavailable(
+            "bar window must resolve to one confirmed instrument identity"
+        )
     identity = identities[0]
     return BarWindowIdentity(
         security_id=identity.security_id,
@@ -182,6 +185,7 @@ def publish_bar_window_coverage(
         period=period,
         identity=identity,
         publication_id=publication_id,
+        data_version=data_version,
         source_batch_id=source_batch_id,
         publication_kind=publication_kind,
         record_count=record_count,
@@ -194,7 +198,7 @@ def publish_bar_window_coverage(
         # 校验误把“新抓取批次”和“实际被复用的覆盖批次”混为同一件事。
         if recorded_source_batch_id not in execution.source_batch_ids:
             execution.record_source_batch(recorded_source_batch_id)
-        # 覆盖版本是回填 child 的终态证据；publication dataVersion 仍可由 coverage 外键精确追溯。
+        # 覆盖版本是回填 child 的终态证据；coverage 同时直接冻结 publication/dataVersion 配对。
         execution.record_checkpoint(
             kind="bar-coverage-version",
             position=str(coverage_version),
@@ -284,6 +288,7 @@ def _record_coverage(
     period: EquityBarPeriod,
     identity: BarWindowIdentity,
     publication_id: UUID,
+    data_version: UUID,
     source_batch_id: UUID,
     publication_kind: str,
     record_count: int,
@@ -311,6 +316,7 @@ def _record_coverage(
             period=period,
             identity=identity,
             publication_id=publication_id,
+            data_version=data_version,
             publication_kind=publication_kind,
             record_count=record_count,
             observed_at=observed_at,
@@ -355,6 +361,7 @@ def _record_coverage(
             coverage_from=identity.coverage_from,
             coverage_to=identity.coverage_to,
             publication_id=publication_id,
+            data_version=data_version,
             source_batch_id=source_batch_id,
             publication_kind=publication_kind,
             quality_status="passed",
@@ -376,6 +383,7 @@ def _same_coverage(
     period: EquityBarPeriod,
     identity: BarWindowIdentity,
     publication_id: UUID,
+    data_version: UUID,
     publication_kind: str,
     record_count: int,
     observed_at: datetime,
@@ -389,6 +397,7 @@ def _same_coverage(
         and replay.coverage_from == identity.coverage_from
         and replay.coverage_to == identity.coverage_to
         and replay.publication_id == publication_id
+        and replay.data_version == data_version
         and replay.publication_kind == publication_kind
         and replay.quality_status == "passed"
         and replay.record_count == record_count

@@ -22,6 +22,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ExchangePath'
         - $ref: '#/components/parameters/SymbolPath'
+        - $ref: '#/components/parameters/DataVersion'
         - name: period
           in: query
           required: false
@@ -50,6 +51,7 @@ paths:
           schema:
             type: string
             format: date
+        - $ref: '#/components/parameters/FactorDataVersion'
         - $ref: '#/components/parameters/Cursor'
         - name: limit
           in: query
@@ -63,12 +65,22 @@ paths:
       responses:
         '200':
           description: Published bar window
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
           content:
             application/json:
               schema:
                 $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/EquityBarPage'
         '204':
           description: If-None-Match matched the current representation
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -88,6 +100,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ExchangePath'
         - $ref: '#/components/parameters/SymbolPath'
+        - $ref: '#/components/parameters/DataVersion'
         - name: start
           in: query
           required: false
@@ -112,13 +125,23 @@ paths:
         - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
-          description: Published factors
+          description: Published factors with a frozen publication source, including legal empty windows.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
           content:
             application/json:
               schema:
                 $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/AdjustmentFactorPage'
         '204':
           description: If-None-Match matched the current representation
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -138,6 +161,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ExchangePath'
         - $ref: '#/components/parameters/SymbolPath'
+        - $ref: '#/components/parameters/DataVersion'
         - name: start
           in: query
           required: false
@@ -163,12 +187,22 @@ paths:
       responses:
         '200':
           description: Published corporate actions
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
           content:
             application/json:
               schema:
                 $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/CorporateActionPage'
         '204':
           description: If-None-Match matched the current representation
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -188,16 +222,28 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ExchangePath'
         - $ref: '#/components/parameters/SymbolPath'
+        - $ref: '#/components/parameters/DataVersion'
+        - $ref: '#/components/parameters/AsOf'
         - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
           description: Published company profile
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
           content:
             application/json:
               schema:
                 $ref: './0018-data-sync-equity-market-data-internal.openapi.yaml#/components/schemas/CompanyProfileResponse'
         '204':
           description: If-None-Match matched the current representation
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            X-Data-Version:
+              $ref: '#/components/headers/DataVersion'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -228,6 +274,30 @@ components:
       schema:
         type: string
         pattern: '^[0-9]{6}$'
+    DataVersion:
+      name: dataVersion
+      in: query
+      required: true
+      description: Immutable publication selected by the matching data-status record.
+      schema:
+        type: string
+        format: uuid
+    FactorDataVersion:
+      name: factorDataVersion
+      in: query
+      required: false
+      description: Immutable adjustment-factor publication required for qfq or hfq bars.
+      schema:
+        type: string
+        format: uuid
+    AsOf:
+      name: asOf
+      in: query
+      required: false
+      description: Business effective date used to resolve the company-profile identity.
+      schema:
+        type: string
+        format: date
     Cursor:
       name: cursor
       in: query
@@ -245,6 +315,16 @@ components:
         type: string
         minLength: 1
         maxLength: 256
+  headers:
+    ETag:
+      description: Strong tag derived from the normalized request projection and dataVersion.
+      schema:
+        type: string
+    DataVersion:
+      description: Immutable publication version returned in the JSON response body.
+      schema:
+        type: string
+        format: uuid
   responses:
     BadRequest:
       description: Invalid query

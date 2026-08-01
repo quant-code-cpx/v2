@@ -89,7 +89,7 @@ def test_adapter_corrects_lot_volume_only_when_vwap_proves_it(
     assert payload["bars"][0]["turnoverRate"] == "0.02"
     assert batch.raw_payload is not None
     assert batch.upstream_source == "tencent-stock-kline"
-    assert batch.adapter_version == "akshare-1.18.78-stock_zh_a_hist_tx-v2"
+    assert batch.adapter_version == tencent_daily_bars._ADAPTER_VERSION
     assert batch.schema_fingerprint == tencent_daily_bars._SCHEMA_FINGERPRINT
     assert captured_kwargs["timeout"] == 5.0
 

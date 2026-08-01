@@ -44,15 +44,6 @@ _DATE_DATASETS = frozenset(
         "equity.adjustment_factor",
     }
 )
-_CURRENT_DATASETS = frozenset(
-    {
-        "equity.profile",
-        "equity.share_capital.reported",
-        "financial.report",
-        "financial.provider-metric",
-        "financial.valuation",
-    }
-)
 _EVENT_DATASETS = frozenset(
     {
         "equity.corporate_event.earnings.reported",
@@ -63,15 +54,13 @@ _EVENT_DATASETS = frozenset(
 _PLANNED_DATASETS = frozenset(
     {
         *_DATE_DATASETS,
-        *_CURRENT_DATASETS,
         "equity.corporate_action",
-        "financial.derived-metric",
         *_EVENT_DATASETS,
         "equity.discovery.eod",
     }
 )
 _HISTORICAL_DATASETS = frozenset({*_DATE_DATASETS, "equity.corporate_action", *_EVENT_DATASETS})
-_INTERNAL_DATASETS = frozenset({"financial.derived-metric", "equity.discovery.eod"})
+_INTERNAL_DATASETS = frozenset({"equity.discovery.eod"})
 _MIB = 1024 * 1024
 _PRE_CHECKPOINT_BASELINE = {
     "commandCount": 280_928,
@@ -139,14 +128,10 @@ def _reference_bundle() -> FrozenReferenceBundle:
                 )
             ),
             "effectiveAsOf": (
-                MARKET_AS_OF
-                if dataset_code == "equity.trading_status.1d"
-                else SNAPSHOT_OBSERVED_ON
+                MARKET_AS_OF if dataset_code == "equity.trading_status.1d" else SNAPSHOT_OBSERVED_ON
             ).isoformat(),
             "observedOn": (
-                MARKET_AS_OF
-                if dataset_code == "equity.trading_status.1d"
-                else SNAPSHOT_OBSERVED_ON
+                MARKET_AS_OF if dataset_code == "equity.trading_status.1d" else SNAPSHOT_OBSERVED_ON
             ).isoformat(),
             "sourceBatchIds": [
                 str(
@@ -163,15 +148,9 @@ def _reference_bundle() -> FrozenReferenceBundle:
         for dataset_code, partition_key in component_keys
     )
     return FrozenReferenceBundle(
-        publication_id=uuid5(
-            NAMESPACE_URL, "quant-v2:benchmark:reference:bundle:publication"
-        ),
-        data_version=uuid5(
-            NAMESPACE_URL, "quant-v2:benchmark:reference:bundle:data-version"
-        ),
-        release_id=uuid5(
-            NAMESPACE_URL, "quant-v2:benchmark:reference:bundle:release"
-        ),
+        publication_id=uuid5(NAMESPACE_URL, "quant-v2:benchmark:reference:bundle:publication"),
+        data_version=uuid5(NAMESPACE_URL, "quant-v2:benchmark:reference:bundle:data-version"),
+        release_id=uuid5(NAMESPACE_URL, "quant-v2:benchmark:reference:bundle:release"),
         snapshot_observed_on=SNAPSHOT_OBSERVED_ON,
         market_as_of=MARKET_AS_OF,
         manifest=manifest,
@@ -234,8 +213,6 @@ def _identities() -> tuple[FrozenIdentity, ...]:
 
 def _input_contract(dataset_code: str) -> tuple[dict[str, Any], ...]:
     """为内部 executor 构造最小、确定性的精确输入合同。"""
-    if dataset_code == "financial.derived-metric":
-        return ({"datasetCode": "financial.report", "binding": "DEPENDENCY_RESULT"},)
     if dataset_code == "equity.discovery.eod":
         return (
             {
@@ -553,9 +530,7 @@ def _architecture_comparison(
                 "rss": "PASS" if peak_rss_bytes <= 512 * _MIB else "FAIL",
                 "commands": "PASS" if child_count <= 50_000 else "FAIL",
                 "singleTransaction": (
-                    "PASS"
-                    if current_storage_bytes / current_page_count <= 64 * _MIB
-                    else "FAIL"
+                    "PASS" if current_storage_bytes / current_page_count <= 64 * _MIB else "FAIL"
                 ),
             },
             "checkpointRule": (

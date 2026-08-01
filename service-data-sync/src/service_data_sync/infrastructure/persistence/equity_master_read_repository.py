@@ -1,8 +1,8 @@
 """已发布证券主数据的 `SQLAlchemy` 只读仓储。
 
-读取只面向冻结的 `canonical publication`，不会读取为兼容展示保留的“当前投影”。交易所、
-代码、名称和生命周期必须在相同的市场有效日与知识截止点共同成立；任一版本基数异常
-即拒绝返回，避免把跨时间片的字段拼成看似完整的证券。
+读取只面向冻结的 `canonical publication`，不会读取为兼容展示保留的“当前投影”。目录
+身份/名称与生命周期分别使用其固定输入组件的知识截止点；任一版本基数异常即拒绝返回，
+避免把跨时间片的字段拼成看似完整的证券。
 """
 
 from __future__ import annotations
@@ -12,7 +12,8 @@ from datetime import date, datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import Select, and_, case, func, literal, or_, select, true
+from sqlalchemy import Select, String, and_, case, func, literal, or_, select, true
+from sqlalchemy import cast as sql_cast
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import aliased
 
@@ -20,6 +21,8 @@ from service_data_sync.application.ports.equity_master_read import (
     EquityMasterPublication,
     EquityMasterReadRepository,
     EquityMasterReadUnavailable,
+    EquityPublicationComponent,
+    EquitySourceAttribution,
     PublicationScope,
     StoredEquityInstrument,
     StoredListingStatusPeriod,
@@ -51,13 +54,16 @@ from ..database.models.publication.dataset_publication_component import (
 )
 
 _EXCHANGE_DATASET = "equity.master.catalog"
-_AGGREGATE_DATASET = "equity.master.cn-a"
+_LIFECYCLE_DATASET = "equity.lifecycle.explicit"
+_RESOLVED_DATASET = "equity.master.resolved"
 _AGGREGATE_PARTITION = "CN_A_STABLE"
+_CATALOG_COMPONENT = "catalog"
+_LIFECYCLE_COMPONENT = "lifecycle"
 _LISTING_STATUSES = frozenset({"LISTED", "SUSPENDED", "DELISTED"})
 
 
 class SqlAlchemyEquityMasterReadRepository(EquityMasterReadRepository):
-    """从 canonical 双时间表读取冻结发布切片，不读取兼容 current projection。"""
+    """从 resolved canonical 双时间表读取冻结发布切片，不读取兼容 current projection。"""
 
     def __init__(self, database: DatabaseClient) -> None:
         """保存服务自有数据库会话工厂，不向接口层泄漏 ORM 对象。"""
@@ -66,46 +72,19 @@ class SqlAlchemyEquityMasterReadRepository(EquityMasterReadRepository):
     def get_current_publication(
         self, *, exchange: Exchange | None
     ) -> EquityMasterPublication | None:
-        """读取单所或三所稳定聚合的当前通过版本。"""
-        dataset = _AGGREGATE_DATASET if exchange is None else _EXCHANGE_DATASET
+        """读取单所或三所 resolved publication 及其不可变输入组件。"""
+        dataset = _RESOLVED_DATASET
         partition_key = _AGGREGATE_PARTITION if exchange is None else exchange.value
         publication = aliased(DatasetPublication, name="publication")
-        child = aliased(DatasetPublication, name="child")
-        component_count = (
-            select(func.count())
-            .select_from(
-                DatasetPublicationComponent.__table__.join(
-                    child,
-                    and_(
-                        child.dataset == _EXCHANGE_DATASET,
-                        child.partition_key == DatasetPublicationComponent.component_partition_key,
-                        child.data_version == DatasetPublicationComponent.component_data_version,
-                        child.quality_status == "passed",
-                        child.effective_as_of.is_not(None),
-                        child.knowledge_cutoff.is_not(None),
-                    ),
-                )
-            )
-            .where(
-                DatasetPublicationComponent.aggregate_publication_id == publication.publication_id
-            )
-            .scalar_subquery()
-        )
         statement = select(
             publication.data_version,
             publication.published_at,
             publication.effective_as_of,
-            publication.knowledge_cutoff,
-            case(
-                (publication.dataset == _AGGREGATE_DATASET, component_count == 3),
-                else_=true(),
-            ).label("components_complete"),
         ).where(
             publication.dataset == dataset,
             publication.partition_key == partition_key,
             publication.quality_status == "passed",
             publication.effective_as_of.is_not(None),
-            publication.knowledge_cutoff.is_not(None),
             publication.superseded_at.is_(None),
         )
         try:
@@ -115,17 +94,138 @@ class SqlAlchemyEquityMasterReadRepository(EquityMasterReadRepository):
             raise EquityMasterReadUnavailable("equity master publication is unavailable") from error
         if row is None:
             return None
-        if exchange is None and row["components_complete"] is not True:
+        data_version = UUID(str(row["data_version"]))
+        try:
+            components = self._components_for_publication(
+                data_version=data_version,
+                exchange=exchange,
+            )
+        except SQLAlchemyError as error:
+            raise EquityMasterReadUnavailable("equity master components are unavailable") from error
+        expected_keys = (
+            {"catalog", "lifecycle"}
+            if exchange is not None
+            else {f"{item.value}.catalog" for item in Exchange}
+            | {f"{item.value}.lifecycle" for item in Exchange}
+        )
+        if {component.component_key for component in components} != expected_keys:
             return None
         scope: PublicationScope = (
             "CN_A_STABLE" if exchange is None else cast(PublicationScope, exchange.value)
         )
         return EquityMasterPublication(
-            data_version=UUID(str(row["data_version"])),
+            data_version=data_version,
             published_at=row["published_at"],
             effective_as_of=row["effective_as_of"],
-            knowledge_cutoff=row["knowledge_cutoff"],
             publication_scope=scope,
+            components=components,
+        )
+
+    def _components_for_publication(
+        self,
+        *,
+        data_version: UUID,
+        exchange: Exchange | None,
+    ) -> tuple[EquityPublicationComponent, ...]:
+        """展开 leaf 或 aggregate manifest，保留目录/生命周期的独立输入血缘。"""
+        publication = aliased(DatasetPublication, name="resolved_publication")
+        component = aliased(DatasetPublicationComponent, name="resolved_component")
+        child = aliased(DatasetPublication, name="input_publication")
+        if exchange is not None:
+            statement = (
+                select(
+                    component.component_partition_key.label("component_key"),
+                    child.dataset,
+                    child.partition_key,
+                    child.data_version,
+                    child.published_at,
+                    child.effective_as_of,
+                    child.knowledge_cutoff,
+                    child.quality_status,
+                )
+                .select_from(publication)
+                .join(
+                    component,
+                    component.aggregate_publication_id == publication.publication_id,
+                )
+                .join(
+                    child,
+                    and_(
+                        child.data_version == component.component_data_version,
+                        child.partition_key == exchange.value,
+                        child.dataset.in_((_EXCHANGE_DATASET, _LIFECYCLE_DATASET)),
+                        child.quality_status == "passed",
+                        child.effective_as_of.is_not(None),
+                        child.knowledge_cutoff.is_not(None),
+                    ),
+                )
+                .where(
+                    publication.data_version == data_version,
+                    publication.dataset == _RESOLVED_DATASET,
+                    publication.partition_key == exchange.value,
+                    publication.quality_status == "passed",
+                )
+            )
+        else:
+            leaf_component = aliased(DatasetPublicationComponent, name="leaf_component")
+            leaf = aliased(DatasetPublication, name="resolved_leaf")
+            input_component = aliased(DatasetPublicationComponent, name="input_component")
+            statement = (
+                select(
+                    func.concat(
+                        leaf.partition_key,
+                        literal("."),
+                        input_component.component_partition_key,
+                    ).label("component_key"),
+                    child.dataset,
+                    child.partition_key,
+                    child.data_version,
+                    child.published_at,
+                    child.effective_as_of,
+                    child.knowledge_cutoff,
+                    child.quality_status,
+                )
+                .select_from(publication)
+                .join(
+                    leaf_component,
+                    leaf_component.aggregate_publication_id == publication.publication_id,
+                )
+                .join(
+                    leaf,
+                    and_(
+                        leaf.data_version == leaf_component.component_data_version,
+                        leaf.dataset == _RESOLVED_DATASET,
+                        leaf.partition_key == leaf_component.component_partition_key,
+                        leaf.quality_status == "passed",
+                    ),
+                )
+                .join(
+                    input_component,
+                    input_component.aggregate_publication_id == leaf.publication_id,
+                )
+                .join(
+                    child,
+                    and_(
+                        child.data_version == input_component.component_data_version,
+                        child.partition_key == leaf.partition_key,
+                        child.dataset.in_((_EXCHANGE_DATASET, _LIFECYCLE_DATASET)),
+                        child.quality_status == "passed",
+                        child.effective_as_of.is_not(None),
+                        child.knowledge_cutoff.is_not(None),
+                    ),
+                )
+                .where(
+                    publication.data_version == data_version,
+                    publication.dataset == _RESOLVED_DATASET,
+                    publication.partition_key == _AGGREGATE_PARTITION,
+                    publication.quality_status == "passed",
+                )
+            )
+        with self._database.session() as connection:
+            rows = connection.execute(statement).mappings().all()
+        return tuple(
+            _publication_component(row)
+            for row in sorted(rows, key=lambda value: str(value["component_key"]))
         )
 
     def list_instruments(
@@ -154,10 +254,10 @@ class SqlAlchemyEquityMasterReadRepository(EquityMasterReadRepository):
                 EquityIdentifierVersion.effective_to.is_(None),
                 EquityIdentifierVersion.effective_to > as_of,
             ),
-            EquityIdentifierVersion.known_from <= scope.c.scoped_known_at,
+            EquityIdentifierVersion.known_from <= scope.c.catalog_known_at,
             or_(
                 EquityIdentifierVersion.known_to.is_(None),
-                EquityIdentifierVersion.known_to > scope.c.scoped_known_at,
+                EquityIdentifierVersion.known_to > scope.c.catalog_known_at,
             ),
         )
         if statuses:
@@ -222,10 +322,10 @@ class SqlAlchemyEquityMasterReadRepository(EquityMasterReadRepository):
             EquityIdentifierVersion.identity_state == "CONFIRMED",
             EquityIdentifierVersion.exchange == exchange.value,
             EquityIdentifierVersion.symbol == symbol,
-            EquityIdentifierVersion.known_from <= scope.c.scoped_known_at,
+            EquityIdentifierVersion.known_from <= scope.c.catalog_known_at,
             or_(
                 EquityIdentifierVersion.known_to.is_(None),
-                EquityIdentifierVersion.known_to > scope.c.scoped_known_at,
+                EquityIdentifierVersion.known_to > scope.c.catalog_known_at,
             ),
         ]
         if identifier_as_of is None:
@@ -283,13 +383,20 @@ class SqlAlchemyEquityMasterReadRepository(EquityMasterReadRepository):
                     (
                         and_(
                             EquityListingStatusVersion.known_to.is_not(None),
-                            EquityListingStatusVersion.known_to <= scope.c.scoped_known_at,
+                            EquityListingStatusVersion.known_to <= scope.c.lifecycle_known_at,
                         ),
                         EquityListingStatusVersion.known_to,
                     ),
                     else_=literal(None),
                 ).label("visible_known_to"),
                 SourceBatch.observed_at,
+                EquityListingStatusVersion.evidence_kind,
+                sql_cast(EquityListingStatusVersion.source_batch_id, String).label(
+                    "source_batch_id"
+                ),
+                SourceBatch.provider_id,
+                SourceBatch.upstream_source,
+                scope.c.lifecycle_quality_status.label("quality_status"),
             )
             .select_from(
                 scope.join(
@@ -302,7 +409,7 @@ class SqlAlchemyEquityMasterReadRepository(EquityMasterReadRepository):
             )
             .where(
                 scope.c.exchange == exchange.value,
-                EquityListingStatusVersion.known_from <= scope.c.scoped_known_at,
+                EquityListingStatusVersion.known_from <= scope.c.lifecycle_known_at,
             )
         )
         if effective_from is not None:
@@ -350,62 +457,150 @@ class SqlAlchemyEquityMasterReadRepository(EquityMasterReadRepository):
 
 
 def _publication_scope(*, data_version: UUID, exchange: Exchange | None, known_at: datetime) -> Any:
-    """将单所或聚合发布展开为各交易所固定知识截止时间的可组合 CTE。"""
-    publication = aliased(DatasetPublication, name="publication")
+    """展开 resolved manifest，并保留目录/生命周期各自的受限知识时间。
+
+    `known_at` 只是调用方请求的上界。每个组件在 SQL 内独立取其 publication cutoff 的较小值，
+    因而不会将两个输入错误压成一个共同 cutoff，也不会让较新的官方生命周期越过自身版本。
+    """
+    publication = aliased(DatasetPublication, name="resolved_publication")
     if exchange is not None:
+        catalog_component = aliased(DatasetPublicationComponent, name="catalog_component")
+        lifecycle_component = aliased(DatasetPublicationComponent, name="lifecycle_component")
+        catalog = aliased(DatasetPublication, name="catalog_publication")
+        lifecycle = aliased(DatasetPublication, name="lifecycle_publication")
         return (
             select(
                 publication.partition_key.label("exchange"),
-                func.least(literal(known_at), publication.knowledge_cutoff).label(
-                    "scoped_known_at"
+                func.least(literal(known_at), catalog.knowledge_cutoff).label("catalog_known_at"),
+                func.least(literal(known_at), lifecycle.knowledge_cutoff).label(
+                    "lifecycle_known_at"
+                ),
+                catalog.quality_status.label("catalog_quality_status"),
+                lifecycle.quality_status.label("lifecycle_quality_status"),
+            )
+            .select_from(publication)
+            .join(
+                catalog_component,
+                and_(
+                    catalog_component.aggregate_publication_id == publication.publication_id,
+                    catalog_component.component_partition_key == _CATALOG_COMPONENT,
+                ),
+            )
+            .join(
+                lifecycle_component,
+                and_(
+                    lifecycle_component.aggregate_publication_id == publication.publication_id,
+                    lifecycle_component.component_partition_key == _LIFECYCLE_COMPONENT,
+                ),
+            )
+            .join(
+                catalog,
+                and_(
+                    catalog.data_version == catalog_component.component_data_version,
+                    catalog.dataset == _EXCHANGE_DATASET,
+                    catalog.partition_key == publication.partition_key,
+                    catalog.quality_status == "passed",
+                    catalog.effective_as_of.is_not(None),
+                    catalog.knowledge_cutoff.is_not(None),
+                ),
+            )
+            .join(
+                lifecycle,
+                and_(
+                    lifecycle.data_version == lifecycle_component.component_data_version,
+                    lifecycle.dataset == _LIFECYCLE_DATASET,
+                    lifecycle.partition_key == publication.partition_key,
+                    lifecycle.quality_status == "passed",
+                    lifecycle.effective_as_of.is_not(None),
+                    lifecycle.knowledge_cutoff.is_not(None),
                 ),
             )
             .where(
                 publication.data_version == data_version,
-                publication.dataset == _EXCHANGE_DATASET,
+                publication.dataset == _RESOLVED_DATASET,
                 publication.partition_key == exchange.value,
                 publication.quality_status == "passed",
                 publication.effective_as_of.is_not(None),
-                publication.knowledge_cutoff.is_not(None),
             )
             .cte("publication_scope")
         )
-    child = aliased(DatasetPublication, name="child_publication")
+    aggregate_component = aliased(DatasetPublicationComponent, name="aggregate_component")
+    leaf = aliased(DatasetPublication, name="resolved_leaf")
+    catalog_component = aliased(DatasetPublicationComponent, name="catalog_component")
+    lifecycle_component = aliased(DatasetPublicationComponent, name="lifecycle_component")
+    catalog = aliased(DatasetPublication, name="catalog_publication")
+    lifecycle = aliased(DatasetPublication, name="lifecycle_publication")
     return (
         select(
-            DatasetPublicationComponent.component_partition_key.label("exchange"),
-            func.least(literal(known_at), child.knowledge_cutoff).label("scoped_known_at"),
+            leaf.partition_key.label("exchange"),
+            func.least(literal(known_at), catalog.knowledge_cutoff).label("catalog_known_at"),
+            func.least(literal(known_at), lifecycle.knowledge_cutoff).label("lifecycle_known_at"),
+            catalog.quality_status.label("catalog_quality_status"),
+            lifecycle.quality_status.label("lifecycle_quality_status"),
         )
         .select_from(publication)
         .join(
-            DatasetPublicationComponent,
-            DatasetPublicationComponent.aggregate_publication_id == publication.publication_id,
+            aggregate_component,
+            aggregate_component.aggregate_publication_id == publication.publication_id,
         )
         .join(
-            child,
+            leaf,
             and_(
-                child.dataset == _EXCHANGE_DATASET,
-                child.partition_key == DatasetPublicationComponent.component_partition_key,
-                child.data_version == DatasetPublicationComponent.component_data_version,
-                child.quality_status == "passed",
-                child.effective_as_of.is_not(None),
-                child.knowledge_cutoff.is_not(None),
+                leaf.data_version == aggregate_component.component_data_version,
+                leaf.dataset == _RESOLVED_DATASET,
+                leaf.partition_key == aggregate_component.component_partition_key,
+                leaf.quality_status == "passed",
+            ),
+        )
+        .join(
+            catalog_component,
+            and_(
+                catalog_component.aggregate_publication_id == leaf.publication_id,
+                catalog_component.component_partition_key == _CATALOG_COMPONENT,
+            ),
+        )
+        .join(
+            lifecycle_component,
+            and_(
+                lifecycle_component.aggregate_publication_id == leaf.publication_id,
+                lifecycle_component.component_partition_key == _LIFECYCLE_COMPONENT,
+            ),
+        )
+        .join(
+            catalog,
+            and_(
+                catalog.data_version == catalog_component.component_data_version,
+                catalog.dataset == _EXCHANGE_DATASET,
+                catalog.partition_key == leaf.partition_key,
+                catalog.quality_status == "passed",
+                catalog.effective_as_of.is_not(None),
+                catalog.knowledge_cutoff.is_not(None),
+            ),
+        )
+        .join(
+            lifecycle,
+            and_(
+                lifecycle.data_version == lifecycle_component.component_data_version,
+                lifecycle.dataset == _LIFECYCLE_DATASET,
+                lifecycle.partition_key == leaf.partition_key,
+                lifecycle.quality_status == "passed",
+                lifecycle.effective_as_of.is_not(None),
+                lifecycle.knowledge_cutoff.is_not(None),
             ),
         )
         .where(
             publication.data_version == data_version,
-            publication.dataset == _AGGREGATE_DATASET,
+            publication.dataset == _RESOLVED_DATASET,
             publication.partition_key == _AGGREGATE_PARTITION,
             publication.quality_status == "passed",
             publication.effective_as_of.is_not(None),
-            publication.knowledge_cutoff.is_not(None),
         )
         .cte("publication_scope")
     )
 
 
 def _instrument_projection(*, scope: Any, projection_as_of: date) -> Select[Any]:
-    """构造身份、名称和生命周期均按相同双时间切片验证基数的只读投影。"""
+    """构造目录身份/名称与生命周期按各自知识组件读取的只读投影。"""
     identifier_source = aliased(SourceBatch, name="identifier_source")
     name_version = aliased(EquityNameVersion, name="name_version")
     name_source = aliased(SourceBatch, name="name_source")
@@ -420,6 +615,9 @@ def _instrument_projection(*, scope: Any, projection_as_of: date) -> Select[Any]
             func.min(name_version.effective_date_precision).label("name_date_precision"),
             func.min(name_version.known_from).label("name_known_from"),
             func.min(name_source.observed_at).label("name_observed_at"),
+            func.min(sql_cast(name_version.source_batch_id, String)).label("name_source_batch_id"),
+            func.min(name_source.provider_id).label("name_provider_id"),
+            func.min(name_source.upstream_source).label("name_upstream_source"),
         )
         .select_from(name_version)
         .join(name_source, name_source.source_batch_id == name_version.source_batch_id)
@@ -427,8 +625,8 @@ def _instrument_projection(*, scope: Any, projection_as_of: date) -> Select[Any]
             name_version.security_id == EquityInstrument.security_id,
             name_version.effective_from <= projection_as_of,
             or_(name_version.effective_to.is_(None), name_version.effective_to > projection_as_of),
-            name_version.known_from <= scope.c.scoped_known_at,
-            or_(name_version.known_to.is_(None), name_version.known_to > scope.c.scoped_known_at),
+            name_version.known_from <= scope.c.catalog_known_at,
+            or_(name_version.known_to.is_(None), name_version.known_to > scope.c.catalog_known_at),
         )
         .lateral("name_projection")
     )
@@ -443,6 +641,12 @@ def _instrument_projection(*, scope: Any, projection_as_of: date) -> Select[Any]
             func.min(listing_version.effective_date_precision).label("listing_date_precision"),
             func.min(listing_version.known_from).label("listing_known_from"),
             func.min(listing_source.observed_at).label("listing_observed_at"),
+            func.min(listing_version.evidence_kind).label("listing_evidence_kind"),
+            func.min(sql_cast(listing_version.source_batch_id, String)).label(
+                "listing_source_batch_id"
+            ),
+            func.min(listing_source.provider_id).label("listing_provider_id"),
+            func.min(listing_source.upstream_source).label("listing_upstream_source"),
         )
         .select_from(listing_version)
         .join(listing_source, listing_source.source_batch_id == listing_version.source_batch_id)
@@ -453,10 +657,10 @@ def _instrument_projection(*, scope: Any, projection_as_of: date) -> Select[Any]
                 listing_version.effective_to.is_(None),
                 listing_version.effective_to > projection_as_of,
             ),
-            listing_version.known_from <= scope.c.scoped_known_at,
+            listing_version.known_from <= scope.c.lifecycle_known_at,
             or_(
                 listing_version.known_to.is_(None),
-                listing_version.known_to > scope.c.scoped_known_at,
+                listing_version.known_to > scope.c.lifecycle_known_at,
             ),
         )
         .lateral("listing_projection")
@@ -471,6 +675,12 @@ def _instrument_projection(*, scope: Any, projection_as_of: date) -> Select[Any]
         EquityIdentifierVersion.effective_date_precision.label("identifier_date_precision"),
         EquityIdentifierVersion.known_from.label("identifier_known_from"),
         identifier_source.observed_at.label("identifier_observed_at"),
+        sql_cast(EquityIdentifierVersion.source_batch_id, String).label(
+            "identifier_source_batch_id"
+        ),
+        identifier_source.provider_id.label("identifier_provider_id"),
+        identifier_source.upstream_source.label("identifier_upstream_source"),
+        scope.c.catalog_quality_status.label("catalog_quality_status"),
         name_projection.c.name_match_count,
         name_projection.c.name,
         name_projection.c.name_effective_from,
@@ -478,6 +688,9 @@ def _instrument_projection(*, scope: Any, projection_as_of: date) -> Select[Any]
         name_projection.c.name_date_precision,
         name_projection.c.name_known_from,
         name_projection.c.name_observed_at,
+        name_projection.c.name_source_batch_id,
+        name_projection.c.name_provider_id,
+        name_projection.c.name_upstream_source,
         listing_projection.c.listing_match_count,
         listing_projection.c.status,
         listing_projection.c.listed_on,
@@ -487,6 +700,11 @@ def _instrument_projection(*, scope: Any, projection_as_of: date) -> Select[Any]
         listing_projection.c.listing_date_precision,
         listing_projection.c.listing_known_from,
         listing_projection.c.listing_observed_at,
+        listing_projection.c.listing_evidence_kind,
+        listing_projection.c.listing_source_batch_id,
+        listing_projection.c.listing_provider_id,
+        listing_projection.c.listing_upstream_source,
+        scope.c.lifecycle_quality_status.label("lifecycle_quality_status"),
     ).select_from(
         scope.join(EquityIdentifierVersion, EquityIdentifierVersion.exchange == scope.c.exchange)
         .join(EquityInstrument, EquityInstrument.security_id == EquityIdentifierVersion.security_id)
@@ -513,7 +731,7 @@ def _stored_instruments(
 
 
 def _stored_instrument(row: Mapping[Any, Any]) -> StoredEquityInstrument:
-    """将一行三组双时间版本映射为 provider-neutral 证券投影。"""
+    """将一行三组双时间版本映射为带来源、证据和质量状态的证券投影。"""
     return StoredEquityInstrument(
         security_id=int(row["security_id"]),
         instrument_id=UUID(str(row["instrument_id"])),
@@ -525,6 +743,8 @@ def _stored_instrument(row: Mapping[Any, Any]) -> StoredEquityInstrument:
             date_precision=str(row["identifier_date_precision"]),
             known_from=row["identifier_known_from"],
             observed_at=row["identifier_observed_at"],
+            source=_source_attribution(row, prefix="identifier"),
+            quality_status=_quality_status(row, key="catalog_quality_status"),
         ),
         name=TemporalEquityName(
             value=str(row["name"]),
@@ -533,6 +753,8 @@ def _stored_instrument(row: Mapping[Any, Any]) -> StoredEquityInstrument:
             date_precision=str(row["name_date_precision"]),
             known_from=row["name_known_from"],
             observed_at=row["name_observed_at"],
+            source=_source_attribution(row, prefix="name"),
+            quality_status=_quality_status(row, key="catalog_quality_status"),
         ),
         listing=TemporalEquityListing(
             status=str(row["status"]),
@@ -543,12 +765,15 @@ def _stored_instrument(row: Mapping[Any, Any]) -> StoredEquityInstrument:
             date_precision=str(row["listing_date_precision"]),
             known_from=row["listing_known_from"],
             observed_at=row["listing_observed_at"],
+            evidence_kind=str(row["listing_evidence_kind"]),
+            source=_source_attribution(row, prefix="listing"),
+            quality_status=_quality_status(row, key="lifecycle_quality_status"),
         ),
     )
 
 
 def _stored_listing_period(row: Mapping[Any, Any]) -> StoredListingStatusPeriod:
-    """将上市状态 SQL 行映射为带稳定内部版本键的历史项。"""
+    """将上市状态 SQL 行映射为带稳定内部版本键、来源和证据的历史项。"""
     return StoredListingStatusPeriod(
         version_id=UUID(str(row["version_id"])),
         status=str(row["status"]),
@@ -558,7 +783,65 @@ def _stored_listing_period(row: Mapping[Any, Any]) -> StoredListingStatusPeriod:
         known_from=row["known_from"],
         known_to=row["visible_known_to"],
         observed_at=row["observed_at"],
+        evidence_kind=str(row["evidence_kind"]),
+        source=_source_attribution(row, prefix=""),
+        quality_status=_quality_status(row, key="quality_status"),
     )
+
+
+def _publication_component(row: Mapping[Any, Any]) -> EquityPublicationComponent:
+    """验证并映射 resolved 输入组件元数据，拒绝残缺 lineage。"""
+    effective_as_of = row["effective_as_of"]
+    knowledge_cutoff = row["knowledge_cutoff"]
+    if (
+        not isinstance(effective_as_of, date)
+        or not isinstance(knowledge_cutoff, datetime)
+        or knowledge_cutoff.tzinfo is None
+    ):
+        raise EquityMasterReadUnavailable("equity master component metadata is invalid")
+    quality_status = str(row["quality_status"])
+    if quality_status != "passed":
+        raise EquityMasterReadUnavailable("equity master component quality is not publishable")
+    return EquityPublicationComponent(
+        component_key=str(row["component_key"]),
+        dataset=str(row["dataset"]),
+        partition_key=str(row["partition_key"]),
+        data_version=UUID(str(row["data_version"])),
+        published_at=row["published_at"],
+        effective_as_of=effective_as_of,
+        knowledge_cutoff=knowledge_cutoff,
+        quality_status=quality_status,
+    )
+
+
+def _source_attribution(row: Mapping[Any, Any], *, prefix: str) -> EquitySourceAttribution:
+    """从 SQL 行构造不含 raw URI 的来源批次锚点。"""
+    separator = "" if not prefix else "_"
+    batch_id = row[f"{prefix}{separator}source_batch_id"]
+    provider_id = row[f"{prefix}{separator}provider_id"]
+    upstream_source = row[f"{prefix}{separator}upstream_source"]
+    if (
+        not isinstance(batch_id, str)
+        or not isinstance(provider_id, str)
+        or not isinstance(upstream_source, str)
+    ):
+        raise EquityMasterReadUnavailable("equity source attribution is incomplete")
+    try:
+        return EquitySourceAttribution(
+            source_batch_id=UUID(batch_id),
+            provider_id=provider_id,
+            upstream_source=upstream_source,
+        )
+    except ValueError as error:
+        raise EquityMasterReadUnavailable("equity source batch identity is invalid") from error
+
+
+def _quality_status(row: Mapping[Any, Any], *, key: str) -> str:
+    """限制读模型只返回已经通过发布门的组件质量状态。"""
+    quality_status = row[key]
+    if quality_status != "passed":
+        raise EquityMasterReadUnavailable("equity component quality is not publishable")
+    return "passed"
 
 
 def _prefix_pattern(value: str | None) -> str | None:

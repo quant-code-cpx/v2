@@ -34,6 +34,7 @@ from service_data_sync.domain.money_flow import (
     MoneyFlowScopeType,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.models.canonical import RawPayloadManifest
 from service_data_sync.infrastructure.database.models.money_flow import (
     MoneyFlowBucketDefinition as BucketModel,
 )
@@ -56,6 +57,9 @@ from service_data_sync.infrastructure.database.models.money_flow import (
     MoneyFlowQualityResult,
     MoneyFlowRankingManifest,
     MoneyFlowRankingMetric,
+    MoneyFlowRankingResearchItem,
+    MoneyFlowRankingResearchMetric,
+    MoneyFlowRankingResearchObservation,
     MoneyFlowSeries,
     MoneyFlowUniverseVersion,
 )
@@ -113,13 +117,17 @@ class SqlAlchemyMoneyFlowRepository(MoneyFlowRepository):
             methodology, observations[0].scope
         )
         with self._database.transaction() as session:
-            method = self._ensure_methodology(session, methodology, now=now)
             source_batch_id = _record_source(
                 session,
                 source=source,
                 now=now,
                 run_id=run_id,
                 partition_key=partition_key,
+            )
+            method = self._ensure_methodology(
+                session,
+                methodology,
+                now=now,
             )
             try:
                 equity_identities = self._preflight_equity_identity_batches(
@@ -256,7 +264,6 @@ class SqlAlchemyMoneyFlowRepository(MoneyFlowRepository):
         now = datetime.now(UTC)
         resolved_partition = partition_key or _ranking_partition_key(methodology, snapshot)
         with self._database.transaction() as session:
-            method = self._ensure_methodology(session, methodology, now=now)
             source_batch_id = _record_source(
                 session,
                 source=source,
@@ -264,9 +271,22 @@ class SqlAlchemyMoneyFlowRepository(MoneyFlowRepository):
                 run_id=run_id,
                 partition_key=partition_key,
             )
+            method = self._ensure_methodology(
+                session,
+                methodology,
+                now=now,
+            )
             # 当前 AKShare SDK 只返回合并 DataFrame，无法证明页号连续与 total；
-            # raw 仍保留，但这种观测不能进入 canonical ranking publication。
+            # raw 与可复核的标准化研究观察仍须入库，但不能进入 canonical ranking publication。
             if not snapshot.is_complete:
+                inserted = self._persist_research_ranking(
+                    session,
+                    method=method,
+                    snapshot=snapshot,
+                    source=source,
+                    source_batch_id=source_batch_id,
+                    now=now,
+                )
                 self._record_quality(
                     session,
                     dataset_kind="ranking",
@@ -280,7 +300,7 @@ class SqlAlchemyMoneyFlowRepository(MoneyFlowRepository):
                 )
                 return PublishedMoneyFlow(
                     data_version=None,
-                    inserted_count=0,
+                    inserted_count=inserted,
                     revised_count=0,
                     unchanged_count=0,
                     published=False,
@@ -450,7 +470,11 @@ class SqlAlchemyMoneyFlowRepository(MoneyFlowRepository):
                 )
 
     def _ensure_methodology(
-        self, session: Session, methodology: MoneyFlowMethodology, *, now: datetime
+        self,
+        session: Session,
+        methodology: MoneyFlowMethodology,
+        *,
+        now: datetime,
     ) -> _StoredMethodology:
         """创建或验证不可变方法学版本，并在新增时推进内部目录 publication。"""
         stable = (
@@ -780,6 +804,104 @@ class SqlAlchemyMoneyFlowRepository(MoneyFlowRepository):
         )
         return outcome
 
+    @staticmethod
+    def _persist_research_ranking(
+        session: Session,
+        *,
+        method: _StoredMethodology,
+        snapshot: MoneyFlowRankingSnapshot,
+        source: MoneyFlowSourceObservation,
+        source_batch_id: UUID,
+        now: datetime,
+    ) -> int:
+        """保存未证完整分页的真实来源排行，绝不猜测 canonical identity。"""
+        if snapshot.scope_type not in {MoneyFlowScopeType.EQUITY, MoneyFlowScopeType.SECTOR}:
+            raise ValueError("research ranking supports only equity or sector scope")
+        grouped: dict[int, list[MoneyFlowRankingItem]] = defaultdict(list)
+        for item in snapshot.items:
+            if item.scope.scope_type is not snapshot.scope_type:
+                raise ValueError("research ranking item scope does not match snapshot scope")
+            grouped[item.supplier_position].append(item)
+        if not grouped:
+            raise ValueError("research ranking must contain supplier positions")
+        ranking_bucket_id = method.bucket_ids.get(snapshot.ranking_bucket)
+        if ranking_bucket_id is None:
+            raise ValueError("research ranking bucket is not defined by methodology")
+        research_observation_id = uuid4()
+        session.execute(
+            insert(MoneyFlowRankingResearchObservation).values(
+                target_trade_date=snapshot.target_trade_date,
+                research_observation_id=research_observation_id,
+                methodology_version_id=method.version_id,
+                scope_type=snapshot.scope_type.value,
+                universe_code=snapshot.universe_id,
+                window_type=snapshot.window_type.value,
+                window_size=snapshot.window_size,
+                ranking_bucket_id=ranking_bucket_id,
+                ranking_basis=snapshot.ranking_basis,
+                source_cutoff_at=snapshot.source_cutoff_at,
+                observed_at=snapshot.observed_at,
+                source_batch_id=source_batch_id,
+                source_row_count=len(grouped),
+                upstream_total=None,
+                completeness_basis=snapshot.completeness_basis,
+                is_complete=False,
+                normalized_payload_sha256=_required_normalized_payload_sha256(source),
+                quality_status="partial",
+                status="research",
+                created_at=now,
+            )
+        )
+        for position, metrics in sorted(grouped.items()):
+            scope = metrics[0].scope
+            if any(metric.scope != scope for metric in metrics):
+                raise ValueError("research ranking position identifies multiple source scopes")
+            if scope.scope_type is MoneyFlowScopeType.EQUITY:
+                if scope.exchange is None or scope.symbol is None:
+                    raise ValueError("research equity ranking scope lacks source identity")
+                identity_values: dict[str, object] = {
+                    "source_exchange": scope.exchange.value,
+                    "source_symbol": scope.symbol,
+                    "source_sector_scheme": None,
+                    "source_sector_code": None,
+                }
+            else:
+                if scope.sector_scheme is None or scope.sector_code is None:
+                    raise ValueError("research sector ranking scope lacks source identity")
+                identity_values = {
+                    "source_exchange": None,
+                    "source_symbol": None,
+                    "source_sector_scheme": scope.sector_scheme,
+                    "source_sector_code": scope.sector_code,
+                }
+            session.execute(
+                insert(MoneyFlowRankingResearchItem).values(
+                    target_trade_date=snapshot.target_trade_date,
+                    research_observation_id=research_observation_id,
+                    supplier_position=position,
+                    scope_type=scope.scope_type.value,
+                    source_name=scope.name,
+                    **identity_values,
+                )
+            )
+            for metric in sorted(metrics, key=lambda item: item.bucket):
+                bucket_id = method.bucket_ids.get(metric.bucket)
+                if bucket_id is None:
+                    raise ValueError("research ranking metric bucket is not defined by methodology")
+                session.execute(
+                    insert(MoneyFlowRankingResearchMetric).values(
+                        target_trade_date=snapshot.target_trade_date,
+                        research_observation_id=research_observation_id,
+                        supplier_position=position,
+                        bucket_id=bucket_id,
+                        gross_inflow=metric.gross_inflow,
+                        gross_outflow=metric.gross_outflow,
+                        net_amount=metric.net_amount,
+                        net_ratio=metric.net_ratio,
+                    )
+                )
+        return len(grouped)
+
     def _resolve_ranking_items(
         self,
         session: Session,
@@ -936,8 +1058,8 @@ def _record_source(
     run_id: UUID | None,
     partition_key: str | None,
 ) -> UUID:
-    """登记一次不可折叠 source observation，并复用已有或手工 run。"""
-    return record_source_observation(
+    """登记不可折叠来源观察及其 raw、标准化对象清单。"""
+    source_batch_id = record_source_observation(
         session,
         provider_id=source.provider_id,
         capability=source.capability,
@@ -951,6 +1073,43 @@ def _record_source(
         run_id=run_id,
         partition_key=partition_key,
     )
+    session.execute(
+        insert(RawPayloadManifest).values(
+            [
+                {
+                    "raw_payload_id": uuid4(),
+                    "source_batch_id": source_batch_id,
+                    "sequence_no": 1,
+                    "role": "raw",
+                    "object_uri": source.raw_uri,
+                    "sha256": source.source_payload_sha256,
+                    "content_type": source.raw_content_type,
+                    "byte_size": source.raw_byte_size,
+                    "fetched_at": source.observed_at,
+                },
+                {
+                    "raw_payload_id": uuid4(),
+                    "source_batch_id": source_batch_id,
+                    "sequence_no": 1,
+                    "role": "normalized",
+                    "object_uri": source.normalized_uri,
+                    "sha256": source.normalized_payload_sha256,
+                    "content_type": source.normalized_content_type,
+                    "byte_size": source.normalized_byte_size,
+                    "fetched_at": source.observed_at,
+                },
+            ]
+        )
+    )
+    return source_batch_id
+
+
+def _required_normalized_payload_sha256(source: MoneyFlowSourceObservation) -> str:
+    """验证研究行绑定的是 adapter 标准载荷摘要，而不是原始字节摘要的替代品。"""
+    digest = source.normalized_payload_sha256
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        raise ValueError("money-flow normalized payload sha256 is invalid")
+    return digest
 
 
 def _methodology_version_values(

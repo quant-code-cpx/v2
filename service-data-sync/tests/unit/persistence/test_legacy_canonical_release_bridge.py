@@ -93,6 +93,9 @@ class CapturingReleaseRepository:
         """保存由正规发布器返回的真实 release/dataVersion 结果。"""
         self._published = published
         self.candidate: CanonicalReleaseCandidate | None = None
+        self.write_publication: object = None
+        self.write_visibility: object = None
+        self.before_final_publication: object = None
 
     def publish_in_session(
         self,
@@ -100,10 +103,17 @@ class CapturingReleaseRepository:
         session: Session,
         candidate: CanonicalReleaseCandidate,
         write_facts: object = None,
+        write_publication: object = None,
+        write_visibility: object = None,
+        before_final_publication: object = None,
+        record_fenced_progress: bool = True,
     ) -> PublishedCanonicalRelease:
-        """记录候选并返回正规发布器已经生成的 immutable release 结果。"""
-        del session, write_facts
+        """记录候选并返回正规发布器已经生成的不可变 release 结果。"""
+        del session, write_facts, record_fenced_progress
         self.candidate = candidate
+        self.write_publication = write_publication
+        self.write_visibility = write_visibility
+        self.before_final_publication = before_final_publication
         return self._published
 
 

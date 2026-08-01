@@ -26,7 +26,7 @@ from service_data_sync.domain.sector import SectorIdentifier, SectorScheme
 
 _CAPABILITY = "sector.membership.snapshot.raw"
 _SCHEMA = "quant-v2.sector-membership-snapshot.v1"
-_ADAPTER_VERSION = "akshare-1.18.78-eastmoney-sector-membership-v1"
+_ADAPTER_VERSION = "akshare-1.18.81-eastmoney-sector-membership-v1"
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 

@@ -187,7 +187,13 @@ def _source() -> MoneyFlowSourceObservation:
         provider_id="fixture-provider",
         capability="money_flow.order_size.daily.equity.raw",
         source_payload_sha256="a" * 64,
-        raw_uri="s3://private/raw/evidence.json",
+        raw_uri=f"unretained://sha256/{'a' * 64}",
+        raw_content_type="application/json",
+        raw_byte_size=128,
+        normalized_payload_sha256="c" * 64,
+        normalized_uri=f"unretained://sha256/{'c' * 64}",
+        normalized_content_type="application/json",
+        normalized_byte_size=96,
         observed_at=_OBSERVED_AT,
         upstream_source="fixture-source",
         adapter_version="fixture-v1",
@@ -265,8 +271,8 @@ def _patch_harness(
         run_id: UUID | None,
         partition_key: str | None,
     ) -> UUID:
-        """验证 raw evidence 已先于 canonical 写入。"""
-        assert source.raw_uri.startswith("s3://private/")
+        """验证 canonical 写入前已有不可回放来源摘要。"""
+        assert source.raw_uri.startswith("unretained://sha256/")
         assert now.tzinfo is not None
         assert run_id is None
         assert partition_key is None
@@ -350,6 +356,43 @@ def _patch_harness(
     monkeypatch.setattr(repository, "_resolve_ranking_items", resolve_ranking)
     monkeypatch.setattr(repository, "_current_ranking", current)
     return state
+
+
+def test_record_source_records_raw_and_normalized_payload_manifests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """每次资金流观察必须同时留存来源批次、raw 与标准化对象清单。"""
+    session = FakeSession()
+    captured: dict[str, object] = {}
+
+    def record_source_observation(
+        _: object,
+        **kwargs: object,
+    ) -> UUID:
+        """捕获传给共享来源账本的原始证据标识。"""
+        captured.update(kwargs)
+        return _SOURCE_BATCH_ID
+
+    monkeypatch.setattr(
+        money_flow_repository,
+        "record_source_observation",
+        record_source_observation,
+    )
+
+    source_batch_id = money_flow_repository._record_source(
+        cast(Any, session),
+        source=_source(),
+        now=_OBSERVED_AT,
+        run_id=None,
+        partition_key=None,
+    )
+
+    assert source_batch_id == _SOURCE_BATCH_ID
+    assert captured["raw_uri"] == f"unretained://sha256/{'a' * 64}"
+    assert len(session.statements) == 1
+    assert getattr(getattr(session.statements[0], "table", None), "name", None) == (
+        "raw_payload_manifest"
+    )
 
 
 def test_publish_daily_counts_insert_revision_noop_and_publishes_latest_date(
@@ -473,11 +516,12 @@ def test_publish_daily_fails_closed_on_identity_boundary_or_unresolved_scope(
     assert len(cast(list[dict[str, object]], unresolved_state["quality"])) == 1
 
 
-def test_publish_ranking_rejects_unproven_completeness_and_identity(
+def test_publish_ranking_persists_unproven_completeness_as_research_and_rejects_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SDK 合并表和任何 scope 零解都不能进入 canonical ranking。"""
-    incomplete_repository = _repository(FakeSession())
+    """SDK 合并表必须真实进入研究表，任何 scope 零解仍不能进入 canonical ranking。"""
+    incomplete_session = FakeSession()
+    incomplete_repository = _repository(incomplete_session)
     incomplete_state = _patch_harness(monkeypatch, incomplete_repository)
     incomplete = incomplete_repository.publish_ranking(
         methodology=_methodology(),
@@ -489,6 +533,16 @@ def test_publish_ranking_rejects_unproven_completeness_and_identity(
         cast(list[dict[str, object]], incomplete_state["quality"])[0]["rule_code"]
         == "ranking-completeness"
     )
+    assert incomplete.inserted_count == 1
+    inserted_tables = {
+        str(getattr(getattr(statement, "table", None), "name", ""))
+        for statement in incomplete_session.statements
+    }
+    assert {
+        "money_flow_ranking_research_observation",
+        "money_flow_ranking_research_item",
+        "money_flow_ranking_research_metric",
+    }.issubset(inserted_tables)
 
     unresolved_repository = _repository(FakeSession())
     unresolved_state = _patch_harness(

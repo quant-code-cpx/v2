@@ -22,11 +22,13 @@ from service_data_sync.application.ports.sector_eod import (
     SectorEodExecutionMode,
     SectorEodHistoricalReference,
     SectorEodQualityResult,
+    SectorEodRepository,
     SectorEodRun,
 )
 from service_data_sync.application.ports.sector_market_data import StoredSector
 from service_data_sync.application.ports.sector_membership import (
     PublishedSectorMembershipSnapshot,
+    SectorMembershipRepository,
     SectorMembershipRun,
 )
 from service_data_sync.application.sector.eod_snapshot_sync import (
@@ -35,6 +37,7 @@ from service_data_sync.application.sector.eod_snapshot_sync import (
 from service_data_sync.application.sector.membership_sync import (
     SectorMembershipSyncService,
 )
+from service_data_sync.application.source_registry import SourceRegistry
 from service_data_sync.bootstrap import financial_derived
 from service_data_sync.bootstrap.container import ServiceContainer
 from service_data_sync.domain.sector import SectorIdentifier, SectorScheme
@@ -417,7 +420,7 @@ def test_membership_release_failure_after_arm_finishes_failed_without_publicatio
     repository = _FailingMembershipRepository(database, marker)
     service = SectorMembershipSyncService(
         source=_MembershipSource(),
-        repository=cast(object, repository),
+        repository=cast(SectorMembershipRepository, repository),
         raw_payload_store=_RawStore(),
         retry_delay_seconds=0,
     )
@@ -457,7 +460,7 @@ def test_sector_eod_failure_after_arm_finishes_failed_without_publication(
     repository = _FailingEodRepository(database, marker)
     service = SectorEodSnapshotSyncService(
         source=_EodSource(),
-        repository=cast(object, repository),
+        repository=cast(SectorEodRepository, repository),
         raw_payload_store=_RawStore(),
         trading_calendar=_OpenCalendar(),
     )
@@ -508,7 +511,7 @@ def _control_plane(database: DatabaseClient, dataset_code: str) -> DataOperation
     return DataOperationsControlPlane(
         database=database,
         catalog={dataset_code: _definition(dataset_code)},
-        source_registry=cast(object, _UnusedRegistry()),
+        source_registry=cast(SourceRegistry, _UnusedRegistry()),
     )
 
 

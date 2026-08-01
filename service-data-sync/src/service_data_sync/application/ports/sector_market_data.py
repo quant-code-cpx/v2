@@ -71,6 +71,12 @@ class SectorMarketDataRepository(Protocol):
         provider_id: str,
         source_payload_sha256: str,
         raw_uri: str,
+        raw_content_type: str,
+        raw_byte_size: int,
+        normalized_payload_sha256: str,
+        normalized_uri: str,
+        normalized_content_type: str,
+        normalized_byte_size: int,
         observed_at: datetime,
     ) -> PublishedSectorBars:
         """在原始证据已可靠保存后，写入一个周期的不可变行情修订。"""

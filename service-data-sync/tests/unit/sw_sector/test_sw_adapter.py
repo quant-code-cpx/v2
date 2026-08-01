@@ -69,7 +69,7 @@ def test_adapter_calls_fixed_version_real_functions_and_freezes_columns(
     assert payload["levels"][1]["items"][0]["parentName"] == "农林牧渔"
     assert payload["levels"][2]["items"][0]["dividendYieldPercent"] == "0.61"
     assert raw["functions"] == calls
-    assert batch.adapter_version == "akshare-1.18.78-legulegu-sw-overview-v1"
+    assert batch.adapter_version == "akshare-1.18.81-legulegu-sw-overview-v1"
     assert len(batch.schema_fingerprint or "") == 64
 
 
@@ -233,7 +233,7 @@ def _return_frames(
 
 
 def _frame(*, level: int) -> pd.DataFrame:
-    """构造与 1.18.78 源码和可执行探针一致的最小 DataFrame。"""
+    """构造与 1.18.81 源码和可执行探针一致的最小 DataFrame。"""
     identity = {
         1: ("801010.SI", "农林牧渔", None),
         2: ("801016.SI", "种植业", "农林牧渔"),

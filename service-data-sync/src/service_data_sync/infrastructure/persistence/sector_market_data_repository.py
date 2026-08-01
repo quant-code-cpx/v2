@@ -36,6 +36,7 @@ from service_data_sync.domain.sector import (
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.database.fenced_execution import current_fenced_execution
+from service_data_sync.infrastructure.database.models.canonical import RawPayloadManifest
 from service_data_sync.infrastructure.persistence.canonical_release_repository import (
     SqlAlchemyCanonicalReleaseRepository,
 )
@@ -79,6 +80,12 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
         provider_id: str,
         source_payload_sha256: str,
         raw_uri: str,
+        raw_content_type: str,
+        raw_byte_size: int,
+        normalized_payload_sha256: str,
+        normalized_uri: str,
+        normalized_content_type: str,
+        normalized_byte_size: int,
         observed_at: datetime,
     ) -> PublishedSectorBars:
         """归档来源血缘、追加变化行，并推进指定周期的当前发布。"""
@@ -95,6 +102,12 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
                 capability=period.capability,
                 source_payload_sha256=source_payload_sha256,
                 raw_uri=raw_uri,
+                raw_content_type=raw_content_type,
+                raw_byte_size=raw_byte_size,
+                normalized_payload_sha256=normalized_payload_sha256,
+                normalized_uri=normalized_uri,
+                normalized_content_type=normalized_content_type,
+                normalized_byte_size=normalized_byte_size,
                 observed_at=observed_at,
                 created_at=now,
             )
@@ -466,9 +479,15 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
         raw_uri: str,
         observed_at: datetime,
         created_at: datetime,
+        raw_content_type: str | None = None,
+        raw_byte_size: int | None = None,
+        normalized_payload_sha256: str | None = None,
+        normalized_uri: str | None = None,
+        normalized_content_type: str | None = None,
+        normalized_byte_size: int | None = None,
     ) -> UUID:
-        """登记独立外部观测；同内容重抓仍保留完整血缘。"""
-        return record_source_observation(
+        """登记独立来源观测及 raw、标准化对象清单。"""
+        source_batch_id = record_source_observation(
             connection,
             provider_id=provider_id,
             capability=capability,
@@ -477,6 +496,47 @@ class SqlAlchemySectorMarketDataRepository(SectorMarketDataRepository):
             observed_at=observed_at,
             created_at=created_at,
         )
+        manifest_values = (
+            raw_content_type,
+            raw_byte_size,
+            normalized_payload_sha256,
+            normalized_uri,
+            normalized_content_type,
+            normalized_byte_size,
+        )
+        if all(value is None for value in manifest_values):
+            return source_batch_id
+        if any(value is None for value in manifest_values):
+            raise ValueError("sector source manifest metadata must be complete")
+        connection.execute(
+            insert(RawPayloadManifest).values(
+                [
+                    {
+                        "raw_payload_id": uuid4(),
+                        "source_batch_id": source_batch_id,
+                        "sequence_no": 1,
+                        "role": "raw",
+                        "object_uri": raw_uri,
+                        "sha256": source_payload_sha256,
+                        "content_type": raw_content_type,
+                        "byte_size": raw_byte_size,
+                        "fetched_at": observed_at,
+                    },
+                    {
+                        "raw_payload_id": uuid4(),
+                        "source_batch_id": source_batch_id,
+                        "sequence_no": 1,
+                        "role": "normalized",
+                        "object_uri": normalized_uri,
+                        "sha256": normalized_payload_sha256,
+                        "content_type": normalized_content_type,
+                        "byte_size": normalized_byte_size,
+                        "fetched_at": observed_at,
+                    },
+                ]
+            )
+        )
+        return source_batch_id
 
     def _write_revisions(
         self,

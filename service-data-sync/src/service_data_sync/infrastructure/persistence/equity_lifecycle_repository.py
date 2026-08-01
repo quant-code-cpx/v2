@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, insert, literal, select, update
 from sqlalchemy.orm import Session
 
+from service_data_sync.application.ports.canonical_release import CanonicalLineageRecord
 from service_data_sync.application.ports.equity_lifecycle import (
     EquityLifecycleReplayCheckpoint,
     EquityLifecycleRepository,
@@ -33,8 +34,14 @@ from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.database.fenced_execution import (
     current_fenced_execution,
 )
+from service_data_sync.infrastructure.persistence.canonical_release_repository import (
+    SqlAlchemyCanonicalReleaseRepository,
+)
 from service_data_sync.infrastructure.persistence.equity_identity_resolver import (
     resolve_identity_on_connection,
+)
+from service_data_sync.infrastructure.persistence.legacy_canonical_release_bridge import (
+    publish_legacy_snapshot,
 )
 from service_data_sync.infrastructure.persistence.source_batch import record_source_observation
 
@@ -57,9 +64,6 @@ from ..database.models.equity.identity.equity_master_snapshot_member import (
     EquityMasterSnapshotMember,
 )
 from ..database.models.equity.identity.equity_name_version import EquityNameVersion
-from ..database.models.publication.dataset_publication import (
-    DatasetPublication,
-)
 
 _CAPABILITY = "equity.lifecycle.explicit"
 _DATASET = "equity.lifecycle.explicit"
@@ -75,6 +79,7 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
     def __init__(self, database: DatabaseClient) -> None:
         """保存 Session 工厂，应用层不直接依赖事务或 SQLAlchemy。"""
         self._database = database
+        self._release_repository = SqlAlchemyCanonicalReleaseRepository(database)
 
     def publish_lifecycle(
         self,
@@ -147,9 +152,10 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
             data_version = self._publish_exchange_version(
                 session,
                 exchange=exchange,
+                snapshot_id=snapshot_id,
+                source_batch_id=source_batch_id,
                 effective_as_of=target_date,
                 published_at=now,
-                business_changed=inserted_count > 0,
             )
             self._advance_checkpoint(
                 session,
@@ -330,11 +336,18 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
         is_knowledge_correction = (
             entry.evidence_kind is EquityLifecycleEvidenceKind.OFFICIAL_CORRECTION
         )
-        if current_status is entry.status and not is_knowledge_correction:
+        is_catalog_evidence_upgrade = _is_catalog_evidence_upgrade(current, entry)
+        if (
+            current_status is entry.status
+            and not is_knowledge_correction
+            and not is_catalog_evidence_upgrade
+        ):
             raise EquityLifecycleTransitionError(
                 "same lifecycle status requires official correction"
             )
-        if not _is_transition_allowed(current_status, entry.status, is_knowledge_correction):
+        if current_status is not entry.status and not _is_transition_allowed(
+            current_status, entry.status, is_knowledge_correction
+        ):
             raise EquityLifecycleTransitionError("lifecycle status transition is not allowed")
         if is_knowledge_correction and current_effective_from != entry.effective_on:
             raise EquityLifecycleTransitionError(
@@ -1006,45 +1019,94 @@ class SqlAlchemyEquityLifecycleRepository(EquityLifecycleRepository):
         connection: Session,
         *,
         exchange: Exchange,
+        snapshot_id: UUID,
+        source_batch_id: UUID,
         effective_as_of: date,
         published_at: datetime,
-        business_changed: bool,
     ) -> UUID:
-        """生命周期事实变化时替换该交易所目录切片，未变化时复用稳定版本。"""
-        current = connection.execute(
-            select(DatasetPublication.data_version).where(
-                DatasetPublication.dataset == _DATASET,
-                DatasetPublication.partition_key == exchange.value,
-                DatasetPublication.superseded_at.is_(None),
-            )
-        ).scalar_one_or_none()
-        if current is not None and not business_changed:
-            return UUID(str(current))
-        if current is not None:
-            connection.execute(
-                update(DatasetPublication)
-                .where(
-                    DatasetPublication.dataset == _DATASET,
-                    DatasetPublication.partition_key == exchange.value,
-                    DatasetPublication.superseded_at.is_(None),
-                )
-                .values(superseded_at=published_at)
-            )
-        data_version = uuid4()
+        """把显式生命周期快照通过统一 release 发布器固化为可恢复消费者版本。"""
+        return self._publish_lifecycle_release(
+            connection,
+            exchange=exchange,
+            snapshot_id=snapshot_id,
+            source_batch_id=source_batch_id,
+            effective_as_of=effective_as_of,
+            published_at=published_at,
+        )
+
+    def _publish_lifecycle_release(
+        self,
+        connection: Session,
+        *,
+        exchange: Exchange,
+        snapshot_id: UUID,
+        source_batch_id: UUID,
+        effective_as_of: date,
+        published_at: datetime,
+    ) -> UUID:
+        """从已落库显式证据成员构造 release 候选，避免旁路统一 publication。"""
+        records = _lifecycle_release_records(
+            connection,
+            snapshot_id=snapshot_id,
+            source_batch_id=source_batch_id,
+        )
+        published = publish_legacy_snapshot(
+            connection,
+            release_repository=self._release_repository,
+            dataset_code=_DATASET,
+            partition_key=exchange.value,
+            domain="equity",
+            grain="exchange lifecycle evidence snapshot + explicit status rows",
+            semantic_family="reported-equity-reference",
+            mapping_version="equity-lifecycle-explicit-release-v1",
+            source_batch_id=source_batch_id,
+            records=records,
+            fact_min=effective_as_of,
+            fact_max=effective_as_of,
+            now=published_at,
+            publication_effective_as_of=effective_as_of,
+        )
+        return published.data_version
+
+
+def _lifecycle_release_records(
+    connection: Session,
+    *,
+    snapshot_id: UUID,
+    source_batch_id: UUID,
+) -> tuple[CanonicalLineageRecord, ...]:
+    """从刚写入的显式生命周期快照构造 release 的逐条来源血缘。"""
+    rows = (
         connection.execute(
-            insert(DatasetPublication).values(
-                publication_id=uuid4(),
-                dataset=_DATASET,
-                partition_key=exchange.value,
-                data_version=data_version,
-                quality_status="passed",
-                effective_as_of=effective_as_of,
-                knowledge_cutoff=published_at,
-                published_at=published_at,
-                superseded_at=None,
+            select(
+                EquityMasterSnapshotMember.exchange,
+                EquityMasterSnapshotMember.symbol,
+                EquityMasterSnapshotMember.content_sha256,
+            )
+            .where(EquityMasterSnapshotMember.snapshot_id == snapshot_id)
+            .order_by(
+                EquityMasterSnapshotMember.exchange,
+                EquityMasterSnapshotMember.symbol,
             )
         )
-        return data_version
+        .mappings()
+        .all()
+    )
+    if not rows:
+        raise ValueError("lifecycle snapshot has no members for canonical release")
+    transform_hash = hashlib.sha256(b"equity-lifecycle-explicit-release-v1").hexdigest()
+    return tuple(
+        CanonicalLineageRecord(
+            record_key_hash=hashlib.sha256(
+                f"lifecycle:{row['exchange']}:{row['symbol']}".encode()
+            ).hexdigest(),
+            content_hash=bytes(row["content_sha256"]).hex(),
+            source_batch_id=source_batch_id,
+            transform_hash=transform_hash,
+            role="primary",
+        )
+        for row in rows
+    )
 
 
 def _record_fenced_lifecycle_publication(*, data_version: UUID, record_count: int) -> None:
@@ -1082,7 +1144,21 @@ def _is_transition_allowed(
 
 
 def _matches_current_entry(current: Mapping[Any, Any], entry: EquityLifecycleEntry) -> bool:
-    """判断新证据是否与开放知识版本等价，避免重复请求制造虚假修订。"""
+    """判断新证据是否与开放知识版本完全等价，避免重复请求制造虚假修订。
+
+    目录 `CATALOG` 与交易所显式证据即使业务字段相同，也不是同一审计结论；后者必须有
+    独立知识版本，才能让 resolved 视图在不改变事实日期的前提下升级来源等级。
+    """
+    return (
+        _matches_current_business_fields(current, entry)
+        and str(current["evidence_kind"]) == entry.evidence_kind.value
+    )
+
+
+def _matches_current_business_fields(
+    current: Mapping[Any, Any], entry: EquityLifecycleEntry
+) -> bool:
+    """比较不含来源等级的生命周期业务字段，供受控证据升级复用。"""
     listed_on = entry.listed_on or current["listed_on"]
     return (
         str(current["status"]) == entry.status.value
@@ -1090,6 +1166,17 @@ def _matches_current_entry(current: Mapping[Any, Any], entry: EquityLifecycleEnt
         and current["delisted_on"] == entry.delisted_on
         and current["effective_from"] == entry.effective_on
         and current["effective_to"] is None
+    )
+
+
+def _is_catalog_evidence_upgrade(current: Mapping[Any, Any], entry: EquityLifecycleEntry) -> bool:
+    """判断同一事实能否由目录证据安全升级为交易所显式证据。
+
+    仅允许开放的 `CATALOG` 版本被同一业务事实替换。不同日期、状态或字段仍须走既有
+    状态机/官方更正约束，避免把来源升级误当成事实改写。
+    """
+    return str(current["evidence_kind"]) == "CATALOG" and _matches_current_business_fields(
+        current, entry
     )
 
 

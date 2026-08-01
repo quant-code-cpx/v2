@@ -32,6 +32,8 @@ class AkshareSinaAdjustmentFactorsAdapter:
     """读取新浪稀疏累计后复权因子，不保存供应商的复权价格序列。
 
     新浪代码前缀只用于 SDK 请求；发布后的证券身份始终是平台的交易所限定代码。
+    因子按生效日稀疏变化，因此结构正常但窗口内没有生效点时输出空列表，而不是伪造
+    零因子或把正常无变化误判为 schema 漂移。
     """
 
     provider_id = "akshare-sina-adjustment-factor"
@@ -82,12 +84,8 @@ class AkshareSinaAdjustmentFactorsAdapter:
                 "provider adjustment-factor schema changed",
                 retryable=False,
             ) from error
-        if not factors:
-            raise ProviderError(
-                ProviderErrorCode.SCHEMA,
-                "provider returned no factors in requested window",
-                retryable=False,
-            )
+        # 累计因子只在除权等生效日出现新点；非空且已验证结构的来源结果全部落在窗口外
+        # 是合法稀疏空窗。下游将其发布为零记录快照，保留既有完整序列而不写入虚假的因子。
         payload = json.dumps(
             {
                 "schema": _SCHEMA,
@@ -111,7 +109,7 @@ class AkshareSinaAdjustmentFactorsAdapter:
             raw_payload=raw_payload,
             raw_content_type="application/json",
             upstream_source="sina-hfq-factor",
-            adapter_version="akshare-1.18.78-v1",
+            adapter_version="akshare-1.18.81-v1",
             schema_fingerprint=hashlib.sha256(
                 json.dumps(sorted(raw_records[0]), ensure_ascii=False).encode()
             ).hexdigest(),

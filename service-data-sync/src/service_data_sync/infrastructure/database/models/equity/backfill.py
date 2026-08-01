@@ -120,20 +120,27 @@ class EquityReferenceGenerationAttempt(Base):
         nullable=True,
         comment="封印后 bundle 的不可变 canonical release。",
     )
+    # 未封印字段由状态约束以 SQL `NULL` 判定，不能把 Python `None` 序列化成 JSON `null`。
     manifest_json: Mapped[list[dict[str, Any]] | None] = mapped_column(
-        JSONB, nullable=True, comment="封印后精确组件 publication、版本和来源批次清单。"
+        JSONB(none_as_null=True),
+        nullable=True,
+        comment="封印后精确组件 publication、版本和来源批次清单。",
     )
     manifest_hash: Mapped[str | None] = mapped_column(
         CHAR(64), nullable=True, comment="组件清单规范 SHA-256。"
     )
     source_batch_ids_json: Mapped[list[str] | None] = mapped_column(
-        JSONB, nullable=True, comment="bundle 全部真实 SourceBatch UUID 的排序去重清单。"
+        JSONB(none_as_null=True),
+        nullable=True,
+        comment="bundle 全部真实 SourceBatch UUID 的排序去重清单。",
     )
     source_batch_hash: Mapped[str | None] = mapped_column(
         CHAR(64), nullable=True, comment="bundle 来源批次清单规范 SHA-256。"
     )
     last_error_json: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB, nullable=True, comment="失败或跨日滚转的稳定机器原因，不含供应商正文。"
+        JSONB(none_as_null=True),
+        nullable=True,
+        comment="失败或跨日滚转的稳定机器原因，不含供应商正文。",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, comment="attempt 创建时间。"
@@ -212,9 +219,7 @@ class EquityReferenceGenerationStep(Base):
     ordinal: Mapped[int] = mapped_column(
         SmallInteger, primary_key=True, nullable=False, comment="依赖顺序固定的一到七。"
     )
-    step_key: Mapped[str] = mapped_column(
-        String(64), nullable=False, comment="稳定步骤标识。"
-    )
+    step_key: Mapped[str] = mapped_column(String(64), nullable=False, comment="稳定步骤标识。")
     dataset_code: Mapped[str] = mapped_column(
         String(160), nullable=False, comment="真实控制面 datasetCode。"
     )
@@ -236,14 +241,21 @@ class EquityReferenceGenerationStep(Base):
     retry_count: Mapped[int] = mapped_column(
         SmallInteger, nullable=False, comment="自动创建重试 command 的次数。"
     )
+    # 未完成步骤同样依赖 SQL `NULL`；否则 JSON `null` 会违反输出完整性约束。
     last_error_json: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB, nullable=True, comment="最近一次命令的稳定失败摘要。"
+        JSONB(none_as_null=True),
+        nullable=True,
+        comment="最近一次命令的稳定失败摘要。",
     )
     output_publications_json: Mapped[list[dict[str, Any]] | None] = mapped_column(
-        JSONB, nullable=True, comment="成功后立刻冻结的精确组件 publication 清单。"
+        JSONB(none_as_null=True),
+        nullable=True,
+        comment="成功后立刻冻结的精确组件 publication 清单。",
     )
     source_batch_ids_json: Mapped[list[str] | None] = mapped_column(
-        JSONB, nullable=True, comment="成功 command 实际使用的排序去重 SourceBatch UUID。"
+        JSONB(none_as_null=True),
+        nullable=True,
+        comment="成功 command 实际使用的排序去重 SourceBatch UUID。",
     )
     output_hash: Mapped[str | None] = mapped_column(
         CHAR(64), nullable=True, comment="publication 与来源清单组合的规范 SHA-256。"
@@ -390,15 +402,11 @@ class EquityBackfillPlanState(Base):
         nullable=False,
         comment="所属不可变父计划。",
     )
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, comment="父计划聚合状态。"
-    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, comment="父计划聚合状态。")
     current_phase: Mapped[str | None] = mapped_column(
         String(48), nullable=True, comment="当前可提交或正在执行的阶段。"
     )
-    revision: Mapped[int] = mapped_column(
-        Integer, nullable=False, comment="状态乐观并发版本。"
-    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, comment="状态乐观并发版本。")
     last_error_json: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB, nullable=True, comment="不含供应商原文的稳定失败摘要。"
     )
@@ -471,12 +479,8 @@ class EquityBackfillPlanIdentity(Base):
     instrument_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), nullable=False, comment="跨服务可审计的证券永久 UUID。"
     )
-    exchange: Mapped[str] = mapped_column(
-        String(4), nullable=False, comment="冻结版本所属交易所。"
-    )
-    symbol: Mapped[str] = mapped_column(
-        String(6), nullable=False, comment="冻结版本的六位代码。"
-    )
+    exchange: Mapped[str] = mapped_column(String(4), nullable=False, comment="冻结版本所属交易所。")
+    symbol: Mapped[str] = mapped_column(String(6), nullable=False, comment="冻结版本的六位代码。")
     effective_from: Mapped[date] = mapped_column(
         Date, nullable=False, comment="代码版本业务有效半开区间起点。"
     )
@@ -628,8 +632,7 @@ class EquityBackfillPlanPage(Base):
             name="ck_equity_backfill_page_child_count",
         ),
         CheckConstraint(
-            "last_ordinal >= first_ordinal "
-            "AND child_count = last_ordinal - first_ordinal + 1",
+            "last_ordinal >= first_ordinal AND child_count = last_ordinal - first_ordinal + 1",
             name="ck_equity_backfill_page_ordinal_range",
         ),
         CheckConstraint(
@@ -703,9 +706,7 @@ class EquityBackfillPlanSeal(Base):
         nullable=False,
         comment="已完整封印的父计划。",
     )
-    page_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, comment="连续分页总数。"
-    )
+    page_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="连续分页总数。")
     child_count: Mapped[int] = mapped_column(
         Integer, nullable=False, comment="与父计划和全部分页一致的 child 总数。"
     )
@@ -771,12 +772,8 @@ class EquityBackfillChildSpec(Base):
         nullable=False,
         comment="所属不可变父计划。",
     )
-    ordinal: Mapped[int] = mapped_column(
-        Integer, nullable=False, comment="跨阶段稳定提交顺序。"
-    )
-    phase: Mapped[str] = mapped_column(
-        String(48), nullable=False, comment="显式依赖阶段。"
-    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False, comment="跨阶段稳定提交顺序。")
+    phase: Mapped[str] = mapped_column(String(48), nullable=False, comment="显式依赖阶段。")
     requirement: Mapped[str] = mapped_column(
         String(24),
         nullable=False,
@@ -915,8 +912,7 @@ class EquityBackfillPartitionCheckpoint(Base):
             name="ck_equity_backfill_partition_window",
         ),
         CheckConstraint(
-            "checkpoint_kind IN "
-            "('DATA_VERSION','BAR_COVERAGE_VERSION','EVENT_COVERAGE_VERSION')",
+            "checkpoint_kind IN ('DATA_VERSION','BAR_COVERAGE_VERSION','EVENT_COVERAGE_VERSION')",
             name="ck_equity_backfill_partition_kind",
         ),
         CheckConstraint(

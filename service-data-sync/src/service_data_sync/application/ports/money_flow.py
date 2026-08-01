@@ -23,12 +23,18 @@ from service_data_sync.domain.money_flow import (
 
 @dataclass(frozen=True, slots=True)
 class MoneyFlowSourceObservation:
-    """携带 canonical 写入必须保留的 raw evidence 血缘。"""
+    """携带 canonical 或研究写入必须保留的来源与标准化血缘。"""
 
     provider_id: str
     capability: str
     source_payload_sha256: str
     raw_uri: str
+    raw_content_type: str
+    raw_byte_size: int
+    normalized_payload_sha256: str
+    normalized_uri: str
+    normalized_content_type: str
+    normalized_byte_size: int
     observed_at: datetime
     upstream_source: str
     adapter_version: str

@@ -113,7 +113,11 @@ class EquityPeriodBarSyncService:
 
 
 class EquityAdjustmentFactorSyncService:
-    """同步新浪稀疏累计后复权因子，并以完整序列发布版本。"""
+    """同步新浪稀疏累计后复权因子，并以完整序列发布版本。
+
+    来源已证实但窗口内没有新生效点时，发布零记录快照以证明这次观察；它不会把因子
+    解释为零，也不会清空此前已经确认的完整稀疏序列。
+    """
 
     def __init__(
         self,
@@ -262,10 +266,10 @@ def decode_adjustment_factor_batch(
     *,
     identifier: EquityIdentifier,
 ) -> tuple[EquityAdjustmentFactor, ...]:
-    """解析累计后复权因子标准载荷，并拒绝空序列和重复生效日。"""
+    """解析累计后复权因子标准载荷，允许稀疏空窗并拒绝重复生效日。"""
     decoded = _payload(payload, schema=_FACTOR_SCHEMA, identifier=identifier)
     rows = decoded.get("factors")
-    if not isinstance(rows, list) or not rows:
+    if not isinstance(rows, list):
         raise _schema_error("adjustment-factor payload has no factors")
     try:
         factors = tuple(

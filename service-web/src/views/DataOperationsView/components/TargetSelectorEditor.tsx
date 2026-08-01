@@ -10,7 +10,12 @@ import {
 import { useCallback } from "react";
 import type { ChangeEvent } from "react";
 
-import type { TargetSelector, TargetSelectorKind } from "../../../types/data-operations";
+import type {
+  MarginTargetSelector,
+  MoneyFlowTargetSelector,
+  TargetSelector,
+  TargetSelectorKind,
+} from "../../../types/data-operations";
 import { createTargetSelector, targetSelectorKindLabel } from "../utils/target-selector";
 
 /** 选择器字段名只覆盖合同 `TargetSelector` 的受控属性。 */
@@ -24,13 +29,12 @@ type SelectorField =
   | "operation"
   | "scope"
   | "etf"
-  | "securityExchange"
-  | "securitySymbol"
   | "channel"
   | "direction"
-  | "administrator"
-  | "capability"
-  | "indexCode";
+  | "indexCode"
+  | "methodology"
+  | "window"
+  | "sectorType";
 
 /** 描述受控 selector 编辑器的合同输入、允许类别和变更出口。 */
 interface TargetSelectorEditorProps {
@@ -42,9 +46,145 @@ interface TargetSelectorEditorProps {
   disabled?: boolean;
 }
 
-/** 将文本转换为受限证券、ETF 或期货代码的规范大写形式。 */
+/** 将文本转换为受限证券、ETF、期货、指数或资金流代码的规范大写形式。 */
 function normalizeCode(value: string): string {
   return value.trim().toUpperCase();
+}
+
+/** 按日频资金流范围创建不携带跨范围字段的严格最小 selector。 */
+function createDailyMoneyFlowSelector(scope: string): MoneyFlowTargetSelector | undefined {
+  if (scope === "EQUITY") {
+    return {
+      kind: "MONEY_FLOW",
+      operation: "DAILY",
+      scope,
+      exchange: "SSE",
+      symbol: "",
+    };
+  }
+  if (scope === "SECTOR") {
+    return {
+      kind: "MONEY_FLOW",
+      operation: "DAILY",
+      scope,
+      scheme: "eastmoney.industry",
+      sectorCode: "",
+    };
+  }
+  return scope === "MARKET" ? { kind: "MONEY_FLOW", operation: "DAILY", scope } : undefined;
+}
+
+/** 按东财排行范围创建与方法学窗口匹配的严格最小 selector。 */
+function createEastmoneyRankingMoneyFlowSelector(
+  scope: string,
+): MoneyFlowTargetSelector | undefined {
+  if (scope === "EQUITY") {
+    return {
+      kind: "MONEY_FLOW",
+      operation: "RANKING",
+      methodology: "EASTMONEY_ORDER_SIZE",
+      scope,
+      window: "TODAY",
+    };
+  }
+  if (scope === "SECTOR") {
+    return {
+      kind: "MONEY_FLOW",
+      operation: "RANKING",
+      methodology: "EASTMONEY_ORDER_SIZE",
+      scope,
+      sectorType: "INDUSTRY",
+      window: "TODAY",
+    };
+  }
+  return undefined;
+}
+
+/** 按同花顺排行范围创建与交易方向方法学匹配的严格最小 selector。 */
+function createThsRankingMoneyFlowSelector(scope: string): MoneyFlowTargetSelector | undefined {
+  if (scope !== "EQUITY" && scope !== "INDUSTRY" && scope !== "CONCEPT") return undefined;
+  return {
+    kind: "MONEY_FLOW",
+    operation: "RANKING",
+    methodology: "THS_TRADE_DIRECTION",
+    scope,
+    window: "INTRADAY",
+  };
+}
+
+/** 冻结两融 operation 可选市场，避免编辑器构造 data-sync 没有执行器的组合。 */
+const MARGIN_VENUES_BY_OPERATION = {
+  MARKET: ["SSE", "SZSE"],
+  SECURITY: ["SSE", "SZSE"],
+  ELIGIBILITY: ["SZSE", "BSE"],
+} as const;
+
+/** 仅更新当前两融 operation 支持的市场，并始终清除未实现的证券子选择器。 */
+function updateMarginVenue(selector: MarginTargetSelector, rawValue: string): MarginTargetSelector {
+  if (selector.operation === "ELIGIBILITY") {
+    return rawValue === "SZSE" || rawValue === "BSE"
+      ? { kind: "MARGIN", operation: "ELIGIBILITY", venue: rawValue, security: null }
+      : selector;
+  }
+  return rawValue === "SSE" || rawValue === "SZSE"
+    ? { kind: "MARGIN", operation: selector.operation, venue: rawValue, security: null }
+    : selector;
+}
+
+/** 将资金流编辑动作收敛为已冻结的 operation、方法学、范围和窗口组合。 */
+function updateMoneyFlowTargetSelector(
+  selector: MoneyFlowTargetSelector,
+  field: SelectorField,
+  rawValue: string,
+): MoneyFlowTargetSelector {
+  if (selector.operation === "DAILY") {
+    if (field === "scope") return createDailyMoneyFlowSelector(rawValue) ?? selector;
+    if (selector.scope === "EQUITY") {
+      if (field === "exchange" && ["SSE", "SZSE", "BSE"].includes(rawValue)) {
+        return { ...selector, exchange: rawValue as "SSE" | "SZSE" | "BSE" };
+      }
+      return field === "symbol" ? { ...selector, symbol: normalizeCode(rawValue) } : selector;
+    }
+    return selector.scope === "SECTOR" && field === "sectorCode"
+      ? { ...selector, sectorCode: rawValue }
+      : selector;
+  }
+  if (field === "methodology") {
+    if (rawValue === "EASTMONEY_ORDER_SIZE") {
+      return createEastmoneyRankingMoneyFlowSelector("EQUITY") ?? selector;
+    }
+    if (rawValue === "THS_TRADE_DIRECTION") {
+      return createThsRankingMoneyFlowSelector("EQUITY") ?? selector;
+    }
+    return selector;
+  }
+  if (selector.methodology === "EASTMONEY_ORDER_SIZE") {
+    if (field === "scope") return createEastmoneyRankingMoneyFlowSelector(rawValue) ?? selector;
+    if (
+      selector.scope === "EQUITY" &&
+      field === "window" &&
+      ["TODAY", "DAY_3", "DAY_5", "DAY_10"].includes(rawValue)
+    ) {
+      return { ...selector, window: rawValue as "TODAY" | "DAY_3" | "DAY_5" | "DAY_10" };
+    }
+    if (selector.scope === "SECTOR") {
+      if (field === "sectorType" && ["INDUSTRY", "CONCEPT", "REGION"].includes(rawValue)) {
+        return { ...selector, sectorType: rawValue as "INDUSTRY" | "CONCEPT" | "REGION" };
+      }
+      if (field === "window" && ["TODAY", "DAY_5", "DAY_10"].includes(rawValue)) {
+        return { ...selector, window: rawValue as "TODAY" | "DAY_5" | "DAY_10" };
+      }
+    }
+    return selector;
+  }
+  if (field === "scope") return createThsRankingMoneyFlowSelector(rawValue) ?? selector;
+  if (field === "window" && ["INTRADAY", "DAY_3", "DAY_5", "DAY_10", "DAY_20"].includes(rawValue)) {
+    return {
+      ...selector,
+      window: rawValue as "INTRADAY" | "DAY_3" | "DAY_5" | "DAY_10" | "DAY_20",
+    };
+  }
+  return selector;
 }
 
 /** 将受控输入字段安全映射为合同定义的严格 selector 并集。 */
@@ -156,40 +296,9 @@ function updateTargetSelectorField(
       }
       return selector;
     case "MARGIN":
-      if (field === "operation") {
-        return {
-          ...selector,
-          operation: rawValue as "MARKET" | "SECURITY" | "ELIGIBILITY",
-        };
-      }
-      if (field === "venue") return { ...selector, venue: rawValue as "SSE" | "SZSE" };
-      if (field === "securityExchange") {
-        return selector.security === null
-          ? selector
-          : {
-              ...selector,
-              security: {
-                ...selector.security,
-                exchange: rawValue as "SSE" | "SZSE" | "BSE",
-              },
-            };
-      }
-      if (field === "securitySymbol") {
-        const symbol = normalizeCode(rawValue);
-        return {
-          ...selector,
-          security:
-            symbol.length === 0
-              ? null
-              : {
-                  kind: "INSTRUMENT",
-                  exchange: selector.security?.exchange ?? selector.venue,
-                  symbol,
-                },
-        };
-      }
-      return selector;
+      return field === "venue" ? updateMarginVenue(selector, rawValue) : selector;
     case "STOCK_CONNECT":
+    case "STOCK_CONNECT_RESEARCH":
       if (field === "channel") {
         return { ...selector, channel: rawValue as "ALL" | "SH" | "SZ" };
       }
@@ -205,11 +314,11 @@ function updateTargetSelectorField(
         ? { ...selector, operation: rawValue as "DRAGON_TIGER" | "BLOCK_TRADE" }
         : selector;
     case "INDEX":
-      if (field === "administrator")
-        return { ...selector, administrator: rawValue as "CSI" | "CNI" };
-      if (field === "capability") return { ...selector, capability: rawValue };
-      if (field === "indexCode") return { ...selector, indexCode: rawValue };
+      if (field === "indexCode" && selector.indexCode !== null)
+        return { ...selector, indexCode: normalizeCode(rawValue) };
       return selector;
+    case "MONEY_FLOW":
+      return updateMoneyFlowTargetSelector(selector, field, rawValue);
   }
 }
 
@@ -466,21 +575,13 @@ export function TargetSelectorEditor({
       ) : null}
       {selector.kind === "MARGIN" ? (
         <Stack direction="row" spacing={1.5}>
-          <FormControl sx={{ width: 140 }} disabled={disabled}>
-            <InputLabel id={`${idPrefix}-margin-operation-label`}>操作</InputLabel>
-            <Select
-              labelId={`${idPrefix}-margin-operation-label`}
-              label="操作"
-              value={selector.operation}
-              onChange={createSelectChangeHandler("operation")}
-            >
-              {(["MARKET", "SECURITY", "ELIGIBILITY"] as const).map((operation) => (
-                <MenuItem key={operation} value={operation}>
-                  {operation}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <TextField
+            sx={{ width: 160 }}
+            label="两融数据能力"
+            value={selector.operation}
+            disabled
+            helperText="由数据集固定"
+          />
           <FormControl sx={{ width: 120 }} disabled={disabled}>
             <InputLabel id={`${idPrefix}-margin-venue-label`}>市场</InputLabel>
             <Select
@@ -489,32 +590,13 @@ export function TargetSelectorEditor({
               value={selector.venue}
               onChange={createSelectChangeHandler("venue")}
             >
-              <MenuItem value="SSE">SSE</MenuItem>
-              <MenuItem value="SZSE">SZSE</MenuItem>
+              {MARGIN_VENUES_BY_OPERATION[selector.operation].map((venue) => (
+                <MenuItem key={venue} value={venue}>
+                  {venue}
+                </MenuItem>
+              ))}
             </Select>
           </FormControl>
-          <FormControl sx={{ width: 120 }} disabled={disabled}>
-            <InputLabel id={`${idPrefix}-margin-security-exchange-label`}>标的交易所</InputLabel>
-            <Select
-              labelId={`${idPrefix}-margin-security-exchange-label`}
-              label="标的交易所"
-              value={selector.security?.exchange ?? selector.venue}
-              onChange={createSelectChangeHandler("securityExchange")}
-              disabled={selector.security === null}
-            >
-              <MenuItem value="SSE">SSE</MenuItem>
-              <MenuItem value="SZSE">SZSE</MenuItem>
-              <MenuItem value="BSE">BSE</MenuItem>
-            </Select>
-          </FormControl>
-          <TextField
-            fullWidth
-            label="标的证券代码（可选）"
-            value={selector.security?.symbol ?? ""}
-            onChange={createTextChangeHandler("securitySymbol")}
-            disabled={disabled}
-            inputProps={{ maxLength: 32 }}
-          />
         </Stack>
       ) : null}
       {selector.kind === "STOCK_CONNECT" ? (
@@ -554,6 +636,43 @@ export function TargetSelectorEditor({
           </FormControl>
         </Stack>
       ) : null}
+      {selector.kind === "STOCK_CONNECT_RESEARCH" ? (
+        <Stack direction="row" spacing={1.5}>
+          <TextField
+            sx={{ flex: 1 }}
+            disabled
+            label="操作"
+            value="港通市场统计（research）"
+            helperText="仅供 research；不产生正式 publication"
+          />
+          <FormControl sx={{ flex: 1 }} disabled={disabled}>
+            <InputLabel id={`${idPrefix}-connect-research-channel-label`}>研究通道</InputLabel>
+            <Select
+              labelId={`${idPrefix}-connect-research-channel-label`}
+              label="研究通道"
+              value={selector.channel}
+              onChange={createSelectChangeHandler("channel")}
+            >
+              <MenuItem value="ALL">全部通道</MenuItem>
+              <MenuItem value="SH">沪通道</MenuItem>
+              <MenuItem value="SZ">深通道</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl sx={{ flex: 1 }} disabled={disabled}>
+            <InputLabel id={`${idPrefix}-connect-research-direction-label`}>研究方向</InputLabel>
+            <Select
+              labelId={`${idPrefix}-connect-research-direction-label`}
+              label="研究方向"
+              value={selector.direction ?? ""}
+              onChange={createSelectChangeHandler("direction")}
+            >
+              <MenuItem value="">全部方向</MenuItem>
+              <MenuItem value="NORTHBOUND">NORTHBOUND</MenuItem>
+              <MenuItem value="SOUTHBOUND">SOUTHBOUND</MenuItem>
+            </Select>
+          </FormControl>
+        </Stack>
+      ) : null}
       {selector.kind === "TRADING_EVENT" ? (
         <FormControl fullWidth disabled={disabled}>
           <InputLabel id={`${idPrefix}-event-operation-label`}>事件类型</InputLabel>
@@ -568,38 +687,158 @@ export function TargetSelectorEditor({
           </Select>
         </FormControl>
       ) : null}
+      {selector.kind === "MONEY_FLOW" ? (
+        <Stack spacing={1.5}>
+          <Stack direction="row" spacing={1.5}>
+            <TextField
+              sx={{ width: 160 }}
+              disabled
+              label="操作"
+              value={selector.operation === "DAILY" ? "日频资金流" : "资金流排行"}
+              helperText="由数据集固定"
+            />
+            {selector.operation === "RANKING" ? (
+              <FormControl sx={{ width: 220 }} disabled={disabled}>
+                <InputLabel id={idPrefix + "-money-flow-methodology-label"}>方法学</InputLabel>
+                <Select
+                  labelId={idPrefix + "-money-flow-methodology-label"}
+                  label="方法学"
+                  value={selector.methodology}
+                  onChange={createSelectChangeHandler("methodology")}
+                >
+                  <MenuItem value="EASTMONEY_ORDER_SIZE">东财按单笔大小</MenuItem>
+                  <MenuItem value="THS_TRADE_DIRECTION">同花顺交易方向</MenuItem>
+                </Select>
+              </FormControl>
+            ) : null}
+            <FormControl sx={{ width: 180 }} disabled={disabled}>
+              <InputLabel id={idPrefix + "-money-flow-scope-label"}>资金流范围</InputLabel>
+              <Select
+                labelId={idPrefix + "-money-flow-scope-label"}
+                label="资金流范围"
+                value={selector.scope}
+                onChange={createSelectChangeHandler("scope")}
+              >
+                {(selector.operation === "DAILY"
+                  ? [
+                      ["EQUITY", "个股"],
+                      ["SECTOR", "行业"],
+                      ["MARKET", "全市场"],
+                    ]
+                  : selector.methodology === "EASTMONEY_ORDER_SIZE"
+                    ? [
+                        ["EQUITY", "个股"],
+                        ["SECTOR", "板块"],
+                      ]
+                    : [
+                        ["EQUITY", "个股"],
+                        ["INDUSTRY", "行业"],
+                        ["CONCEPT", "概念"],
+                      ]
+                ).map(([scope, label]) => (
+                  <MenuItem key={scope} value={scope}>
+                    {label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {selector.operation === "RANKING" ? (
+              <FormControl sx={{ width: 160 }} disabled={disabled}>
+                <InputLabel id={idPrefix + "-money-flow-window-label"}>窗口</InputLabel>
+                <Select
+                  labelId={idPrefix + "-money-flow-window-label"}
+                  label="窗口"
+                  value={selector.window}
+                  onChange={createSelectChangeHandler("window")}
+                >
+                  {(selector.methodology === "EASTMONEY_ORDER_SIZE" && selector.scope === "EQUITY"
+                    ? ["TODAY", "DAY_3", "DAY_5", "DAY_10"]
+                    : selector.methodology === "EASTMONEY_ORDER_SIZE"
+                      ? ["TODAY", "DAY_5", "DAY_10"]
+                      : ["INTRADAY", "DAY_3", "DAY_5", "DAY_10", "DAY_20"]
+                  ).map((window) => (
+                    <MenuItem key={window} value={window}>
+                      {window}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            ) : null}
+          </Stack>
+          {selector.operation === "DAILY" && selector.scope === "EQUITY" ? (
+            <Stack direction="row" spacing={1.5}>
+              <FormControl sx={{ width: 120 }} disabled={disabled}>
+                <InputLabel id={idPrefix + "-money-flow-exchange-label"}>交易所</InputLabel>
+                <Select
+                  labelId={idPrefix + "-money-flow-exchange-label"}
+                  label="交易所"
+                  value={selector.exchange}
+                  onChange={createSelectChangeHandler("exchange")}
+                >
+                  <MenuItem value="SSE">SSE</MenuItem>
+                  <MenuItem value="SZSE">SZSE</MenuItem>
+                  <MenuItem value="BSE">BSE</MenuItem>
+                </Select>
+              </FormControl>
+              <TextField
+                required
+                fullWidth
+                label="证券代码"
+                value={selector.symbol}
+                onChange={createTextChangeHandler("symbol")}
+                disabled={disabled}
+                inputProps={{ maxLength: 6 }}
+              />
+            </Stack>
+          ) : null}
+          {selector.operation === "DAILY" && selector.scope === "SECTOR" ? (
+            <Stack direction="row" spacing={1.5}>
+              <TextField sx={{ width: 220 }} disabled label="分类体系" value={selector.scheme} />
+              <TextField
+                required
+                fullWidth
+                label="行业代码"
+                value={selector.sectorCode}
+                onChange={createTextChangeHandler("sectorCode")}
+                disabled={disabled}
+                inputProps={{ maxLength: 120 }}
+              />
+            </Stack>
+          ) : null}
+          {selector.operation === "RANKING" &&
+          selector.methodology === "EASTMONEY_ORDER_SIZE" &&
+          selector.scope === "SECTOR" ? (
+            <FormControl sx={{ width: 220 }} disabled={disabled}>
+              <InputLabel id={idPrefix + "-money-flow-sector-type-label"}>板块类型</InputLabel>
+              <Select
+                labelId={idPrefix + "-money-flow-sector-type-label"}
+                label="板块类型"
+                value={selector.sectorType}
+                onChange={createSelectChangeHandler("sectorType")}
+              >
+                <MenuItem value="INDUSTRY">INDUSTRY</MenuItem>
+                <MenuItem value="CONCEPT">CONCEPT</MenuItem>
+                <MenuItem value="REGION">REGION</MenuItem>
+              </Select>
+            </FormControl>
+          ) : null}
+        </Stack>
+      ) : null}
       {selector.kind === "INDEX" ? (
         <Stack direction="row" spacing={1.5}>
-          <FormControl sx={{ width: 120 }} disabled={disabled}>
-            <InputLabel id={`${idPrefix}-index-administrator-label`}>管理方</InputLabel>
-            <Select
-              labelId={`${idPrefix}-index-administrator-label`}
-              label="管理方"
-              value={selector.administrator}
-              onChange={createSelectChangeHandler("administrator")}
-            >
-              <MenuItem value="CSI">CSI</MenuItem>
-              <MenuItem value="CNI">CNI</MenuItem>
-            </Select>
-          </FormControl>
-          <TextField
-            required
-            fullWidth
-            label="能力"
-            value={selector.capability}
-            onChange={createTextChangeHandler("capability")}
-            disabled={disabled}
-            inputProps={{ maxLength: 120 }}
-          />
-          <TextField
-            required
-            fullWidth
-            label="指数代码"
-            value={selector.indexCode}
-            onChange={createTextChangeHandler("indexCode")}
-            disabled={disabled}
-            inputProps={{ maxLength: 64 }}
-          />
+          <TextField sx={{ width: 120 }} disabled label="管理方" value={selector.administrator} />
+          <TextField fullWidth label="能力" value={selector.capability} disabled />
+          {selector.indexCode !== null ? (
+            <TextField
+              required
+              fullWidth
+              label="指数代码"
+              value={selector.indexCode}
+              onChange={createTextChangeHandler("indexCode")}
+              disabled={disabled}
+              inputProps={{ maxLength: 8 }}
+            />
+          ) : null}
         </Stack>
       ) : null}
     </Stack>

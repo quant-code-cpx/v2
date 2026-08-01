@@ -26,6 +26,58 @@ const etfOperationByDatasetCode = {
   'fund.etf.nav.1d.reported': 'NAV',
 } as const;
 
+/** 冻结六个指数 canonical dataset 与其唯一允许的管理方、能力和代码范围。 */
+const indexTargetByDatasetCode = {
+  'index.csi.catalog.snapshot': {
+    administrator: 'CSI',
+    capability: 'index.catalog.snapshot',
+    requiresIndexCode: false,
+  },
+  'index.csi.constituent.snapshot': {
+    administrator: 'CSI',
+    capability: 'index.constituent.snapshot',
+    requiresIndexCode: true,
+  },
+  'index.csi.weight.snapshot': {
+    administrator: 'CSI',
+    capability: 'index.weight.snapshot',
+    requiresIndexCode: true,
+  },
+  'index.cni.catalog.snapshot': {
+    administrator: 'CNI',
+    capability: 'index.catalog.snapshot',
+    requiresIndexCode: false,
+  },
+  'index.cni.constituent.snapshot': {
+    administrator: 'CNI',
+    capability: 'index.constituent.snapshot',
+    requiresIndexCode: true,
+  },
+  'index.cni.weight.snapshot': {
+    administrator: 'CNI',
+    capability: 'index.weight.snapshot',
+    requiresIndexCode: true,
+  },
+} as const;
+
+/** 冻结两个资金流 canonical dataset 与唯一允许的同步操作。 */
+const moneyFlowOperationByDatasetCode = {
+  'money_flow.daily': 'DAILY',
+  'money_flow.ranking': 'RANKING',
+} as const;
+
+/** 冻结三类两融数据集与唯一执行器操作，禁止浏览器把一个数据集改作另一类两融同步。 */
+const marginOperationByDatasetCode = {
+  'market.margin.market.1d.reported': 'MARKET',
+  'market.margin.security.1d.reported': 'SECURITY',
+  'market.margin.eligibility.reported': 'ELIGIBILITY',
+} as const;
+
+/** 冻结唯一可执行的港通市场统计 `research` 数据集，不能与正式互联互通 `bundle` 混用。 */
+const stockConnectResearchOperationByDatasetCode = {
+  'market.stock_connect.market_stat.research': 'MARKET_STAT',
+} as const;
+
 /** 表示全量数据集唯一允许的全局选择器。 */
 const globalTargetSelectorSchema = z.object({ kind: z.literal('GLOBAL') }).strict();
 
@@ -137,15 +189,32 @@ const etfTargetSelectorSchema = z
     }
   });
 
-/** 表示融资融券市场、证券或资格能力的严格业务选择器。 */
+/** 表示融资融券市场日汇总、证券日明细或资格快照的严格业务选择器。 */
 const marginTargetSelectorSchema = z
   .object({
     kind: z.literal('MARGIN'),
     operation: z.enum(['MARKET', 'SECURITY', 'ELIGIBILITY']),
-    venue: z.enum(['SSE', 'SZSE']),
-    security: z.union([z.null(), instrumentTargetSelectorSchema]),
+    venue: z.enum(['SSE', 'SZSE', 'BSE']),
+    // 当前 canonical executor 只支持按市场批量执行；不能把未实现的单证券过滤伪装为有效范围。
+    security: z.null(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    const venueIsSupported =
+      value.operation === 'ELIGIBILITY'
+        ? value.venue === 'SZSE' || value.venue === 'BSE'
+        : value.venue === 'SSE' || value.venue === 'SZSE';
+    if (!venueIsSupported) {
+      context.addIssue({
+        code: 'custom',
+        path: ['venue'],
+        message:
+          value.operation === 'ELIGIBILITY'
+            ? 'margin eligibility only supports SZSE or BSE'
+            : 'margin MARKET and SECURITY only support SSE or SZSE',
+      });
+    }
+  });
 
 /** 表示一次同步市场统计、活跃榜、状态和身份的沪深港通完整 bundle 选择器。 */
 const stockConnectTargetSelectorSchema = z
@@ -157,20 +226,135 @@ const stockConnectTargetSelectorSchema = z
   })
   .strict();
 
+/** 表示不产生正式 `publication` 的港通市场统计 `research` 同步范围，严格独立于官方 `bundle`。 */
+const stockConnectResearchTargetSelectorSchema = z
+  .object({
+    kind: z.literal('STOCK_CONNECT_RESEARCH'),
+    operation: z.literal('MARKET_STAT'),
+    channel: z.enum(['SH', 'SZ', 'ALL']),
+    direction: z.enum(['NORTHBOUND', 'SOUTHBOUND']).nullable(),
+  })
+  .strict();
+
 /** 表示龙虎榜或大宗交易事件的严格业务选择器。 */
 const tradingEventTargetSelectorSchema = z
   .object({ kind: z.literal('TRADING_EVENT'), operation: z.enum(['DRAGON_TIGER', 'BLOCK_TRADE']) })
   .strict();
 
-/** 表示指数编制方、能力及指数代码的严格业务选择器。 */
+/** 表示指数管理方、冻结能力与可选六码至八码指数代码的严格业务选择器。 */
 const indexTargetSelectorSchema = z
   .object({
     kind: z.literal('INDEX'),
     administrator: z.enum(['CSI', 'CNI']),
-    capability: z.string().min(1).max(120),
-    indexCode: z.string().min(1).max(64),
+    capability: z.enum([
+      'index.catalog.snapshot',
+      'index.constituent.snapshot',
+      'index.weight.snapshot',
+    ]),
+    indexCode: z.union([z.string().regex(/^[A-Z0-9]{6,8}$/), z.null()]),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.capability === 'index.catalog.snapshot') {
+      if (value.indexCode !== null) {
+        context.addIssue({
+          code: 'custom',
+          path: ['indexCode'],
+          message: 'index catalog selector requires null indexCode',
+        });
+      }
+      return;
+    }
+    if (value.indexCode === null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['indexCode'],
+        message:
+          'index constituent and weight selectors require a six-to-eight-character indexCode',
+      });
+    }
+  });
+
+/** 判断资金流分支是否未携带当前 operation、方法学或范围不允许的字段。 */
+function hasOnlyMoneyFlowFields(value: object, allowedFields: readonly string[]): boolean {
+  return Object.keys(value).every((field) => allowedFields.includes(field));
+}
+
+/** 表示日频、东财排行或同花顺排行的严格资金流业务选择器。 */
+const moneyFlowTargetSelectorSchema = z
+  .object({
+    kind: z.literal('MONEY_FLOW'),
+    operation: z.enum(['DAILY', 'RANKING']),
+    scope: z.enum(['EQUITY', 'SECTOR', 'MARKET', 'INDUSTRY', 'CONCEPT']),
+    exchange: equityExchangeSchema.optional(),
+    symbol: z
+      .string()
+      .regex(/^[0-9]{6}$/)
+      .optional(),
+    scheme: z.literal('eastmoney.industry').optional(),
+    sectorCode: z.string().min(1).max(120).optional(),
+    methodology: z.enum(['EASTMONEY_ORDER_SIZE', 'THS_TRADE_DIRECTION']).optional(),
+    window: z.enum(['INTRADAY', 'TODAY', 'DAY_3', 'DAY_5', 'DAY_10', 'DAY_20']).optional(),
+    sectorType: z.enum(['INDUSTRY', 'CONCEPT', 'REGION']).optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const dailyEquity =
+      value.operation === 'DAILY' &&
+      value.scope === 'EQUITY' &&
+      value.exchange !== undefined &&
+      value.symbol !== undefined &&
+      hasOnlyMoneyFlowFields(value, ['kind', 'operation', 'scope', 'exchange', 'symbol']);
+    const dailySector =
+      value.operation === 'DAILY' &&
+      value.scope === 'SECTOR' &&
+      value.scheme === 'eastmoney.industry' &&
+      value.sectorCode !== undefined &&
+      hasOnlyMoneyFlowFields(value, ['kind', 'operation', 'scope', 'scheme', 'sectorCode']);
+    const dailyMarket =
+      value.operation === 'DAILY' &&
+      value.scope === 'MARKET' &&
+      hasOnlyMoneyFlowFields(value, ['kind', 'operation', 'scope']);
+    const eastmoneyEquityRanking =
+      value.operation === 'RANKING' &&
+      value.methodology === 'EASTMONEY_ORDER_SIZE' &&
+      value.scope === 'EQUITY' &&
+      ['TODAY', 'DAY_3', 'DAY_5', 'DAY_10'].includes(value.window ?? '') &&
+      hasOnlyMoneyFlowFields(value, ['kind', 'operation', 'methodology', 'scope', 'window']);
+    const eastmoneySectorRanking =
+      value.operation === 'RANKING' &&
+      value.methodology === 'EASTMONEY_ORDER_SIZE' &&
+      value.scope === 'SECTOR' &&
+      value.sectorType !== undefined &&
+      ['TODAY', 'DAY_5', 'DAY_10'].includes(value.window ?? '') &&
+      hasOnlyMoneyFlowFields(value, [
+        'kind',
+        'operation',
+        'methodology',
+        'scope',
+        'sectorType',
+        'window',
+      ]);
+    const thsRanking =
+      value.operation === 'RANKING' &&
+      value.methodology === 'THS_TRADE_DIRECTION' &&
+      ['EQUITY', 'INDUSTRY', 'CONCEPT'].includes(value.scope) &&
+      ['INTRADAY', 'DAY_3', 'DAY_5', 'DAY_10', 'DAY_20'].includes(value.window ?? '') &&
+      hasOnlyMoneyFlowFields(value, ['kind', 'operation', 'methodology', 'scope', 'window']);
+    if (
+      !dailyEquity &&
+      !dailySector &&
+      !dailyMarket &&
+      !eastmoneyEquityRanking &&
+      !eastmoneySectorRanking &&
+      !thsRanking
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'money flow selector fields do not match operation, methodology and scope',
+      });
+    }
+  });
 
 /** 表示合同允许的受限业务目标选择器并集，禁止透传 Provider 参数或 URI。 */
 export const targetSelectorSchema = z.discriminatedUnion('kind', [
@@ -183,8 +367,10 @@ export const targetSelectorSchema = z.discriminatedUnion('kind', [
   etfTargetSelectorSchema,
   marginTargetSelectorSchema,
   stockConnectTargetSelectorSchema,
+  stockConnectResearchTargetSelectorSchema,
   tradingEventTargetSelectorSchema,
   indexTargetSelectorSchema,
+  moneyFlowTargetSelectorSchema,
 ]);
 
 /** 校验 preflight 草稿与 schedule 模板中的全量 ETF 尚未冻结 publication。 */
@@ -203,16 +389,55 @@ export const draftTargetSelectorSchema = targetSelectorSchema.superRefine((selec
   }
 });
 
-/** 判断 selector 是否与 canonical dataset 的固定 ETF 操作一致，其他数据集禁止使用 ETF selector。 */
+/** 判断 selector 是否与 canonical dataset 的冻结业务范围一致，其他数据集禁止专属 selector。 */
 export function targetSelectorMatchesDataset(
   datasetCode: string,
   selector: z.infer<typeof targetSelectorSchema>,
 ): boolean {
   const expectedEtfOperation =
     etfOperationByDatasetCode[datasetCode as keyof typeof etfOperationByDatasetCode];
-  return expectedEtfOperation === undefined
-    ? selector.kind !== 'ETF'
-    : selector.kind === 'ETF' && selector.operation === expectedEtfOperation;
+  if (expectedEtfOperation !== undefined) {
+    return selector.kind === 'ETF' && selector.operation === expectedEtfOperation;
+  }
+  const expectedIndexTarget =
+    indexTargetByDatasetCode[datasetCode as keyof typeof indexTargetByDatasetCode];
+  if (expectedIndexTarget !== undefined) {
+    return (
+      selector.kind === 'INDEX' &&
+      selector.administrator === expectedIndexTarget.administrator &&
+      selector.capability === expectedIndexTarget.capability &&
+      (expectedIndexTarget.requiresIndexCode
+        ? typeof selector.indexCode === 'string'
+        : selector.indexCode === null)
+    );
+  }
+  const expectedMoneyFlowOperation =
+    moneyFlowOperationByDatasetCode[datasetCode as keyof typeof moneyFlowOperationByDatasetCode];
+  if (expectedMoneyFlowOperation !== undefined) {
+    return selector.kind === 'MONEY_FLOW' && selector.operation === expectedMoneyFlowOperation;
+  }
+  const expectedMarginOperation =
+    marginOperationByDatasetCode[datasetCode as keyof typeof marginOperationByDatasetCode];
+  if (expectedMarginOperation !== undefined) {
+    return selector.kind === 'MARGIN' && selector.operation === expectedMarginOperation;
+  }
+  const expectedStockConnectResearchOperation =
+    stockConnectResearchOperationByDatasetCode[
+      datasetCode as keyof typeof stockConnectResearchOperationByDatasetCode
+    ];
+  if (expectedStockConnectResearchOperation !== undefined) {
+    return (
+      selector.kind === 'STOCK_CONNECT_RESEARCH' &&
+      selector.operation === expectedStockConnectResearchOperation
+    );
+  }
+  return (
+    selector.kind !== 'ETF' &&
+    selector.kind !== 'INDEX' &&
+    selector.kind !== 'MONEY_FLOW' &&
+    selector.kind !== 'MARGIN' &&
+    selector.kind !== 'STOCK_CONNECT_RESEARCH'
+  );
 }
 
 /** 校验一个同步 target 的模式与日期参数组合。 */
@@ -230,8 +455,8 @@ export const syncTargetSchema = z
     if (!targetSelectorMatchesDataset(value.datasetCode, value.selector)) {
       context.addIssue({
         code: 'custom',
-        path: ['selector', 'operation'],
-        message: 'ETF datasetCode and selector operation do not match',
+        path: ['selector'],
+        message: 'datasetCode and selector do not match',
       });
     }
     // 四种模式的日期字段必须完整显式，避免 API 替 data-sync 猜测范围。
@@ -577,8 +802,8 @@ export const scheduleUpsertRequestSchema = z
     if (!targetSelectorMatchesDataset(value.datasetCode, value.selector)) {
       context.addIssue({
         code: 'custom',
-        path: ['selector', 'operation'],
-        message: 'ETF datasetCode and selector operation do not match',
+        path: ['selector'],
+        message: 'datasetCode and selector do not match',
       });
     }
     // 创建与更新不能用半空版本字段绕过 data-sync 的乐观锁。

@@ -9,11 +9,12 @@ description = "Foundation runtime for the quant-v2 market data synchronization s
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-  "akshare==1.18.78",
+  "akshare==1.18.81",
   "alembic>=1.16,<2",
   "boto3>=1.39,<2",
   "celery>=5.5,<6",
   "fastapi>=0.116,<1",
+  "httpx>=0.28.1",
   "paramiko>=3.5,<4",
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.10,<3",
@@ -42,6 +43,7 @@ data-sync-equity-bars = "service_data_sync.entrypoints.equity_bars:main"
 data-sync-equity-catalog = "service_data_sync.entrypoints.equity_catalog:main"
 data-sync-equity-lifecycle = "service_data_sync.entrypoints.equity_lifecycle:main"
 data-sync-equity-reference = "service_data_sync.entrypoints.equity_reference:main"
+data-sync-equity-backfill = "service_data_sync.entrypoints.equity_backfill:main"
 data-sync-financial = "service_data_sync.entrypoints.financial:main"
 data-sync-financial-derived = "service_data_sync.entrypoints.financial_derived:main"
 data-sync-money-flow = "service_data_sync.entrypoints.money_flow:main"

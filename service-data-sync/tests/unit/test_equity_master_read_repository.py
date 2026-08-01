@@ -91,11 +91,13 @@ class FakeDatabase:
 
 
 def test_repository_requires_complete_aggregate_publication_components() -> None:
-    """全市场发布只有精确解析三个通过质量门的 child 时才可读取。"""
+    """全市场 resolved publication 只有解析完整六个输入组件时才可读取。"""
     engine = FakeEngine(
         [
-            _publication_row(components_complete=True),
-            _publication_row(components_complete=False),
+            _publication_row(),
+            _component_rows(),
+            _publication_row(),
+            _component_rows()[:-1],
         ]
     )
     repository = _repository(engine)
@@ -106,12 +108,14 @@ def test_repository_requires_complete_aggregate_publication_components() -> None
     assert publication is not None
     assert publication.data_version == _VERSION
     assert publication.publication_scope == "CN_A_STABLE"
+    assert len(publication.components) == 6
     assert incomplete is None
-    assert "dataset_publication_component" in engine.connection.statements[0]
+    assert "dataset_publication_component" in engine.connection.statements[1]
+    assert "resolved_leaf" in engine.connection.statements[1]
 
 
 def test_repository_lists_published_slice_with_literal_prefix_and_keyset() -> None:
-    """目录查询应绑定聚合组件、应用同一双时间并转义前缀元字符。"""
+    """目录查询应绑定 resolved 组件、分开应用 cutoff 并转义前缀元字符。"""
     engine = FakeEngine([[_instrument_row()]])
     repository = _repository(engine)
 
@@ -134,7 +138,8 @@ def test_repository_lists_published_slice_with_literal_prefix_and_keyset() -> No
     assert rows[0].name.value == "浦发银行"
     assert "dataset_publication_component" in statement
     assert "identity_state" in statement
-    assert "scoped_known_at" in statement
+    assert "catalog_known_at" in statement
+    assert "lifecycle_known_at" in statement
     assert "lower(name_projection.name)" in statement
     assert "ORDER BY equity_identifier_version.exchange" in statement
     assert parameters == {}
@@ -203,6 +208,11 @@ def test_repository_lists_auditable_listing_revisions_at_publication_cutoff() ->
         "known_from": datetime(2026, 6, 1, tzinfo=UTC),
         "visible_known_to": None,
         "observed_at": datetime(2026, 6, 1, 1, tzinfo=UTC),
+        "evidence_kind": "EXPLICIT_LISTING",
+        "source_batch_id": "50000000-0000-4000-8000-000000000002",
+        "provider_id": "lifecycle-provider",
+        "upstream_source": "sse.lifecycle",
+        "quality_status": "passed",
     }
     engine = FakeEngine([[row]])
     repository = _repository(engine)
@@ -226,7 +236,8 @@ def test_repository_lists_auditable_listing_revisions_at_publication_cutoff() ->
     assert rows[0].known_to is None
     assert "FROM publication_scope JOIN equity_listing_status_version" in statement
     assert (
-        "equity_listing_status_version.known_to <= publication_scope.scoped_known_at" in statement
+        "equity_listing_status_version.known_to <= publication_scope.lifecycle_known_at"
+        in statement
     )
     assert "ORDER BY equity_listing_status_version.effective_from" in statement
     assert parameters == {}
@@ -237,15 +248,42 @@ def _repository(engine: FakeEngine) -> SqlAlchemyEquityMasterReadRepository:
     return SqlAlchemyEquityMasterReadRepository(cast(DatabaseClient, FakeDatabase(engine)))
 
 
-def _publication_row(*, components_complete: bool) -> dict[str, object]:
-    """构造聚合发布查询所需的完整映射行。"""
+def _publication_row() -> dict[str, object]:
+    """构造 resolved 聚合发布查询所需的完整映射行。"""
     return {
         "data_version": _VERSION,
         "published_at": datetime(2026, 7, 2, 12, 5, tzinfo=UTC),
         "effective_as_of": date(2026, 7, 1),
-        "knowledge_cutoff": _CUTOFF,
-        "components_complete": components_complete,
     }
+
+
+def _component_rows() -> list[dict[str, object]]:
+    """构造三所目录与生命周期输入组件，保留各自版本和独立 cutoff。"""
+    return [
+        {
+            "component_key": f"{exchange}.{kind}",
+            "dataset": (
+                "equity.master.catalog" if kind == "catalog" else "equity.lifecycle.explicit"
+            ),
+            "partition_key": exchange,
+            "data_version": UUID(f"40000000-0000-4000-8000-0000000000{index:02d}"),
+            "published_at": datetime(2026, 7, 2, 12, 5, tzinfo=UTC),
+            "effective_as_of": date(2026, 7, 1),
+            "knowledge_cutoff": _CUTOFF,
+            "quality_status": "passed",
+        }
+        for index, (exchange, kind) in enumerate(
+            (
+                ("SSE", "catalog"),
+                ("SSE", "lifecycle"),
+                ("SZSE", "catalog"),
+                ("SZSE", "lifecycle"),
+                ("BSE", "catalog"),
+                ("BSE", "lifecycle"),
+            ),
+            start=1,
+        )
+    ]
 
 
 def _instrument_row() -> dict[str, object]:
@@ -262,6 +300,10 @@ def _instrument_row() -> dict[str, object]:
         "identifier_date_precision": "OFFICIAL_DATE",
         "identifier_known_from": known_from,
         "identifier_observed_at": observed_at,
+        "identifier_source_batch_id": "50000000-0000-4000-8000-000000000001",
+        "identifier_provider_id": "catalog-provider",
+        "identifier_upstream_source": "eastmoney.equity-catalog",
+        "catalog_quality_status": "passed",
         "name_match_count": 1,
         "name": "浦发银行",
         "name_effective_from": date(1999, 11, 10),
@@ -269,6 +311,9 @@ def _instrument_row() -> dict[str, object]:
         "name_date_precision": "OFFICIAL_DATE",
         "name_known_from": known_from,
         "name_observed_at": observed_at,
+        "name_source_batch_id": "50000000-0000-4000-8000-000000000001",
+        "name_provider_id": "catalog-provider",
+        "name_upstream_source": "eastmoney.equity-catalog",
         "listing_match_count": 1,
         "status": "LISTED",
         "listed_on": date(1999, 11, 10),
@@ -278,4 +323,9 @@ def _instrument_row() -> dict[str, object]:
         "listing_date_precision": "OFFICIAL_DATE",
         "listing_known_from": known_from,
         "listing_observed_at": observed_at,
+        "listing_evidence_kind": "EXPLICIT_LISTING",
+        "listing_source_batch_id": "50000000-0000-4000-8000-000000000002",
+        "listing_provider_id": "lifecycle-provider",
+        "listing_upstream_source": "sse.lifecycle",
+        "lifecycle_quality_status": "passed",
     }

@@ -3,7 +3,11 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   createDefaultTargetSelector,
   createTargetSelector,
+  indexTargetForDataset,
   isTargetSelectorStructurallyReady,
+  marginTargetForDataset,
+  moneyFlowTargetForDataset,
+  stockConnectResearchTargetForDataset,
   targetSelectorSummary,
 } from "../utils/target-selector";
 
@@ -43,6 +47,84 @@ describe("data operations target selector", () => {
     expect(createDefaultTargetSelector(["ETF"], "fund.etf.unknown")).toBeUndefined();
   });
 
+  /** 六个指数数据集只生成与服务端一致的管理方、能力及目录或单指数代码草稿。 */
+  it("binds index dataset codes to controlled selector shapes", () => {
+    expect(createDefaultTargetSelector(["INDEX"], "index.csi.catalog.snapshot")).toEqual({
+      kind: "INDEX",
+      administrator: "CSI",
+      capability: "index.catalog.snapshot",
+      indexCode: null,
+    });
+    expect(createDefaultTargetSelector(["INDEX"], "index.csi.constituent.snapshot")).toEqual({
+      kind: "INDEX",
+      administrator: "CSI",
+      capability: "index.constituent.snapshot",
+      indexCode: "",
+    });
+    expect(createDefaultTargetSelector(["INDEX"], "index.csi.weight.snapshot")).toMatchObject({
+      administrator: "CSI",
+      capability: "index.weight.snapshot",
+      indexCode: "",
+    });
+    expect(createDefaultTargetSelector(["INDEX"], "index.cni.catalog.snapshot")).toEqual({
+      kind: "INDEX",
+      administrator: "CNI",
+      capability: "index.catalog.snapshot",
+      indexCode: null,
+    });
+    expect(createDefaultTargetSelector(["INDEX"], "index.cni.constituent.snapshot")).toMatchObject({
+      administrator: "CNI",
+      capability: "index.constituent.snapshot",
+      indexCode: "",
+    });
+    expect(createDefaultTargetSelector(["INDEX"], "index.cni.weight.snapshot")).toMatchObject({
+      administrator: "CNI",
+      capability: "index.weight.snapshot",
+      indexCode: "",
+    });
+    expect(indexTargetForDataset("index.unknown.snapshot")).toBeUndefined();
+  });
+
+  /** 两个资金流数据集只生成各自固定操作的有效最小草稿，未知数据集 fail-closed。 */
+  it("binds money flow dataset codes to daily or ranking drafts", () => {
+    expect(createDefaultTargetSelector(["MONEY_FLOW"], "money_flow.daily")).toEqual({
+      kind: "MONEY_FLOW",
+      operation: "DAILY",
+      scope: "MARKET",
+    });
+    expect(createDefaultTargetSelector(["MONEY_FLOW"], "money_flow.ranking")).toEqual({
+      kind: "MONEY_FLOW",
+      operation: "RANKING",
+      methodology: "EASTMONEY_ORDER_SIZE",
+      scope: "EQUITY",
+      window: "TODAY",
+    });
+    expect(moneyFlowTargetForDataset("money_flow.unknown")).toBeUndefined();
+  });
+
+  /** 三类两融数据集必须固定 operation；资格快照默认选择已有真实来源的北交所范围。 */
+  it("binds margin dataset codes to strict market-level defaults", () => {
+    expect(createDefaultTargetSelector(["MARGIN"], "market.margin.market.1d.reported")).toEqual({
+      kind: "MARGIN",
+      operation: "MARKET",
+      venue: "SSE",
+      security: null,
+    });
+    expect(createDefaultTargetSelector(["MARGIN"], "market.margin.security.1d.reported")).toEqual({
+      kind: "MARGIN",
+      operation: "SECURITY",
+      venue: "SSE",
+      security: null,
+    });
+    expect(createDefaultTargetSelector(["MARGIN"], "market.margin.eligibility.reported")).toEqual({
+      kind: "MARGIN",
+      operation: "ELIGIBILITY",
+      venue: "BSE",
+      security: null,
+    });
+    expect(marginTargetForDataset("market.margin.unknown")).toBeUndefined();
+  });
+
   /** 非全局 selector 在缺少合同必填字段时不能进入预检。 */
   it("requires the strict union fields before preflight", () => {
     const instrument = createTargetSelector("INSTRUMENT", "equity.daily");
@@ -67,6 +149,132 @@ describe("data operations target selector", () => {
         etf: "SSE.510300",
       }),
     ).toBe(true);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "MARGIN",
+        operation: "ELIGIBILITY",
+        venue: "BSE",
+        security: null,
+      }),
+    ).toBe(true);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "MARGIN",
+        operation: "ELIGIBILITY",
+        venue: "SSE",
+        security: null,
+      } as never),
+    ).toBe(false);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "MARGIN",
+        operation: "SECURITY",
+        venue: "SZSE",
+        security: { kind: "INSTRUMENT", exchange: "SZSE", symbol: "000001" },
+      } as never),
+    ).toBe(false);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "INDEX",
+        administrator: "CSI",
+        capability: "index.catalog.snapshot",
+        indexCode: null,
+      }),
+    ).toBe(true);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "INDEX",
+        administrator: "CNI",
+        capability: "index.constituent.snapshot",
+        indexCode: "ABC12345",
+      }),
+    ).toBe(true);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "INDEX",
+        administrator: "CNI",
+        capability: "index.weight.snapshot",
+        indexCode: "ABC12",
+      }),
+    ).toBe(false);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "MONEY_FLOW",
+        operation: "DAILY",
+        scope: "EQUITY",
+        exchange: "SSE",
+        symbol: "600000",
+      }),
+    ).toBe(true);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "MONEY_FLOW",
+        operation: "DAILY",
+        scope: "EQUITY",
+        exchange: "SSE",
+        symbol: "60000",
+      }),
+    ).toBe(false);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "MONEY_FLOW",
+        operation: "DAILY",
+        scope: "SECTOR",
+        scheme: "eastmoney.industry",
+        sectorCode: "BK0475",
+      }),
+    ).toBe(true);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "MONEY_FLOW",
+        operation: "DAILY",
+        scope: "MARKET",
+      }),
+    ).toBe(true);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "MONEY_FLOW",
+        operation: "RANKING",
+        methodology: "EASTMONEY_ORDER_SIZE",
+        scope: "EQUITY",
+        window: "DAY_3",
+      }),
+    ).toBe(true);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "MONEY_FLOW",
+        operation: "RANKING",
+        methodology: "EASTMONEY_ORDER_SIZE",
+        scope: "SECTOR",
+        sectorType: "REGION",
+        window: "DAY_5",
+      }),
+    ).toBe(true);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "MONEY_FLOW",
+        operation: "RANKING",
+        methodology: "THS_TRADE_DIRECTION",
+        scope: "INDUSTRY",
+        window: "DAY_20",
+      }),
+    ).toBe(true);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "INDEX",
+        administrator: "CNI",
+        capability: "index.weight.snapshot",
+        indexCode: "ABC123456",
+      }),
+    ).toBe(false);
+    expect(
+      isTargetSelectorStructurallyReady({
+        kind: "INDEX",
+        administrator: "CNI",
+        capability: "index.weight.snapshot",
+        indexCode: "abc123",
+      }),
+    ).toBe(false);
     expect(
       isTargetSelectorStructurallyReady({
         kind: "ETF",
@@ -118,6 +326,29 @@ describe("data operations target selector", () => {
     expect(targetSelectorSummary(selector!)).toBe("完整互联互通数据包 · 全部通道 · 全部方向");
   });
 
+  /** 港通市场统计 `research` 只为唯一数据集生成默认范围，且不复用正式 `bundle` `selector`。 */
+  it("defaults stock-connect market-stat research independently and fail-closed", () => {
+    const selector = createTargetSelector(
+      "STOCK_CONNECT_RESEARCH",
+      "market.stock_connect.market_stat.research",
+    );
+
+    expect(selector).toEqual({
+      kind: "STOCK_CONNECT_RESEARCH",
+      operation: "MARKET_STAT",
+      channel: "ALL",
+      direction: null,
+    });
+    expect(
+      stockConnectResearchTargetForDataset("market.stock_connect.unknown.research"),
+    ).toBeUndefined();
+    expect(
+      createTargetSelector("STOCK_CONNECT_RESEARCH", "market.stock_connect.unknown.research"),
+    ).toBeUndefined();
+    expect(isTargetSelectorStructurallyReady(selector!)).toBe(true);
+    expect(targetSelectorSummary(selector!)).toBe("港通市场统计（research） · 全部通道 · 全部方向");
+  });
+
   /** selector 摘要只表达公开业务范围，不混入 Provider 参数或内部执行状态。 */
   it("builds a safe selector summary", () => {
     expect(
@@ -134,9 +365,9 @@ describe("data operations target selector", () => {
         kind: "MARGIN",
         operation: "SECURITY",
         venue: "SSE",
-        security: { kind: "INSTRUMENT", exchange: "SSE", symbol: "600519" },
+        security: null,
       }),
-    ).toBe("SECURITY.SSE.600519");
+    ).toBe("SECURITY.SSE");
     expect(
       targetSelectorSummary({
         kind: "ETF",
@@ -150,5 +381,40 @@ describe("data operations target selector", () => {
         },
       }),
     ).toBe("STATUS.全部已发布 ETF");
+    expect(
+      targetSelectorSummary({
+        kind: "INDEX",
+        administrator: "CSI",
+        capability: "index.catalog.snapshot",
+        indexCode: null,
+      }),
+    ).toBe("CSI.index.catalog.snapshot");
+    expect(
+      targetSelectorSummary({
+        kind: "INDEX",
+        administrator: "CNI",
+        capability: "index.weight.snapshot",
+        indexCode: "ABC12345",
+      }),
+    ).toBe("CNI.index.weight.snapshot.ABC12345");
+    expect(
+      targetSelectorSummary({
+        kind: "MONEY_FLOW",
+        operation: "DAILY",
+        scope: "EQUITY",
+        exchange: "SSE",
+        symbol: "600000",
+      }),
+    ).toBe("DAILY.EQUITY.SSE.600000");
+    expect(
+      targetSelectorSummary({
+        kind: "MONEY_FLOW",
+        operation: "RANKING",
+        methodology: "EASTMONEY_ORDER_SIZE",
+        scope: "SECTOR",
+        sectorType: "CONCEPT",
+        window: "DAY_10",
+      }),
+    ).toBe("RANKING.EASTMONEY_ORDER_SIZE.SECTOR.CONCEPT.DAY_10");
   });
 });

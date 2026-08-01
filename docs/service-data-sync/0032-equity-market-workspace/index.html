@@ -460,6 +460,32 @@
         text-align: center;
         font-size: 12px;
       }
+
+      @media print {
+        body {
+          background: #fff;
+          color: #111827;
+        }
+
+        .sidebar {
+          display: none;
+        }
+
+        .shell,
+        main {
+          display: block;
+          max-width: none;
+          padding: 0;
+        }
+
+        .section,
+        .table-wrap,
+        .callout,
+        .phase {
+          break-inside: avoid;
+          box-shadow: none;
+        }
+      }
     </style>
   </head>
   <body>
@@ -483,24 +509,31 @@
 
       <main>
         <header class="hero">
-          <div class="eyebrow">IMPLEMENTED · REAL PUBLICATION VALIDATING</div>
+          <div class="eyebrow">CODE IMPLEMENTED · REAL PUBLICATION / CURRENT READINESS</div>
           <h1>股票中心：真实 A 股全量同步、冻结横截面与发布方案</h1>
           <p class="lead">
             本方案把沪深京 A 股证券目录、生命周期、普通停复牌、日周月行情、复权、公司行动、财务、
-            估值、行业概念、申万归属、股本市值和证券事件收敛为可审计的真实数据链；资金流只保留
-            research 状态与明确不可用边界，不进入生产 publication；
+            估值、行业概念、申万归属、股本市值和证券事件收敛为可审计的真实数据链；资金流在方法学尚未完成
+            validated 且未形成完整 EOD 批次前保持明确不可用；
             <strong>没有合格 publication 就不对消费者声称有数据，任何生产环境都不得用 fixture、demo 或人工构造行情补位。</strong>
           </p>
           <dl class="meta">
-            <div><dt>状态</dt><dd>Implemented · real publication validating</dd></div>
+            <div><dt>状态</dt><dd>代码/控制面已实现 · 运行态按 current publication 判定</dd></div>
             <div><dt>市场 / 时区</dt><dd>沪深京 A 股 / Asia/Shanghai</dd></div>
             <div><dt>产品频率</dt><dd>EOD；不含实时与 Level-2</dd></div>
-            <div><dt>日期</dt><dd>2026-07-30</dd></div>
+            <div><dt>日期</dt><dd>2026-08-01 · runtime audit 修订</dd></div>
           </dl>
           <div class="callout warn">
             <strong>环境事实：</strong>2026-07-30 对本机开发 PostgreSQL 的只读核验显示
             <code>dataset_publication</code> 为 0 行。该事实只说明当前开发环境尚无可消费版本；
             首次上线必须先完成本方案定义的真实全量回填和发布验收。
+          </div>
+          <div class="callout good">
+            <strong>首批 A 股 equity 来源元数据不构成执行门：</strong><code>provider</code>、adapter、方法学、
+            <code>approvalStatus</code> 和 rights/license 引用继续写入 source batch 与 publication lineage，
+            但不得决定 command 受理、checkpoint、publication 或技术验收。可阻断链路的只有可复现的请求、
+            provider、schema、质量、fence、数据库、coverage 与版本一致性故障；详见
+            <a href="../../decisions/0028-source-metadata-nonblocking-data-operations.md">ADR-0028</a>。
           </div>
         </header>
 
@@ -509,8 +542,15 @@
           <div class="decision-grid">
             <div class="decision good">
               <strong>全量的精确定义</strong>
-              覆盖 CN_A_STABLE 当前与历史身份集合，以及每个来源能提供且通过质量门的完整历史。
-              上游不存在的历史以可用起点表达，禁止补造记录；research-disabled 资金流不属于当前全量承诺。
+              覆盖 CN_A_STABLE 当前与历史身份集合，以及每个已形成真实 <code>sourceBatchId</code>、通过质量门并封存为
+              <code>publication</code> 的来源历史。上游不存在的历史以可用起点表达，禁止补造记录；资金流未形成可比较的
+              EOD 来源批次时不属于当前全量承诺。
+            </div>
+            <div class="decision bad">
+              <strong>交易所来源矩阵先于全量结论</strong>
+              身份目录可覆盖沪深京，但当前仅沪深日/周/月行情已有冻结来源批次的正向证据。BSE 周期行情或复权因子在
+              adapter 尚未产出可核验来源批次时固定为 <code>SOURCE_EXCHANGE_UNAVAILABLE</code>，必须 fail closed，
+              不能被写进“已完成全量”、合法空集或 PARTIAL 事实。
             </div>
             <div class="decision good">
               <strong>统一列表只读冻结 EOD 横截面</strong>
@@ -530,14 +570,50 @@
             <div class="decision">
               <strong>方法学不混用</strong>
               列表默认估值使用已发布的 Eastmoney provider observation；
-              资金流只有在方法学从 research 晋级 validated 且生产开关开启后才能进入列表。
-              当前不设生产默认、不发布研究数据；任何晋级或切换都产生新版本。
+              资金流只有在方法学达到 validated、形成完整 EOD 来源批次并通过可比性校验后才能进入列表。
+              当前不设默认列或排序；任何方法学晋级或来源切换都产生新版本。
             </div>
             <div class="decision bad">
-              <strong>生产入口只在全链真实发布后开启</strong>
-              开发阶段可以分批交付代码，但包含股票中心入口的 Web 版本必须等三服务 E2E 使用真实来源和真实
-              publication 通过后才能部署；不能用空壳、fixture 或手填 CSV 验收。
+              <strong>生产入口只读取真实发布版本</strong>
+              开发阶段可以分批交付代码；包含股票中心入口的 Web 版本只读取真实 <code>publication</code>。BASE 身份
+              publication 缺失时页面显示 <code>NO_PUBLICATION</code>；可选数据集按独立 <code>PARTIAL</code>/<code>STALE</code>/
+              <code>SOURCE_UNAVAILABLE</code> 处理。不能用空壳、fixture 或手填 CSV 验收。
             </div>
+          </div>
+
+          <h3>真实数据发布条件（按 batch / coverage 判定）</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>验证项</th><th>记录必须包含</th><th>失败时的唯一行为</th></tr></thead>
+              <tbody>
+                <tr><td>代码/路由/adapter</td><td>任务、adapter、canonical 存储、reader、控制面与测试代码。</td><td>仅证明实现存在；事实读取仍必须命中当前 publication。</td></tr>
+                <tr><td>来源批次身份</td><td><code>dataset/capability、exchange、period、provider、upstreamSource、methodology/version、sourceBatchId、observedAt、adapterVersion、schemaFingerprint、sourceSnapshotSha256</code>。</td><td>缺失、不可读或无法校验时写入失败证据；该数据集返回 <code>SOURCE_UNAVAILABLE</code> 或 <code>QUARANTINED</code>，绝不伪造事实。</td></tr>
+                <tr><td>交易所 coverage</td><td>逐 <code>exchange/period</code> 记录来源批次、覆盖窗口、探针、质量与 publication。</td><td>目录身份可按 SSE/SZSE/BSE 独立判断；BSE K 线/复权没有有效 coverage 时返回 <code>SOURCE_EXCHANGE_UNAVAILABLE</code>，绝不产生空 bars、零因子或替代序列。</td></tr>
+                <tr><td>质量 + 原子 publication</td><td>真实 source batch、raw/object 摘要或失败证据、schema/质量结果、完成 coverage、冻结 manifest 与 current <code>dataset_publication</code>。</td><td>不推进当前指针；保留上一版本为 <code>STALE</code>，首次版本则返回 <code>NO_PUBLICATION</code>，不将模型、可变行或测试 fixture 投影给 API/Web。</td></tr>
+                <tr><td>容量 + E2E</td><td>目录 600 秒异常上限、来源 p50/p95、DB/WAL、对象存储、CPU/内存、EOD 临界路径和 API→浏览器真实 E2E。</td><td>作为上线验收与容量告警证据；超预算时不推进新指针，已有版本按 <code>STALE</code> 可读。</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="decision bad">
+            <strong>不可变 publication 来源绑定（防 legacy 绕过）</strong>
+            创建 <code>dataset_publication</code> 时必须在同一事务把 <code>publicationId + dataVersion</code> 绑定到冻结的
+            <code>sourceBatchId / provider / upstreamSource / methodologyVersion / observedAt / sourceSnapshotSha256</code>；数据库约束禁止事后改写或删除。
+            所有股票中心 reader 只读取来源绑定完整、质量通过且与 current manifest 相同的 publication。迁移前、手工或半成品
+            publication 缺来源绑定、覆盖或质量结果时一律视为无 publication，不能以当前 catalog 回填或推断历史事实。
+          </div>
+
+          <h3>交易所来源与消费矩阵（本轮固定）</h3>
+          <div class="table-wrap">
+            <table class="compact">
+              <thead><tr><th>能力族</th><th>SSE</th><th>SZSE</th><th>BSE</th><th>规则</th></tr></thead>
+              <tbody>
+                <tr><td>目录、身份、生命周期</td><td>逐 cell 验证</td><td>逐 cell 验证</td><td>逐 cell 验证</td><td>三所身份不自动携带行情 coverage；无真实 publication 返回 <code>NO_PUBLICATION</code>。</td></tr>
+                <tr><td>原生日/周/月 K 线、复权因子、KLineChart</td><td>来源批次 + coverage</td><td>来源批次 + coverage</td><td><strong>当前无 coverage</strong></td><td>SSE/SZSE 按来源批次、质量、publication 与容量证据读取；BSE 返回 <code>SOURCE_EXCHANGE_UNAVAILABLE</code> / <code>coverage-unavailable</code>。</td></tr>
+                <tr><td>其它详情/事件/分类</td><td>逐 capability 验证</td><td>逐 capability 验证</td><td>逐 capability 验证</td><td>不得把某一交易所或某一数据族的通过外推到另一个 cell。</td></tr>
+                <tr><td>资金流及排名</td><td colspan="3">methodology pending / unavailable</td><td>未形成可比较、可重复的 EOD 来源批次；不向 service-api/web 投影未发布观察值。</td></tr>
+              </tbody>
+            </table>
           </div>
 
           <h3>边界</h3>
@@ -553,7 +629,8 @@
           <h2>2. 当前能力基线与缺口</h2>
           <p>
             “已实现”表示代码中已有 adapter、canonical/revision、publication 与读取链；
-            不表示当前环境已有可消费记录。模型存在但没有同步、发布或 reader 时仍判定为不可消费。
+            不表示当前环境已有可消费记录。模型存在但没有同步、来源批次、质量结果或 current publication 时仍判定为不可消费；
+            reader 必须精确读取对应 dataVersion 的 publication。
           </p>
           <div class="table-wrap">
             <table>
@@ -578,11 +655,11 @@
                 </tr>
                 <tr>
                   <td>日 / 周 / 月行情</td>
-                  <td><span class="tag good">已实现</span> 腾讯日线；东财原生周/月线</td>
+                  <td><span class="tag good">代码已实现</span> 腾讯日线；东财原生周/月线；SSE/SZSE 已有来源路径，BSE 当前没有 K 线/复权 coverage</td>
                   <td>三张周期表、年度分区、revision</td>
                   <td><span class="tag good">已实现</span> 每证券每周期独立发布</td>
-                  <td>discovery producer/snapshot/reader 已实现；真实 publication E2E 仍在验证</td>
-                  <td>在同一 EOD manifest 中派生昨收、涨跌并原因化缺口</td>
+                  <td>SSE/SZSE 逐证券逐周期发布候选；BSE K 线/复权请求固定失败关闭；真实 publication E2E 仍在验证</td>
+                  <td>在同一 EOD manifest 中派生昨收、涨跌并原因化缺口；BSE 不得以空 bar、零因子或替代行情覆盖代替来源验收</td>
                 </tr>
                 <tr>
                   <td>复权、公司行动、概况</td>
@@ -594,7 +671,7 @@
                 </tr>
                 <tr>
                   <td>财务、指标、估值</td>
-                  <td><span class="tag good">技术实现</span> AKShare 东财；默认关闭</td>
+                  <td><span class="tag good">技术实现</span> AKShare 东财；等待真实首发来源批次</td>
                   <td>报告、行项目、供应商指标、平台派生、估值 revision</td>
                   <td><span class="tag good">已实现</span> PIT publication / reader</td>
                   <td>全证券真实首发仍待环境验证</td>
@@ -605,8 +682,8 @@
                   <td><span class="tag warn">fail closed</span> 东财 order-size、同花顺排行</td>
                   <td>series、ranking、methodology</td>
                   <td><span class="tag warn">仅模型与 reader</span> 无控制面 canonical producer</td>
-                  <td>方法学状态为 research、production_enabled=false；生产 publication 关闭</td>
-                  <td>本方案保持明确不可用；后续须单独完成方法学评审、来源许可与连续探针后才能晋级</td>
+                  <td>方法学尚未完成 validated；尚无 canonical producer 的完整 EOD 批次</td>
+                  <td>本方案保持明确不可用；后续须单独完成方法学评审、连续探针与来源批次对账后才能晋级</td>
                 </tr>
                 <tr>
                   <td>行业 / 概念归属</td>
@@ -695,8 +772,8 @@
                 </tr>
                 <tr>
                   <td><code>equity.bar.1d|1w|1mo</code></td>
-                  <td>腾讯未复权日线；Eastmoney 原生周/月线</td>
-                  <td>证券 + 周期 + 年份；来源全部可用历史</td>
+                  <td>腾讯未复权日线；Eastmoney 原生周/月线；当前冻结合同仅 SSE/SZSE</td>
+                  <td>证券 + 周期 + 年份；经交易所来源矩阵验证的全部可用历史</td>
                   <td>周/月不从日线聚合；量统一为股、额为 CNY</td>
                   <td>OHLC、非负量额、唯一日期、isFinal</td>
                 </tr>
@@ -725,8 +802,8 @@
                   <td><code>money_flow.equity.1d.order_size</code></td>
                   <td>仅研究态 Eastmoney order-size 模型/reader；无控制面 canonical producer</td>
                   <td>当前不建立生产分区或 publication</td>
-                  <td>methodology=research、production_enabled=false；不与 THS 排行混算</td>
-                  <td>本轮固定 UNAVAILABLE；未来须完成来源许可、连续探针和方法学晋级后另发新版本</td>
+                  <td>方法学尚未完成 validated；不与 THS 排行混算</td>
+                  <td>本轮固定 UNAVAILABLE；未来须完成连续探针、方法学晋级和完整来源批次对账后另发新版本</td>
                 </tr>
                 <tr>
                   <td><code>sector.membership.snapshot</code></td>
@@ -858,7 +935,7 @@
                 <tr><td>totalMarketCap</td><td>close × 生效中的 totalShares</td><td>close 或股本缺失</td><td>供应商市值静默覆盖</td></tr>
                 <tr><td>floatMarketCap</td><td>close × listedTradableAShares</td><td>任一输入缺失</td><td>把“已流通股份”与自由流通盘混名</td></tr>
                 <tr><td>valuation</td><td>目标日之前最近一次同方法学已发布观察</td><td>不适用、亏损导致 PE 无意义、无观察</td><td>跨方法学补值</td></tr>
-                <tr><td>moneyFlow</td><td>仅在 validated 方法学的生产 publication 中选择；当前无生产值</td><td>当前固定为 NOT_COVERED / UNAVAILABLE</td><td>使用 research 观察、THS 排行、价格涨跌或零值替代</td></tr>
+                <tr><td>moneyFlow</td><td>仅在 validated 方法学的完整 EOD publication 中选择；当前无可发布值</td><td>当前固定为 NOT_COVERED / UNAVAILABLE</td><td>使用未验证观察、THS 排行、价格涨跌或零值替代</td></tr>
               </tbody>
             </table>
           </div>
@@ -875,19 +952,22 @@
           </div>
 
           <h3>父任务与依赖图</h3>
-          <pre>equity_workspace.full_backfill
+          <pre>reference_bundle.seal（原子封存，跨上海日界线先 rollover 再 seal）
 ├─ master.exchange_snapshot[SSE, SZSE, BSE] ── lifecycle.explicit
-├─ per_security
-│  ├─ bars[1d, 1w, 1mo] ── adjustment_factor ── corporate_action
-│  ├─ company_profile ── share_capital
-│  ├─ financial[statement, provider_metric, valuation] ── derived_metric
-│  └─ money_flow.equity.1d（当前 research，明确跳过且原因化）
-├─ market_snapshot
-│  ├─ trading_status.1d
-│  ├─ sector[industry, concept].membership
-│  ├─ sw2021.membership
-│  └─ events[earnings, dragon_tiger, block_trade]
-└─ equity.discovery.eod.build ── publish</pre>
+└─ immutable roster + identityAsOf + source matrix + exact release/dataVersion
+
+equity_workspace.historical_backfill（只读取 sealed bundle，可恢复、可分页）
+├─ per_security bars[SSE,SZSE; 1d, 1w, 1mo] ── adjustment_factor ── corporate_action
+├─ BSE bars / adjustment_factor ── fail closed（不调度为已发布 facts）
+├─ events[earnings, dragon_tiger, block_trade]
+└─ equity.discovery.eod.build ── publish
+
+equity_workspace.current_observation_refresh（独立命令族，不借用历史 snapshot）
+├─ company_profile ── share_capital
+├─ financial[statement, provider_metric, valuation] ── derived_metric
+└─ trading_status / industry-concept / sw membership
+
+money_flow.equity.1d（方法学未完成 validated，明确不进入当前编排）</pre>
 
           <h3>运行模式</h3>
           <div class="table-wrap">
@@ -897,13 +977,13 @@
                 <tr>
                   <td>首次全量</td>
                   <td>市场、来源可用起点、targetAsOf</td>
-                  <td>覆盖全部身份和来源全部可用历史；按证券与年份切片</td>
-                  <td>dataset + partition + source policy + schema version；内容摘要相同不新增 revision</td>
+                  <td>先封存 reference bundle；历史 child 只读取该 bundle 中可冻结来源，按证券与年份切片；CURRENT_AT_EXECUTION 数据集由独立 refresh 命令产生自己的观察时间</td>
+                  <td>bundle/release/dataVersion + dataset + partition + source policy + schema version；内容摘要相同不新增 revision</td>
                 </tr>
                 <tr>
                   <td>日增量</td>
                   <td>targetTradeDate</td>
-                  <td>收盘后同步目录、状态、bar、事件和横截面；research 资金流不进入生产编排</td>
+                  <td>收盘后同步目录、状态、bar、事件和横截面；方法学未完成 validated 的资金流不进入当前编排</td>
                   <td>目标日分区；重复执行只产生 unchanged 计数</td>
                 </tr>
                 <tr>
@@ -931,13 +1011,18 @@
           <h3>调度与容量</h3>
           <ul>
             <li>父任务进入 0031 控制面定义的全局 fencing；所有旧 CLI/Celery 写路径在本模块实施时接入同一 fence。</li>
-            <li>默认安全速率为每 provider 单并发、每秒 1 请求；真实探针得到配额后只通过配置提高，不写死在代码。</li>
+            <li>默认安全速率为每 provider 单并发、每秒 1 请求；真实探针得到配额后只通过配置提高，不写死在代码。此默认值不是生产容量实测结论。</li>
+            <li>全市场目录请求有 <strong>600 秒</strong>墙钟异常上限；超过即保留失败证据并停止该分区。600 秒不能被当成目录的 p95、常态时延或 EOD 通过证明。</li>
+            <li>每个拟公开 <code>dataset/capability + exchange + period</code> 要在生产等价 egress 留存真实来源 <code>p50/p95</code>、成功率、重试次数、样本量与 adapter/schema 版本；未采到实测值的 cell 固定 PENDING。</li>
+            <li>同一次全量/增量压测必须记录 DB 写入/事务 <code>p50/p95</code>、WAL bytes、checkpoint 写入时间/失败、锁等待，且记录对象存储 raw/manifest 的 PUT/HEAD <code>p50/p95</code>、字节量和可读回校验。</li>
+            <li>worker 记录已配置 CPU/memory limit、CPU throttling、RSS 峰值、OOMKilled=0 和实际并发；不允许用开发机空载或未限额容器推断生产容量。</li>
+            <li>以实测并发、各 stage p95 与重试余量建立 EOD 临界路径：目录、来源抓取、DB/WAL、对象存储、discovery build、publication 的合计必须在收盘后 120 分钟内。任一阶段无实测、超预算或不可复盘即不创建新 public current 指针。</li>
             <li>每个证券任务有 20 秒墙钟超时、最多 3 次带抖动退避；schema/单位/身份错误不可重试，直接隔离。</li>
             <li>事件首发固定切成最多 31 天的 operation window。10 年闭区间最多 118 个窗口；每个窗口成功后才记录 coverage bundle checkpoint，失败只重跑该窗口。</li>
             <li>龙虎榜席位使用与 AKShare 固定接口同源的东财 HEAD、BUY、SELL 日期窗报表批量分页，不按每个 head 再发两次请求。2024-04 真实探针分别为 1,720 / 8,593 / 8,589 行，按服务端约 500 行每页约 37 页；每页独立 HTTP timeout 与有限重试。</li>
             <li>事件分页先冻结总页数与总记录数，再按稳定键抓满所有页；跨页重复冲突、孤儿席位、BUY/SELL 缺边或金额不平都使整窗失败。取消后不再调度新页，失败证据保留已抓页的脱敏摘要。</li>
-            <li>全市场父 run 永久冻结 <code>{instrumentId, exchange, symbol, identityAsOf}</code> roster 和 source snapshot；分区键使用 instrument UUID。retry 只能继承该 roster 的成功分区，不得按当前目录重算或以可复用代码命名。</li>
-            <li>全量任务分片 100 只证券；单 shard 可恢复。父任务只汇总状态，不持有巨大内存数组。</li>
+            <li>全市场父 run 永久冻结 <code>{instrumentId, exchange, symbol, identityAsOf}</code> roster、source matrix 与精确 release/dataVersion；分区键使用 instrument UUID。retry 只能继承该 roster 的成功分区，不得按当前目录重算或以可复用代码命名。</li>
+            <li>计划为低基数、可分页的 sealed child 拓扑；每页有上限且 child 只保留可恢复 partition key/manifest 引用，父任务不持有全市场巨大内存数组。HOLD 后必须按封存 release 与 knowledge cutoff 读取，不因 current 指针推进而失败或串读。</li>
             <li>EOD discovery 只在所有必需组件达到目标日或存在合法原因状态后构建；失败不推进当前指针。</li>
           </ul>
         </section>
@@ -949,22 +1034,23 @@
             <div class="card"><strong>DATA</strong>真实来源记录通过质量门并进入 publication。</div>
             <div class="card"><strong>LEGITIMATE_EMPTY</strong>有完整来源响应且该证券/日期确实无记录。</div>
             <div class="card"><strong>NOT_APPLICABLE</strong>如亏损证券的 PE、未上市日期行情，业务上不适用。</div>
-            <div class="card"><strong>SOURCE_UNAVAILABLE</strong>来源失败、未准入或覆盖不足；不得进入 FULL discovery。</div>
+            <div class="card"><strong>SOURCE_UNAVAILABLE</strong>来源失败或 coverage 不足；不得被伪装成 FULL discovery。</div>
             <div class="card"><strong>QUARANTINED</strong>schema、单位、身份或质量异常；保留证据，不对外可见。</div>
             <div class="card"><strong>STALE_LAST_GOOD</strong>新任务失败，消费者继续读上一合格版本并显示陈旧。</div>
           </div>
 
-          <h3>BASE/PARTIAL 与 FULL discovery 门禁</h3>
+          <h3>BASE/PARTIAL 与 FULL discovery 规则</h3>
           <ul class="checklist">
+            <li>任何面向 API/Web 的 <code>AVAILABLE</code> component 同时需要真实 source batch、raw/object 摘要或可读失败证据、质量通过、完整 coverage 和当前 <code>dataset_publication</code>；代码、adapter、模型、reader 或单次 probe 均不足以替代。</li>
             <li>首个可消费 BASE 由身份、已有来源覆盖的生命周期事实和目标日交易状态组成；未覆盖的 SUSPENDED 必须原因化。BASE 合格即可发布 <code>completeness=PARTIAL</code>，不因可选宽列尚未回填而永久阻断股票中心。</li>
             <li>bar、股本、估值和 memberships 为独立可选组件；缺失时字段为 null + reason、component 明确不可用，绝不伪造成 FULL。资金流固定不进入当前 capabilities。</li>
-            <li>身份组件为同一 CN_A_STABLE publication，沪深京 child dataVersion 完整。</li>
+            <li>身份组件为同一 CN_A_STABLE publication，沪深京 child dataVersion 完整；这不表示 BSE 已具备 K 线或复权 coverage。</li>
             <li>每个目标证券在行情、交易状态、股本、估值、行业/概念、申万中均有 DATA、LEGITIMATE_EMPTY、NOT_APPLICABLE 或受控不可用原因。</li>
             <li>任何必需语义族存在 SOURCE_UNAVAILABLE 或 QUARANTINED 时不发布新版本；继续保留上一版本。</li>
             <li>目标日所有 bar 为最终记录，OHLC、量额、日期、币种和单位校验通过。</li>
             <li>总市值与流通市值可以由明确股本输入重算，误差为 Decimal 精确运算的舍入范围。</li>
             <li>行业/概念允许多值；申万三级最多一个。未覆盖必须有受控原因，不能填“未知行业”。</li>
-            <li>估值的 methodology code/version、supplier、观察窗口与 component dataVersion 完整；资金流记录 research/disabled 治理状态，不生成 component dataVersion。</li>
+            <li>估值的 methodology code/version、supplier、观察窗口与 component dataVersion 完整；资金流记录方法学未完成 validated 的治理状态，不生成 component dataVersion。</li>
             <li>记录数、覆盖率、空值原因分布和上一版本差异均写入 quality result。</li>
           </ul>
 
@@ -989,11 +1075,25 @@
             <li><code>knownAt</code> 只选择当时已创建且未被当时 supersede 的 coverage；events/query 与 data-status 共用同一事实选择器、来源和方法学投影，不能用一个宽窗的总 recordCount 推断其中某日非空。</li>
           </ul>
 
+          <h3>K 线窗口 coverage</h3>
+          <ul class="checklist">
+            <li>只在 SSE/SZSE 形成有效来源批次后建立 K 线/复权 coverage。BSE 尚未形成该 coverage；任意 BSE bars/factor 请求都返回 <code>SOURCE_EXCHANGE_UNAVAILABLE</code> 或 <code>coverage-unavailable</code>，不得写 ZERO_RECORD_COVERAGE。</li>
+            <li>每个 bars 响应按 <code>securityId + identifierVersionId + period + [start,end] + dataVersion</code> 精确选择一个 current、passed 且与 publication dataVersion 完全相等的 coverage；旧身份版本、旧 dataVersion 或窗口不完整均失败关闭。</li>
+            <li><code>DATA</code> coverage 的事实行数必须与 manifest 一致；<code>ZERO_RECORD_COVERAGE</code> 才能返回空 items。无 coverage、错窗口或行数不符返回 <code>409 coverage-unavailable</code>，不把 legacy availability 或来源失败诊断伪造成空行情。</li>
+            <li>成功响应始终携带 <code>coverageVersion</code>、<code>publicationKind</code>、<code>sourceBatchId</code> 和 <code>dataVersion</code>；API/Web 用它们显示可审计 lineage，并将其纳入分页链一致性检查。</li>
+          </ul>
+
           <h3>无 publication</h3>
           <p>
             内部 reader 返回稳定 <code>publication-unavailable</code>，包含 dataset、partition、
             availability、reasonCode、observedAt 和可选 lastGoodPublication；不返回 200 空列表，
             因为“没有发布”与“发布后查询为空”不是同一业务事实。
+          </p>
+          <p>
+            <strong>publication 事实选择：</strong>质量状态为通过、sourceBatch/raw/object 摘要或失败证据、manifest 与
+            coverage 可追溯，且 current pointer 由真实运行原子提交时，reader 才可把 <code>AVAILABLE</code> 交给
+            service-api。否则按数据集返回 <code>NO_PUBLICATION</code>、<code>PARTIAL</code>、<code>STALE_LAST_GOOD</code>
+            或 <code>SOURCE_UNAVAILABLE</code>，不把观察值或半成品 revision 当事实。
           </p>
         </section>
 
@@ -1002,6 +1102,8 @@
           <p>
             本方案同时是已实施 internal v1 reader 的评审基线；service-api 使用 service bearer、
             request id、超时和严格 schema 校验。遵守任务约束，本轮不创建 OpenAPI 文件；后续治理记录只能 additive。
+            internal reader 只返回来源绑定完整、质量通过且与请求 dataVersion 一致的真实 publication；
+            未发布观察、隔离 revision 与运维证据不会投影给 service-api。
           </p>
           <div class="table-wrap">
             <table>
@@ -1024,6 +1126,12 @@
                   <td>汇总详情页各数据集状态</td>
                   <td>families、asOf、knownAt</td>
                   <td>每族 availability、freshness、dataVersion、source label、methodology；不返回事实数据</td>
+                </tr>
+                <tr>
+                  <td>既有 <code>GET /internal/v1/equities/{exchange}/{symbol}/bars</code></td>
+                  <td>读取日/周/月原生 K 线（公开候选仅 SSE/SZSE）</td>
+                  <td>period、窗口、adjust、dataVersion?；身份与窗口必须命中完整 current coverage</td>
+                  <td>DATA 或 ZERO_RECORD_COVERAGE + coverageVersion/publicationKind/sourceBatchId；BSE 固定 source-exchange-unavailable / coverage-unavailable，不写空 coverage；ETag 与 X-Data-Version 保持严格</td>
                 </tr>
                 <tr>
                   <td>既有 <code>/internal/v1/equities/…</code></td>
@@ -1060,9 +1168,11 @@
           <ul class="checklist">
             <li>非 test 环境启动时拒绝 providerId、adapter class 或 source policy 中含 fake、fixture、demo、sample。</li>
             <li>每条可发布 revision 必须有非空 <code>sourceBatchId</code>，可追溯 provider、upstreamSource、observedAt、adapterVersion 和 schemaFingerprint。</li>
+            <li>可读事实由 sourceBatch、coverage、质量结果、冻结 manifest 与原子 current pointer 共同判定；代码、adapter 名称、单次 probe 或手工标记均不能替代这些证据。</li>
             <li>discovery 每个非派生值必须绑定 component dataVersion；派生值必须绑定公式版本与输入版本。</li>
             <li>真实来源返回空集只能成为 LEGITIMATE_EMPTY，必须有完整请求证据与覆盖判断；异常响应不能转换为空集。</li>
             <li>验收环境不执行 demo seed；首发通过真实全量命令生成，并随机抽样回溯到 source batch。</li>
+            <li>未完成质量或方法学校验的观察只保留在隔离/运维证据域；不可被 internal reader、service-api 或 service-web 当成已发布数据或 sourceLabel。</li>
             <li>单元和契约测试可用 fixture，但测试报告不得作为生产数据可用性证据。</li>
           </ul>
         </section>
@@ -1110,7 +1220,7 @@
               <h3>契约与控制面落座</h3>
               <p>任务禁止新增 ADR/OpenAPI；以服务内 strict schema 与契约测试固化边界，将股票中心写任务接入既有 0031 全局 fence，并保持非 test 假数据路径关闭。</p>
             </div>
-            <div class="gate">门禁：架构测试与 POST/GET 边界固定</div>
+            <div class="gate">校验：架构测试与 POST/GET 边界固定</div>
           </div>
           <div class="phase">
             <div class="phase-id">PHASE 1</div>
@@ -1118,15 +1228,15 @@
               <h3>缺失 canonical 数据链</h3>
               <p>实现普通停复牌、申万 membership、历史股本及专用事件身份 reader；完成 migration、adapter、CLI/Celery、质量与 publication。</p>
             </div>
-            <div class="gate">门禁：真实 probe + replay + integration</div>
+            <div class="gate">校验：真实 probe + replay + integration</div>
           </div>
           <div class="phase">
             <div class="phase-id">PHASE 2</div>
             <div>
               <h3>全量历史首发</h3>
-              <p>先发布身份，再分证券回填 bars、factor、action、profile、financial、valuation、memberships、share capital 与 events；资金流维持 research/disabled，不进入首发。</p>
+              <p>先封存身份 reference bundle，再按已有来源 coverage 回填 bars、factor、action 与 events；BSE K 线/复权在尚无 coverage 时固定返回来源不可用。profile、financial、valuation、memberships、share capital 作为独立 CURRENT_AT_EXECUTION refresh，记录自己的 observedAt 与 dataVersion，绝不写入历史 sealed plan。资金流在方法学与来源批次完成前不进入首发。</p>
             </div>
-            <div class="gate">门禁：全市场覆盖清单无未解释缺口</div>
+            <div class="gate">校验：交易所 frozen source matrix、非空原始响应、全市场覆盖清单无未解释缺口</div>
           </div>
           <div class="phase">
             <div class="phase-id">PHASE 3</div>
@@ -1134,15 +1244,15 @@
               <h3>Discovery 构建与内部 API</h3>
               <p>生成同日冻结横截面、component manifest、availability 与索引；实现三条内部查询并完成 cursor/ETag/回滚测试。</p>
             </div>
-            <div class="gate">门禁：BASE 全身份 publication；可选组件 PARTIAL 可解释 + 性能预算</div>
+            <div class="gate">校验：BASE 全身份 publication；可选组件 PARTIAL 可解释 + 性能预算</div>
           </div>
           <div class="phase">
             <div class="phase-id">PHASE 4</div>
             <div>
               <h3>三服务真实 E2E 与排程</h3>
-              <p>API 和 Web 只读本次真实 publication；人工比对来源样本，通过后启用收盘后增量 schedule，最后部署包含股票中心入口的 Web 版本。</p>
+              <p>API 和 Web 只读本次封存的真实 publication；人工比对来源样本、质量、容量和 API/Web E2E，通过后启用收盘后增量 schedule，最后部署包含股票中心入口的 Web 版本。BSE K 线/复权尚无 coverage 时固定返回来源不可用，而非等待未来 probe 后暗中放开。</p>
             </div>
-            <div class="gate">门禁：无 fixture 请求、无跨库、无 N+1</div>
+            <div class="gate">校验：无 fixture 请求、无跨库、无 N+1、无未验证交易所冒充全量、容量通过</div>
           </div>
 
           <h3>回滚</h3>
@@ -1159,10 +1269,10 @@
           <ul class="checklist">
             <li>三所目录中的每只证券都出现在全量覆盖清单，身份冲突为 0。</li>
             <li>普通停牌、暂停上市、退市三个概念在模型、API 和页面文案中互不混用。</li>
-            <li>日/周/月线各自来自原生上游周期；复权窗口能回溯 bar/factor 两个 dataVersion。</li>
+            <li>仅 SSE/SZSE 的日/周/月线来自原生上游周期；复权窗口能回溯 bar/factor 两个 dataVersion。BSE K 线/复权固定 fail closed，不能出现空 coverage 或替代序列。</li>
             <li>股本历史来自真实 Eastmoney 股本结构，市值可以从同日 close 与有效股本重算。</li>
             <li>申万三级成分通过真实接口同步；每条归属能回溯 source batch，不用公司概况行业文本替代。</li>
-            <li>财务与估值的 provider/methodology/version/knownAt 完整，平台派生指标保留输入 manifest；资金流明确 research/disabled 且筛选、列、排序失败关闭。</li>
+            <li>财务与估值的 provider/methodology/version/knownAt、sourceBatch 与 coverage 完整，平台派生指标保留输入 manifest；资金流在方法学和 EOD 批次未完成时明确 UNAVAILABLE，筛选、列、排序失败关闭。</li>
             <li>龙虎榜、大宗交易、预告和快报按 exchange+symbol 可读，内部 UUID 不泄漏给公开层。</li>
             <li>BASE discovery 的身份、名称、交易所和生命周期覆盖三所全部证券；可选组件
               SOURCE_UNAVAILABLE / QUARANTINED 时 publication 为 PARTIAL，字段为 null 且有 nullReason，
@@ -1170,13 +1280,15 @@
             <li>重复执行全量与增量任务不产生重复事实；任一 shard 失败后可从 checkpoint 恢复。</li>
             <li>component 在构建中变化时不会产生混合版本；cursor 永不跨 dataVersion。</li>
             <li>断源、schema 漂移、DB 故障和错误发布均完成演练，上一 publication 可继续读并可回滚。</li>
-            <li>staging E2E 的每条抽样记录都能追溯真实 sourceBatchId；运行态没有 fixture/mock/demo provider。</li>
+            <li>staging E2E 的每条抽样记录都能追溯真实 sourceBatchId、来源摘要或失败证据、质量、coverage 与 manifest；运行态没有 fixture/mock/demo 或手工构造 provider。</li>
+            <li>目录 600 秒异常上限、来源 p50/p95、DB/WAL、对象存储、CPU/内存与收盘后 120 分钟 EOD 临界路径均有生产等价实测；无记录或超预算即不推进 public current 指针。</li>
             <li>Docker 中通过 Ruff format/check、Pyright、unit、architecture、integration 与镜像构建。</li>
           </ul>
 
           <div class="callout good">
-            <strong>上线判定：</strong>只有上述全部通过且 service-api 0007、service-web 0007 的真实 E2E
-            同时通过，股票中心才允许从关闭状态切为可见。不存在“先用假数据上线、以后再接同步”的路径。
+            <strong>上线判定：</strong>逐 cell 的真实 source batch、质量、coverage、publication、容量实测与
+            service-api 0007、service-web 0007 的真实 E2E 同时通过后，股票中心读取该 current publication。
+            首次没有 publication 时显示 <code>NO_PUBLICATION</code>；不存在“先用假数据上线、以后再接同步”的路径。
           </div>
         </section>
 
@@ -1193,6 +1305,7 @@
             <li><a href="../0024-corporate-events/index.html">0024 · 公司事件</a></li>
             <li><a href="../0025-trading-events/index.html">0025 · 龙虎榜与大宗交易</a></li>
             <li><a href="../0031-data-operations-control-plane/index.html">0031 · 数据运维控制面</a></li>
+            <li><a href="../../decisions/0028-source-metadata-nonblocking-data-operations.md">ADR-0028 · 首批 A 股 equity 来源审计元数据不阻断控制面</a></li>
           </ul>
 
           <h3>代码证据</h3>
@@ -1218,14 +1331,18 @@
               <tbody>
                 <tr><td>目标目录</td><td><span class="tag good">通过</span></td><td>创建前确认 <code>0032-equity-market-workspace/</code> 不存在。</td></tr>
                 <tr><td>现状证据</td><td><span class="tag good">完成</span></td><td>CodeGraph 优先核对 adapter 注册、模块调用、publication 与 reader；文档证据补充来源边界。</td></tr>
-                <tr><td>生产代码验证</td><td><span class="tag warn">未运行</span></td><td>本次只新增技术方案，不修改生产源码、配置、migration 或契约；实施阶段按服务 AGENTS.md 执行完整 Docker 验证。</td></tr>
+                <tr><td>生产代码验证</td><td><span class="tag good">已执行</span></td><td>本轮已修改同步代码、migration 与控制面；Docker 测试镜像、<code>ruff format --check</code>、<code>ruff check</code>、<code>pyright</code> 与板块成员等针对性测试均通过。全量 unit 与相关 PostgreSQL 集成以最终合并状态复跑为准。</td></tr>
+                <tr><td>runtime audit 数据判定</td><td><span class="tag warn">无 current publication</span></td><td>当前开发库 <code>dataset_publication=0</code>；运行态将返回 <code>NO_PUBLICATION</code>，待真实全量 source batch、质量、coverage、publication、容量和 E2E 证据形成后自动按 current pointer 读取。</td></tr>
+                <tr><td>真实 provider 探针</td><td><span class="tag warn">部分通过</span></td><td>2026-08-01 已从真实目录动态取样并完成 SSE/SZSE/BSE lifecycle；三所均通过。SZSE TLS EOF 改为 adapter 内有界重试后复验通过。完整目录、日/周/月、因子、行动、概况矩阵仍需在稳定外网窗口连续完成，不能以已通过的 lifecycle 推断。</td></tr>
+                <tr><td>真实控制面 command</td><td><span class="tag warn">合同偏差待修正</span></td><td>目录 target 的 preflight 已返回 200/eligible；submit 返回 409 <code>equity-production-source-not-approved</code>。该拒绝仅由 <code>CANDIDATE</code> 与 rights/license 元数据触发，违反 ADR-0028，不是技术验收门。真实 source batch、checkpoint、publication 与 E2E 仍未运行，须在移除此控制面偏差后按实际 provider、schema、质量、事务与 coverage 结果验证。</td></tr>
+                <tr><td>真实三服务 E2E</td><td><span class="tag warn">待首发执行</span></td><td>以真实来源批次执行全量回填，逐 dataset/exchange/capability 抽样核对 sourceBatch、质量、coverage、publication 与 API→浏览器结果；不以 fixture、mock、demo 或手工数据替代。</td></tr>
                 <tr><td>Git 操作</td><td><span class="tag good">符合</span></td><td>未提交、未推送、未创建 PR。</td></tr>
               </tbody>
             </table>
           </div>
         </section>
 
-        <div class="footer">quant-v2 · service-data-sync · equity market workspace · 0032</div>
+        <div class="footer">quant-v2 · service-data-sync · equity market workspace · 0032 · runtime audit / 来源元数据语义修订 2026-08-01</div>
       </main>
     </div>
   </body>

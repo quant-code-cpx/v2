@@ -478,8 +478,12 @@ def _visible_periods(
 def _metric_interval_counts(engine: Engine) -> tuple[int, int, int]:
     """读取两类 revision 行数及被错误收窄的有效区间数量。"""
     with engine.connect() as connection:
-        provider_count = connection.scalar(text("SELECT count(*) FROM provider_financial_metric_revision"))
-        derived_count = connection.scalar(text("SELECT count(*) FROM derived_financial_metric_revision"))
+        provider_count = connection.scalar(
+            text("SELECT count(*) FROM provider_financial_metric_revision")
+        )
+        derived_count = connection.scalar(
+            text("SELECT count(*) FROM derived_financial_metric_revision")
+        )
         narrowed_count = connection.scalar(
             text(
                 """

@@ -53,8 +53,7 @@ def downgrade() -> None:
     ]
     if populated:
         raise RuntimeError(
-            "cannot downgrade equity market workspace after data exists: "
-            + ",".join(populated)
+            "cannot downgrade equity market workspace after data exists: " + ",".join(populated)
         )
     for table in reversed(_TABLES):
         table.drop(bind=bind, checkfirst=False)

@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from typing import Any
@@ -34,6 +34,9 @@ from service_data_sync.infrastructure.data_operations.equity_backfill import (
     iter_topology_pages,
     source_contract_hash,
 )
+from service_data_sync.infrastructure.data_operations.equity_reference_bundle import (
+    EquityReferenceBundleOrchestrator,
+)
 from service_data_sync.infrastructure.data_operations.legacy_submission import (
     submit_system_command_group,
 )
@@ -55,7 +58,6 @@ from service_data_sync.infrastructure.database.models.equity.identity.equity_ins
     EquityInstrument,
 )
 from service_data_sync.infrastructure.database.models.operations import (
-    DataOperationCommand,
     DataOperationExecutionSlot,
     DataOperationRun,
     DataOperationRunSourceBatch,
@@ -72,33 +74,21 @@ from service_data_sync.infrastructure.database.models.publication.dataset_public
 
 _HISTORY_START = date(1990, 12, 19)
 _MAX_RETRIES = 3
-_TERMINAL_COMMANDS = frozenset(
-    {"SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED", "REJECTED"}
-)
-_TERMINAL_CHILDREN = frozenset(
-    {"SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED", "BLOCKED"}
-)
+_TERMINAL_COMMANDS = frozenset({"SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED", "REJECTED"})
+_TERMINAL_CHILDREN = frozenset({"SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED", "BLOCKED"})
 _INSTRUMENT_SOURCE_DATASETS = (
     "equity.bar.1d.raw",
     "equity.bar.1w.raw",
     "equity.bar.1mo.raw",
     "equity.adjustment_factor",
     "equity.corporate_action",
-    "equity.profile",
-    "equity.share_capital.reported",
-    "financial.report",
-    "financial.provider-metric",
-    "financial.valuation",
 )
 _GLOBAL_EVENT_DATASETS = (
     "equity.corporate_event.earnings.reported",
     "equity.dragon_tiger.disclosure.reported",
     "equity.block_trade.execution.reported",
 )
-_INTERNAL_DATASETS = (
-    "financial.derived-metric",
-    "equity.discovery.eod",
-)
+_INTERNAL_DATASETS = ("equity.discovery.eod",)
 _PLANNED_DATASETS = frozenset(
     (*_INSTRUMENT_SOURCE_DATASETS, *_GLOBAL_EVENT_DATASETS, *_INTERNAL_DATASETS)
 )
@@ -112,11 +102,7 @@ _HISTORICAL_DATASETS = frozenset(
         *_GLOBAL_EVENT_DATASETS,
     )
 )
-_PUBLICATION_DATASETS = {
-    "financial.report": "financial.statement.raw",
-    "financial.provider-metric": "financial.metric.raw",
-    "financial.valuation": "financial.valuation.raw",
-}
+_PUBLICATION_DATASETS: dict[str, str] = {}
 
 
 def _utc_now() -> datetime:
@@ -169,12 +155,14 @@ class EquityBackfillOrchestrator:
         *,
         database: DatabaseClient,
         control_plane: DataOperationsControlPlane,
+        reference_bundle_orchestrator: EquityReferenceBundleOrchestrator | None = None,
         now: Callable[[], datetime] | None = None,
         poll_interval_seconds: float = 0.25,
     ) -> None:
-        """保存权威数据库、统一控制面与可测试时钟。"""
+        """保存权威数据库、控制面、可选自动引用生成器与可测试时钟。"""
         self._database = database
         self._control_plane = control_plane
+        self._reference_bundle_orchestrator = reference_bundle_orchestrator
         self._now = now or _utc_now
         self._poll_interval_seconds = max(0.0, poll_interval_seconds)
 
@@ -195,10 +183,22 @@ class EquityBackfillOrchestrator:
         campaign_key: str,
         reference_bundle: FrozenReferenceBundle | None,
         worker_id: str,
+        instrument_scope: tuple[str, str] | None = None,
         max_wait_seconds: float = 7200,
     ) -> UUID:
-        """创建来源真实可证的完整计划，或从已有不可变输入补齐缺页并封印。"""
-        normalized = _campaign_key(campaign_key)
+        """自动封印引用后创建历史计划，或从已有不可变输入补齐缺页并封印。
+
+        调用方不传入 `reference_bundle` 时，必须注入引用生成器。新计划先完成当前态
+        引用 bundle，才会探测可重放历史来源并落入父计划；已有计划绝不再次调用任何
+        current-only 适配器，因此可跨上海自然日继续恢复。`instrument_scope` 只供真实
+        端到端烟测缩小历史 child roster：引用 bundle 仍完整生成，且 scope 会进入独立
+        campaign key，绝不与全市场计划或另一只证券混用。
+        """
+        normalized_scope = _instrument_scope(instrument_scope)
+        normalized = _scoped_campaign_key(
+            _campaign_key(campaign_key),
+            instrument_scope=normalized_scope,
+        )
         deadline = time.monotonic() + max(1.0, max_wait_seconds)
         existing = self.find_plan(normalized)
         if existing is not None:
@@ -206,11 +206,15 @@ class EquityBackfillOrchestrator:
             self._persist_pages_and_seal(existing, topology)
             return existing
         if reference_bundle is None:
-            raise EquityBackfillOrchestrationError(
-                "new equity backfill plan requires a sealed reference bundle"
+            reference_bundle = self._create_reference_bundle(
+                campaign_key=normalized,
+                worker_id=worker_id,
+                deadline=deadline,
             )
         reference_bundle.validate()
         inputs = self._reference_inputs(reference_bundle)
+        if normalized_scope is not None:
+            inputs = _scoped_reference_inputs(inputs, instrument_scope=normalized_scope)
         roster_hash = compute_roster_hash(inputs.identities)
         plan_id = uuid5(
             NAMESPACE_URL,
@@ -224,9 +228,7 @@ class EquityBackfillOrchestrator:
             worker_id=worker_id,
             deadline=deadline,
         )
-        snapshots = self._control_plane.system_source_snapshots(
-            sorted(_PLANNED_DATASETS)
-        )
+        snapshots = self._control_plane.system_source_snapshots(sorted(_PLANNED_DATASETS))
         sources = self._freeze_sources(
             observations=observations,
             snapshots=snapshots,
@@ -254,6 +256,29 @@ class EquityBackfillOrchestrator:
         self._persist_pages_and_seal(plan_id, topology)
         return plan_id
 
+    def _create_reference_bundle(
+        self,
+        *,
+        campaign_key: str,
+        worker_id: str,
+        deadline: float,
+    ) -> FrozenReferenceBundle:
+        """经七步 current-only 生成器获得已封印 bundle，禁止历史计划自行补当前输入。"""
+        if self._reference_bundle_orchestrator is None:
+            raise EquityBackfillOrchestrationError(
+                "new equity backfill plan requires an automatic reference bundle orchestrator"
+            )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise EquityBackfillPending(
+                "equity backfill budget expired before reference bundle sealing"
+            )
+        return self._reference_bundle_orchestrator.run_until_sealed(
+            campaign_key=_reference_campaign_key(campaign_key),
+            worker_id=f"{worker_id}:reference",
+            max_wait_seconds=remaining,
+        )
+
     def run_until_terminal(
         self,
         *,
@@ -272,9 +297,7 @@ class EquityBackfillOrchestrator:
             if summary["status"] in {"SUCCEEDED", "PARTIAL", "FAILED", "BLOCKED"}:
                 return summary
             if time.monotonic() >= deadline:
-                raise EquityBackfillPending(
-                    f"equity backfill plan remains {summary['status']}"
-                )
+                raise EquityBackfillPending(f"equity backfill plan remains {summary['status']}")
             self._recover_submitting(plan_id, maximum_inflight_children)
             self._retry_children(plan_id)
             self._prepare_phase_children(plan_id, maximum_inflight_children)
@@ -305,8 +328,7 @@ class EquityBackfillOrchestrator:
                     )
                     .join(
                         EquityBackfillChildSpec,
-                        EquityBackfillChildSpec.child_id
-                        == EquityBackfillChildState.child_id,
+                        EquityBackfillChildSpec.child_id == EquityBackfillChildState.child_id,
                     )
                     .where(EquityBackfillChildSpec.plan_id == plan_id)
                     .group_by(EquityBackfillChildState.status)
@@ -322,17 +344,13 @@ class EquityBackfillOrchestrator:
                 "rosterCount": plan.roster_count,
                 "snapshotObservedOn": plan.snapshot_observed_on.isoformat(),
                 "marketAsOf": plan.market_as_of.isoformat(),
-                "referenceBundleDataVersion": str(
-                    plan.reference_bundle_data_version
-                ),
+                "referenceBundleDataVersion": str(plan.reference_bundle_data_version),
                 "sourceEvidenceHash": plan.source_evidence_hash,
                 "auditSummary": state.audit_summary_json,
                 "lastError": state.last_error_json,
             }
 
-    def _reference_inputs(
-        self, bundle: FrozenReferenceBundle
-    ) -> _ReferenceInputs:
+    def _reference_inputs(self, bundle: FrozenReferenceBundle) -> _ReferenceInputs:
         """从 bundle 精确解析主目录、生命周期和知识时点可见的确认身份。"""
         master_components = [
             component
@@ -357,8 +375,7 @@ class EquityBackfillOrchestrator:
                 aggregate is None
                 or aggregate.dataset != "equity.master.cn-a"
                 or aggregate.partition_key != "CN_A_STABLE"
-                or aggregate.data_version
-                != UUID(str(master_components[0]["dataVersion"]))
+                or aggregate.data_version != UUID(str(master_components[0]["dataVersion"]))
                 or aggregate.quality_status != "passed"
             ):
                 raise EquityBackfillOrchestrationError(
@@ -371,9 +388,7 @@ class EquityBackfillOrchestrator:
                         DatasetPublicationComponent.aggregate_publication_id
                         == aggregate.publication_id
                     )
-                    .order_by(
-                        DatasetPublicationComponent.component_partition_key
-                    )
+                    .order_by(DatasetPublicationComponent.component_partition_key)
                 ).all()
             )
             if {row.component_partition_key for row in component_rows} != {
@@ -388,11 +403,9 @@ class EquityBackfillOrchestrator:
             for row in component_rows:
                 publication = session.scalar(
                     select(DatasetPublication).where(
-                        DatasetPublication.dataset == "equity.master",
-                        DatasetPublication.partition_key
-                        == row.component_partition_key,
-                        DatasetPublication.data_version
-                        == row.component_data_version,
+                        DatasetPublication.dataset == "equity.master.catalog",
+                        DatasetPublication.partition_key == row.component_partition_key,
+                        DatasetPublication.data_version == row.component_data_version,
                     )
                 )
                 if publication is None:
@@ -418,13 +431,10 @@ class EquityBackfillOrchestrator:
                     publication is None
                     or publication.dataset != "equity.lifecycle.explicit"
                     or publication.partition_key != component["partitionKey"]
-                    or publication.data_version
-                    != UUID(str(component["dataVersion"]))
+                    or publication.data_version != UUID(str(component["dataVersion"]))
                     or publication.quality_status != "passed"
                 ):
-                    raise EquityBackfillOrchestrationError(
-                        "lifecycle publication is invalid"
-                    )
+                    raise EquityBackfillOrchestrationError("lifecycle publication is invalid")
                 lifecycle_publications.append(
                     _publication_manifest(
                         publication,
@@ -437,8 +447,7 @@ class EquityBackfillOrchestrator:
                     select(EquityIdentifierVersion, EquityInstrument.instrument_id)
                     .join(
                         EquityInstrument,
-                        EquityInstrument.security_id
-                        == EquityIdentifierVersion.security_id,
+                        EquityInstrument.security_id == EquityIdentifierVersion.security_id,
                     )
                     .where(
                         EquityIdentifierVersion.identity_state == "CONFIRMED",
@@ -502,8 +511,7 @@ class EquityBackfillOrchestrator:
             candidates = [
                 identity
                 for identity in identities
-                if identity.exchange == exchange
-                and identity.active_on(snapshot_observed_on)
+                if identity.exchange == exchange and identity.active_on(snapshot_observed_on)
             ]
             if candidates:
                 representatives[exchange] = min(
@@ -568,9 +576,7 @@ class EquityBackfillOrchestrator:
         deadline: float,
     ) -> tuple[_ProbeObservation, ...]:
         """幂等执行一个探测组；可重试失败复制新 run，成功结果不会被假重跑覆盖。"""
-        request_prefix = (
-            f"eqbf-proof:{_short_hash(campaign_key)}:{_short_hash(group_key)}"
-        )
+        request_prefix = f"eqbf-proof:{_short_hash(campaign_key)}:{_short_hash(group_key)}"
         receipt = submit_system_command_group(
             self._control_plane,
             targets=targets,
@@ -586,9 +592,7 @@ class EquityBackfillOrchestrator:
             if status in _TERMINAL_COMMANDS:
                 child_runs = detail["childRuns"]
                 if not isinstance(child_runs, list) or not child_runs:
-                    raise EquityBackfillOrchestrationError(
-                        "source proof command has no child runs"
-                    )
+                    raise EquityBackfillOrchestrationError("source proof command has no child runs")
                 retryable_failure = False
                 for item in child_runs:
                     dataset_code = str(item["datasetCode"])
@@ -631,9 +635,7 @@ class EquityBackfillOrchestrator:
                             "source proof exhausted retryable Provider failures"
                         )
                     retry_no += 1
-                    retry_seed = (
-                        f"{campaign_key}:{group_key}:{command_id}:{retry_no}"
-                    )
+                    retry_seed = f"{campaign_key}:{group_key}:{command_id}:{retry_no}"
                     digest = _hash_json(retry_seed)
                     retry_receipt = self._control_plane.retry_command(
                         request={
@@ -665,9 +667,7 @@ class EquityBackfillOrchestrator:
                     )
                 return tuple(results[code] for code in sorted(results))
             if time.monotonic() >= deadline:
-                raise EquityBackfillPending(
-                    f"source proof command remains {status}: {group_key}"
-                )
+                raise EquityBackfillPending(f"source proof command remains {status}: {group_key}")
             progressed = self._control_plane.dispatch_once(
                 f"{worker_id}:source-proof:{_short_hash(group_key)}"
             )
@@ -742,9 +742,7 @@ class EquityBackfillOrchestrator:
         }
         for dataset_code, dataset_observations in grouped.items():
             successful = [
-                observation
-                for observation in dataset_observations
-                if observation.succeeded
+                observation for observation in dataset_observations if observation.succeeded
             ]
             if not successful:
                 raise EquityBackfillOrchestrationError(
@@ -756,9 +754,7 @@ class EquityBackfillOrchestrator:
                     f"source binding changed during proof: {dataset_code}"
                 )
             batches = tuple(
-                batch
-                for observation in successful
-                for batch in observation.source_batches
+                batch for observation in successful for batch in observation.source_batches
             )
             signatures = {
                 (
@@ -818,22 +814,17 @@ class EquityBackfillOrchestrator:
             }
             source = FrozenSource(
                 dataset_code=dataset_code,
-                publication_dataset_code=_PUBLICATION_DATASETS.get(
-                    dataset_code, dataset_code
-                ),
+                publication_dataset_code=_PUBLICATION_DATASETS.get(dataset_code, dataset_code),
                 source_snapshot=current_snapshot,
                 source_snapshot_hash=_hash_json(list(current_snapshot)),
-                earliest_date=(
-                    _HISTORY_START if dataset_code in _HISTORICAL_DATASETS else None
-                ),
+                earliest_date=(_HISTORY_START if dataset_code in _HISTORICAL_DATASETS else None),
                 earliest_date_method=(
                     "CONTROLLED_EXECUTOR_REQUEST_FLOOR_V1"
                     if dataset_code in _HISTORICAL_DATASETS
                     else "CURRENT_SNAPSHOT_ONLY"
                 ),
                 evidence_ref=(
-                    f"data-operation-source-proof:{dataset_code}:"
-                    f"{_short_hash(evidence)}"
+                    f"data-operation-source-proof:{dataset_code}:{_short_hash(evidence)}"
                 ),
                 evidence_sha256=_hash_json(evidence),
                 evidence_observed_at=max(batch.observed_at for batch in batches),
@@ -864,9 +855,7 @@ class EquityBackfillOrchestrator:
                 source,
                 source_contract_hash=source_contract_hash(source),
             )
-        supported_internal_exchanges = tuple(
-            sorted({identity.exchange for identity in identities})
-        )
+        supported_internal_exchanges = tuple(sorted({identity.exchange for identity in identities}))
         for dataset_code in _INTERNAL_DATASETS:
             source_snapshot = tuple(snapshots[dataset_code])
             if len(source_snapshot) != 1:
@@ -885,19 +874,10 @@ class EquityBackfillOrchestrator:
                     f"internal executor identity is invalid: {dataset_code}"
                 )
             input_contract = (
-                (
-                    {
-                        "datasetCode": "financial.report",
-                        "binding": "EXACT_CHILD_PUBLICATION",
-                    },
-                )
-                if dataset_code == "financial.derived-metric"
-                else (
-                    {
-                        "binding": "ALL_TERMINAL_CHILD_RESULTS",
-                        "referenceBundle": "EXACT_PLAN_BUNDLE",
-                    },
-                )
+                {
+                    "binding": "ALL_TERMINAL_CHILD_RESULTS",
+                    "referenceBundle": "EXACT_PLAN_BUNDLE",
+                },
             )
             evidence = {
                 "datasetCode": dataset_code,
@@ -913,8 +893,7 @@ class EquityBackfillOrchestrator:
                 earliest_date=None,
                 earliest_date_method="INTERNAL_EXACT_INPUTS_ONLY",
                 evidence_ref=(
-                    f"internal-executor-source-proof:{dataset_code}:"
-                    f"{_short_hash(evidence)}"
+                    f"internal-executor-source-proof:{dataset_code}:{_short_hash(evidence)}"
                 ),
                 evidence_sha256=_hash_json(evidence),
                 evidence_observed_at=self._now(),
@@ -945,9 +924,7 @@ class EquityBackfillOrchestrator:
                 source_contract_hash=source_contract_hash(source),
             )
         if set(result) != _PLANNED_DATASETS:
-            raise EquityBackfillOrchestrationError(
-                "frozen source manifest is incomplete"
-            )
+            raise EquityBackfillOrchestrationError("frozen source manifest is incomplete")
         for source in result.values():
             source.validate()
         return result
@@ -992,15 +969,10 @@ class EquityBackfillOrchestrator:
                 {"key": f"equity-backfill-plan:{campaign_key}"},
             )
             existing = session.scalar(
-                select(EquityBackfillPlan).where(
-                    EquityBackfillPlan.campaign_key == campaign_key
-                )
+                select(EquityBackfillPlan).where(EquityBackfillPlan.campaign_key == campaign_key)
             )
             if existing is not None:
-                if (
-                    existing.plan_id != plan_id
-                    or existing.request_hash != request_hash
-                ):
+                if existing.plan_id != plan_id or existing.request_hash != request_hash:
                     raise EquityBackfillOrchestrationError(
                         "campaign key is already bound to another frozen request"
                     )
@@ -1014,9 +986,7 @@ class EquityBackfillOrchestrator:
                     aggregate_publication_id=inputs.aggregate.publication_id,
                     aggregate_data_version=inputs.aggregate.data_version,
                     aggregate_components_json=list(inputs.aggregate_components),
-                    lifecycle_publications_json=list(
-                        inputs.lifecycle_publications
-                    ),
+                    lifecycle_publications_json=list(inputs.lifecycle_publications),
                     reference_bundle_publication_id=reference_bundle.publication_id,
                     reference_bundle_data_version=reference_bundle.data_version,
                     reference_manifest_json=list(reference_bundle.manifest),
@@ -1064,10 +1034,7 @@ class EquityBackfillOrchestrator:
                 ]
             )
             session.add_all(
-                [
-                    _source_row(plan_id=plan_id, source=sources[code])
-                    for code in sorted(sources)
-                ]
+                [_source_row(plan_id=plan_id, source=sources[code]) for code in sorted(sources)]
             )
 
     def _persist_pages_and_seal(
@@ -1105,8 +1072,7 @@ class EquityBackfillOrchestrator:
                         .select_from(EquityBackfillChildSpec)
                         .where(
                             EquityBackfillChildSpec.plan_id == plan_id,
-                            EquityBackfillChildSpec.ordinal
-                            >= page.first_ordinal,
+                            EquityBackfillChildSpec.ordinal >= page.first_ordinal,
                             EquityBackfillChildSpec.ordinal <= page.last_ordinal,
                         )
                     )
@@ -1131,9 +1097,7 @@ class EquityBackfillOrchestrator:
                             targets_json=list(child.targets),
                             intents_json=list(child.intents),
                             dependency_keys_json=list(child.dependency_keys),
-                            completion_dependency_keys_json=list(
-                                child.completion_dependency_keys
-                            ),
+                            completion_dependency_keys_json=list(child.completion_dependency_keys),
                             source_hashes_json=child.source_hashes,
                             submission_id=child.submission_id,
                             request_prefix=child.request_prefix,
@@ -1206,7 +1170,7 @@ class EquityBackfillOrchestrator:
                 )
             if state.status == "BUILDING":
                 state.status = "HELD"
-                state.current_phase=None
+                state.current_phase = None
                 state.revision += 1
                 state.updated_at = self._now()
 
@@ -1220,13 +1184,8 @@ class EquityBackfillOrchestrator:
                 DatasetPublication,
                 plan.reference_bundle_publication_id,
             )
-            if (
-                bundle_publication is None
-                or bundle_publication.release_id is None
-            ):
-                raise EquityBackfillOrchestrationError(
-                    "frozen reference bundle release is missing"
-                )
+            if bundle_publication is None or bundle_publication.release_id is None:
+                raise EquityBackfillOrchestrationError("frozen reference bundle release is missing")
             bundle = FrozenReferenceBundle(
                 publication_id=plan.reference_bundle_publication_id,
                 data_version=plan.reference_bundle_data_version,
@@ -1251,9 +1210,7 @@ class EquityBackfillOrchestrator:
                 ).all()
             )
             identities = tuple(_frozen_identity(row) for row in identity_rows)
-            sources = {
-                row.dataset_code: _frozen_source(row) for row in source_rows
-            }
+            sources = {row.dataset_code: _frozen_source(row) for row in source_rows}
             if (
                 len(identities) != plan.roster_count
                 or compute_roster_hash(identities) != plan.roster_hash
@@ -1299,9 +1256,7 @@ class EquityBackfillOrchestrator:
                     with_for_update=True,
                 )
                 if state is None:
-                    raise EquityBackfillOrchestrationError(
-                        "equity backfill state is missing"
-                    )
+                    raise EquityBackfillOrchestrationError("equity backfill state is missing")
                 if state.status in {
                     "RUNNING",
                     "SUCCEEDED",
@@ -1311,9 +1266,7 @@ class EquityBackfillOrchestrator:
                 }:
                     return
                 if state.status != "HELD":
-                    raise EquityBackfillOrchestrationError(
-                        "equity backfill plan is not sealed"
-                    )
+                    raise EquityBackfillOrchestrationError("equity backfill plan is not sealed")
                 other = session.scalar(
                     select(EquityBackfillPlanState.plan_id).where(
                         EquityBackfillPlanState.status == "RUNNING",
@@ -1333,30 +1286,19 @@ class EquityBackfillOrchestrator:
                     session.scalar(
                         select(func.count())
                         .select_from(DataOperationRun)
-                        .where(
-                            DataOperationRun.status.in_(
-                                ("RUNNING", "CANCEL_REQUESTED")
-                            )
-                        )
+                        .where(DataOperationRun.status.in_(("RUNNING", "CANCEL_REQUESTED")))
                     )
                     or 0
                 )
-                if (
-                    (slot is None or slot.state == "IDLE")
-                    and active_runs == 0
-                ):
+                if (slot is None or slot.state == "IDLE") and active_runs == 0:
                     state.status = "RUNNING"
                     state.current_phase = PHASES[0]
                     state.revision += 1
                     state.updated_at = self._now()
                     return
             if time.monotonic() >= deadline:
-                raise EquityBackfillPending(
-                    "equity backfill waits for the current fenced run"
-                )
-            progressed = self._control_plane.dispatch_once(
-                f"{worker_id}:equity-backfill-drain"
-            )
+                raise EquityBackfillPending("equity backfill waits for the current fenced run")
+            progressed = self._control_plane.dispatch_once(f"{worker_id}:equity-backfill-drain")
             if not progressed:
                 self._control_plane.reap_expired_slots()
                 if self._poll_interval_seconds:
@@ -1366,19 +1308,14 @@ class EquityBackfillOrchestrator:
         """提交已标为 SUBMITTING 的稳定 child，网络未知结果由幂等键原样恢复。"""
         with self._database.session() as session:
             state = session.get(EquityBackfillPlanState, plan_id)
-            if (
-                state is None
-                or state.status != "RUNNING"
-                or state.current_phase is None
-            ):
+            if state is None or state.status != "RUNNING" or state.current_phase is None:
                 return
             children = tuple(
                 session.scalars(
                     select(EquityBackfillChildSpec)
                     .join(
                         EquityBackfillChildState,
-                        EquityBackfillChildState.child_id
-                        == EquityBackfillChildSpec.child_id,
+                        EquityBackfillChildState.child_id == EquityBackfillChildSpec.child_id,
                     )
                     .where(
                         EquityBackfillChildSpec.plan_id == plan_id,
@@ -1422,15 +1359,12 @@ class EquityBackfillOrchestrator:
                     .select_from(EquityBackfillChildState)
                     .join(
                         EquityBackfillChildSpec,
-                        EquityBackfillChildSpec.child_id
-                        == EquityBackfillChildState.child_id,
+                        EquityBackfillChildSpec.child_id == EquityBackfillChildState.child_id,
                     )
                     .where(
                         EquityBackfillChildSpec.plan_id == plan_id,
                         EquityBackfillChildSpec.phase == plan_state.current_phase,
-                        EquityBackfillChildState.status.in_(
-                            ("SUBMITTING", "SUBMITTED", "RUNNING")
-                        ),
+                        EquityBackfillChildState.status.in_(("SUBMITTING", "SUBMITTED", "RUNNING")),
                     )
                 )
                 or 0
@@ -1443,13 +1377,11 @@ class EquityBackfillOrchestrator:
                     select(EquityBackfillChildSpec)
                     .join(
                         EquityBackfillChildState,
-                        EquityBackfillChildState.child_id
-                        == EquityBackfillChildSpec.child_id,
+                        EquityBackfillChildState.child_id == EquityBackfillChildSpec.child_id,
                     )
                     .where(
                         EquityBackfillChildSpec.plan_id == plan_id,
-                        EquityBackfillChildSpec.phase
-                        == plan_state.current_phase,
+                        EquityBackfillChildSpec.phase == plan_state.current_phase,
                         EquityBackfillChildState.status == "HELD",
                     )
                     .order_by(EquityBackfillChildSpec.ordinal)
@@ -1457,27 +1389,28 @@ class EquityBackfillOrchestrator:
                     .with_for_update(skip_locked=True)
                 ).all()
             )
-            dependency_keys = {
-                key for child in children for key in child.dependency_keys_json
-            }
-            dependency_states = {
-                child_key: status
-                for child_key, status in session.execute(
-                    select(
-                        EquityBackfillChildSpec.child_key,
-                        EquityBackfillChildState.status,
-                    )
-                    .join(
-                        EquityBackfillChildState,
-                        EquityBackfillChildState.child_id
-                        == EquityBackfillChildSpec.child_id,
-                    )
-                    .where(
-                        EquityBackfillChildSpec.plan_id == plan_id,
-                        EquityBackfillChildSpec.child_key.in_(dependency_keys),
-                    )
-                ).all()
-            } if dependency_keys else {}
+            dependency_keys = {key for child in children for key in child.dependency_keys_json}
+            dependency_states = (
+                {
+                    child_key: status
+                    for child_key, status in session.execute(
+                        select(
+                            EquityBackfillChildSpec.child_key,
+                            EquityBackfillChildState.status,
+                        )
+                        .join(
+                            EquityBackfillChildState,
+                            EquityBackfillChildState.child_id == EquityBackfillChildSpec.child_id,
+                        )
+                        .where(
+                            EquityBackfillChildSpec.plan_id == plan_id,
+                            EquityBackfillChildSpec.child_key.in_(dependency_keys),
+                        )
+                    ).all()
+                }
+                if dependency_keys
+                else {}
+            )
             for child in children:
                 child_state = session.get(
                     EquityBackfillChildState,
@@ -1519,16 +1452,12 @@ class EquityBackfillOrchestrator:
                     select(EquityBackfillChildSpec, EquityBackfillChildState)
                     .join(
                         EquityBackfillChildState,
-                        EquityBackfillChildState.child_id
-                        == EquityBackfillChildSpec.child_id,
+                        EquityBackfillChildState.child_id == EquityBackfillChildSpec.child_id,
                     )
                     .where(
                         EquityBackfillChildSpec.plan_id == plan_id,
-                        EquityBackfillChildSpec.phase
-                        == plan_state.current_phase,
-                        EquityBackfillChildState.status.in_(
-                            ("PARTIAL", "FAILED", "CANCELLED")
-                        ),
+                        EquityBackfillChildSpec.phase == plan_state.current_phase,
+                        EquityBackfillChildState.status.in_(("PARTIAL", "FAILED", "CANCELLED")),
                         EquityBackfillChildState.resume_count < _MAX_RETRIES,
                     )
                     .order_by(EquityBackfillChildSpec.ordinal)
@@ -1536,9 +1465,7 @@ class EquityBackfillOrchestrator:
                 ).all()
             )
         for child, state in values:
-            if state.command_id is None or not _retryable_child_error(
-                state.last_error_json
-            ):
+            if state.command_id is None or not _retryable_child_error(state.last_error_json):
                 continue
             retry_no = state.resume_count + 1
             digest = _hash_json(
@@ -1590,8 +1517,7 @@ class EquityBackfillOrchestrator:
                     select(EquityBackfillChildSpec, EquityBackfillChildState)
                     .join(
                         EquityBackfillChildState,
-                        EquityBackfillChildState.child_id
-                        == EquityBackfillChildSpec.child_id,
+                        EquityBackfillChildState.child_id == EquityBackfillChildSpec.child_id,
                     )
                     .where(
                         EquityBackfillChildSpec.plan_id == plan_id,
@@ -1632,8 +1558,7 @@ class EquityBackfillOrchestrator:
                     select(EquityBackfillChildSpec, EquityBackfillChildState)
                     .join(
                         EquityBackfillChildState,
-                        EquityBackfillChildState.child_id
-                        == EquityBackfillChildSpec.child_id,
+                        EquityBackfillChildState.child_id == EquityBackfillChildSpec.child_id,
                     )
                     .where(EquityBackfillChildSpec.plan_id == plan_id)
                 ).all()
@@ -1641,8 +1566,7 @@ class EquityBackfillOrchestrator:
             optional_failures = [
                 child_state
                 for spec, child_state in all_rows
-                if spec.requirement == "OPTIONAL"
-                and child_state.status != "SUCCEEDED"
+                if spec.requirement == "OPTIONAL" and child_state.status != "SUCCEEDED"
             ]
             state.status = "PARTIAL" if optional_failures else "SUCCEEDED"
             state.current_phase = None
@@ -1665,8 +1589,7 @@ class EquityBackfillOrchestrator:
                 select(EquityBackfillChildState.status, func.count())
                 .join(
                     EquityBackfillChildSpec,
-                    EquityBackfillChildSpec.child_id
-                    == EquityBackfillChildState.child_id,
+                    EquityBackfillChildSpec.child_id == EquityBackfillChildState.child_id,
                 )
                 .where(EquityBackfillChildSpec.plan_id == plan.plan_id)
                 .group_by(EquityBackfillChildState.status)
@@ -1714,6 +1637,66 @@ def _campaign_key(value: str) -> str:
     if not normalized or len(normalized) > 128:
         raise ValueError("equity backfill campaign key is invalid")
     return normalized
+
+
+def _instrument_scope(value: tuple[str, str] | None) -> tuple[str, str] | None:
+    """校验真实烟测的交易所和六位证券代码，不接受可被 Provider 重解释的自由文本。"""
+    if value is None:
+        return None
+    if not isinstance(value, tuple) or len(value) != 2:
+        raise ValueError("equity backfill instrument scope is invalid")
+    exchange, symbol = (str(part).strip().upper() for part in value)
+    if exchange not in {"SSE", "SZSE", "BSE"} or (
+        len(symbol) != 6 or not symbol.isascii() or not symbol.isdecimal()
+    ):
+        raise ValueError("equity backfill instrument scope is invalid")
+    return exchange, symbol
+
+
+def _scoped_campaign_key(
+    campaign_key: str,
+    *,
+    instrument_scope: tuple[str, str] | None,
+) -> str:
+    """为真实单证券烟测派生独立稳定 campaign key，防止复用全市场计划。"""
+    if instrument_scope is None:
+        return campaign_key
+    exchange, symbol = instrument_scope
+    suffix = f":smoke:{exchange}.{symbol}"
+    candidate = f"{campaign_key}{suffix}"
+    if len(candidate) <= 128:
+        return candidate
+    digest = hashlib.sha256(candidate.encode()).hexdigest()[:24]
+    return f"{campaign_key[:95]}:smoke:{digest}"
+
+
+def _reference_campaign_key(campaign_key: str) -> str:
+    """派生不超过账本上限的引用生成批次键，长全市场键也可自动恢复。"""
+    suffix = ":reference"
+    candidate = f"{campaign_key}{suffix}"
+    if len(candidate) <= 128:
+        return candidate
+    digest = hashlib.sha256(candidate.encode()).hexdigest()[:24]
+    return f"{campaign_key[:93]}:ref:{digest}"
+
+
+def _scoped_reference_inputs(
+    inputs: _ReferenceInputs,
+    *,
+    instrument_scope: tuple[str, str],
+) -> _ReferenceInputs:
+    """只从已封存主目录挑选一个精确身份，重新编号后生成最小真实历史 roster。"""
+    exchange, symbol = instrument_scope
+    matched = [
+        identity
+        for identity in inputs.identities
+        if identity.exchange == exchange and identity.symbol == symbol
+    ]
+    if len(matched) != 1:
+        raise EquityBackfillOrchestrationError(
+            "instrument scope is not exactly one confirmed identity in the sealed master"
+        )
+    return replace(inputs, identities=(replace(matched[0], ordinal=1),))
 
 
 def _instrument_probe_target(
@@ -1813,9 +1796,7 @@ def _publication_manifest(
         "publicationId": str(publication.publication_id),
         "dataVersion": str(publication.data_version),
         "effectiveAsOf": (
-            None
-            if publication.effective_as_of is None
-            else publication.effective_as_of.isoformat()
+            None if publication.effective_as_of is None else publication.effective_as_of.isoformat()
         ),
         "knowledgeCutoff": (
             None

@@ -18,6 +18,7 @@ from sqlalchemy import and_, func, insert, literal, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.orm import Session
 
+from service_data_sync.application.ports.canonical_release import CanonicalLineageRecord
 from service_data_sync.application.ports.sector_market_data import StoredSector
 from service_data_sync.application.ports.sector_membership import (
     PublishedSectorMembershipRelease,
@@ -86,9 +87,11 @@ from ..database.models.sector.membership.sector_membership_snapshot import (
 from ..database.partition_manager import (
     ensure_sector_membership_item_partition,
 )
+from .canonical_release_repository import SqlAlchemyCanonicalReleaseRepository
 from .equity_identity_resolver import (
     resolve_identity_on_connection,
 )
+from .legacy_canonical_release_bridge import publish_legacy_snapshot
 from .source_batch import record_source_observation
 
 _CAPABILITY = "sector.membership.snapshot.raw"
@@ -102,6 +105,7 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
     def __init__(self, database: DatabaseClient) -> None:
         """保存服务私有数据库会话工厂，调用方不接触 SQLAlchemy 或数据表。"""
         self._database = database
+        self._release_repository = SqlAlchemyCanonicalReleaseRepository(database)
 
     def list_active_sectors(self, *, scheme: SectorScheme) -> Sequence[StoredSector]:
         """读取一个分类体系当前 ACTIVE 板块，供一次 scheme run 冻结分区集合。"""
@@ -444,81 +448,91 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
                 else "passed"
             )
             current = self._current_release(connection, scheme)
-            component_snapshot_ids = tuple(
-                UUID(str(snapshot["snapshot_id"])) for _, snapshot, _ in components
-            )
-            if current is not None and self._release_matches(
-                connection, UUID(str(current["release_id"])), component_snapshot_ids, quality_status
-            ):
-                _record_fenced_release(
-                    data_version=UUID(str(current["data_version"])),
-                    record_count=expected_count,
-                )
-                if before_final_publication is not None:
-                    before_final_publication()
-                return PublishedSectorMembershipRelease(
-                    release_id=UUID(str(current["release_id"])),
-                    data_version=UUID(str(current["data_version"])),
-                    quality_status=str(current["quality_status"]),
-                    fresh_sector_count=int(current["fresh_sector_count"]),
-                    carried_forward_sector_count=int(current["carried_forward_sector_count"]),
-                    published_at=current["published_at"],
-                )
-            if current is not None:
-                connection.execute(
-                    update(SectorMembershipRelease)
-                    .where(SectorMembershipRelease.release_id == current["release_id"])
-                    .values(superseded_at=now)
-                )
-            release_id = uuid4()
-            data_version = uuid4()
+            records = _membership_release_records(scheme=scheme, components=components)
             release_as_of = max(snapshot["observed_at"] for _, snapshot, _ in components)
             coverage_start = min(snapshot["observed_at"] for _, snapshot, _ in components)
-            connection.execute(
-                insert(SectorMembershipRelease).values(
-                    release_id=release_id,
-                    scheme=scheme.value,
-                    release_as_of=release_as_of,
-                    coverage_start=coverage_start,
-                    data_version=data_version,
-                    quality_status=quality_status,
-                    expected_sector_count=expected_count,
-                    fresh_sector_count=fresh_count,
-                    carried_forward_sector_count=carried_count,
-                    identity_coverage_percent=100,
-                    excluded_identity_count=0,
-                    published_at=now,
-                    superseded_at=None,
-                )
-            )
-            for sector, snapshot, carried_forward in components:
-                connection.execute(
-                    insert(SectorMembershipReleaseSector).values(
-                        release_id=release_id,
-                        sector_key=sector.sector_key,
-                        snapshot_id=snapshot["snapshot_id"],
-                        carried_forward=carried_forward,
-                        snapshot_observed_at=snapshot["observed_at"],
+
+            def write_visibility(
+                session: Session,
+                publication_id: UUID,
+                data_version: UUID,
+                release_id: UUID,
+            ) -> None:
+                """在 publication 已具备真实 dataVersion 后写入同一 release 的领域清单。"""
+                del publication_id
+                existing = session.scalar(
+                    select(SectorMembershipRelease.release_id).where(
+                        SectorMembershipRelease.release_id == release_id
                     )
                 )
-            if before_final_publication is not None:
-                before_final_publication()
-            self._publish_dataset(
+                if existing is not None:
+                    return
+                if current is not None and UUID(str(current["release_id"])) != release_id:
+                    # 领域 release 的“当前”唯一索引与 canonical publication 同一事务切换。
+                    # 必须先关闭旧指针，随后才能插入新清单；任一后续步骤失败会整体回滚，读取方
+                    # 因而永远不会看到无对应 canonical release/dataVersion 的当前成分清单。
+                    session.execute(
+                        update(SectorMembershipRelease)
+                        .where(
+                            SectorMembershipRelease.release_id == current["release_id"],
+                            SectorMembershipRelease.superseded_at.is_(None),
+                        )
+                        .values(superseded_at=now)
+                    )
+                session.execute(
+                    insert(SectorMembershipRelease).values(
+                        release_id=release_id,
+                        scheme=scheme.value,
+                        release_as_of=release_as_of,
+                        coverage_start=coverage_start,
+                        data_version=data_version,
+                        quality_status=quality_status,
+                        expected_sector_count=expected_count,
+                        fresh_sector_count=fresh_count,
+                        carried_forward_sector_count=carried_count,
+                        identity_coverage_percent=100,
+                        excluded_identity_count=0,
+                        published_at=now,
+                        superseded_at=None,
+                    )
+                )
+                for sector, snapshot, carried_forward in components:
+                    session.execute(
+                        insert(SectorMembershipReleaseSector).values(
+                            release_id=release_id,
+                            sector_key=sector.sector_key,
+                            snapshot_id=snapshot["snapshot_id"],
+                            carried_forward=carried_forward,
+                            snapshot_observed_at=snapshot["observed_at"],
+                        )
+                    )
+
+            published = publish_legacy_snapshot(
                 connection,
-                scheme=scheme,
-                data_version=data_version,
+                release_repository=self._release_repository,
+                dataset_code=_DATASET,
+                partition_key=scheme.value,
+                domain="sector",
+                grain="scheme membership release + complete sector snapshot manifest",
+                semantic_family="reported-sector-membership",
+                mapping_version="sector-membership-release-v1",
+                source_batch_id=records[0].source_batch_id,
+                records=records,
+                fact_min=observation_date,
+                fact_max=observation_date,
+                now=now,
                 quality_status=quality_status,
-                effective_as_of=observation_date,
-                published_at=now,
+                publication_effective_as_of=observation_date,
+                write_visibility=write_visibility,
+                before_final_publication=before_final_publication,
             )
-            _record_fenced_release(data_version=data_version, record_count=expected_count)
         return PublishedSectorMembershipRelease(
-            release_id=release_id,
-            data_version=data_version,
+            release_id=published.release_id,
+            data_version=published.data_version,
             quality_status=quality_status,
             fresh_sector_count=fresh_count,
             carried_forward_sector_count=carried_count,
-            published_at=now,
+            published_at=published.published_at,
         )
 
     def get_release(
@@ -1192,6 +1206,8 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
                     SectorMembershipSnapshot.observation_date,
                     SectorMembershipSnapshot.member_count,
                     SectorMembershipSnapshot.quality_status,
+                    SectorMembershipSnapshot.source_batch_id,
+                    SectorMembershipSnapshot.content_sha256,
                 )
                 .where(
                     SectorMembershipSnapshot.sector_key == sector_key,
@@ -1293,6 +1309,32 @@ class SqlAlchemySectorMembershipRepository(SectorMembershipRepository):
                 superseded_at=None,
             )
         )
+
+
+def _membership_release_records(
+    *,
+    scheme: SectorScheme,
+    components: Sequence[tuple[StoredSector, Mapping[Any, Any], bool]],
+) -> tuple[CanonicalLineageRecord, ...]:
+    """把完整板块快照 manifest 转成每板块一条不可变 release 血缘记录。"""
+    if not components:
+        raise ValueError("sector membership release requires at least one snapshot component")
+    transform_hash = hashlib.sha256(b"sector-membership-release-v1").hexdigest()
+    return tuple(
+        CanonicalLineageRecord(
+            record_key_hash=hashlib.sha256(
+                f"{scheme.value}:{sector.identifier.code}:{snapshot['snapshot_id']}".encode()
+            ).hexdigest(),
+            content_hash=bytes(snapshot["content_sha256"]).hex(),
+            source_batch_id=UUID(str(snapshot["source_batch_id"])),
+            transform_hash=transform_hash,
+            role="input",
+        )
+        for sector, snapshot, _carried_forward in sorted(
+            components,
+            key=lambda item: (item[0].identifier.code, str(item[1]["snapshot_id"])),
+        )
+    )
 
 
 def _record_fenced_release(*, data_version: UUID, record_count: int) -> None:

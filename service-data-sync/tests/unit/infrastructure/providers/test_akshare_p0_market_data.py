@@ -37,7 +37,6 @@ from service_data_sync.infrastructure.providers.akshare.p0_market_data import (
     _margin_security,
     _normalize_corporate_events,
     _normalize_dragon_tiger,
-    _stock_connect_active,
     _stock_connect_market,
 )
 
@@ -398,14 +397,61 @@ def _sse_directory_row(
     }
 
 
-def test_adapter_declares_all_sixteen_p0_capabilities() -> None:
-    """验证统一 provider 恰好声明当前已完成映射的十六个 capability。"""
+def test_adapter_retries_unclassified_transport_failure_before_returning_batch() -> None:
+    """验证交易所网关短暂断连会在总请求预算内重试，而不会生成伪空批次。"""
+    expected_payload = {"schema": "quant-v2.margin-eligibility.v1", "records": []}
+    expected_raw = {"records": []}
+    request = SourceRequest(
+        capability="market.margin.eligibility.reported",
+        parameters=(("venue", "BSE"), ("start", "2026-07-31"), ("end", "2026-07-31")),
+    )
+    with (
+        patch(
+            "service_data_sync.infrastructure.providers.akshare.p0_market_data._fetch_payload",
+            side_effect=[
+                requests.ConnectionError("gateway closed"),
+                (expected_payload, expected_raw, "bse"),
+            ],
+        ) as fetch,
+        patch(
+            "service_data_sync.infrastructure.providers.akshare.p0_market_data.asyncio.sleep",
+            new=AsyncMock(),
+        ) as sleep,
+    ):
+        batch = asyncio.run(AkshareP0MarketDataAdapter(request_timeout_seconds=5).fetch(request))
+
+    assert json.loads(batch.payload) == expected_payload
+    assert fetch.call_count == 2
+    sleep.assert_awaited_once_with(0.5)
+
+
+def test_adapter_does_not_retry_classified_provider_error() -> None:
+    """验证已识别的 schema 失败保持 fail-closed，不被传输重试掩盖。"""
+    request = SourceRequest(
+        capability="market.margin.eligibility.reported",
+        parameters=(("venue", "BSE"), ("start", "2026-07-31"), ("end", "2026-07-31")),
+    )
+    failure = ProviderError(ProviderErrorCode.SCHEMA, "provider schema changed", retryable=False)
+    with patch(
+        "service_data_sync.infrastructure.providers.akshare.p0_market_data._fetch_payload",
+        side_effect=failure,
+    ) as fetch:
+        with pytest.raises(ProviderError, match="provider schema changed") as raised:
+            asyncio.run(AkshareP0MarketDataAdapter(request_timeout_seconds=5).fetch(request))
+
+    assert raised.value.code is ProviderErrorCode.SCHEMA
+    assert fetch.call_count == 1
+
+
+def test_adapter_declares_only_fifteen_real_p0_capabilities() -> None:
+    """验证统一 provider 不再把无真源的港通活跃证券伪装为成功 capability。"""
     adapter = AkshareP0MarketDataAdapter(request_timeout_seconds=5)
 
     assert adapter.provider_id == "akshare"
-    assert len(adapter.capabilities()) == 16
+    assert len(adapter.capabilities()) == 15
     assert "fund.etf.master" in adapter.capabilities()
     assert "derivative.bar.1d.reported" in adapter.capabilities()
+    assert "market.stock_connect.active_security.snapshot" not in adapter.capabilities()
 
 
 def test_etf_status_nav_and_bars_keep_source_units_and_empty_dimensions() -> None:
@@ -804,7 +850,7 @@ def test_sse_category_tree_rejects_unknown_parent_and_cycle(
 
 
 def test_margin_adapter_maps_sse_and_szse_missing_fields_without_derivation() -> None:
-    """验证两融 adapter 保留深市未披露偿还字段为空，并只为深市映射名单。"""
+    """验证两融 adapter 保留深市未披露偿还字段为空，并映射深市观察名单。"""
     market_frame = pd.DataFrame(
         [
             {
@@ -839,13 +885,123 @@ def test_margin_adapter_maps_sse_and_szse_missing_fields_without_derivation() ->
         market, _ = _margin_market(_window(venue="SSE"))
         security, _ = _margin_security(_window(venue="SZSE"))
         eligibility, _ = _margin_eligibility(_window(venue="SZSE"))
-        sse_eligibility, _ = _margin_eligibility(_window(venue="SSE"))
 
     assert market["records"][0]["financingBalance"] == "10"
     assert security["records"][0]["financingRepaymentReported"] is None
     assert security["records"][0]["nullReason"] == "NOT_REPORTED_BY_SOURCE"
     assert eligibility["records"][0]["evidenceBasis"] == "OBSERVED_LIST"
-    assert sse_eligibility["records"] == []
+
+
+def test_margin_adapter_maps_bse_underlying_flags_without_using_daily_availability() -> None:
+    """验证北交所标的列精确映射四种资格，日内可用列只保留在 raw 证据。"""
+    frame = pd.DataFrame(
+        [
+            {
+                "证券代码": "920000",
+                "证券简称": "全资格",
+                "融资标的": "Y",
+                "融券标的": "Y",
+                "当日可融资": "N",
+                "当日可融券": "N",
+            },
+            {
+                "证券代码": "920001",
+                "证券简称": "仅融资",
+                "融资标的": "Y",
+                "融券标的": "N",
+                "当日可融资": "Y",
+                "当日可融券": "N",
+            },
+            {
+                "证券代码": "920002",
+                "证券简称": "仅融券",
+                "融资标的": "N",
+                "融券标的": "Y",
+                "当日可融资": "N",
+                "当日可融券": "Y",
+            },
+            {
+                "证券代码": "920003",
+                "证券简称": "非标的",
+                "融资标的": "N",
+                "融券标的": "N",
+                "当日可融资": "Y",
+                "当日可融券": "Y",
+            },
+        ]
+    )
+    parameters = {"venue": "BSE", "start": "2026-07-28", "end": "2026-07-28"}
+    with patch(
+        "service_data_sync.infrastructure.providers.akshare.p0_market_data.ak.stock_margin_underlying_info_bse",
+        return_value=frame,
+    ) as fetch:
+        payload, raw, upstream_source = _fetch_payload(
+            capability="market.margin.eligibility.reported",
+            parameters=parameters,
+            request_timeout_seconds=5,
+        )
+
+    assert fetch.call_args.args == ("20260728",)
+    assert upstream_source == "bse.margin-underlying"
+    assert [record["status"] for record in payload["records"]] == [
+        "ELIGIBLE",
+        "FINANCING_ONLY",
+        "LENDING_ONLY",
+        "INELIGIBLE",
+    ]
+    assert {"当日可融资", "当日可融券"}.isdisjoint(payload["records"][0])
+    assert raw["records"][0]["records"][0]["当日可融资"] == "N"
+    assert raw["records"][0]["records"][0]["当日可融券"] == "N"
+
+
+@pytest.mark.parametrize(
+    ("frame", "message"),
+    [
+        (pd.DataFrame([{"证券代码": "920000"}]), "column contract changed"),
+        (
+            pd.DataFrame(
+                [
+                    {
+                        "证券代码": "920000",
+                        "证券简称": "坏标志",
+                        "融资标的": "MAYBE",
+                        "融券标的": "Y",
+                        "当日可融资": "Y",
+                        "当日可融券": "Y",
+                    }
+                ]
+            ),
+            "must be Y or N",
+        ),
+        (
+            pd.DataFrame(
+                [
+                    {
+                        "证券代码": "ABC123",
+                        "证券简称": "坏代码",
+                        "融资标的": "Y",
+                        "融券标的": "Y",
+                        "当日可融资": "Y",
+                        "当日可融券": "Y",
+                    }
+                ]
+            ),
+            "identity is invalid",
+        ),
+    ],
+)
+def test_margin_adapter_rejects_bse_schema_or_flag_drift(frame: pd.DataFrame, message: str) -> None:
+    """北交所中文列或任一 Y/N 标志漂移必须隔离，不能降级为空或猜测。"""
+    with (
+        patch(
+            "service_data_sync.infrastructure.providers.akshare.p0_market_data.ak.stock_margin_underlying_info_bse",
+            return_value=frame,
+        ),
+        pytest.raises(ProviderError, match=message) as captured,
+    ):
+        _margin_eligibility({"venue": "BSE", "start": "2026-07-28", "end": "2026-07-28"})
+
+    assert captured.value.code is ProviderErrorCode.SCHEMA
 
 
 def test_akshare_empty_dataframe_construction_error_becomes_a_normal_empty_batch() -> None:
@@ -862,8 +1018,8 @@ def test_akshare_empty_dataframe_construction_error_becomes_a_normal_empty_batch
     assert raw["records"] == [{"requestedDate": None, "records": []}]
 
 
-def test_stock_connect_maps_history_and_rejects_estimated_holding_ranking() -> None:
-    """验证港通金额换算为 CNY，成交活跃榜不会误用持股估算排行。"""
+def test_stock_connect_maps_history_to_cny_without_deriving_turnover() -> None:
+    """验证港通金额换算为 CNY，接口未给总成交额时保持为空。"""
     frame = pd.DataFrame(
         [
             {
@@ -881,12 +1037,76 @@ def test_stock_connect_maps_history_and_rejects_estimated_holding_ranking() -> N
         return_value=frame,
     ):
         market, _ = _stock_connect_market(parameters)
-    active, raw = _stock_connect_active(parameters)
 
     assert market["records"][0]["buyAmount"] == "1250000000.0"
     assert market["records"][0]["turnoverAmount"] is None
-    assert active["records"] == []
-    assert "not official active-trading" in str(raw["reason"])
+
+
+def test_adapter_rejects_stock_connect_active_direct_request_with_desensitized_evidence() -> None:
+    """无可验证 active-security 真源时，直调必须失败关闭而非返回伪空成功。"""
+    adapter = AkshareP0MarketDataAdapter(request_timeout_seconds=5)
+    request = SourceRequest(
+        capability="market.stock_connect.active_security.snapshot",
+        parameters=(
+            ("channel", "SH"),
+            ("direction", "NORTHBOUND"),
+            ("start", "2026-07-28"),
+            ("end", "2026-07-28"),
+        ),
+    )
+
+    assert request.capability not in adapter.capabilities()
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(adapter.fetch(request))
+
+    assert captured.value.code is ProviderErrorCode.CURRENTLY_UNSUPPORTED
+    assert captured.value.retryable is False
+    assert captured.value.failure_evidence is not None
+    evidence_text = captured.value.failure_evidence.decode()
+    evidence = json.loads(evidence_text)
+    assert evidence["reasonCode"] == "NO_VERIFIED_ACTIVE_SECURITY_SOURCE"
+    assert evidence["request"]["parameterNames"] == ["channel", "direction", "end", "start"]
+    assert len(evidence["request"]["requestFingerprint"]) == 64
+    assert "NORTHBOUND" not in evidence_text
+    assert "2026-07-28" not in evidence_text
+
+
+@pytest.mark.parametrize(
+    ("capability", "venue", "reason_code"),
+    [
+        (
+            "market.margin.eligibility.reported",
+            "SSE",
+            "SSE_MARGIN_ELIGIBILITY_NO_UNDERLYING_ENDPOINT",
+        ),
+        ("market.margin.market.1d.reported", "BSE", "BSE_MARGIN_MARKET_NOT_MAPPED"),
+        ("market.margin.security.1d.reported", "BSE", "BSE_MARGIN_SECURITY_NOT_MAPPED"),
+    ],
+)
+def test_adapter_rejects_margin_requests_without_a_mapped_true_source(
+    capability: str, venue: str, reason_code: str
+) -> None:
+    """上交所资格和北交所余额/明细均必须显式不支持，不能被伪空成功掩盖。"""
+    adapter = AkshareP0MarketDataAdapter(request_timeout_seconds=5)
+    request = SourceRequest(
+        capability=capability,
+        parameters=(
+            ("venue", venue),
+            ("start", "2026-07-28"),
+            ("end", "2026-07-28"),
+        ),
+    )
+
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(adapter.fetch(request))
+
+    assert captured.value.code is ProviderErrorCode.CURRENTLY_UNSUPPORTED
+    assert captured.value.retryable is False
+    assert captured.value.failure_evidence is not None
+    evidence = json.loads(captured.value.failure_evidence)
+    assert evidence["capability"] == capability
+    assert evidence["reasonCode"] == reason_code
+    assert evidence["request"]["parameterNames"] == ["end", "start", "venue"]
 
 
 def test_corporate_adapter_keeps_documents_when_some_metrics_are_unavailable() -> None:
@@ -1253,7 +1473,7 @@ def test_earnings_native_pages_use_notice_date_and_independent_timeout() -> None
         "2026-07-29",
     }
     assert batch.upstream_source == "eastmoney.earnings"
-    assert batch.adapter_version == "akshare-1.18.78-p0-market-data-v8"
+    assert batch.adapter_version == "akshare-1.18.81-p0-market-data-v9"
     assert raw["announcementField"] == "NOTICE_DATE"
     assert len(script.calls) == 2
     assert all(request_timeout.read == 1 for _, request_timeout in script.calls)

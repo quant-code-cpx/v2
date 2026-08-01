@@ -33,7 +33,8 @@ from ..base import Base
 class IndexDefinition(Base):
     """为 `P0-A` 观察建立管理人范围内的暂定指数身份，不断言代码延续或跨资产根身份。
 
-    同一六位代码在不同管理人下并不天然相同，代码变更、合并或退役也需要官方事件才能建立链路。
+    同一六码至八码大写字母数字代码在不同管理人下并不天然相同，代码变更、合并或退役也需要官方事件
+    才能建立链路。
     因此本表的身份只在“管理人 + 当前来源代码”范围内稳定，`status` 是观察或已确认状态，不能
     把目录缺席直接视为停编，更不能替代跨资产 `MarketEntity`。
     """
@@ -43,7 +44,9 @@ class IndexDefinition(Base):
         CheckConstraint(
             "administrator_code IN ('CSI', 'CNI')", name="ck_index_definition_administrator"
         ),
-        CheckConstraint("source_index_code ~ '^[0-9]{6}$'", name="ck_index_definition_source_code"),
+        CheckConstraint(
+            "source_index_code ~ '^[A-Z0-9]{6,8}$'", name="ck_index_definition_source_code"
+        ),
         CheckConstraint(
             "status IN ('observed', 'active', 'retired')", name="ck_index_definition_status"
         ),
@@ -61,7 +64,7 @@ class IndexDefinition(Base):
         String(8), nullable=False, comment="中证或国证管理人代码。"
     )
     source_index_code: Mapped[str] = mapped_column(
-        String(6), nullable=False, comment="当前观察到的六位来源指数代码。"
+        String(8), nullable=False, comment="当前观察到的六码至八码大写字母数字来源指数代码。"
     )
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, comment="仅观察、已确认活动或有官方证据的退役状态。"

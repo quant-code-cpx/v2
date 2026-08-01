@@ -231,6 +231,7 @@ function publicEquityPage(input: InternalEquityPage): EquityPage {
 
 /** 移除单证券详情的内部 UUID。 */
 function publicEquityDetail(input: InternalEquityDetail): EquityDetail {
+  /** 保留 resolved publication 的组件血缘，公开层只裁剪内部证券 UUID。 */
   return parsePublicResponse(equityDetailSchema, {
     identifier: input.identifier,
     name: input.name,
@@ -238,7 +239,9 @@ function publicEquityDetail(input: InternalEquityDetail): EquityDetail {
     dataVersion: input.dataVersion,
     publishedAt: input.publishedAt,
     effectiveAsOf: input.effectiveAsOf,
-    knowledgeCutoff: input.knowledgeCutoff,
+    requestedKnownAt: input.requestedKnownAt,
+    publicationScope: input.publicationScope,
+    componentPublications: input.componentPublications,
   });
 }
 
@@ -246,6 +249,7 @@ function publicEquityDetail(input: InternalEquityDetail): EquityDetail {
 function publicListingStatusHistoryPage(
   input: InternalListingStatusHistoryPage,
 ): ListingStatusHistoryPage {
+  /** 保留历史项来源和 resolved 组件血缘，公开层只裁剪内部证券 UUID。 */
   return parsePublicResponse(listingStatusHistoryPageSchema, {
     exchange: input.exchange,
     symbol: input.symbol,
@@ -253,7 +257,9 @@ function publicListingStatusHistoryPage(
     nextCursor: input.nextCursor,
     dataVersion: input.dataVersion,
     publishedAt: input.publishedAt,
-    knowledgeCutoff: input.knowledgeCutoff,
+    requestedKnownAt: input.requestedKnownAt,
+    publicationScope: input.publicationScope,
+    componentPublications: input.componentPublications,
   });
 }
 

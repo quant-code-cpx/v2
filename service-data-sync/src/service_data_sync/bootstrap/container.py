@@ -45,7 +45,8 @@ from service_data_sync.infrastructure.providers.official import (
 )
 from service_data_sync.infrastructure.providers.tushare import TushareMarketOverviewAdapter
 
-_EQUITY_CATALOG_MIN_TIMEOUT_SECONDS = 180
+# 东财目录会顺序拉取全市场分页；总预算必须覆盖完整快照，而单页 HTTP 仍使用普通请求超时。
+_EQUITY_CATALOG_MIN_TIMEOUT_SECONDS = 600
 
 
 @dataclass
@@ -145,7 +146,9 @@ def build_source_registry(settings: Settings) -> SourceRegistry:
             )
         )
     if settings.akshare_enabled:
-        install_eastmoney_request_compatibility()
+        install_eastmoney_request_compatibility(
+            request_timeout_seconds=settings.akshare_request_timeout_seconds
+        )
         # P0 CLI 默认精确选择 `provider_id=akshare`；统一 adapter 避免同名 provider 注册歧义。
         registry.register(
             AkshareP0MarketDataAdapter(
@@ -159,7 +162,7 @@ def build_source_registry(settings: Settings) -> SourceRegistry:
         )
         registry.register(
             AkshareEastmoneyEquityCatalogAdapter(
-                # 全市场目录单次真实抓取明显长于普通单证券请求，只扩大这一 adapter 的墙钟预算。
+                # 全市场目录单次真实抓取明显长于普通单证券请求，只扩大这一 adapter 的总预算。
                 request_timeout_seconds=max(
                     settings.akshare_request_timeout_seconds,
                     _EQUITY_CATALOG_MIN_TIMEOUT_SECONDS,

@@ -395,7 +395,7 @@ export function equityBarsQueryOptions(
   });
 }
 
-/** 合并同一 cursor 链的行情页，并拒绝跨 publication 或非递增时间序列。 */
+/** 合并同一 cursor 链的行情页，并拒绝跨 publication、精确覆盖或非递增时间序列。 */
 function mergeEquityBarPages(
   entities: ReadonlyArray<ConditionalEntity<EquityBarPage>>,
 ): EquityBarPage {
@@ -416,7 +416,10 @@ function mergeEquityBarPages(
       page.adjustmentMode !== first.adjustmentMode ||
       page.adjustAsOf !== first.adjustAsOf ||
       page.factorVersion !== first.factorVersion ||
-      page.dataVersion !== first.dataVersion
+      page.dataVersion !== first.dataVersion ||
+      page.coverageVersion !== first.coverageVersion ||
+      page.publicationKind !== first.publicationKind ||
+      page.sourceBatchId !== first.sourceBatchId
     ) {
       throw new ApiError(409, "snapshot-expired");
     }

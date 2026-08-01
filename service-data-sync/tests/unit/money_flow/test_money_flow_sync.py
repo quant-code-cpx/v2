@@ -23,8 +23,10 @@ from service_data_sync.application.ports.data_source import (
     ProviderErrorCode,
     SourceRequest,
 )
-from service_data_sync.application.ports.market_data import RawPayload
-from service_data_sync.application.ports.money_flow import PublishedMoneyFlow
+from service_data_sync.application.ports.money_flow import (
+    MoneyFlowSourceObservation,
+    PublishedMoneyFlow,
+)
 from service_data_sync.domain.money_flow import MoneyFlowScopeType
 
 _OBSERVED_AT = datetime(2026, 7, 24, 10, tzinfo=UTC)
@@ -66,28 +68,6 @@ class FakeSource:
             upstream_source="fixture",
             schema_fingerprint="a" * 64,
         )
-
-
-class FakeRawStore:
-    """记录 raw evidence，并返回不可变对象 URI。"""
-
-    def __init__(self, events: list[str]) -> None:
-        """保存执行顺序。"""
-        self._events = events
-        self.payloads: list[RawPayload] = []
-
-    def put(self, payload: RawPayload) -> str:
-        """在 canonical 发布前记录 raw。"""
-        self._events.append("raw")
-        self.payloads.append(payload)
-        return f"s3://private/{payload.object_key}"
-
-    def get(self, uri: str) -> bytes:
-        """按不可变 URI 返回已归档证据，供离线重放契约使用。"""
-        for payload in self.payloads:
-            if uri == f"s3://private/{payload.object_key}":
-                return payload.payload
-        raise KeyError(uri)
 
 
 class FakeRepository:
@@ -188,8 +168,8 @@ def _ranking_payload(*, sector: bool = False) -> dict[str, object]:
     }
 
 
-def test_sync_archives_raw_before_research_canonical_write() -> None:
-    """验证 raw-first、研究态 fail-closed 和显式 run checkpoint 透传。"""
+def test_sync_keeps_success_payload_unretained_before_research_canonical_write() -> None:
+    """成功批次只传入摘要引用；研究态入库不持久化任何来源字节。"""
     payload = json.dumps(
         {
             "schema": "quant-v2.money-flow-daily.v1",
@@ -216,7 +196,6 @@ def test_sync_archives_raw_before_research_canonical_write() -> None:
     ).encode()
     events: list[str] = []
     source = FakeSource(payload, events)
-    raw_store = FakeRawStore(events)
     repository = FakeRepository(events)
     run_id = uuid4()
 
@@ -224,7 +203,6 @@ def test_sync_archives_raw_before_research_canonical_write() -> None:
         MoneyFlowSyncService(
             source=source,
             repository=repository,
-            raw_payload_store=raw_store,
         ).sync(
             capability="money_flow.order_size.daily.equity.raw",
             parameters=(("exchange", "SSE"), ("symbol", "600000")),
@@ -233,17 +211,20 @@ def test_sync_archives_raw_before_research_canonical_write() -> None:
         )
     )
 
-    assert events == ["fetch", "raw", "publish"]
+    assert events == ["fetch", "publish"]
     assert result.publication.published is False
     assert repository.call is not None
     assert repository.call["methodology"].status == "research"
     assert repository.call["run_id"] == run_id
     assert repository.call["partition_key"] == "request:fixture"
-    assert raw_store.payloads[0].payload == b'{"vendor":"raw"}'
+    source_observation = repository.call["source"]
+    assert isinstance(source_observation, MoneyFlowSourceObservation)
+    assert source_observation.raw_uri.startswith("unretained://sha256/")
+    assert source_observation.normalized_uri.startswith("unretained://sha256/")
 
 
 def test_sync_routes_supplier_ranking_without_recomputing_position() -> None:
-    """验证排行保留供应商位置、方法学隔离和 raw-first 顺序。"""
+    """验证排行保留供应商位置、方法学隔离及成功载荷不落对象存储。"""
     capability = "money_flow.trade_direction.ranking.equity.raw"
     events: list[str] = []
     source = FakeSource(
@@ -251,21 +232,19 @@ def test_sync_routes_supplier_ranking_without_recomputing_position() -> None:
         events,
         capability=capability,
     )
-    raw_store = FakeRawStore(events)
     repository = FakeRankingRepository(events)
 
     result = asyncio.run(
         MoneyFlowSyncService(
             source=source,
             repository=repository,
-            raw_payload_store=raw_store,
         ).sync(
             capability=capability,
             parameters=(("indicator", "3日排行"),),
         )
     )
 
-    assert events == ["fetch", "raw", "publish-ranking"]
+    assert events == ["fetch", "publish-ranking"]
     assert result.publication.quality_status == "partial"
     assert repository.call is not None
     methodology = repository.call["methodology"]
@@ -277,12 +256,11 @@ def test_sync_routes_supplier_ranking_without_recomputing_position() -> None:
 
 
 def test_sync_rejects_capability_not_declared_by_selected_source() -> None:
-    """来源未声明能力时不得发出网络请求或写入 raw。"""
+    """来源未声明能力时不得发出网络请求或创建来源观察。"""
     events: list[str] = []
     service = MoneyFlowSyncService(
         source=FakeSource(b"{}", events),
         repository=FakeRepository(events),
-        raw_payload_store=FakeRawStore(events),
     )
 
     with pytest.raises(ProviderError) as captured:
@@ -388,6 +366,31 @@ def test_ranking_parser_rejects_invalid_structure_and_typed_fields() -> None:
     assert isinstance(metric_record, dict)
     metric_record["metrics"] = [None]
     invalid_payloads.append((invalid_metric, "metric is invalid"))
+    empty_metric_list = _ranking_payload()
+    empty_metric_items = empty_metric_list["items"]
+    assert isinstance(empty_metric_items, list)
+    empty_metric_record = empty_metric_items[0]
+    assert isinstance(empty_metric_record, dict)
+    empty_metric_record["metrics"] = []
+    invalid_payloads.append((empty_metric_list, "item is invalid"))
+    no_measure_metric = _ranking_payload()
+    no_measure_items = no_measure_metric["items"]
+    assert isinstance(no_measure_items, list)
+    no_measure_record = no_measure_items[0]
+    assert isinstance(no_measure_record, dict)
+    no_measure_metrics = no_measure_record["metrics"]
+    assert isinstance(no_measure_metrics, list)
+    no_measure_value = no_measure_metrics[0]
+    assert isinstance(no_measure_value, dict)
+    no_measure_value.update(
+        {
+            "grossInflow": None,
+            "grossOutflow": None,
+            "netAmount": None,
+            "netRatio": None,
+        }
+    )
+    invalid_payloads.append((no_measure_metric, "has no measures"))
     invalid_position = _ranking_payload()
     position_items = invalid_position["items"]
     assert isinstance(position_items, list)

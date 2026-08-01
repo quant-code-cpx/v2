@@ -46,6 +46,9 @@
 0022/0023 共同定义数据目录、同步命令、运行、健康评估、自动计划和运维记录。0022 的
 `service-data-sync` 命令/run 是执行权威；0023 的 `service-api` submission/outbox 只表示授权与交付意图。
 公开写操作返回 `202 delivery=PENDING` 时，不得解释为同步服务已经受理。
+对首批 A 股 `equity.*` target，来源 binding 中的 `approvalStatus`、rights/license 与归属字段仅用于审计和
+lineage，不能改变 command、checkpoint、publication 或技术验收；详见
+[ADR-0028](../decisions/0028-source-metadata-nonblocking-data-operations.md)。
 
 0024/0025 共同定义沪股通、深股通、港股通（沪）、港股通（深）的共同 bundle、通道统计、
 官方活跃证券榜、证券上下文和独立持久化 readiness 证据。0024 的已批准 publication

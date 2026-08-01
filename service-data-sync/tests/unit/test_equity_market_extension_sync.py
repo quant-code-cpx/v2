@@ -115,7 +115,7 @@ class FakeRepository:
         self.calls.append((kind, kwargs))
         identifier = kwargs["identifier"]
         assert isinstance(identifier, EquityIdentifier)
-        rows = kwargs.get("bars")
+        rows = kwargs.get("bars", kwargs.get("factors"))
         row_count = len(rows) if isinstance(rows, tuple) else 1
         return PublishedEquityDataset(
             data_version=uuid4(),
@@ -349,6 +349,39 @@ def test_factor_action_and_profile_sync_publish_typed_values() -> None:
     assert repository.calls[1][1]["end"] == date(2026, 7, 28)
     assert profile.industry == "白酒"
     assert len(raw_store.values) == 6
+
+
+def test_factor_sync_publishes_proven_sparse_empty_window() -> None:
+    """来源已证明无新增生效点时，因子同步必须发布零记录快照而不伪造数值。"""
+    identifier = EquityIdentifier.parse("SSE.600519")
+    repository = FakeRepository()
+    raw_store = FakeRawStore()
+    source = FakeSource(
+        "equity.adjustment_factor",
+        _payload(
+            "quant-v2.equity-adjustment-factor.v1",
+            identifier,
+            factors=[],
+        ),
+    )
+
+    result = asyncio.run(
+        EquityAdjustmentFactorSyncService(
+            source=source,
+            repository=repository,  # type: ignore[arg-type]
+            raw_payload_store=raw_store,  # type: ignore[arg-type]
+        ).sync(
+            identifier=identifier,
+            start=date(2026, 8, 1),
+            end=date(2026, 8, 1),
+        )
+    )
+
+    assert result.inserted_count == 0
+    assert repository.calls[0][0] == "factor"
+    assert repository.calls[0][1]["factors"] == ()
+    assert repository.calls[0][1]["window_end"] == date(2026, 8, 1)
+    assert len(raw_store.values) == 2
 
 
 @pytest.mark.parametrize(

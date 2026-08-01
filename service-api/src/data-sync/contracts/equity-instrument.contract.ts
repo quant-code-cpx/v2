@@ -18,6 +18,42 @@ const dateTimeSchema = z.string().datetime({ offset: true });
 const nullableDateSchema = dateSchema.nullable();
 const nullableDateTimeSchema = dateTimeSchema.nullable();
 
+/** 校验不含 raw URI 的来源批次锚点，供两个服务核对数据血缘。 */
+const sourceAttributionSchema = z
+  .object({
+    sourceBatchId: z.string().uuid(),
+    providerId: z.string().min(1).max(100),
+    upstreamSource: z.string().min(1).max(100),
+  })
+  .strict();
+
+/** 约束已发布输入组件的质量状态；resolved 主数据只接受 passed 输入。 */
+const publicationQualityStatusSchema = z.literal('passed');
+
+/** 校验目录和交易所生命周期可以公开审计的证据类型。 */
+const lifecycleEvidenceKindSchema = z.enum([
+  'CATALOG',
+  'EXPLICIT_LISTING',
+  'EXPLICIT_SUSPENSION',
+  'EXPLICIT_RESUMPTION',
+  'EXPLICIT_DELISTING',
+  'OFFICIAL_CORRECTION',
+]);
+
+/** 校验 resolved publication 固定采用的一个目录或生命周期输入组件。 */
+const publicationComponentSchema = z
+  .object({
+    componentKey: z.string().min(1).max(64),
+    dataset: z.enum(['equity.master.catalog', 'equity.lifecycle.explicit']),
+    partitionKey: exchangeSchema,
+    dataVersion: z.string().uuid(),
+    publishedAt: dateTimeSchema,
+    effectiveAsOf: dateSchema,
+    knowledgeCutoff: dateTimeSchema,
+    qualityStatus: publicationQualityStatusSchema,
+  })
+  .strict();
+
 /** 校验一个证券代码在业务有效时间与系统知识时间中的身份。 */
 const temporalIdentifierSchema = z
   .object({
@@ -28,6 +64,8 @@ const temporalIdentifierSchema = z
     datePrecision: effectiveDatePrecisionSchema,
     knownFrom: dateTimeSchema,
     observedAt: dateTimeSchema,
+    source: sourceAttributionSchema,
+    qualityStatus: publicationQualityStatusSchema,
   })
   .strict();
 
@@ -40,6 +78,8 @@ const temporalNameSchema = z
     datePrecision: effectiveDatePrecisionSchema,
     knownFrom: dateTimeSchema,
     observedAt: dateTimeSchema,
+    source: sourceAttributionSchema,
+    qualityStatus: publicationQualityStatusSchema,
   })
   .strict();
 
@@ -54,6 +94,9 @@ const temporalListingSchema = z
     datePrecision: effectiveDatePrecisionSchema,
     knownFrom: dateTimeSchema,
     observedAt: dateTimeSchema,
+    evidenceKind: lifecycleEvidenceKindSchema,
+    source: sourceAttributionSchema,
+    qualityStatus: publicationQualityStatusSchema,
   })
   .strict();
 
@@ -78,8 +121,9 @@ export const internalEquityPageSchema = z
     dataVersion: z.string().uuid(),
     publishedAt: dateTimeSchema,
     effectiveAsOf: dateSchema,
-    knowledgeCutoff: dateTimeSchema,
+    requestedKnownAt: dateTimeSchema,
     publicationScope: z.enum(['SSE', 'SZSE', 'BSE', 'CN_A_STABLE']),
+    componentPublications: z.array(publicationComponentSchema).min(2).max(6),
   })
   .strict();
 
@@ -91,8 +135,9 @@ export const equityPageSchema = z
     dataVersion: z.string().uuid(),
     publishedAt: dateTimeSchema,
     effectiveAsOf: dateSchema,
-    knowledgeCutoff: dateTimeSchema,
+    requestedKnownAt: dateTimeSchema,
     publicationScope: z.enum(['SSE', 'SZSE', 'BSE', 'CN_A_STABLE']),
+    componentPublications: z.array(publicationComponentSchema).min(2).max(6),
   })
   .strict();
 
@@ -106,7 +151,9 @@ export const internalEquityDetailSchema = z
     dataVersion: z.string().uuid(),
     publishedAt: dateTimeSchema,
     effectiveAsOf: dateSchema,
-    knowledgeCutoff: dateTimeSchema,
+    requestedKnownAt: dateTimeSchema,
+    publicationScope: z.enum(['SSE', 'SZSE', 'BSE', 'CN_A_STABLE']),
+    componentPublications: z.array(publicationComponentSchema).min(2).max(6),
   })
   .strict();
 
@@ -123,6 +170,9 @@ const listingStatusPeriodSchema = z
     knownFrom: dateTimeSchema,
     knownTo: nullableDateTimeSchema,
     observedAt: dateTimeSchema,
+    evidenceKind: lifecycleEvidenceKindSchema,
+    source: sourceAttributionSchema,
+    qualityStatus: publicationQualityStatusSchema,
   })
   .strict();
 
@@ -136,7 +186,9 @@ export const internalListingStatusHistoryPageSchema = z
     nextCursor: z.string().max(1024).nullable(),
     dataVersion: z.string().uuid(),
     publishedAt: dateTimeSchema,
-    knowledgeCutoff: dateTimeSchema,
+    requestedKnownAt: dateTimeSchema,
+    publicationScope: z.enum(['SSE', 'SZSE', 'BSE', 'CN_A_STABLE']),
+    componentPublications: z.array(publicationComponentSchema).min(2).max(6),
   })
   .strict();
 

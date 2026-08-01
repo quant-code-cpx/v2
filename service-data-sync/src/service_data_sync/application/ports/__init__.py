@@ -22,6 +22,10 @@ from service_data_sync.application.ports.market_data import (
 )
 from service_data_sync.application.ports.sector_market_data import SectorMarketDataRepository
 from service_data_sync.application.ports.sector_membership import SectorMembershipRepository
+from service_data_sync.application.ports.stock_connect_market_stat_research import (
+    StockConnectMarketStatFailureEvidenceStore,
+    StockConnectMarketStatResearchRepository,
+)
 
 __all__ = [
     "DataSourcePort",
@@ -36,4 +40,6 @@ __all__ = [
     "SectorMarketDataRepository",
     "SectorMembershipRepository",
     "SourceRequest",
+    "StockConnectMarketStatFailureEvidenceStore",
+    "StockConnectMarketStatResearchRepository",
 ]

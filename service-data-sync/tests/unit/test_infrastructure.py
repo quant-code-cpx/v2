@@ -192,8 +192,8 @@ def test_registry_grants_only_the_full_market_catalog_a_longer_timeout(
     configured_environment: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """全市场目录至少获得 180 秒预算，其他 `AKShare` adapter 仍沿用普通请求预算。"""
-    captured: dict[str, int] = {}
+    """全市场目录获得 600 秒总预算，单页东财请求仍沿用普通请求预算。"""
+    captured: dict[str, float] = {}
     p0_adapter_type = container_module.AkshareP0MarketDataAdapter
     catalog_adapter_type = container_module.AkshareEastmoneyEquityCatalogAdapter
 
@@ -207,9 +207,18 @@ def test_registry_grants_only_the_full_market_catalog_a_longer_timeout(
         captured["catalog"] = request_timeout_seconds
         return catalog_adapter_type(request_timeout_seconds=request_timeout_seconds)
 
+    def install_eastmoney_compatibility(*, request_timeout_seconds: float) -> None:
+        """记录容器传给东财传输层的单请求预算，不修改全局 requests 行为。"""
+        captured["eastmoneyHttp"] = request_timeout_seconds
+
     monkeypatch.setenv("DATA_SYNC_AKSHARE_ENABLED", "true")
     monkeypatch.setenv("DATA_SYNC_AKSHARE_REQUEST_TIMEOUT_SECONDS", "12")
     monkeypatch.setattr(container_module, "AkshareP0MarketDataAdapter", build_p0_adapter)
+    monkeypatch.setattr(
+        container_module,
+        "install_eastmoney_request_compatibility",
+        install_eastmoney_compatibility,
+    )
     monkeypatch.setattr(
         container_module,
         "AkshareEastmoneyEquityCatalogAdapter",
@@ -219,7 +228,7 @@ def test_registry_grants_only_the_full_market_catalog_a_longer_timeout(
     registry = container_module.build_source_registry(load_settings())
 
     assert "akshare-eastmoney-equity-catalog" in registry.provider_ids()
-    assert captured == {"p0": 12, "catalog": 180}
+    assert captured == {"eastmoneyHttp": 12, "p0": 12, "catalog": 600}
 
 
 def test_registry_adds_sw_snapshot_source_only_with_its_explicit_capability_flag(

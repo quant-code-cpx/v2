@@ -1,13 +1,16 @@
 openapi: 3.1.1
 info:
   title: service-data-sync equity instrument internal API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Implemented service-to-service read contract for published Shanghai, Shenzhen,
     and Beijing A-share instrument master data. service-data-sync owns canonical
     identity, bitemporal names and listing lifecycle. Raw evidence, provider
     fields, PENDING placeholders, quarantined conflicts, and database keys are
-    not exposed. instrumentId is an internal correlation identifier and must be
+    not exposed. A published fact now carries a safe source-batch UUID,
+    provider ID, upstream source, evidence kind, and quality status for
+    cross-service verification; raw URIs and provider payload fields remain
+    private. instrumentId is an internal correlation identifier and must be
     removed by service-api before any public response.
 
     This contract is the implementation authority for the equity catalog,
@@ -440,6 +443,77 @@ components:
       type: [string, 'null']
       format: date-time
 
+    SourceAttribution:
+      type: object
+      additionalProperties: false
+      required: [sourceBatchId, providerId, upstreamSource]
+      description: 可复验但不含 raw URI 的来源观察锚点。
+      properties:
+        sourceBatchId:
+          type: string
+          format: uuid
+        providerId:
+          type: string
+          minLength: 1
+          maxLength: 100
+        upstreamSource:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+    PublicationQualityStatus:
+      type: string
+      enum: [passed]
+      description: resolved 主数据仅选择通过质量门的输入组件。
+
+    LifecycleEvidenceKind:
+      type: string
+      enum:
+        - CATALOG
+        - EXPLICIT_LISTING
+        - EXPLICIT_SUSPENSION
+        - EXPLICIT_RESUMPTION
+        - EXPLICIT_DELISTING
+        - OFFICIAL_CORRECTION
+
+    PublicationComponent:
+      type: object
+      additionalProperties: false
+      required:
+        - componentKey
+        - dataset
+        - partitionKey
+        - dataVersion
+        - publishedAt
+        - effectiveAsOf
+        - knowledgeCutoff
+        - qualityStatus
+      description: resolved publication 固定采用的目录或生命周期输入，二者 cutoff 独立。
+      properties:
+        componentKey:
+          type: string
+          minLength: 1
+          maxLength: 64
+        dataset:
+          type: string
+          enum: [equity.master.catalog, equity.lifecycle.explicit]
+        partitionKey:
+          $ref: '#/components/schemas/Exchange'
+        dataVersion:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+        effectiveAsOf:
+          type: string
+          format: date
+        knowledgeCutoff:
+          type: string
+          format: date-time
+        qualityStatus:
+          $ref: '#/components/schemas/PublicationQualityStatus'
+
     TemporalIdentifier:
       type: object
       additionalProperties: false
@@ -451,6 +525,8 @@ components:
         - datePrecision
         - knownFrom
         - observedAt
+        - source
+        - qualityStatus
       properties:
         exchange:
           $ref: '#/components/schemas/Exchange'
@@ -469,6 +545,10 @@ components:
         observedAt:
           type: string
           format: date-time
+        source:
+          $ref: '#/components/schemas/SourceAttribution'
+        qualityStatus:
+          $ref: '#/components/schemas/PublicationQualityStatus'
 
     TemporalName:
       type: object
@@ -480,6 +560,8 @@ components:
         - datePrecision
         - knownFrom
         - observedAt
+        - source
+        - qualityStatus
       properties:
         value:
           type: string
@@ -498,6 +580,10 @@ components:
         observedAt:
           type: string
           format: date-time
+        source:
+          $ref: '#/components/schemas/SourceAttribution'
+        qualityStatus:
+          $ref: '#/components/schemas/PublicationQualityStatus'
 
     TemporalListing:
       type: object
@@ -511,6 +597,9 @@ components:
         - datePrecision
         - knownFrom
         - observedAt
+        - evidenceKind
+        - source
+        - qualityStatus
       properties:
         status:
           $ref: '#/components/schemas/ListingStatus'
@@ -531,6 +620,12 @@ components:
         observedAt:
           type: string
           format: date-time
+        evidenceKind:
+          $ref: '#/components/schemas/LifecycleEvidenceKind'
+        source:
+          $ref: '#/components/schemas/SourceAttribution'
+        qualityStatus:
+          $ref: '#/components/schemas/PublicationQualityStatus'
 
     InternalEquityItem:
       type: object
@@ -557,8 +652,9 @@ components:
         - dataVersion
         - publishedAt
         - effectiveAsOf
-        - knowledgeCutoff
+        - requestedKnownAt
         - publicationScope
+        - componentPublications
       properties:
         items:
           type: array
@@ -577,12 +673,18 @@ components:
         effectiveAsOf:
           type: string
           format: date
-        knowledgeCutoff:
+        requestedKnownAt:
           type: string
           format: date-time
         publicationScope:
           type: string
           enum: [SSE, SZSE, BSE, CN_A_STABLE]
+        componentPublications:
+          type: array
+          minItems: 2
+          maxItems: 6
+          items:
+            $ref: '#/components/schemas/PublicationComponent'
 
     InternalEquityDetail:
       type: object
@@ -595,7 +697,9 @@ components:
         - dataVersion
         - publishedAt
         - effectiveAsOf
-        - knowledgeCutoff
+        - requestedKnownAt
+        - publicationScope
+        - componentPublications
       properties:
         instrumentId:
           type: string
@@ -616,9 +720,18 @@ components:
         effectiveAsOf:
           type: string
           format: date
-        knowledgeCutoff:
+        requestedKnownAt:
           type: string
           format: date-time
+        publicationScope:
+          type: string
+          enum: [SSE, SZSE, BSE, CN_A_STABLE]
+        componentPublications:
+          type: array
+          minItems: 2
+          maxItems: 6
+          items:
+            $ref: '#/components/schemas/PublicationComponent'
 
     InternalListingStatusPeriod:
       type: object
@@ -631,6 +744,9 @@ components:
         - knownFrom
         - knownTo
         - observedAt
+        - evidenceKind
+        - source
+        - qualityStatus
       properties:
         status:
           $ref: '#/components/schemas/ListingStatus'
@@ -649,6 +765,12 @@ components:
         observedAt:
           type: string
           format: date-time
+        evidenceKind:
+          $ref: '#/components/schemas/LifecycleEvidenceKind'
+        source:
+          $ref: '#/components/schemas/SourceAttribution'
+        qualityStatus:
+          $ref: '#/components/schemas/PublicationQualityStatus'
 
     InternalListingStatusHistoryPage:
       type: object
@@ -661,7 +783,9 @@ components:
         - nextCursor
         - dataVersion
         - publishedAt
-        - knowledgeCutoff
+        - requestedKnownAt
+        - publicationScope
+        - componentPublications
       properties:
         instrumentId:
           type: string
@@ -685,9 +809,18 @@ components:
         publishedAt:
           type: string
           format: date-time
-        knowledgeCutoff:
+        requestedKnownAt:
           type: string
           format: date-time
+        publicationScope:
+          type: string
+          enum: [SSE, SZSE, BSE, CN_A_STABLE]
+        componentPublications:
+          type: array
+          minItems: 2
+          maxItems: 6
+          items:
+            $ref: '#/components/schemas/PublicationComponent'
 
     Problem:
       type: object

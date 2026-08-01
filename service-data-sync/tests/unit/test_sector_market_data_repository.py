@@ -158,7 +158,13 @@ def test_repository_writes_weekly_table_and_advances_weekly_publication(
         bars=(_bar(),),
         provider_id="test-provider",
         source_payload_sha256="a" * 64,
-        raw_uri="s3://test/raw.json",
+        raw_uri=f"unretained://sha256/{'a' * 64}",
+        raw_content_type="application/json",
+        raw_byte_size=128,
+        normalized_payload_sha256="c" * 64,
+        normalized_uri=f"unretained://sha256/{'c' * 64}",
+        normalized_content_type="application/json",
+        normalized_byte_size=96,
         observed_at=datetime(2026, 7, 1, tzinfo=UTC),
     )
 
@@ -167,6 +173,7 @@ def test_repository_writes_weekly_table_and_advances_weekly_publication(
     assert "sector_weekly_bar" in statements
     assert "sector_daily_bar" not in statements
     assert "INSERT INTO source_batch" in statements
+    assert "raw_payload_manifest" in statements
     assert publication.data_version == data_version
     assert release_bridge.call_args.kwargs["dataset_code"] == "sector.bar.1w.raw"
     assert release_bridge.call_args.kwargs["records"] == _lineage_records(source_batch_id)
@@ -193,6 +200,7 @@ def test_repository_keeps_current_monthly_publication_when_values_are_unchanged(
         [
             _sector_row(sector_id),
             {"source_batch_id": source_batch_id},
+            None,
             {"revision": 1, "content_sha256": _bar_content_hash(bar, is_final=True)},
         ]
     )
@@ -204,7 +212,13 @@ def test_repository_keeps_current_monthly_publication_when_values_are_unchanged(
         bars=(bar,),
         provider_id="test-provider",
         source_payload_sha256="b" * 64,
-        raw_uri="s3://test/raw.json",
+        raw_uri=f"unretained://sha256/{'b' * 64}",
+        raw_content_type="application/json",
+        raw_byte_size=128,
+        normalized_payload_sha256="d" * 64,
+        normalized_uri=f"unretained://sha256/{'d' * 64}",
+        normalized_content_type="application/json",
+        normalized_byte_size=96,
         observed_at=datetime(2026, 7, 1, tzinfo=UTC),
     )
 

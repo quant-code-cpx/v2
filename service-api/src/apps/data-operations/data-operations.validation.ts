@@ -9,11 +9,11 @@ export function validateDataOperationsRequest<T>(schema: z.ZodType<T>, input: un
     return result.data;
   }
   const message = result.error.issues.map((issue) => issue.message).join('; ');
-  // 重复 target、计划半空组合与数据集固定操作冲突都是业务语义错误，合同要求明确使用 422。
+  // 重复 target、计划半空组合与数据集固定 selector 冲突都是业务语义错误，合同要求明确使用 422。
   if (
     message.includes('Duplicate datasetCode') ||
     message.includes('scheduleId and expectedVersion') ||
-    message.includes('ETF datasetCode and selector operation do not match') ||
+    message.includes('datasetCode and selector do not match') ||
     message.includes('single ETF venue must match the qualified ETF identity')
   ) {
     throw new PublicProblemException(

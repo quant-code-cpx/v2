@@ -44,6 +44,14 @@ from service_data_sync.infrastructure.persistence.typed_p0_support import (
 _COVERAGE_SQL_BATCH_SIZE = 5_000
 
 
+class EquityWindowIdentityUnavailable(ValueError):
+    """表示指定证券在完整事实窗口内没有唯一已确认身份版本。
+
+    这不是来源、网络或数据库暂态失败。调用方必须先补齐生命周期主数据，或把请求拆分到
+    单一身份版本覆盖的日期窗口，不能把当前目录身份倒灌到历史行情或事件。
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class EventCoverageIdentity:
     """冻结一次成功来源响应实际覆盖的证券身份版本与业务日期分段。"""
@@ -142,7 +150,7 @@ def resolve_event_coverage_identities(
             .all()
         )
         if len(rows) != 1:
-            raise ValueError(
+            raise EquityWindowIdentityUnavailable(
                 "event instrument identity must uniquely cover the complete requested window"
             )
         row = rows[0]
@@ -190,7 +198,9 @@ def resolve_event_coverage_identities(
             for row in rows
         )
         if not identities:
-            raise ValueError("global event coverage has no confirmed identity roster")
+            raise EquityWindowIdentityUnavailable(
+                "global event coverage has no confirmed identity roster"
+            )
         scope = "GLOBAL"
     roster_payload = [
         {
@@ -335,8 +345,10 @@ def publish_event_window_coverages(
     )
     execution = current_fenced_execution()
     if execution is not None:
+        # coverage aggregate 不是消费者可读的 `dataVersion`。普通公司行动同步已由
+        # `_publish` 写入真实 data-version checkpoint；回填则在全部窗口封印后由
+        # `finalize_equity_event_partitions` 明确写入 event-coverage-version。
         execution.record_publication_progress(record_count=total_records)
-        execution.record_checkpoint(kind="event-coverage-version", position=str(aggregate))
     return PublishedEventCoverages(
         data_version=aggregate,
         record_count=total_records,

@@ -1,4 +1,4 @@
-"""基于固定版本 `AKShare` 交易所接口的显式上市生命周期适配器。
+"""基于固定版本 `AKShare` 与交易所官方端点的显式上市生命周期适配器。
 
 沪深终止上市表只生成有官方日期的 `DELISTED` 事实，北交所在册表只生成有官方上市日的
 `LISTED` 事实。适配器不会从目录缺席、名称变化或今日观察时间推断任何状态；历史日期
@@ -12,10 +12,13 @@ import hashlib
 import json
 from collections.abc import Mapping
 from datetime import UTC, date, datetime
+from io import BytesIO
 from typing import Any
+from zipfile import BadZipFile
 from zoneinfo import ZoneInfo
 
 import akshare as ak
+import pandas as pd
 import requests
 
 from service_data_sync.application.ports.data_source import (
@@ -28,7 +31,7 @@ from service_data_sync.domain.equity import Exchange
 
 _CAPABILITY = "equity.lifecycle.explicit"
 _SCHEMA = "quant-v2.equity-lifecycle-explicit.v1"
-_ADAPTER_VERSION = "akshare-1.18.78-official-exchange-lifecycle-v2"
+_ADAPTER_VERSION = "akshare-1.18.81-official-exchange-lifecycle-v3"
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _SSE_URL = "https://query.sse.com.cn/commonQuery.do"
 _SSE_HEADERS = {
@@ -71,6 +74,38 @@ _SSE_REQUIRED_FIELDS = frozenset(
         "DELIST_DATE",
     }
 )
+_SZSE_URL = "https://www.szse.cn/api/report/ShowReport"
+_SZSE_HEADERS = {
+    "Accept": (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,"
+        "application/octet-stream;q=0.9"
+    ),
+    "Referer": "https://www.szse.cn/market/stock/suspend/index.html",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"
+    ),
+}
+_SZSE_PARAMS = {
+    "SHOWTYPE": "xlsx",
+    "CATALOGID": "1793_ssgs",
+    "TABKEY": "tab2",
+    "random": "0.6935816432433362",
+}
+_SZSE_MAX_BYTES = 8 * 1024 * 1024
+# 深交所网关偶发在 TLS 握手后提前关闭连接；仅重试明确的传输中断，固定上限不能掩盖
+# 状态码、文件格式或字段合同变化。
+_SZSE_FETCH_MAX_ATTEMPTS = 3
+_SZSE_FETCH_RETRY_BASE_SECONDS = 0.5
+_SZSE_TRANSPORT_ERRORS = (
+    requests.exceptions.ChunkedEncodingError,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.SSLError,
+    requests.exceptions.Timeout,
+    BrokenPipeError,
+    ConnectionAbortedError,
+    ConnectionResetError,
+)
 
 
 class AkshareExchangeEquityLifecycleAdapter:
@@ -84,14 +119,16 @@ class AkshareExchangeEquityLifecycleAdapter:
     def __init__(
         self,
         *,
-        request_timeout_seconds: int,
+        request_timeout_seconds: float,
         client: Any = ak,
         sse_http_client: Any = requests,
+        szse_http_client: Any = requests,
     ) -> None:
-        """保存固定上游 client 与单次阻塞请求墙钟预算，便于 fixture 注入。"""
+        """保存固定上游 client、官方 HTTP transport 与总墙钟预算，便于 fixture 注入。"""
         self._request_timeout_seconds = request_timeout_seconds
         self._client = client
         self._sse_http_client = sse_http_client
+        self._szse_http_client = szse_http_client
 
     def capabilities(self) -> frozenset[str]:
         """声明唯一显式生命周期能力。"""
@@ -117,11 +154,14 @@ class AkshareExchangeEquityLifecycleAdapter:
                 retryable=False,
             )
         try:
-            async with asyncio.timeout(self._request_timeout_seconds):
-                raw_records, raw_payload = await asyncio.to_thread(
-                    self._fetch_records,
-                    exchange,
-                )
+            if exchange is Exchange.SZSE:
+                raw_records, raw_payload = await self._fetch_szse_records_with_retry()
+            else:
+                async with asyncio.timeout(self._request_timeout_seconds):
+                    raw_records, raw_payload = await asyncio.to_thread(
+                        self._fetch_records,
+                        exchange,
+                    )
         except TimeoutError as error:
             raise ProviderError(
                 ProviderErrorCode.UNAVAILABLE,
@@ -177,9 +217,110 @@ class AkshareExchangeEquityLifecycleAdapter:
         if exchange is Exchange.SSE:
             return self._fetch_sse_records()
         if exchange is Exchange.SZSE:
-            frame = self._client.stock_info_sz_delist("终止上市公司")
-        else:
-            frame = self._client.stock_info_bj_name_code()
+            raise AssertionError("SZSE lifecycle must use the bounded official XLSX transport")
+        frame = self._client.stock_info_bj_name_code()
+        if frame.empty:
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "provider returned an empty lifecycle dataset",
+                retryable=False,
+            )
+        records = frame.to_dict(orient="records")
+        raw_payload = json.dumps(
+            {"records": records},
+            ensure_ascii=False,
+            default=_json_default,
+            separators=(",", ":"),
+        ).encode()
+        return records, raw_payload
+
+    async def _fetch_szse_records_with_retry(self) -> tuple[list[dict[str, Any]], bytes]:
+        """在同一总预算内重试深交所 TLS 短断，不用 AKShare 无超时包装调用。"""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._request_timeout_seconds
+        for attempt in range(_SZSE_FETCH_MAX_ATTEMPTS):
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError("SZSE lifecycle provider total request budget exhausted")
+            try:
+                async with asyncio.timeout(remaining):
+                    return await asyncio.to_thread(
+                        self._fetch_szse_records,
+                        timeout_seconds=remaining,
+                    )
+            except Exception as error:
+                if isinstance(error, ProviderError) or not isinstance(
+                    error, _SZSE_TRANSPORT_ERRORS
+                ):
+                    raise
+                if attempt + 1 >= _SZSE_FETCH_MAX_ATTEMPTS:
+                    raise ProviderError(
+                        ProviderErrorCode.UNAVAILABLE,
+                        "SZSE lifecycle request failed after bounded retry",
+                        retryable=True,
+                    ) from error
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        "SZSE lifecycle provider total request budget exhausted"
+                    ) from error
+                # 退避也从总预算扣除；不能让三个短断重试超过 command 的租约窗口。
+                delay = min(_SZSE_FETCH_RETRY_BASE_SECONDS * (2**attempt), remaining)
+                if delay > 0:
+                    await asyncio.sleep(delay)
+        raise AssertionError("SZSE lifecycle retry loop must return or raise")
+
+    def _fetch_szse_records(
+        self,
+        *,
+        timeout_seconds: float,
+    ) -> tuple[list[dict[str, Any]], bytes]:
+        """直读深交所终止上市 XLSX，显式设置 transport 超时并验证文件边界。"""
+        # 剩余总预算不足一秒时也必须传给底层 transport；强行抬到一秒会让后台线程越过 fence。
+        timeout = max(0.001, timeout_seconds)
+        response = self._szse_http_client.get(
+            _SZSE_URL,
+            params=dict(_SZSE_PARAMS),
+            headers=_SZSE_HEADERS,
+            timeout=(min(5.0, timeout), timeout),
+        )
+        if response.status_code == 429:
+            raise ProviderError(
+                ProviderErrorCode.RATE_LIMITED,
+                "SZSE lifecycle request rate limited",
+                retryable=True,
+            )
+        if response.status_code >= 500:
+            raise ProviderError(
+                ProviderErrorCode.UNAVAILABLE,
+                "SZSE lifecycle upstream unavailable",
+                retryable=True,
+            )
+        if response.status_code != 200:
+            raise ProviderError(
+                ProviderErrorCode.INVALID_REQUEST,
+                f"SZSE lifecycle returned HTTP {response.status_code}",
+                retryable=False,
+            )
+        content = bytes(response.content)
+        if not content or len(content) > _SZSE_MAX_BYTES or not content.startswith(b"PK"):
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "SZSE lifecycle response is not a bounded XLSX file",
+                retryable=False,
+            )
+        try:
+            frame = pd.read_excel(
+                BytesIO(content),
+                engine="openpyxl",
+                dtype={"证券代码": str},
+            )
+        except (BadZipFile, OSError, TypeError, ValueError) as error:
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "SZSE lifecycle XLSX cannot be decoded",
+                retryable=False,
+            ) from error
         if frame.empty:
             raise ProviderError(
                 ProviderErrorCode.SCHEMA,
@@ -198,7 +339,7 @@ class AkshareExchangeEquityLifecycleAdapter:
     def _fetch_sse_records(self) -> tuple[list[dict[str, Any]], bytes]:
         """直读上交所原始 JSON，保留 A/B 证券字段并只请求 A 股与科创板类型。
 
-        AKShare 1.18.78 的包装函数会裁掉 `STOCK_TYPE`、`A_STOCK_CODE` 和
+        AKShare 1.18.81 的包装函数会裁掉 `STOCK_TYPE`、`A_STOCK_CODE` 和
         `B_STOCK_CODE`，随后错误使用公司代码，无法区分同一公司的 A/B 股。
         因此这里冻结其官方底层端点和查询参数，语义字段缺失时直接隔离。
         """

@@ -92,9 +92,7 @@ _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _BUNDLE_DATASET = "equity.workspace.reference-bundle"
 _BUNDLE_PARTITION = "CN_A_REFERENCE"
 _BUNDLE_MAPPING_VERSION = "equity-reference-bundle-v1"
-_BUNDLE_SCHEMA_FINGERPRINT = hashlib.sha256(
-    b"quant-v2.equity-reference-bundle.v1"
-).hexdigest()
+_BUNDLE_SCHEMA_FINGERPRINT = hashlib.sha256(b"quant-v2.equity-reference-bundle.v1").hexdigest()
 _MAX_RETRIES = 3
 _TERMINAL_COMMANDS = frozenset({"SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED", "REJECTED"})
 
@@ -239,8 +237,7 @@ class EquityReferenceBundleOrchestrator:
                 .where(
                     EquityReferenceGenerationAttempt.campaign_key == campaign_key,
                     EquityReferenceGenerationAttempt.status == "SEALED",
-                    EquityReferenceGenerationAttempt.snapshot_observed_on
-                    == snapshot_observed_on,
+                    EquityReferenceGenerationAttempt.snapshot_observed_on == snapshot_observed_on,
                     EquityReferenceGenerationAttempt.market_as_of == market_as_of,
                 )
                 .order_by(EquityReferenceGenerationAttempt.attempt_no.desc())
@@ -248,15 +245,17 @@ class EquityReferenceBundleOrchestrator:
             ).scalar_one_or_none()
             if sealed is not None:
                 return sealed
-            attempt_no = int(
-                session.scalar(
-                    select(func.coalesce(func.max(EquityReferenceGenerationAttempt.attempt_no), 0))
-                    .where(
-                        EquityReferenceGenerationAttempt.campaign_key == campaign_key
+            attempt_no = (
+                int(
+                    session.scalar(
+                        select(
+                            func.coalesce(func.max(EquityReferenceGenerationAttempt.attempt_no), 0)
+                        ).where(EquityReferenceGenerationAttempt.campaign_key == campaign_key)
                     )
+                    or 0
                 )
-                or 0
-            ) + 1
+                + 1
+            )
             attempt_id = uuid5(
                 NAMESPACE_URL,
                 (
@@ -696,9 +695,7 @@ class EquityReferenceBundleOrchestrator:
             if attempt.status == "SEALED":
                 return self._frozen_bundle(attempt)
             if attempt.status != "BUILDING":
-                raise EquityReferenceGenerationError(
-                    "reference attempt is not sealable"
-                )
+                raise EquityReferenceGenerationError("reference attempt is not sealable")
             steps = list(
                 session.scalars(
                     select(EquityReferenceGenerationStep)
@@ -708,13 +705,9 @@ class EquityReferenceBundleOrchestrator:
                 ).all()
             )
             if len(steps) != 7 or any(step.status != "SUCCEEDED" for step in steps):
-                raise EquityReferenceGenerationError(
-                    "reference attempt has incomplete steps"
-                )
+                raise EquityReferenceGenerationError("reference attempt has incomplete steps")
             manifest = [
-                component
-                for step in steps
-                for component in (step.output_publications_json or [])
+                component for step in steps for component in (step.output_publications_json or [])
             ]
             manifest.sort(
                 key=lambda item: (
@@ -764,9 +757,7 @@ class EquityReferenceBundleOrchestrator:
                                 "component_partition_key": (
                                     f"{component['datasetCode']}|{component['partitionKey']}"
                                 ),
-                                "component_data_version": UUID(
-                                    str(component["dataVersion"])
-                                ),
+                                "component_data_version": UUID(str(component["dataVersion"])),
                             }
                             for component in manifest
                         ]
@@ -807,9 +798,7 @@ class EquityReferenceBundleOrchestrator:
             attempt.sealed_at = now
             return frozen
 
-    def _frozen_bundle(
-        self, attempt: EquityReferenceGenerationAttempt
-    ) -> FrozenReferenceBundle:
+    def _frozen_bundle(self, attempt: EquityReferenceGenerationAttempt) -> FrozenReferenceBundle:
         """从已封印 attempt 恢复强类型 bundle，并重新运行完整清单校验。"""
         if (
             attempt.status != "SEALED"
@@ -819,9 +808,7 @@ class EquityReferenceBundleOrchestrator:
             or attempt.manifest_json is None
             or attempt.manifest_hash is None
         ):
-            raise EquityReferenceGenerationError(
-                "sealed reference attempt is incomplete"
-            )
+            raise EquityReferenceGenerationError("sealed reference attempt is incomplete")
         bundle = FrozenReferenceBundle(
             publication_id=attempt.bundle_publication_id,
             data_version=attempt.bundle_data_version,
@@ -873,9 +860,7 @@ def _step_specs(
             "selector": {"kind": "GLOBAL"},
             "dateFrom": None,
             "dateTo": None,
-            "observationDate": (
-                None if observation_date is None else observation_date.isoformat()
-            ),
+            "observationDate": (None if observation_date is None else observation_date.isoformat()),
         }
 
     return (
@@ -984,9 +969,7 @@ def _capture_step_publications(
                 "publicationId": str(publication.publication_id),
                 "dataVersion": str(publication.data_version),
                 "releaseId": (
-                    None
-                    if publication.release_id is None
-                    else str(publication.release_id)
+                    None if publication.release_id is None else str(publication.release_id)
                 ),
                 "effectiveAsOf": (
                     None
@@ -1038,19 +1021,15 @@ def _expected_component_keys(
         )
         detail = session.get(SwSectorPublication, taxonomy.data_version)
         if detail is None:
-            raise EquityReferenceGenerationError(
-                "SW taxonomy publication detail is missing"
-            )
+            raise EquityReferenceGenerationError("SW taxonomy publication detail is missing")
         node_codes = tuple(
             sorted(
                 {
                     str(value).removesuffix(".SI")
                     for value in session.scalars(
                         select(SwSectorNodeRevision.sector_code).where(
-                            SwSectorNodeRevision.snapshot_date
-                            == attempt.snapshot_observed_on,
-                            SwSectorNodeRevision.methodology_id
-                            == detail.methodology_id,
+                            SwSectorNodeRevision.snapshot_date == attempt.snapshot_observed_on,
+                            SwSectorNodeRevision.methodology_id == detail.methodology_id,
                             SwSectorNodeRevision.level == 3,
                             SwSectorNodeRevision.known_to.is_(None),
                             SwSectorNodeRevision.quality_status.in_(("passed", "warned")),
@@ -1064,9 +1043,7 @@ def _expected_component_keys(
                 "SW taxonomy contains no publishable third-level nodes"
             )
         return [(dataset_code, f"SW2021:{node_code}") for node_code in node_codes]
-    raise EquityReferenceGenerationError(
-        f"unsupported equity reference dataset: {dataset_code}"
-    )
+    raise EquityReferenceGenerationError(f"unsupported equity reference dataset: {dataset_code}")
 
 
 def _publication_visible_at(
@@ -1107,13 +1084,14 @@ def _component_source_ids(
     if publication.dataset == "equity.master.cn-a":
         return _require_sources(run_sources, publication)
     if publication.dataset == "equity.lifecycle.explicit":
+        # 显式生命周期只报告有官方证据的事件，快照语义必为 PARTIAL；以 COMPLETE 过滤会让
+        # 已发布且真实的 lifecycle component 永远无法绑定其本次 command 的来源批次。
         values = set(
             session.scalars(
                 select(EquityMasterSnapshot.source_batch_id).where(
                     EquityMasterSnapshot.snapshot_kind == "LIFECYCLE",
                     EquityMasterSnapshot.exchange == publication.partition_key,
                     EquityMasterSnapshot.target_date == attempt.snapshot_observed_on,
-                    EquityMasterSnapshot.completeness == "COMPLETE",
                     EquityMasterSnapshot.quality_status.in_(("passed", "warned")),
                     EquityMasterSnapshot.source_batch_id.in_(run_sources),
                 )
@@ -1127,9 +1105,7 @@ def _component_source_ids(
             )
         ).scalar_one_or_none()
         if release is None:
-            raise EquityReferenceGenerationError(
-                "sector membership domain release is missing"
-            )
+            raise EquityReferenceGenerationError("sector membership domain release is missing")
         values = set(
             session.scalars(
                 select(SectorMembershipSnapshot.source_batch_id)
@@ -1201,9 +1177,7 @@ def _source_contract_hash(session: Session, source_ids: Sequence[UUID]) -> str:
         .order_by(SourceBatch.source_batch_id)
     ).all()
     if len(rows) != len(set(source_ids)):
-        raise EquityReferenceGenerationError(
-            "reference SourceBatch descriptor is incomplete"
-        )
+        raise EquityReferenceGenerationError("reference SourceBatch descriptor is incomplete")
     return _hash_json(
         [
             {
@@ -1264,9 +1238,7 @@ def _bundle_candidate(
             version=1,
             semantic_family="derived-reference-publication-bundle",
             kind="derived",
-            formula_hash=hashlib.sha256(
-                _BUNDLE_MAPPING_VERSION.encode()
-            ).hexdigest(),
+            formula_hash=hashlib.sha256(_BUNDLE_MAPPING_VERSION.encode()).hexdigest(),
             effective_from=None,
             effective_to=None,
             status="validated",
@@ -1333,15 +1305,12 @@ def _bundle_candidate(
         CanonicalLineageRecord(
             record_key_hash=hashlib.sha256(
                 (
-                    f"{component['datasetCode']}|{component['partitionKey']}|"
-                    f"{source_batch_id}"
+                    f"{component['datasetCode']}|{component['partitionKey']}|{source_batch_id}"
                 ).encode()
             ).hexdigest(),
             content_hash=_hash_json(component),
             source_batch_id=UUID(str(source_batch_id)),
-            transform_hash=hashlib.sha256(
-                _BUNDLE_MAPPING_VERSION.encode()
-            ).hexdigest(),
+            transform_hash=hashlib.sha256(_BUNDLE_MAPPING_VERSION.encode()).hexdigest(),
             role="input",
         )
         for component in manifest
@@ -1388,8 +1357,7 @@ def _command_retryable(detail: dict[str, Any]) -> bool:
         if child.get("status") in {"FAILED", "PARTIAL", "INTERRUPTED"}
     ]
     return bool(errors) and all(
-        isinstance(error, dict) and error.get("retryable") is True
-        for error in errors
+        isinstance(error, dict) and error.get("retryable") is True for error in errors
     )
 
 

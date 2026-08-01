@@ -9,7 +9,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import or_, select, text
 
 from service_data_sync.application.ports.equity_workspace import (
     EquityWorkspaceSourceObservation,
@@ -41,6 +41,9 @@ from service_data_sync.domain.sw_sector import (
     SwMethodology,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.database.models.equity.identity import (
+    equity_identifier_version as identifier_version_model,
+)
 from service_data_sync.infrastructure.persistence.equity_discovery_repository import (
     DiscoveryBuildUnavailable,
     SqlAlchemyEquityDiscoveryRepository,
@@ -79,15 +82,15 @@ def test_discovery_build_publishes_truthful_partial_and_preserves_last_good() ->
     )
     financial = SqlAlchemyFinancialSyncRepository(database)
     discovery = SqlAlchemyEquityDiscoveryRepository(database)
-    suffix = f"{uuid4().int % 10_000:04d}"
+    identifiers = _reserve_fixture_identifiers(database)
     current = {
-        Exchange.SSE: EquityIdentifier.parse(f"SSE.68{suffix}"),
-        Exchange.SZSE: EquityIdentifier.parse(f"SZSE.30{suffix}"),
-        Exchange.BSE: EquityIdentifier.parse(f"BSE.92{suffix}"),
+        Exchange.SSE: identifiers[0],
+        Exchange.SZSE: identifiers[1],
+        Exchange.BSE: identifiers[2],
     }
     historical = {
-        Exchange.SSE: EquityIdentifier.parse(f"SSE.60{suffix}"),
-        Exchange.SZSE: EquityIdentifier.parse(f"SZSE.00{suffix}"),
+        Exchange.SSE: identifiers[3],
+        Exchange.SZSE: identifiers[4],
     }
     try:
         _publish_catalogs(catalog, current=current)
@@ -226,6 +229,42 @@ def test_discovery_build_publishes_truthful_partial_and_preserves_last_good() ->
     assert revised.data_version != first.data_version
     assert raised.value.reason_code == "TRADING_STATUS_PUBLICATION_UNAVAILABLE"
     assert current_discovery == revised.data_version
+
+
+def _reserve_fixture_identifiers(database: DatabaseClient) -> tuple[EquityIdentifier, ...]:
+    """在共享集成库中有界挑选从未出现过的五个代码，避免随机四位尾码复用历史身份。"""
+    for _ in range(128):
+        suffix = f"{uuid4().int % 10_000:04d}"
+        candidates = (
+            EquityIdentifier.parse(f"SSE.68{suffix}"),
+            EquityIdentifier.parse(f"SZSE.30{suffix}"),
+            EquityIdentifier.parse(f"BSE.92{suffix}"),
+            EquityIdentifier.parse(f"SSE.60{suffix}"),
+            EquityIdentifier.parse(f"SZSE.00{suffix}"),
+        )
+        with database.session() as session:
+            existing = session.scalar(
+                select(identifier_version_model.EquityIdentifierVersion.version_id)
+                .where(
+                    or_(
+                        *(
+                            (
+                                identifier_version_model.EquityIdentifierVersion.exchange
+                                == identifier.exchange.value
+                            )
+                            & (
+                                identifier_version_model.EquityIdentifierVersion.symbol
+                                == identifier.symbol
+                            )
+                            for identifier in candidates
+                        )
+                    )
+                )
+                .limit(1)
+            )
+        if existing is None:
+            return candidates
+    raise RuntimeError("unable to reserve collision-free discovery integration identifiers")
 
 
 def _publish_catalogs(

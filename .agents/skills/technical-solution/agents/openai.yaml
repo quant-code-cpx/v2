@@ -1,6 +1,6 @@
 interface:
   display_name: "技术方案"
-  short_description: "创建简约、清晰、可审阅的 PC 桌面端 HTML 技术方案"
-  default_prompt: "Use $technical-solution to create a concise PC-desktop-only HTML technical proposal for this repository."
+  short_description: "创建严格排除非技术考量的 PC 桌面端 HTML 技术方案"
+  default_prompt: "Use $technical-solution to create a technical-only PC-desktop HTML proposal that never treats nontechnical factors as blockers."
 policy:
   allow_implicit_invocation: true

@@ -170,6 +170,23 @@ class _Component:
 
 
 @dataclass(frozen=True, slots=True)
+class _LockedReferenceComponent:
+    """保存回填计划封存的 publication、release 与原始证据边界。"""
+
+    publication: DatasetPublication
+    source_batch_ids: tuple[UUID, ...]
+
+    @property
+    def component(self) -> _Component:
+        """投影出派生 publication manifest 使用的稳定输入版本。"""
+        return _Component(
+            dataset=self.publication.dataset,
+            partition_key=self.publication.partition_key,
+            data_version=UUID(str(self.publication.data_version)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class _OptionalFamily:
     """保存某证券一个可选语义族的值、血缘和可用性。"""
 
@@ -241,29 +258,93 @@ class SqlAlchemyEquityDiscoveryRepository:
         self._database = database
         self._releases = SqlAlchemyCanonicalReleaseRepository(database)
 
-    def build(self, *, as_of: date) -> PublishedEquityDiscovery:
-        """构建指定 EOD 日期；BASE 缺失则失败，可选族缺失则发布 PARTIAL。"""
+    def build(
+        self,
+        *,
+        as_of: date,
+        reference_manifest: Sequence[Mapping[str, Any]] | None = None,
+    ) -> PublishedEquityDiscovery:
+        """构建指定 EOD 日期；回填调用只消费封印引用，详情族保持独立 partial。
+
+        普通独立刷新沿用当前 publication 选择语义。股票中心历史回填传入
+        `reference_manifest` 时，BASE 输入必须按清单中的精确 publication、release 与知识
+        截止点重放；即使 current 指针已经推进，也绝不回退或混读新版本。行情、股本、估值和
+        资金流不属于该 bundle 的 BASE，故在该模式只写原因化不可用状态，等待独立刷新链路发布。
+        """
         projections: tuple[_Projection, ...] = ()
         components: tuple[_Component, ...] = ()
         completeness = "PARTIAL"
+        frozen_reference = (
+            None
+            if reference_manifest is None
+            else tuple(dict(component) for component in reference_manifest)
+        )
 
         def prepare_candidate(session: Session) -> CanonicalReleaseCandidate:
             """锁定输入版本并准备确定性 projection 候选。"""
             nonlocal projections, components, completeness
             now = datetime.now(UTC)
-            master, master_components = _master_components(session)
-            identities = _identities(session)
+            locked_reference = (
+                ()
+                if frozen_reference is None
+                else _locked_reference_components(
+                    session,
+                    as_of=as_of,
+                    manifest=frozen_reference,
+                )
+            )
+            reference_components = tuple(item.component for item in locked_reference)
+            master: DatasetPublication | None = None
+            if frozen_reference is None:
+                master, master_components = _master_components(session)
+                identities = _identities(session)
+            else:
+                master_components = _frozen_master_components(
+                    session,
+                    references=locked_reference,
+                )
+                identities = _frozen_identities(
+                    session,
+                    master_components=master_components,
+                )
             if not identities:
                 raise DiscoveryBuildUnavailable(
                     "IDENTITY_PUBLICATION_EMPTY",
                     "CN_A_STABLE contains no confirmed equity identities",
                 )
             security_ids = tuple(sorted(identities))
-            lifecycle, lifecycle_components = _lifecycle_components(
-                session,
-                security_ids=security_ids,
-                as_of=as_of,
-            )
+            if frozen_reference is None:
+                lifecycle, lifecycle_components = _lifecycle_components(
+                    session,
+                    security_ids=security_ids,
+                    as_of=as_of,
+                )
+                trading_publication = _single_publication(
+                    session,
+                    dataset=_TRADING_DATASET,
+                    partition_key=f"date:{as_of.isoformat()}",
+                    reason_code="TRADING_STATUS_PUBLICATION_UNAVAILABLE",
+                )
+                statuses = _trading_statuses(session, security_ids=security_ids, as_of=as_of)
+            else:
+                lifecycle, lifecycle_components = _frozen_lifecycle_components(
+                    session,
+                    identities=identities,
+                    as_of=as_of,
+                    references=locked_reference,
+                )
+                trading_reference = _reference_component(
+                    locked_reference,
+                    dataset=_TRADING_DATASET,
+                    partition_key=f"date:{as_of.isoformat()}",
+                )
+                trading_publication = trading_reference.publication
+                statuses = _frozen_trading_statuses(
+                    session,
+                    security_ids=security_ids,
+                    as_of=as_of,
+                    reference=trading_reference,
+                )
             fact_components = _fact_components(
                 session,
                 identities=identities,
@@ -271,25 +352,34 @@ class SqlAlchemyEquityDiscoveryRepository:
                 master_components=master_components,
                 lifecycle_components=lifecycle_components,
             )
-            daily_publications = _available_security_publications(
-                session,
-                dataset=_DAILY_DATASET,
-                security_ids=security_ids,
+            daily_publications = (
+                {}
+                if frozen_reference is not None
+                else _available_security_publications(
+                    session,
+                    dataset=_DAILY_DATASET,
+                    security_ids=security_ids,
+                )
             )
-            capital_publications = _available_security_publications(
-                session,
-                dataset=_CAPITAL_DATASET,
-                security_ids=security_ids,
+            capital_publications = (
+                {}
+                if frozen_reference is not None
+                else _available_security_publications(
+                    session,
+                    dataset=_CAPITAL_DATASET,
+                    security_ids=security_ids,
+                )
             )
-            trading_publication = _single_publication(
-                session,
-                dataset=_TRADING_DATASET,
-                partition_key=f"date:{as_of.isoformat()}",
-                reason_code="TRADING_STATUS_PUBLICATION_UNAVAILABLE",
+            bars = (
+                {}
+                if frozen_reference is not None
+                else _latest_bars(session, security_ids=security_ids, as_of=as_of)
             )
-            bars = _latest_bars(session, security_ids=security_ids, as_of=as_of)
-            capitals = _latest_capitals(session, security_ids=security_ids, as_of=as_of)
-            statuses = _trading_statuses(session, security_ids=security_ids, as_of=as_of)
+            capitals = (
+                {}
+                if frozen_reference is not None
+                else _latest_capitals(session, security_ids=security_ids, as_of=as_of)
+            )
             selected_market_versions = {
                 UUID(str(trading_publication.data_version)),
                 *daily_publications.values(),
@@ -312,43 +402,71 @@ class SqlAlchemyEquityDiscoveryRepository:
                 session,
                 source_batch_ids=fact_source_batch_ids,
             )
-            valuation, valuation_components = _valuation_families(
-                session, security_ids=security_ids, as_of=as_of
-            )
-            money_flow, money_flow_components = _money_flow_families(
-                session, security_ids=security_ids, as_of=as_of
-            )
-            memberships, membership_states, membership_components = _membership_families(
-                session,
-                security_ids=security_ids,
-                as_of=as_of,
-                release_repository=self._releases,
-            )
-            components = _deduplicate_components(
+            valuation, valuation_components = (
                 (
-                    _Component(
-                        dataset=_MASTER_DATASET,
-                        partition_key=_MASTER_PARTITION,
-                        data_version=UUID(str(master.data_version)),
-                    ),
-                    *master_components,
-                    *lifecycle_components,
-                    _Component(
-                        dataset=_TRADING_DATASET,
-                        partition_key=f"date:{as_of.isoformat()}",
-                        data_version=UUID(str(trading_publication.data_version)),
-                    ),
-                    *(
-                        _Component(_DAILY_DATASET, f"security:{key}", value)
-                        for key, value in daily_publications.items()
-                    ),
-                    *(
-                        _Component(_CAPITAL_DATASET, f"security:{key}", value)
-                        for key, value in capital_publications.items()
-                    ),
-                    *valuation_components,
-                    *money_flow_components,
-                    *membership_components,
+                    {
+                        security_id: _unavailable_family("VALUATION_SEPARATE_CURRENT_REFRESH")
+                        for security_id in security_ids
+                    },
+                    (),
+                )
+                if frozen_reference is not None
+                else _valuation_families(session, security_ids=security_ids, as_of=as_of)
+            )
+            money_flow, money_flow_components = (
+                (
+                    {
+                        security_id: _unavailable_family("METHODOLOGY_NOT_FROZEN")
+                        for security_id in security_ids
+                    },
+                    (),
+                )
+                if frozen_reference is not None
+                else _money_flow_families(session, security_ids=security_ids, as_of=as_of)
+            )
+            if frozen_reference is None:
+                memberships, membership_states, membership_components = _membership_families(
+                    session,
+                    security_ids=security_ids,
+                    as_of=as_of,
+                    release_repository=self._releases,
+                )
+            else:
+                memberships, membership_states, membership_components = _frozen_membership_families(
+                    session,
+                    security_ids=security_ids,
+                    as_of=as_of,
+                    references=locked_reference,
+                )
+            components = (
+                reference_components
+                if frozen_reference is not None
+                else _deduplicate_components(
+                    (
+                        _Component(
+                            dataset=_MASTER_DATASET,
+                            partition_key=_MASTER_PARTITION,
+                            data_version=_current_master_data_version(master),
+                        ),
+                        *master_components,
+                        *lifecycle_components,
+                        _Component(
+                            dataset=_TRADING_DATASET,
+                            partition_key=f"date:{as_of.isoformat()}",
+                            data_version=UUID(str(trading_publication.data_version)),
+                        ),
+                        *(
+                            _Component(_DAILY_DATASET, f"security:{key}", value)
+                            for key, value in daily_publications.items()
+                        ),
+                        *(
+                            _Component(_CAPITAL_DATASET, f"security:{key}", value)
+                            for key, value in capital_publications.items()
+                        ),
+                        *valuation_components,
+                        *money_flow_components,
+                        *membership_components,
+                    )
                 )
             )
             projections = tuple(
@@ -523,6 +641,482 @@ class SqlAlchemyEquityDiscoveryRepository:
             data_version=published.data_version,
             completeness=completeness,
             row_count=len(projections),
+        )
+
+
+def _locked_reference_components(
+    session: Session,
+    *,
+    as_of: date,
+    manifest: Sequence[Mapping[str, Any]],
+) -> tuple[_LockedReferenceComponent, ...]:
+    """校验回填 claim 的精确引用组件仍可读取，拒绝向 current 指针回退。
+
+    回填控制面已在 claim 时校验 bundle、release 和 lineage；这里再次锁住同一组
+    `DatasetPublication`。历史 publication 被 supersede 后仍是合法不可变输入，恢复必须按
+    它的 `release` 和 `knowledge_cutoff` 重放，绝不能要求它继续担任 current 指针。
+    """
+    required_counts = {
+        _MASTER_DATASET: 1,
+        _LIFECYCLE_DATASET: 3,
+        "sector.catalog.raw": 2,
+        _SECTOR_MEMBERSHIP_DATASET: 2,
+        _SW_TAXONOMY_DATASET: 1,
+        _TRADING_DATASET: 1,
+    }
+    components: list[_LockedReferenceComponent] = []
+    counts: dict[str, int] = defaultdict(int)
+    seen: set[tuple[str, str]] = set()
+    for item in manifest:
+        try:
+            dataset = str(item["datasetCode"])
+            partition_key = str(item["partitionKey"])
+            publication_id = UUID(str(item["publicationId"]))
+            data_version = UUID(str(item["dataVersion"]))
+            release_id = UUID(str(item["releaseId"]))
+            source_batch_ids = tuple(UUID(str(value)) for value in item["sourceBatchIds"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise DiscoveryBuildUnavailable(
+                "REFERENCE_MANIFEST_INVALID",
+                "equity backfill reference component has an invalid identity",
+            ) from error
+        key = (dataset, partition_key)
+        if (
+            dataset not in {*required_counts, _SW_MEMBERSHIP_DATASET}
+            or key in seen
+            or not source_batch_ids
+        ):
+            raise DiscoveryBuildUnavailable(
+                "REFERENCE_MANIFEST_INVALID",
+                "equity backfill reference component coverage is invalid",
+            )
+        seen.add(key)
+        counts[dataset] += 1
+        publication = session.get(DatasetPublication, publication_id, with_for_update=True)
+        if (
+            publication is None
+            or publication.dataset != dataset
+            or publication.partition_key != partition_key
+            or publication.data_version != data_version
+            or publication.release_id != release_id
+            or publication.quality_status not in {"passed", "warned"}
+        ):
+            raise DiscoveryBuildUnavailable(
+                "REFERENCE_COMPONENT_IMMUTABLE_IDENTITY_MISMATCH",
+                "sealed reference component is no longer the exact readable publication",
+            )
+        source_count = int(
+            session.scalar(
+                select(func.count())
+                .select_from(SourceBatch)
+                .where(SourceBatch.source_batch_id.in_(source_batch_ids))
+            )
+            or 0
+        )
+        if source_count != len(set(source_batch_ids)):
+            raise DiscoveryBuildUnavailable(
+                "REFERENCE_SOURCE_EVIDENCE_UNAVAILABLE",
+                "sealed reference component has incomplete source evidence",
+            )
+        cutoff = _reference_knowledge_cutoff(
+            _LockedReferenceComponent(
+                publication=publication,
+                source_batch_ids=tuple(sorted(set(source_batch_ids), key=str)),
+            )
+        )
+        _assert_fact_sources_before_cutoff(
+            session,
+            source_batch_ids=set(source_batch_ids),
+            cutoff=cutoff,
+            reason_code="REFERENCE_SOURCE_AFTER_KNOWLEDGE_CUTOFF",
+        )
+        components.append(
+            _LockedReferenceComponent(
+                publication=publication,
+                source_batch_ids=tuple(sorted(set(source_batch_ids), key=str)),
+            )
+        )
+    if (
+        {dataset: counts.get(dataset, 0) for dataset in required_counts} != required_counts
+        or counts.get(_SW_MEMBERSHIP_DATASET, 0) < 1
+        or set(counts) != {*required_counts, _SW_MEMBERSHIP_DATASET}
+    ):
+        raise DiscoveryBuildUnavailable(
+            "REFERENCE_COMPONENT_COVERAGE_INCOMPLETE",
+            "sealed reference bundle does not contain every discovery BASE component",
+        )
+    trading_component = next(
+        component for component in components if component.publication.dataset == _TRADING_DATASET
+    )
+    if trading_component.publication.partition_key != f"date:{as_of.isoformat()}":
+        raise DiscoveryBuildUnavailable(
+            "REFERENCE_TRADING_DATE_MISMATCH",
+            "sealed trading-status component does not match discovery trade date",
+        )
+    return tuple(components)
+
+
+def _reference_component(
+    references: Sequence[_LockedReferenceComponent],
+    *,
+    dataset: str,
+    partition_key: str,
+) -> _LockedReferenceComponent:
+    """从已校验的封存引用中取唯一组件，缺失或重复都拒绝继续。"""
+    matches = [
+        item
+        for item in references
+        if item.publication.dataset == dataset and item.publication.partition_key == partition_key
+    ]
+    if len(matches) != 1:
+        raise DiscoveryBuildUnavailable(
+            "REFERENCE_COMPONENT_COVERAGE_INCOMPLETE",
+            "sealed reference bundle has no unique required component",
+        )
+    return matches[0]
+
+
+def _only_reference_component(
+    references: Sequence[_LockedReferenceComponent],
+    *,
+    dataset: str,
+) -> _LockedReferenceComponent:
+    """读取某数据集唯一封存组件，适用于按观测日产生单分区的 taxonomy。"""
+    matches = [item for item in references if item.publication.dataset == dataset]
+    if len(matches) != 1:
+        raise DiscoveryBuildUnavailable(
+            "REFERENCE_COMPONENT_COVERAGE_INCOMPLETE",
+            "sealed reference bundle has no unique dataset component",
+        )
+    return matches[0]
+
+
+def _reference_knowledge_cutoff(reference: _LockedReferenceComponent) -> datetime:
+    """读取封存 publication 的知识边界，缺失时拒绝把 current 事实伪装成历史。"""
+    cutoff = reference.publication.knowledge_cutoff
+    if not isinstance(cutoff, datetime) or cutoff.tzinfo is None:
+        raise DiscoveryBuildUnavailable(
+            "REFERENCE_KNOWLEDGE_CUTOFF_UNAVAILABLE",
+            "sealed reference publication has no timezone-aware knowledge cutoff",
+        )
+    return cutoff
+
+
+def _current_master_data_version(master: DatasetPublication | None) -> UUID:
+    """提取当前刷新已锁定的 CN_A 聚合版本，防止分支意外缺失输入。"""
+    if master is None:
+        raise DiscoveryBuildUnavailable(
+            "IDENTITY_PUBLICATION_UNAVAILABLE",
+            "current discovery build has no locked CN_A_STABLE publication",
+        )
+    return UUID(str(master.data_version))
+
+
+def _frozen_master_components(
+    session: Session,
+    *,
+    references: Sequence[_LockedReferenceComponent],
+) -> tuple[_Component, ...]:
+    """从封存 CN_A 聚合 manifest 重放三所交易所 child publication。"""
+    master = _reference_component(
+        references,
+        dataset=_MASTER_DATASET,
+        partition_key=_MASTER_PARTITION,
+    )
+    manifest = (
+        session.execute(
+            select(
+                DatasetPublicationComponent.component_partition_key,
+                DatasetPublicationComponent.component_data_version,
+            ).where(
+                DatasetPublicationComponent.aggregate_publication_id
+                == master.publication.publication_id
+            )
+        )
+        .mappings()
+        .all()
+    )
+    expected = {"SSE", "SZSE", "BSE"}
+    frozen = {
+        str(row["component_partition_key"]): UUID(str(row["component_data_version"]))
+        for row in manifest
+    }
+    if set(frozen) != expected:
+        raise DiscoveryBuildUnavailable(
+            "IDENTITY_COMPONENT_INCOMPLETE",
+            "sealed CN_A_STABLE does not bind all exchanges",
+        )
+    rows = (
+        session.execute(
+            select(DatasetPublication)
+            .where(
+                DatasetPublication.dataset == _MASTER_CHILD_DATASET,
+                DatasetPublication.data_version.in_(set(frozen.values())),
+            )
+            .with_for_update()
+        )
+        .scalars()
+        .all()
+    )
+    by_exchange = {str(row.partition_key): row for row in rows}
+    if (
+        set(by_exchange) != expected
+        or len(by_exchange) != len(rows)
+        or any(
+            UUID(str(by_exchange[exchange].data_version)) != frozen[exchange]
+            or by_exchange[exchange].quality_status not in {"passed", "warned"}
+            for exchange in expected
+        )
+    ):
+        raise DiscoveryBuildUnavailable(
+            "IDENTITY_COMPONENT_IMMUTABLE_IDENTITY_MISMATCH",
+            "sealed CN_A_STABLE child publication is unavailable or changed identity",
+        )
+    for publication in by_exchange.values():
+        _reference_knowledge_cutoff(
+            _LockedReferenceComponent(publication=publication, source_batch_ids=())
+        )
+    return tuple(
+        _Component(_MASTER_CHILD_DATASET, exchange, frozen[exchange]) for exchange in sorted(frozen)
+    )
+
+
+def _frozen_identities(
+    session: Session,
+    *,
+    master_components: Sequence[_Component],
+) -> dict[int, _IdentityProjection]:
+    """按每所交易所 child publication 的知识截止点重放确认身份与名称。"""
+    expected = {"SSE", "SZSE", "BSE"}
+    rows = (
+        session.execute(
+            select(
+                DatasetPublication.partition_key,
+                DatasetPublication.data_version,
+                DatasetPublication.knowledge_cutoff,
+            ).where(
+                DatasetPublication.dataset == _MASTER_CHILD_DATASET,
+                DatasetPublication.data_version.in_(
+                    {item.data_version for item in master_components}
+                ),
+            )
+        )
+        .mappings()
+        .all()
+    )
+    cutoffs: dict[str, datetime] = {}
+    versions: dict[str, UUID] = {}
+    for row in rows:
+        exchange = str(row["partition_key"])
+        cutoff = row["knowledge_cutoff"]
+        if exchange in cutoffs or not isinstance(cutoff, datetime) or cutoff.tzinfo is None:
+            raise DiscoveryBuildUnavailable(
+                "IDENTITY_COMPONENT_KNOWLEDGE_CUTOFF_INVALID",
+                "sealed identity child publication has no unique knowledge cutoff",
+            )
+        cutoffs[exchange] = cutoff
+        versions[exchange] = UUID(str(row["data_version"]))
+    expected_versions = {item.partition_key: item.data_version for item in master_components}
+    if set(cutoffs) != expected or versions != expected_versions:
+        raise DiscoveryBuildUnavailable(
+            "IDENTITY_COMPONENT_IMMUTABLE_IDENTITY_MISMATCH",
+            "sealed identity child publications cannot be reconstructed",
+        )
+    identifier_rows: list[Mapping[Any, Any]] = []
+    for exchange, cutoff in sorted(cutoffs.items()):
+        identifier_rows.extend(
+            session.execute(
+                select(
+                    EquityIdentifierVersion.security_id,
+                    EquityIdentifierVersion.exchange,
+                    EquityIdentifierVersion.symbol,
+                    EquityIdentifierVersion.effective_from,
+                    EquityIdentifierVersion.version_id,
+                    EquityIdentifierVersion.source_batch_id,
+                ).where(
+                    EquityIdentifierVersion.exchange == exchange,
+                    EquityIdentifierVersion.identity_state == "CONFIRMED",
+                    EquityIdentifierVersion.known_from <= cutoff,
+                    (EquityIdentifierVersion.known_to.is_(None))
+                    | (EquityIdentifierVersion.known_to > cutoff),
+                )
+            )
+            .mappings()
+            .all()
+        )
+    identifiers = _latest_fact_rows(
+        identifier_rows,
+        reason_code="IDENTITY_VERSION_AMBIGUOUS",
+    )
+    if not identifiers:
+        return {}
+    name_rows: list[Mapping[Any, Any]] = []
+    for security_id, identifier in identifiers.items():
+        cutoff = cutoffs[str(identifier["exchange"])]
+        name_rows.extend(
+            session.execute(
+                select(
+                    EquityNameVersion.security_id,
+                    EquityNameVersion.name,
+                    EquityNameVersion.effective_from,
+                    EquityNameVersion.version_id,
+                    EquityNameVersion.source_batch_id,
+                ).where(
+                    EquityNameVersion.security_id == security_id,
+                    EquityNameVersion.known_from <= cutoff,
+                    (EquityNameVersion.known_to.is_(None)) | (EquityNameVersion.known_to > cutoff),
+                )
+            )
+            .mappings()
+            .all()
+        )
+    names = _latest_fact_rows(name_rows, reason_code="IDENTITY_NAME_VERSION_AMBIGUOUS")
+    if set(names) != set(identifiers):
+        raise DiscoveryBuildUnavailable(
+            "IDENTITY_VERSION_INCOMPLETE",
+            "sealed confirmed identities do not have complete name history",
+        )
+    result: dict[int, _IdentityProjection] = {}
+    for security_id, identifier in identifiers.items():
+        name = names[security_id]
+        display_name = str(name["name"]).strip()
+        if not display_name:
+            raise DiscoveryBuildUnavailable(
+                "IDENTITY_NAME_EMPTY",
+                "sealed confirmed identity has an empty display name",
+            )
+        result[security_id] = _IdentityProjection(
+            security_id=security_id,
+            exchange=str(identifier["exchange"]),
+            symbol=str(identifier["symbol"]),
+            name=display_name,
+            identifier_source_batch_id=UUID(str(identifier["source_batch_id"])),
+            name_source_batch_id=UUID(str(name["source_batch_id"])),
+        )
+    return result
+
+
+def _frozen_lifecycle_components(
+    session: Session,
+    *,
+    identities: Mapping[int, _IdentityProjection],
+    as_of: date,
+    references: Sequence[_LockedReferenceComponent],
+) -> tuple[dict[int, EquityListingStatusVersion], tuple[_Component, ...]]:
+    """按三所生命周期 publication 各自知识边界重放目标日状态。"""
+    expected = {"SSE", "SZSE", "BSE"}
+    components: list[_Component] = []
+    lifecycle: dict[int, EquityListingStatusVersion] = {}
+    for exchange in sorted(expected):
+        reference = _reference_component(
+            references,
+            dataset=_LIFECYCLE_DATASET,
+            partition_key=exchange,
+        )
+        cutoff = _reference_knowledge_cutoff(reference)
+        security_ids = tuple(
+            security_id
+            for security_id, identity in identities.items()
+            if identity.exchange == exchange
+        )
+        if not security_ids:
+            components.append(reference.component)
+            continue
+        rows = (
+            session.execute(
+                select(EquityListingStatusVersion).where(
+                    EquityListingStatusVersion.security_id.in_(security_ids),
+                    EquityListingStatusVersion.effective_from <= as_of,
+                    (EquityListingStatusVersion.effective_to.is_(None))
+                    | (EquityListingStatusVersion.effective_to > as_of),
+                    EquityListingStatusVersion.known_from <= cutoff,
+                    (EquityListingStatusVersion.known_to.is_(None))
+                    | (EquityListingStatusVersion.known_to > cutoff),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        resolved = {int(row.security_id): row for row in rows}
+        if len(resolved) != len(rows) or set(resolved) != set(security_ids):
+            raise DiscoveryBuildUnavailable(
+                "LIFECYCLE_COVERAGE_INCOMPLETE",
+                "sealed lifecycle publication cannot resolve every confirmed security",
+            )
+        lifecycle.update(resolved)
+        components.append(reference.component)
+    if set(lifecycle) != set(identities):
+        raise DiscoveryBuildUnavailable(
+            "LIFECYCLE_COVERAGE_INCOMPLETE",
+            "sealed lifecycle publications do not cover every confirmed security",
+        )
+    return lifecycle, tuple(components)
+
+
+def _frozen_trading_statuses(
+    session: Session,
+    *,
+    security_ids: Sequence[int],
+    as_of: date,
+    reference: _LockedReferenceComponent,
+) -> dict[int, EquityTradingStatusRevision]:
+    """按封存交易状态 publication 的知识截止点读取停复牌事实。"""
+    cutoff = _reference_knowledge_cutoff(reference)
+    rows = (
+        session.execute(
+            select(EquityTradingStatusRevision).where(
+                EquityTradingStatusRevision.security_id.in_(security_ids),
+                EquityTradingStatusRevision.trade_date == as_of,
+                EquityTradingStatusRevision.known_from <= cutoff,
+                (EquityTradingStatusRevision.known_to.is_(None))
+                | (EquityTradingStatusRevision.known_to > cutoff),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    result = {int(row.security_id): row for row in rows}
+    if len(result) != len(rows):
+        raise DiscoveryBuildUnavailable(
+            "TRADING_STATUS_AMBIGUOUS",
+            "sealed ordinary trading status is ambiguous",
+        )
+    _assert_fact_sources_before_cutoff(
+        session,
+        source_batch_ids={UUID(str(row.source_batch_id)) for row in rows},
+        cutoff=cutoff,
+        reason_code="TRADING_STATUS_SOURCE_AFTER_REFERENCE_CUTOFF",
+    )
+    return result
+
+
+def _assert_fact_sources_before_cutoff(
+    session: Session,
+    *,
+    source_batch_ids: set[UUID],
+    cutoff: datetime,
+    reason_code: str,
+) -> None:
+    """验证历史事实的证据不晚于封存 publication 的知识边界。"""
+    if not source_batch_ids:
+        return
+    rows = (
+        session.execute(
+            select(SourceBatch.source_batch_id, SourceBatch.created_at).where(
+                SourceBatch.source_batch_id.in_(source_batch_ids)
+            )
+        )
+        .mappings()
+        .all()
+    )
+    sources = {UUID(str(row["source_batch_id"])): row["created_at"] for row in rows}
+    if set(sources) != source_batch_ids or any(
+        not isinstance(created_at, datetime) or created_at > cutoff
+        for created_at in sources.values()
+    ):
+        raise DiscoveryBuildUnavailable(
+            reason_code,
+            "sealed reference cannot prove every fact source preceded its knowledge cutoff",
         )
 
 
@@ -1492,6 +2086,296 @@ def _membership_families(
         states,
         _deduplicate_components(components),
     )
+
+
+def _frozen_membership_families(
+    session: Session,
+    *,
+    security_ids: Sequence[int],
+    as_of: date,
+    references: Sequence[_LockedReferenceComponent],
+) -> tuple[
+    dict[int, tuple[_Membership, ...]],
+    dict[int, dict[str, _OptionalFamily]],
+    tuple[_Component, ...],
+]:
+    """按封存板块、申万 publication 重放分类；目录名称无历史证据时明确降级。"""
+    memberships: dict[int, list[_Membership]] = {security_id: [] for security_id in security_ids}
+    states: dict[int, dict[str, _OptionalFamily]] = {
+        security_id: {} for security_id in security_ids
+    }
+    for scheme in _SECTOR_SCHEMES:
+        family = "industry" if scheme.endswith("industry") else "concept"
+        release_reference = _reference_component(
+            references,
+            dataset=_SECTOR_MEMBERSHIP_DATASET,
+            partition_key=scheme,
+        )
+        catalog_reference = _reference_component(
+            references,
+            dataset="sector.catalog.raw",
+            partition_key=scheme,
+        )
+        release = session.execute(
+            select(SectorMembershipRelease).where(
+                SectorMembershipRelease.release_id == release_reference.publication.release_id,
+                SectorMembershipRelease.data_version == release_reference.publication.data_version,
+                SectorMembershipRelease.scheme == scheme,
+            )
+        ).scalar_one_or_none()
+        if release is None:
+            _mark_family_unavailable(
+                states,
+                security_ids,
+                family,
+                "FROZEN_SECTOR_MEMBERSHIP_RELEASE_UNAVAILABLE",
+            )
+            continue
+        source_label = _sector_membership_source_label(
+            session,
+            release_id=UUID(str(release.release_id)),
+        )
+        rows = (
+            session.execute(
+                select(
+                    SectorMembershipItem.security_id,
+                    SectorEntity.sector_code,
+                    SectorEntity.name,
+                    SectorEntity.updated_at,
+                    SectorMembershipItem.snapshot_date,
+                )
+                .join(
+                    SectorMembershipReleaseSector,
+                    SectorMembershipReleaseSector.snapshot_id == SectorMembershipItem.snapshot_id,
+                )
+                .join(
+                    SectorEntity,
+                    SectorEntity.sector_key == SectorMembershipReleaseSector.sector_key,
+                )
+                .where(
+                    SectorMembershipReleaseSector.release_id == release.release_id,
+                    SectorMembershipItem.security_id.in_(security_ids),
+                )
+            )
+            .mappings()
+            .all()
+        )
+        catalog_cutoff = _reference_knowledge_cutoff(catalog_reference)
+        # `SectorEntity` 仅保留当前显示名；若它在封存目录之后变更，不能把新名泄漏到旧计划。
+        if any(
+            row["name"] is None
+            or not isinstance(row["updated_at"], datetime)
+            or row["updated_at"] > catalog_cutoff
+            for row in rows
+        ):
+            _mark_family_unavailable(
+                states,
+                security_ids,
+                family,
+                "FROZEN_SECTOR_CATALOG_NAME_HISTORY_UNAVAILABLE",
+            )
+            continue
+        grouped: dict[int, int] = defaultdict(int)
+        for row in rows:
+            security_id = int(row["security_id"])
+            grouped[security_id] += 1
+            memberships[security_id].append(
+                _Membership(
+                    scheme=scheme,
+                    code=str(row["sector_code"]),
+                    name=str(row["name"]),
+                    level=None,
+                    observed_on=row["snapshot_date"],
+                )
+            )
+        for security_id in security_ids:
+            states[security_id][family] = _OptionalFamily(
+                values={},
+                availability="DATA" if grouped[security_id] else "LEGITIMATE_EMPTY",
+                reason_code=None if grouped[security_id] else "NO_REPORTED_MEMBERSHIP",
+                data_version=UUID(str(release.data_version)),
+                source_label=source_label,
+                methodology={"code": scheme, "version": "1"},
+            )
+    _append_frozen_sw_memberships(
+        session,
+        security_ids=security_ids,
+        as_of=as_of,
+        memberships=memberships,
+        states=states,
+        references=references,
+    )
+    return (
+        {
+            key: tuple(sorted(value, key=lambda item: (item.scheme, item.code)))
+            for key, value in memberships.items()
+        },
+        states,
+        (),
+    )
+
+
+def _mark_family_unavailable(
+    states: dict[int, dict[str, _OptionalFamily]],
+    security_ids: Sequence[int],
+    family: str,
+    reason_code: str,
+) -> None:
+    """为整个分类语义族写入可审计不可用状态，而不是改读 current 版本。"""
+    for security_id in security_ids:
+        states[security_id][family] = _unavailable_family(reason_code)
+
+
+def _append_frozen_sw_memberships(
+    session: Session,
+    *,
+    security_ids: Sequence[int],
+    as_of: date,
+    memberships: dict[int, list[_Membership]],
+    states: dict[int, dict[str, _OptionalFamily]],
+    references: Sequence[_LockedReferenceComponent],
+) -> None:
+    """按封存 taxonomy 与每个三级节点 publication 重放申万完整归属。"""
+    taxonomy_reference = _only_reference_component(
+        references,
+        dataset=_SW_TAXONOMY_DATASET,
+    )
+    taxonomy = session.execute(
+        select(SwSectorPublication).where(
+            SwSectorPublication.data_version == taxonomy_reference.publication.data_version,
+            SwSectorPublication.capability == _SW_TAXONOMY_DATASET,
+        )
+    ).scalar_one_or_none()
+    if taxonomy is None:
+        _mark_sw_unavailable(states, security_ids, "FROZEN_SW_TAXONOMY_UNAVAILABLE")
+        return
+    cutoff = _reference_knowledge_cutoff(taxonomy_reference)
+    node_rows = (
+        session.execute(
+            select(
+                SwSectorNodeRevision.sector_code,
+                SwSectorNodeRevision.name,
+                SwSectorNodeRevision.level,
+                SwSectorNodeRevision.parent_code,
+            ).where(
+                SwSectorNodeRevision.snapshot_date == taxonomy.snapshot_date,
+                SwSectorNodeRevision.methodology_id == taxonomy.methodology_id,
+                SwSectorNodeRevision.known_from <= cutoff,
+                (SwSectorNodeRevision.known_to.is_(None))
+                | (SwSectorNodeRevision.known_to > cutoff),
+                SwSectorNodeRevision.quality_status.in_(("passed", "warned")),
+            )
+        )
+        .mappings()
+        .all()
+    )
+    nodes = {
+        _sw_code(row["sector_code"]): _SwNode(
+            code=_sw_code(row["sector_code"]),
+            name=str(row["name"]),
+            level=int(row["level"]),
+            parent_code=(None if row["parent_code"] is None else _sw_code(row["parent_code"])),
+        )
+        for row in node_rows
+    }
+    if len(nodes) != len(node_rows):
+        raise DiscoveryBuildUnavailable(
+            "SW_TAXONOMY_AMBIGUOUS",
+            "sealed taxonomy contains duplicate normalized node codes",
+        )
+    third_level_nodes = {code: node for code, node in nodes.items() if node.level == 3}
+    by_node: dict[str, tuple[_LockedReferenceComponent, SwMembershipRelease, str]] = {}
+    for reference in references:
+        if reference.publication.dataset != _SW_MEMBERSHIP_DATASET:
+            continue
+        release = session.execute(
+            select(SwMembershipRelease).where(
+                SwMembershipRelease.release_id == reference.publication.release_id,
+                SwMembershipRelease.source_batch_id.in_(reference.source_batch_ids),
+                SwMembershipRelease.observation_date <= as_of,
+            )
+        ).scalar_one_or_none()
+        if release is None:
+            _mark_sw_unavailable(
+                states,
+                security_ids,
+                "FROZEN_SW_MEMBERSHIP_RELEASE_UNAVAILABLE",
+            )
+            return
+        node_code = _sw_code(release.node_code)
+        if node_code in by_node:
+            raise DiscoveryBuildUnavailable(
+                "SW_MEMBERSHIP_AMBIGUOUS",
+                "sealed reference has multiple membership releases for one third-level node",
+            )
+        source = _source_batch_labels(
+            session,
+            source_batch_ids={UUID(str(release.source_batch_id))},
+        )[UUID(str(release.source_batch_id))]
+        by_node[node_code] = (reference, release, source)
+    if not third_level_nodes or set(by_node) != set(third_level_nodes):
+        _mark_sw_unavailable(states, security_ids, "SW_MEMBERSHIP_COVERAGE_INCOMPLETE")
+        return
+    release_ids = [release.release_id for _reference, release, _source in by_node.values()]
+    rows = (
+        session.execute(
+            select(
+                SwMembershipItem.security_id,
+                SwMembershipItem.third_level_node_code,
+                SwMembershipRelease.observation_date,
+            )
+            .join(
+                SwMembershipRelease,
+                SwMembershipRelease.release_id == SwMembershipItem.release_id,
+            )
+            .where(
+                SwMembershipItem.release_id.in_(release_ids),
+                SwMembershipItem.security_id.in_(security_ids),
+            )
+        )
+        .mappings()
+        .all()
+    )
+    grouped: dict[int, list[Mapping[Any, Any]]] = defaultdict(list)
+    for row in rows:
+        grouped[int(row["security_id"])].append(row)
+    if any(len(value) > 1 for value in grouped.values()):
+        raise DiscoveryBuildUnavailable(
+            "SW_MEMBERSHIP_AMBIGUOUS",
+            "one security belongs to multiple sealed SW third-level nodes",
+        )
+    combined_source = _combined_source_label(
+        source for _reference, _release, source in by_node.values()
+    )
+    for security_id in security_ids:
+        values = grouped.get(security_id, [])
+        if values:
+            value = values[0]
+            code = _sw_code(value["third_level_node_code"])
+            path = _sw_path(nodes, third_level_code=code)
+            memberships[security_id].extend(
+                _Membership(
+                    scheme="sw.industry",
+                    code=node.code,
+                    name=node.name,
+                    level=str(node.level),
+                    observed_on=value["observation_date"],
+                )
+                for node in path
+            )
+            reference, _release, source_label = by_node[code]
+            data_version = UUID(str(reference.publication.data_version))
+        else:
+            source_label = combined_source
+            data_version = None
+        states[security_id]["sw"] = _OptionalFamily(
+            values={},
+            availability="DATA" if values else "LEGITIMATE_EMPTY",
+            reason_code=None if values else "NO_REPORTED_MEMBERSHIP",
+            data_version=data_version,
+            source_label=source_label,
+            methodology={"code": "SW2021", "version": "1"},
+        )
 
 
 def _sector_membership_source_label(session: Session, *, release_id: UUID) -> str:

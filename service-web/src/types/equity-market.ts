@@ -468,44 +468,108 @@ export const equityListingStatusHistoryPageSchema = z
   })
   .strict();
 
-/** 既有日、周、月行情响应。 */
-export const equityBarPageSchema = z
+/** 约束可公开复验的精确 K 线覆盖与来源批次谱系，不包含服务内证券身份 UUID。 */
+const equityBarCoverageLineageFields = {
+  coverageVersion: uuidSchema,
+  publicationKind: z.enum(["DATA", "ZERO_RECORD_COVERAGE"]),
+  sourceBatchId: uuidSchema,
+};
+
+/** 复用已发布日、周、月行情页的公共业务字段。 */
+const equityBarPageFields = {
+  exchange: equityExchangeSchema,
+  symbol: z.string().regex(/^\d{6}$/),
+  ...equityBarCoverageLineageFields,
+  period: z.enum(["1d", "1w", "1mo"]),
+  adjustmentMode: z.enum(["none", "qfq", "hfq"]),
+  adjustAsOf: dateSchema.nullable(),
+  factorVersion: uuidSchema.nullable(),
+  formulaVersion: z.literal("cumulative-hfq-v1").nullable(),
+  dataVersion: uuidSchema,
+  publishedAt: dateTimeSchema,
+  qualityStatus: z.literal("passed"),
+  items: z
+    .array(
+      z
+        .object({
+          periodEnd: dateSchema,
+          open: nonNegativeDecimalSchema,
+          high: nonNegativeDecimalSchema,
+          low: nonNegativeDecimalSchema,
+          close: nonNegativeDecimalSchema,
+          volumeShares: integerStringSchema,
+          amountCny: nonNegativeDecimalSchema,
+          turnoverRate: nonNegativeDecimalSchema.nullable(),
+          isFinal: z.boolean(),
+          revision: z.number().int().positive(),
+        })
+        .strict(),
+    )
+    .max(2000),
+  nextCursor: z.string().max(1024).nullable(),
+};
+
+/** 约束当前精确覆盖可读取的正常行情 publication。 */
+const availableEquityBarPageSchema = z
   .object({
-    exchange: equityExchangeSchema,
-    symbol: z.string().regex(/^\d{6}$/),
-    period: z.enum(["1d", "1w", "1mo"]),
-    adjustmentMode: z.enum(["none", "qfq", "hfq"]),
-    adjustAsOf: dateSchema.nullable(),
-    factorVersion: uuidSchema.nullable(),
-    formulaVersion: z.string().max(80).nullable(),
-    dataVersion: uuidSchema.nullable(),
-    publishedAt: dateTimeSchema.nullable(),
-    availability: z.enum(["AVAILABLE", "EMPTY", "SOURCE_UNAVAILABLE"]),
+    ...equityBarPageFields,
+    availability: z.literal("AVAILABLE"),
     observedAt: dateTimeSchema.nullable(),
     reasonCode: z.string().max(80).nullable(),
-    qualityStatus: z.string().max(40).nullable(),
-    stale: z.boolean(),
-    items: z
-      .array(
-        z
-          .object({
-            periodEnd: dateSchema,
-            open: nonNegativeDecimalSchema,
-            high: nonNegativeDecimalSchema,
-            low: nonNegativeDecimalSchema,
-            close: nonNegativeDecimalSchema,
-            volumeShares: integerStringSchema,
-            amountCny: nonNegativeDecimalSchema,
-            turnoverRate: nonNegativeDecimalSchema.nullable(),
-            isFinal: z.boolean(),
-            revision: z.number().int().positive(),
-          })
-          .strict(),
-      )
-      .max(2000),
-    nextCursor: z.string().max(1024).nullable(),
+    stale: z.literal(false),
   })
-  .passthrough();
+  .strict();
+
+/** 约束保留最后合格精确覆盖、同时报告来源暂不可用的只读行情 publication。 */
+const staleEquityBarPageSchema = z
+  .object({
+    ...equityBarPageFields,
+    availability: z.literal("SOURCE_UNAVAILABLE"),
+    observedAt: dateTimeSchema,
+    reasonCode: z.string().min(1).max(80),
+    stale: z.literal(true),
+  })
+  .strict();
+
+/** 既有日、周、月行情响应必须带完整精确覆盖谱系，未知字段一律拒绝。 */
+export const equityBarPageSchema = z
+  .union([availableEquityBarPageSchema, staleEquityBarPageSchema])
+  .superRefine(validateEquityBarCoverageShape);
+
+/** 拒绝把无覆盖、分页错配或空数据 publication 伪装为可用 K 线。 */
+function validateEquityBarCoverageShape(
+  value: {
+    publicationKind: "DATA" | "ZERO_RECORD_COVERAGE";
+    items: unknown[];
+    nextCursor: string | null;
+  },
+  context: z.RefinementCtx,
+): void {
+  if (value.publicationKind === "ZERO_RECORD_COVERAGE") {
+    if (value.items.length !== 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["items"],
+        message: "ZERO_RECORD_COVERAGE 必须没有 K 线记录",
+      });
+    }
+    if (value.nextCursor !== null) {
+      context.addIssue({
+        code: "custom",
+        path: ["nextCursor"],
+        message: "ZERO_RECORD_COVERAGE 不得继续分页",
+      });
+    }
+    return;
+  }
+  if (value.items.length === 0) {
+    context.addIssue({
+      code: "custom",
+      path: ["items"],
+      message: "DATA 必须至少包含一条 K 线记录",
+    });
+  }
+}
 
 /** 既有公司概况响应。 */
 export const equityCompanyProfileSchema = z

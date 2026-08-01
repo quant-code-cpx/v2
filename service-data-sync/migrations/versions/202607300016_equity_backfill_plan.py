@@ -386,8 +386,7 @@ def upgrade() -> None:
             name="ck_equity_backfill_page_child_count",
         ),
         sa.CheckConstraint(
-            "last_ordinal >= first_ordinal "
-            "AND child_count = last_ordinal - first_ordinal + 1",
+            "last_ordinal >= first_ordinal AND child_count = last_ordinal - first_ordinal + 1",
             name="ck_equity_backfill_page_ordinal_range",
         ),
         sa.CheckConstraint(
@@ -505,8 +504,7 @@ def upgrade() -> None:
             name="ck_equity_backfill_child_key",
         ),
         sa.CheckConstraint(
-            "window_to IS NULL OR "
-            "(window_from IS NOT NULL AND window_to >= window_from)",
+            "window_to IS NULL OR (window_from IS NOT NULL AND window_to >= window_from)",
             name="ck_equity_backfill_child_window",
         ),
         sa.CheckConstraint(
@@ -853,9 +851,7 @@ def downgrade() -> None:
         """
     )
     for table_name in reversed(_IMMUTABLE_TABLES):
-        op.execute(
-            f"DROP TRIGGER trg_{table_name}_immutable ON {table_name}"
-        )
+        op.execute(f"DROP TRIGGER trg_{table_name}_immutable ON {table_name}")
 
     op.drop_index(
         "ix_equity_backfill_child_result_command",

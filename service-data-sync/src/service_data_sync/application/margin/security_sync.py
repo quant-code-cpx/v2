@@ -31,6 +31,7 @@ _SECURITY_CAPABILITY = "market.margin.security.1d.reported"
 _SECURITY_SCHEMA = "quant-v2.margin-security-daily.v1"
 _ELIGIBILITY_CAPABILITY = "market.margin.eligibility.reported"
 _ELIGIBILITY_SCHEMA = "quant-v2.margin-eligibility.v1"
+_SECURITY_DAILY_VENUES = frozenset({"SSE", "SZSE"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +46,7 @@ class MarginSecuritySyncResult:
 
 
 class MarginSecurityDailySyncService:
-    """同步沪深证券两融直报日明细，深市缺失的偿还值保持为空。"""
+    """同步沪深证券两融直报日明细，北交所资格名单不能替代证券日明细。"""
 
     def __init__(
         self,
@@ -60,7 +61,13 @@ class MarginSecurityDailySyncService:
         self._raw_payload_store = raw_payload_store
 
     async def sync(self, *, venue: MarginVenue, start: date, end: date) -> MarginSecuritySyncResult:
-        """抓取有界证券明细；能力、场所或日期不满足 P0 约束时立即停止。"""
+        """抓取沪深有界证券明细；北交所仅允许走资格名单 capability。"""
+        if venue.code not in _SECURITY_DAILY_VENUES:
+            raise ProviderError(
+                ProviderErrorCode.CURRENTLY_UNSUPPORTED,
+                "margin security daily is currently unsupported for this venue",
+                retryable=False,
+            )
         batch = await _fetch(
             source=self._source,
             capability=_SECURITY_CAPABILITY,
@@ -85,7 +92,7 @@ class MarginSecurityDailySyncService:
 
 
 class MarginEligibilitySyncService:
-    """同步沪深两融资格公告或观察目录，绝不由当前缺席自动写入不适格状态。"""
+    """同步沪深北两融资格公告或观察目录，绝不由当前缺席自动写入不适格状态。"""
 
     def __init__(
         self,

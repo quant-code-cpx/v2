@@ -438,10 +438,11 @@ def test_repository_rejects_reused_or_pending_identity_windows() -> None:
 
 
 def test_publication_prefers_security_partition_and_guards_legacy_fallback() -> None:
-    """旧代码分区只在当前知识中从未映射到第二只证券时允许兼容读取。"""
+    """旧代码分区只在未复用时兼容读取，并保留已通过质量状态和旧行默认值。"""
     publication_row = {
         "data_version": uuid4(),
         "published_at": datetime(2026, 7, 28, tzinfo=UTC),
+        "quality_status": "passed",
     }
     instrument = StoredEquityInstrument(
         security_id=1,
@@ -453,6 +454,14 @@ def test_publication_prefers_security_partition_and_guards_legacy_fallback() -> 
     stable_engine = FakeEngine([publication_row])
     legacy_engine = FakeEngine([None, [{"security_id": 1}], publication_row])
     reused_engine = FakeEngine([None, [{"security_id": 1}, {"security_id": 2}]])
+    compatibility_engine = FakeEngine(
+        [
+            {
+                "data_version": uuid4(),
+                "published_at": datetime(2026, 7, 28, tzinfo=UTC),
+            }
+        ]
+    )
 
     stable = _repository(stable_engine).get_current_publication(
         dataset="equity.profile",
@@ -466,14 +475,56 @@ def test_publication_prefers_security_partition_and_guards_legacy_fallback() -> 
         dataset="equity.profile",
         instrument=instrument,
     )
+    compatibility = _repository(compatibility_engine).get_current_publication(
+        dataset="equity.profile",
+        instrument=instrument,
+    )
 
     assert _security_partition_key(1) == "security:1"
     assert stable is not None
     assert legacy is not None
     assert reused is None
+    assert compatibility is not None
+    assert stable.quality_status == "passed"
+    assert legacy.quality_status == "passed"
+    assert compatibility.quality_status == "passed"
+    assert "dataset_publication.quality_status" in stable_engine.connection.statements[0]
+    assert "dataset_publication.quality_status =" in stable_engine.connection.statements[0]
     assert len(stable_engine.connection.statements) == 1
     assert len(legacy_engine.connection.statements) == 3
     assert len(reused_engine.connection.statements) == 2
+
+
+def test_publication_source_requires_one_release_bound_observation() -> None:
+    """来源投影只接受 release 规范化运行唯一绑定的批次，避免任取同运行的其他观察。"""
+    source_batch_id = uuid4()
+    source_row = {
+        "source_batch_id": source_batch_id,
+        "provider_id": "akshare-sina-adjustment-factor",
+        "upstream_source": "sina-hfq-factor",
+        "adapter_version": "akshare-1.18.81-v1",
+    }
+    data_version = uuid4()
+    exact_engine = FakeEngine([[source_row]])
+    ambiguous_engine = FakeEngine([[source_row, source_row]])
+
+    exact = _repository(exact_engine).get_publication_source(
+        dataset="equity.adjustment_factor",
+        data_version=data_version,
+    )
+    ambiguous = _repository(ambiguous_engine).get_publication_source(
+        dataset="equity.adjustment_factor",
+        data_version=data_version,
+    )
+
+    assert exact is not None
+    assert exact.source_batch_id == source_batch_id
+    assert exact.provider_id == "akshare-sina-adjustment-factor"
+    assert ambiguous is None
+    statement = exact_engine.connection.statements[0]
+    assert "dataset_release" in statement
+    assert "normalization_run" in statement
+    assert "source_batch" in statement
 
 
 def test_repository_orchestrates_all_equity_extension_publications(monkeypatch) -> None:
@@ -619,13 +670,23 @@ def test_repository_orchestrates_all_equity_extension_publications(monkeypatch) 
             start=date(2026, 1, 1),
             end=date(2026, 7, 28),
         )
-    with pytest.raises(ValueError, match="factors must not be empty"):
-        repository.publish_adjustment_factors(
-            identifier=identifier,
-            factors=(),
-            source=source,
-            window_end=date(2026, 7, 28),
-        )
+    empty_factors = repository.publish_adjustment_factors(
+        identifier=identifier,
+        factors=(),
+        source=source,
+        window_end=date(2026, 7, 28),
+    )
+    assert empty_factors.data_version == data_version
+    assert empty_factors.inserted_count == 0
+    assert empty_factors.unchanged_count == 0
+    assert empty_factors.source_batch_id is not None
+    assert record_source.call_count == 5
+    assert advance.call_count == 5
+    assert write_factors.call_count == 1
+    assert any(
+        call.kwargs["fact_dates"] == (date(2026, 7, 28),)
+        for call in confirmed_instrument.call_args_list
+    )
 
 
 def test_repository_writes_extension_revisions_and_checkpoints() -> None:
@@ -747,8 +808,9 @@ def test_repository_writes_extension_revisions_and_checkpoints() -> None:
 
 
 def test_repository_reads_all_extension_resources() -> None:
-    """读取方法从各自物理表映射行情、因子、事件、概况和 publication。"""
+    """读取方法从各自物理表映射行情、因子、事件、概况、质量和来源血缘。"""
     data_version = uuid4()
+    source_batch_id = uuid4()
     published_at = datetime(2026, 7, 28, tzinfo=UTC)
     action_id = uuid4()
     instrument = StoredEquityInstrument(
@@ -773,6 +835,7 @@ def test_repository_reads_all_extension_resources() -> None:
         main_business="白酒",
         business_scope=None,
         summary=None,
+        source_batch_id=source_batch_id,
     )
     bar_row = {
         "period_end": date(2026, 7, 24),
@@ -788,7 +851,11 @@ def test_repository_reads_all_extension_resources() -> None:
     }
     engine = FakeEngine(
         [
-            {"data_version": data_version, "published_at": published_at},
+            {
+                "data_version": data_version,
+                "published_at": published_at,
+                "quality_status": "passed",
+            },
             [bar_row],
             [bar_row],
             [
@@ -797,6 +864,7 @@ def test_repository_reads_all_extension_resources() -> None:
                     "cumulative_factor": Decimal("2"),
                     "revision": 1,
                     "factor_version": data_version,
+                    "source_batch_id": source_batch_id,
                 }
             ],
             [
@@ -812,6 +880,7 @@ def test_repository_reads_all_extension_resources() -> None:
                     "cash_dividend_per_10": Decimal("10"),
                     "bonus_shares_per_10": None,
                     "transfer_shares_per_10": None,
+                    "source_batch_id": source_batch_id,
                 }
             ],
             profile_row,
@@ -851,11 +920,17 @@ def test_repository_reads_all_extension_resources() -> None:
     profile = repository.get_company_profile(security_id=1)
 
     assert publication is not None and publication.data_version == data_version
+    assert publication.quality_status == "passed"
     assert cast(EquityPeriodBar, weekly[0].bar).period is EquityBarPeriod.WEEK_1
     assert cast(EquityDailyBar, daily[0].bar).trade_date == date(2026, 7, 24)
     assert factors[0].factor.cumulative_factor == Decimal("2")
+    assert factors[0].source_batch_id == source_batch_id
     assert actions[0].action_id == action_id
+    assert actions[0].source_batch_id == source_batch_id
     assert profile is not None and profile.profile.industry == "白酒"
+    assert profile is not None and profile.source_batch_id == source_batch_id
+    assert "equity_adjustment_factor.source_batch_id" in engine.connection.statements[3]
+    assert "equity_corporate_action_version.source_batch_id" in engine.connection.statements[4]
     assert (
         repository.get_current_publication(
             dataset="equity.profile",

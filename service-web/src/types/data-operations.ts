@@ -31,8 +31,10 @@ export type TargetSelectorKind =
   | "ETF"
   | "MARGIN"
   | "STOCK_CONNECT"
+  | "STOCK_CONNECT_RESEARCH"
   | "TRADING_EVENT"
-  | "INDEX";
+  | "INDEX"
+  | "MONEY_FLOW";
 
 /** 数据集服务端计算的新鲜度结论。 */
 export type FreshnessStatus = "FRESH" | "WARNING" | "STALE" | "UNKNOWN" | "NOT_APPLICABLE";
@@ -288,18 +290,37 @@ export type EtfTargetSelector =
   | OneEtfTargetSelector
   | AllEtfsDraftTargetSelector;
 
-/** 两融市场、标的证券或资格范围。 */
-export interface MarginTargetSelector {
+/** 两融市场汇总和证券日明细只能按沪深市场批量执行，不能携带未实现的证券子选择器。 */
+export interface MarginDailyTargetSelector {
   kind: "MARGIN";
-  operation: "MARKET" | "SECURITY" | "ELIGIBILITY";
+  operation: "MARKET" | "SECURITY";
   venue: "SSE" | "SZSE";
-  security: InstrumentTargetSelector | null;
+  security: null;
 }
+
+/** 两融资格快照只支持深交所和北交所，北交所真实来源由该独立分支显式表达。 */
+export interface MarginEligibilityTargetSelector {
+  kind: "MARGIN";
+  operation: "ELIGIBILITY";
+  venue: "SZSE" | "BSE";
+  security: null;
+}
+
+/** 两融数据集的严格市场级 selector 并集。 */
+export type MarginTargetSelector = MarginDailyTargetSelector | MarginEligibilityTargetSelector;
 
 /** 完整沪深港通数据包的通道和方向范围；不承载持仓等越界操作。 */
 export interface StockConnectTargetSelector {
   kind: "STOCK_CONNECT";
   operation: "MARKET";
+  channel: "ALL" | "SH" | "SZ";
+  direction: "NORTHBOUND" | "SOUTHBOUND" | null;
+}
+
+/** 港通市场统计 `research` 独立于正式互联互通 `bundle`，不携带或暗示正式 `publication`。 */
+export interface StockConnectResearchTargetSelector {
+  kind: "STOCK_CONNECT_RESEARCH";
+  operation: "MARKET_STAT";
   channel: "ALL" | "SH" | "SZ";
   direction: "NORTHBOUND" | "SOUTHBOUND" | null;
 }
@@ -310,13 +331,86 @@ export interface TradingEventTargetSelector {
   operation: "DRAGON_TIGER" | "BLOCK_TRADE";
 }
 
-/** 指数管理方、能力和指数代码范围。 */
-export interface IndexTargetSelector {
+/** 指数目录快照不以单条指数作为同步范围。 */
+export interface IndexCatalogTargetSelector {
   kind: "INDEX";
   administrator: "CSI" | "CNI";
-  capability: string;
+  capability: "index.catalog.snapshot";
+  indexCode: null;
+}
+
+/** 指数成分或权重快照必须以一个显式指数代码作为同步范围。 */
+export interface IndexSnapshotTargetSelector {
+  kind: "INDEX";
+  administrator: "CSI" | "CNI";
+  capability: "index.constituent.snapshot" | "index.weight.snapshot";
   indexCode: string;
 }
+
+/** 指数目录与单指数快照的严格受控范围。 */
+export type IndexTargetSelector = IndexCatalogTargetSelector | IndexSnapshotTargetSelector;
+
+/** 个股日频资金流必须显式携带沪深北交易所和六码证券代码。 */
+export interface MoneyFlowDailyEquityTargetSelector {
+  kind: "MONEY_FLOW";
+  operation: "DAILY";
+  scope: "EQUITY";
+  exchange: "SSE" | "SZSE" | "BSE";
+  symbol: string;
+}
+
+/** 东财行业日频资金流固定使用 `eastmoney.industry` 分类体系。 */
+export interface MoneyFlowDailySectorTargetSelector {
+  kind: "MONEY_FLOW";
+  operation: "DAILY";
+  scope: "SECTOR";
+  scheme: "eastmoney.industry";
+  sectorCode: string;
+}
+
+/** 全市场日频资金流不带证券、行业或方法学参数。 */
+export interface MoneyFlowDailyMarketTargetSelector {
+  kind: "MONEY_FLOW";
+  operation: "DAILY";
+  scope: "MARKET";
+}
+
+/** 东财按单笔大小排行的个股资金流窗口。 */
+export interface MoneyFlowEastmoneyEquityRankingTargetSelector {
+  kind: "MONEY_FLOW";
+  operation: "RANKING";
+  methodology: "EASTMONEY_ORDER_SIZE";
+  scope: "EQUITY";
+  window: "TODAY" | "DAY_3" | "DAY_5" | "DAY_10";
+}
+
+/** 东财行业、概念或地域排行必须显式指明可用的 sectorType。 */
+export interface MoneyFlowEastmoneySectorRankingTargetSelector {
+  kind: "MONEY_FLOW";
+  operation: "RANKING";
+  methodology: "EASTMONEY_ORDER_SIZE";
+  scope: "SECTOR";
+  sectorType: "INDUSTRY" | "CONCEPT" | "REGION";
+  window: "TODAY" | "DAY_5" | "DAY_10";
+}
+
+/** 同花顺按交易方向排行仅覆盖个股、行业和概念三个聚合范围。 */
+export interface MoneyFlowThsRankingTargetSelector {
+  kind: "MONEY_FLOW";
+  operation: "RANKING";
+  methodology: "THS_TRADE_DIRECTION";
+  scope: "EQUITY" | "INDUSTRY" | "CONCEPT";
+  window: "INTRADAY" | "DAY_3" | "DAY_5" | "DAY_10" | "DAY_20";
+}
+
+/** 日频与排行资金流的严格可消费同步范围。 */
+export type MoneyFlowTargetSelector =
+  | MoneyFlowDailyEquityTargetSelector
+  | MoneyFlowDailySectorTargetSelector
+  | MoneyFlowDailyMarketTargetSelector
+  | MoneyFlowEastmoneyEquityRankingTargetSelector
+  | MoneyFlowEastmoneySectorRankingTargetSelector
+  | MoneyFlowThsRankingTargetSelector;
 
 /** 合同定义的严格 selector 并集，禁止承载任意 JSON、URI 或凭据。 */
 export type TargetSelector =
@@ -329,8 +423,10 @@ export type TargetSelector =
   | EtfTargetSelector
   | MarginTargetSelector
   | StockConnectTargetSelector
+  | StockConnectResearchTargetSelector
   | TradingEventTargetSelector
-  | IndexTargetSelector;
+  | IndexTargetSelector
+  | MoneyFlowTargetSelector;
 
 /** 预检返回与运行详情可携带服务端冻结后的全量 ETF selector。 */
 export type FrozenTargetSelector =

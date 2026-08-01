@@ -62,6 +62,7 @@ class SqlAlchemyCanonicalReleaseRepository(CanonicalReleaseRepository):
         write_facts: Callable[[Session, UUID], None] | None,
         write_publication: Callable[[Session, UUID, UUID, UUID], None] | None = None,
         write_visibility: Callable[[Session, UUID, UUID, UUID], None] | None = None,
+        before_final_publication: Callable[[], None] | None = None,
         record_fenced_progress: bool = True,
     ) -> PublishedCanonicalRelease:
         """在 `release` 创建与 `publication` 切换之间写入强类型事实，消除非空外键循环。
@@ -75,6 +76,7 @@ class SqlAlchemyCanonicalReleaseRepository(CanonicalReleaseRepository):
                 write_facts=write_facts,
                 write_publication=write_publication,
                 write_visibility=write_visibility,
+                before_final_publication=before_final_publication,
                 record_fenced_progress=record_fenced_progress,
             )
 
@@ -89,6 +91,7 @@ class SqlAlchemyCanonicalReleaseRepository(CanonicalReleaseRepository):
         write_visibility: (
             Callable[[Session, CanonicalReleaseCandidate, UUID, UUID, UUID], None] | None
         ) = None,
+        before_final_publication: Callable[[], None] | None = None,
         record_fenced_progress: bool = True,
     ) -> PublishedCanonicalRelease:
         """在同一事务内准备候选、事实、聚合清单和可见性证据并切换 publication。
@@ -135,6 +138,7 @@ class SqlAlchemyCanonicalReleaseRepository(CanonicalReleaseRepository):
                         )
                     )
                 ),
+                before_final_publication=before_final_publication,
                 record_fenced_progress=record_fenced_progress,
             )
 
@@ -146,6 +150,7 @@ class SqlAlchemyCanonicalReleaseRepository(CanonicalReleaseRepository):
         write_facts: Callable[[Session, UUID], None] | None = None,
         write_publication: Callable[[Session, UUID, UUID, UUID], None] | None = None,
         write_visibility: Callable[[Session, UUID, UUID, UUID], None] | None = None,
+        before_final_publication: Callable[[], None] | None = None,
         record_fenced_progress: bool = True,
     ) -> PublishedCanonicalRelease:
         """在调用方既有事务中复用统一 release 发布路径。
@@ -160,6 +165,7 @@ class SqlAlchemyCanonicalReleaseRepository(CanonicalReleaseRepository):
             write_facts=write_facts,
             write_publication=write_publication,
             write_visibility=write_visibility,
+            before_final_publication=before_final_publication,
             record_fenced_progress=record_fenced_progress,
         )
 
@@ -171,6 +177,7 @@ def _publish_in_session(
     write_facts: Callable[[Session, UUID], None] | None,
     write_publication: Callable[[Session, UUID, UUID, UUID], None] | None = None,
     write_visibility: Callable[[Session, UUID, UUID, UUID], None] | None = None,
+    before_final_publication: Callable[[], None] | None = None,
     record_fenced_progress: bool = True,
 ) -> PublishedCanonicalRelease:
     """执行已准备候选的统一发布步骤；调用方必须已开启同一数据库事务。
@@ -200,6 +207,8 @@ def _publish_in_session(
     ).scalar_one_or_none()
     if current is not None and current.release_id == release.release_id:
         # 重试命中当前内容时不创建新数据版本，只推进受同一栅栏保护的处理水位。
+        if before_final_publication is not None:
+            before_final_publication()
         _advance_checkpoint(session, candidate=candidate, release_id=release.release_id)
         if write_visibility is not None:
             write_visibility(
@@ -225,6 +234,9 @@ def _publish_in_session(
             "canonical release has already been superseded; reactivation needs a new design"
         )
     now = candidate.created_at
+    # 栅栏必须在可见指针切换前最后武装，避免晚到 worker 覆盖已确认的新版本。
+    if before_final_publication is not None:
+        before_final_publication()
     if current is not None:
         session.execute(
             update(DatasetPublication)

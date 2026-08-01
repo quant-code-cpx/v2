@@ -5,23 +5,28 @@ from __future__ import annotations
 import hashlib
 import os
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, insert, select, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateSchema, DropSchema
 
+from service_data_sync.application.ports.financial_read import FinancialReadRepository
 from service_data_sync.application.ports.market_data import (
     EquitySourceObservation,
     PublishedDailyBars,
     PublishedEquityDataset,
 )
+from service_data_sync.application.ports.sector_market_data import SectorMarketDataRepository
+from service_data_sync.bootstrap.settings import load_settings
 from service_data_sync.domain.equity import (
     EquityBarPeriod,
     EquityDailyBar,
@@ -70,6 +75,7 @@ from service_data_sync.infrastructure.persistence.equity_market_data_repository 
 from service_data_sync.infrastructure.persistence.source_batch import (
     record_source_observation,
 )
+from service_data_sync.interfaces.internal_sector_api import create_app
 
 pytestmark = pytest.mark.integration
 
@@ -98,9 +104,12 @@ def test_three_period_zero_data_replay_lineage_and_fault_rollback(
         monkeypatch.setenv("DATA_SYNC_DATABASE_URL", migration_url)
         config = Config("alembic.ini")
         config.set_main_option("sqlalchemy.url", migration_url.replace("%", "%%"))
-        command.upgrade(config, "202607300017")
+        command.upgrade(config, "202607300019")
         security_id, identifier_version_id = _seed_identity(engine)
         repository = SqlAlchemyEquityMarketDataRepository(database)
+        # 所有来源观察早于 publication 生成时刻，避免测试把尚未被服务观察到的事实
+        # 误当成可读数据；各步仍使用递增观察时间检验 supersede 与陈旧拒绝。
+        observation_base = datetime.now(UTC) - timedelta(hours=1)
 
         zero_results = {}
         for offset, period in enumerate(EquityBarPeriod):
@@ -111,7 +120,7 @@ def test_three_period_zero_data_replay_lineage_and_fault_rollback(
                 source=_source(
                     period,
                     f"zero-{period.value}",
-                    observed_at=datetime(2026, 8, 1, 8, offset, tzinfo=UTC),
+                    observed_at=observation_base + timedelta(minutes=offset),
                 ),
             )
             zero_results[period] = result
@@ -122,7 +131,7 @@ def test_three_period_zero_data_replay_lineage_and_fault_rollback(
             period: _source(
                 period,
                 f"data-{period.value}",
-                observed_at=datetime(2026, 8, 1, 9, offset, tzinfo=UTC),
+                observed_at=observation_base + timedelta(minutes=10 + offset),
             )
             for offset, period in enumerate(EquityBarPeriod)
         }
@@ -225,6 +234,7 @@ def test_three_period_zero_data_replay_lineage_and_fault_rollback(
         assert {row["identifier_version_id"] for row in coverages} == {identifier_version_id}
         assert all(row["quality_status"] == "passed" for row in coverages)
         assert all(row["release_id"] is not None for row in coverages)
+        assert all(row["data_version"] == row["publication_data_version"] for row in coverages)
         assert all(row["identity_hash"] != row["universe_hash"] for row in coverages)
         assert all(row["coverage_from"] == _START for row in coverages)
         assert all(row["coverage_to"] == _END for row in coverages)
@@ -249,6 +259,84 @@ def test_three_period_zero_data_replay_lineage_and_fault_rollback(
         )
         assert _fact_counts(engine, security_id=security_id) == (1, 1, 1)
 
+        for period in EquityBarPeriod:
+            selected = repository.get_bar_window_coverage(
+                identifier=_IDENTIFIER,
+                security_id=security_id,
+                period=period,
+                start=_START,
+                end=_END,
+                data_version=data_results[period].data_version,
+            )
+            assert selected is not None
+            assert selected.data_version == data_results[period].data_version
+            assert selected.source_batch_id == data_results[period].source_batch_id
+            assert selected.publication_kind == "DATA"
+            assert selected.record_count == 1
+            # 同一证券的零记录旧观察已被 DATA 观察替代，不能被旧 dataVersion 重新选中。
+            assert (
+                repository.get_bar_window_coverage(
+                    identifier=_IDENTIFIER,
+                    security_id=security_id,
+                    period=period,
+                    start=_START,
+                    end=_END,
+                    data_version=zero_results[period].data_version,
+                )
+                is None
+            )
+        assert (
+            repository.get_bar_window_coverage(
+                identifier=_IDENTIFIER,
+                security_id=security_id,
+                period=EquityBarPeriod.DAY_1,
+                start=date(2026, 7, 2),
+                end=_END,
+                data_version=data_results[EquityBarPeriod.DAY_1].data_version,
+            )
+            is None
+        )
+
+        # 通过实际 FastAPI 路由读取同一 PostgreSQL schema，不能只验证仓储 SQL 而遗漏
+        # HTTP 层将零记录或无 coverage 误投影为可用数据的风险。
+        reader_zero_result = _publish(
+            repository,
+            period=EquityBarPeriod.WEEK_1,
+            bars=(),
+            source=_source(
+                EquityBarPeriod.WEEK_1,
+                "reader-zero-1w",
+                observed_at=observation_base + timedelta(minutes=20),
+            ),
+            start=date(2026, 8, 1),
+            end=date(2026, 8, 31),
+        )
+        _assert_internal_bars_reader(
+            monkeypatch,
+            repository,
+            data_result=data_results[EquityBarPeriod.WEEK_1],
+            zero_result=reader_zero_result,
+        )
+
+        current_day_coverage = next(
+            row for row in coverages if row["period"] == "1d" and row["publication_kind"] == "DATA"
+        )
+        with pytest.raises(Exception, match="data version mismatches publication"):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE equity_bar_window_coverage
+                        SET data_version = :other_data_version
+                        WHERE coverage_version = :coverage_version
+                        """
+                    ),
+                    {
+                        "other_data_version": zero_results[EquityBarPeriod.DAY_1].data_version,
+                        "coverage_version": current_day_coverage["coverage_version"],
+                    },
+                )
+
         before_stale = _transaction_counts(engine)
         with pytest.raises(ValueError, match="source observation regresses"):
             _publish(
@@ -258,7 +346,7 @@ def test_three_period_zero_data_replay_lineage_and_fault_rollback(
                 source=_source(
                     EquityBarPeriod.DAY_1,
                     "stale-observation",
-                    observed_at=datetime(2026, 8, 1, 8, 30, tzinfo=UTC),
+                    observed_at=observation_base + timedelta(minutes=5),
                 ),
             )
         assert _transaction_counts(engine) == before_stale
@@ -279,7 +367,7 @@ def test_three_period_zero_data_replay_lineage_and_fault_rollback(
                 source=_source(
                     EquityBarPeriod.DAY_1,
                     "mismatched-source",
-                    observed_at=datetime(2026, 8, 3, tzinfo=UTC),
+                    observed_at=observation_base + timedelta(minutes=30),
                 ),
                 start=date(2026, 8, 1),
                 end=date(2026, 8, 31),
@@ -317,7 +405,7 @@ def test_three_period_zero_data_replay_lineage_and_fault_rollback(
                 source=_source(
                     EquityBarPeriod.DAY_1,
                     "rollback",
-                    observed_at=datetime(2026, 8, 4, tzinfo=UTC),
+                    observed_at=observation_base + timedelta(minutes=40),
                 ),
                 start=date(2026, 8, 1),
                 end=date(2026, 8, 31),
@@ -353,6 +441,8 @@ def _publish(
     period: EquityBarPeriod,
     bars: tuple[EquityDailyBar | EquityPeriodBar, ...],
     source: EquitySourceObservation,
+    start: date = _START,
+    end: date = _END,
 ) -> PublishedDailyBars | PublishedEquityDataset:
     """按周期调用真实仓储，并保留统一结果形状供测试断言。"""
     if period is EquityBarPeriod.DAY_1:
@@ -360,17 +450,79 @@ def _publish(
             identifier=_IDENTIFIER,
             bars=tuple(bar for bar in bars if isinstance(bar, EquityDailyBar)),
             source=source,
-            start=_START,
-            end=_END,
+            start=start,
+            end=end,
         )
     return repository.publish_period_bars(
         identifier=_IDENTIFIER,
         period=period,
         bars=tuple(bar for bar in bars if isinstance(bar, EquityPeriodBar)),
         source=source,
-        start=_START,
-        end=_END,
+        start=start,
+        end=end,
     )
+
+
+def _assert_internal_bars_reader(
+    monkeypatch: pytest.MonkeyPatch,
+    repository: SqlAlchemyEquityMarketDataRepository,
+    *,
+    data_result: PublishedDailyBars | PublishedEquityDataset,
+    zero_result: PublishedDailyBars | PublishedEquityDataset,
+) -> None:
+    """从真实 PostgreSQL publication 验证内部 bars 路由的 DATA、ZERO 与无覆盖语义。"""
+    monkeypatch.setenv(
+        "DATA_SYNC_INTERNAL_API_BEARER_TOKEN",
+        "integration-only-internal-api-bearer-token-000000000000",
+    )
+    # 此端到端断言只装配行情 reader，避免外部 stock-connect 依赖干扰本地 schema。
+    monkeypatch.setenv("DATA_SYNC_STOCK_CONNECT_ENABLED", "false")
+    settings = load_settings()
+    app = create_app(
+        settings=settings,
+        repository=cast(SectorMarketDataRepository, object()),
+        financial_repository=cast(FinancialReadRepository, object()),
+        equity_market_repository=repository,
+    )
+    headers = {"Authorization": f"Bearer {settings.internal_api_bearer_token.get_secret_value()}"}
+    data_endpoint = (
+        "/internal/v1/equities/SSE/600519/bars"
+        f"?period=1w&start={_START.isoformat()}&end={_END.isoformat()}"
+        f"&dataVersion={data_result.data_version}"
+    )
+    zero_endpoint = (
+        "/internal/v1/equities/SSE/600519/bars"
+        "?period=1w&start=2026-08-01&end=2026-08-31"
+        f"&dataVersion={zero_result.data_version}"
+    )
+    missing_coverage_endpoint = (
+        "/internal/v1/equities/SSE/600519/bars"
+        "?period=1w&start=2026-06-01&end=2026-06-30"
+        f"&dataVersion={data_result.data_version}"
+    )
+    with TestClient(app) as client:
+        data_response = client.get(data_endpoint, headers=headers)
+        zero_response = client.get(zero_endpoint, headers=headers)
+        missing_coverage_response = client.get(missing_coverage_endpoint, headers=headers)
+
+    assert data_response.status_code == 200, data_response.text
+    assert data_response.headers["x-data-version"] == str(data_result.data_version)
+    assert data_response.json()["coverageVersion"] == str(data_result.coverage_version)
+    assert data_response.json()["publicationKind"] == "DATA"
+    assert data_response.json()["sourceBatchId"] == str(data_result.source_batch_id)
+    assert data_response.json()["availability"] == "AVAILABLE"
+    assert len(data_response.json()["items"]) == 1
+
+    assert zero_response.status_code == 200, zero_response.text
+    assert zero_response.headers["x-data-version"] == str(zero_result.data_version)
+    assert zero_response.json()["coverageVersion"] == str(zero_result.coverage_version)
+    assert zero_response.json()["publicationKind"] == "ZERO_RECORD_COVERAGE"
+    assert zero_response.json()["sourceBatchId"] == str(zero_result.source_batch_id)
+    assert zero_response.json()["items"] == []
+    assert zero_response.json()["nextCursor"] is None
+
+    assert missing_coverage_response.status_code == 409
+    assert missing_coverage_response.json()["code"] == "coverage-unavailable"
 
 
 def _bar(period: EquityBarPeriod) -> EquityDailyBar | EquityPeriodBar:
@@ -509,6 +661,9 @@ def _coverage_rows(engine: Engine, *, security_id: int) -> list[dict[str, object
                     EquityBarWindowCoverage.identity_hash,
                     EquityBarWindowCoverage.universe_hash,
                     EquityBarWindowCoverage.superseded_at,
+                    EquityBarWindowCoverage.data_version,
+                    DatasetPublication.data_version.label("publication_data_version"),
+                    EquityBarWindowCoverage.coverage_version,
                     DatasetPublication.release_id,
                     SourceBatch.provider_id,
                     SourceBatch.upstream_source,
@@ -592,6 +747,7 @@ def _coverage_snapshot(engine: Engine, *, security_id: int) -> tuple[tuple[objec
                 EquityBarWindowCoverage.coverage_from,
                 EquityBarWindowCoverage.coverage_to,
                 EquityBarWindowCoverage.publication_id,
+                EquityBarWindowCoverage.data_version,
                 EquityBarWindowCoverage.source_batch_id,
                 EquityBarWindowCoverage.publication_kind,
                 EquityBarWindowCoverage.record_count,

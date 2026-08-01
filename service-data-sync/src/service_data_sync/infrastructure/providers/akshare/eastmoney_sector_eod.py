@@ -27,7 +27,7 @@ from service_data_sync.domain.sector import SectorScheme
 
 _CAPABILITY = "sector.quote.eod.snapshot.raw"
 _SCHEMA = "quant-v2.sector-eod-snapshot.v1"
-_ADAPTER_VERSION = "akshare-1.18.78-eastmoney-sector-eod-v1"
+_ADAPTER_VERSION = "akshare-1.18.81-eastmoney-sector-eod-v1"
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _REQUIRED_COLUMNS = frozenset(
     {

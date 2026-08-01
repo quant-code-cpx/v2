@@ -65,6 +65,10 @@ from .stock_connect_center import (
     StockConnectOverviewPublication,
 )
 from .stock_connect_identity import StockConnectHkexInstrumentIdentity
+from .stock_connect_market_stat_research import (
+    StockConnectMarketStatResearchBatch,
+    StockConnectMarketStatResearchObservation,
+)
 from .stock_connect_overview_generation import (
     StockConnectOverviewGeneration,
     StockConnectOverviewGenerationComponent,
@@ -126,6 +130,8 @@ __all__ = [
     "StockConnectOverviewGenerationComponent",
     "StockConnectReadinessCalendarDay",
     "StockConnectReadinessSnapshot",
+    "StockConnectMarketStatResearchBatch",
+    "StockConnectMarketStatResearchObservation",
     "RestrictedUnlockLot",
     "ShareCapitalComponent",
     "ShareholderHoldingAction",

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Literal, Protocol
 from uuid import UUID
@@ -22,14 +22,45 @@ class EquityMasterReadUnavailable(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
-class EquityMasterPublication:
-    """描述一次交易所或三所稳定聚合的不可变读取版本。"""
+class EquitySourceAttribution:
+    """描述一条已发布字段版本的脱敏来源锚点。
 
+    `source_batch_id` 是可复验的不可变观察标识，但不携带 raw URI、Cookie 或供应商原始字段。
+    因此内部和业务 API 可以核对来源一致性，而不会越过 adapter 与证据存储边界。
+    """
+
+    source_batch_id: UUID | None = None
+    provider_id: str = "unknown"
+    upstream_source: str = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class EquityPublicationComponent:
+    """描述 resolved 主数据 publication 固定采用的一个输入版本。
+
+    目录与生命周期各自的 `knowledge_cutoff` 必须独立保留；调用方不得把它们压缩成
+    一个看似统一、实际并不存在的知识时间。
+    """
+
+    component_key: str
+    dataset: str
+    partition_key: str
     data_version: UUID
     published_at: datetime
     effective_as_of: date
     knowledge_cutoff: datetime
+    quality_status: str
+
+
+@dataclass(frozen=True, slots=True)
+class EquityMasterPublication:
+    """描述一次 resolved 主数据读取版本及其固定的输入血缘。"""
+
+    data_version: UUID
+    published_at: datetime
+    effective_as_of: date
     publication_scope: PublicationScope
+    components: tuple[EquityPublicationComponent, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +74,8 @@ class TemporalEquityIdentifier:
     date_precision: str
     known_from: datetime
     observed_at: datetime
+    source: EquitySourceAttribution = field(default_factory=EquitySourceAttribution)
+    quality_status: str = "passed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +88,8 @@ class TemporalEquityName:
     date_precision: str
     known_from: datetime
     observed_at: datetime
+    source: EquitySourceAttribution = field(default_factory=EquitySourceAttribution)
+    quality_status: str = "passed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +104,9 @@ class TemporalEquityListing:
     date_precision: str
     known_from: datetime
     observed_at: datetime
+    evidence_kind: str = "CATALOG"
+    source: EquitySourceAttribution = field(default_factory=EquitySourceAttribution)
+    quality_status: str = "passed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +132,9 @@ class StoredListingStatusPeriod:
     known_from: datetime
     known_to: datetime | None
     observed_at: datetime
+    evidence_kind: str = "CATALOG"
+    source: EquitySourceAttribution = field(default_factory=EquitySourceAttribution)
+    quality_status: str = "passed"
 
 
 class EquityMasterReadRepository(Protocol):

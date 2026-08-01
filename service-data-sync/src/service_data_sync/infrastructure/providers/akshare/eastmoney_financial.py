@@ -39,7 +39,7 @@ _SCHEMAS = {
     _METRIC_CAPABILITY: "quant-v2.financial-provider-metric.v1",
     _VALUATION_CAPABILITY: "quant-v2.financial-valuation.v1",
 }
-_ADAPTER_VERSION = "akshare-1.18.78-eastmoney-financial-v2"
+_ADAPTER_VERSION = "akshare-1.18.81-eastmoney-financial-v2"
 _MAX_ATTEMPTS = 3
 _BACKOFF_BASE_SECONDS = 1.0
 _BACKOFF_JITTER_SECONDS = 0.5

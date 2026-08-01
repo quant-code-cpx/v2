@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import date
+from http.client import RemoteDisconnected
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -118,16 +120,52 @@ def test_period_adapter_calls_weekly_interface_and_converts_lots_to_shares(
     assert payload["bars"][0]["volumeShares"] == "1000"
     assert payload["bars"][0]["turnoverRate"] == "0.02"
     assert batch.upstream_source == "eastmoney-stock-kline"
-    assert batch.adapter_version == "akshare-1.18.78-stock_zh_a_hist-v3"
+    assert batch.adapter_version == eastmoney_equity_period_bars._ADAPTER_VERSION
     assert batch.schema_fingerprint == eastmoney_equity_period_bars._SCHEMA_FINGERPRINT
-    assert captured["timeout"] == 2.0
+    first_timeout = captured["timeout"]
+    assert isinstance(first_timeout, float)
+    assert 0 < first_timeout <= 2.0
     assert adapter.supported_exchanges == frozenset(
         {
             eastmoney_equity_period_bars.Exchange.SSE,
             eastmoney_equity_period_bars.Exchange.SZSE,
-            eastmoney_equity_period_bars.Exchange.BSE,
         }
     )
+
+
+def test_period_adapter_rejects_bse_before_calling_unverified_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """北交所未获本来源合同证明时不触网、不产生可误判为空窗的批次。"""
+
+    def unexpected_history_call(**_kwargs: object) -> None:
+        """若北交所请求误入东财端点，则立即暴露来源矩阵绕过。"""
+        raise AssertionError("unverified BSE endpoint must not be called")
+
+    monkeypatch.setattr(
+        eastmoney_equity_period_bars.ak,
+        "stock_zh_a_hist",
+        unexpected_history_call,
+    )
+    adapter = AkshareEastmoneyEquityPeriodBarsAdapter(request_timeout_seconds=2)
+
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(
+            adapter.fetch(
+                SourceRequest(
+                    capability="equity.bar.1w.raw",
+                    parameters=(
+                        ("instrument", "BSE.835185"),
+                        ("period", "1w"),
+                        ("start", "2026-07-01"),
+                        ("end", "2026-07-28"),
+                    ),
+                )
+            )
+        )
+
+    assert captured.value.code is ProviderErrorCode.CURRENTLY_UNSUPPORTED
+    assert captured.value.retryable is False
 
 
 def test_period_adapter_returns_proven_empty_window_and_rejects_schema_drift(
@@ -213,7 +251,9 @@ def test_period_adapter_requires_identity_bound_raw_proof_for_sdk_no_columns(
         "beg": "20260725",
         "end": "20260726",
     }
-    assert captured["timeout"] == 2.0
+    proof_timeout = captured["timeout"]
+    assert isinstance(proof_timeout, float)
+    assert 0 < proof_timeout <= 2.0
 
     with pytest.raises(ProviderError) as failed:
         asyncio.run(adapter.fetch(request))
@@ -255,6 +295,66 @@ def test_factor_adapter_filters_window_and_keeps_positive_exact_factor(
     assert captured["symbol"] == "sh600519"
     assert captured["adjust"] == "hfq-factor"
     assert payload["factors"] == [{"effectiveDate": "2026-01-01", "cumulativeFactor": "2.5"}]
+
+
+def test_factor_adapter_preserves_proven_sparse_empty_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """结构正常但没有窗口内生效点时必须输出空批次，而非把稀疏语义误判为漂移。"""
+
+    def fake_daily(**_kwargs: object) -> FakeFrame:
+        """返回窗口外的两个有效因子，模拟本次没有除权生效点。"""
+        return FakeFrame(
+            [
+                {"date": date(2026, 7, 31), "hfq_factor": "1.5"},
+                {"date": date(2026, 8, 3), "hfq_factor": "1.5"},
+            ]
+        )
+
+    monkeypatch.setattr(sina_adjustment_factors.ak, "stock_zh_a_daily", fake_daily)
+    batch = asyncio.run(
+        AkshareSinaAdjustmentFactorsAdapter(request_timeout_seconds=2).fetch(
+            SourceRequest(
+                capability="equity.adjustment_factor",
+                parameters=(
+                    ("instrument", "SSE.600519"),
+                    ("start", "2026-08-01"),
+                    ("end", "2026-08-01"),
+                ),
+            )
+        )
+    )
+
+    assert json.loads(batch.payload)["factors"] == []
+
+
+def test_factor_adapter_keeps_empty_provider_response_as_schema_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """来源本身无行不等于已证明稀疏空窗，仍必须按 schema 异常隔离。"""
+
+    def fake_daily(**_kwargs: object) -> FakeFrame:
+        """模拟无法证明字段结构或窗口语义的空 SDK 响应。"""
+        return FakeFrame([])
+
+    monkeypatch.setattr(sina_adjustment_factors.ak, "stock_zh_a_daily", fake_daily)
+
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(
+            AkshareSinaAdjustmentFactorsAdapter(request_timeout_seconds=2).fetch(
+                SourceRequest(
+                    capability="equity.adjustment_factor",
+                    parameters=(
+                        ("instrument", "SSE.600519"),
+                        ("start", "2026-08-01"),
+                        ("end", "2026-08-01"),
+                    ),
+                )
+            )
+        )
+
+    assert captured.value.code is ProviderErrorCode.SCHEMA
+    assert captured.value.retryable is False
 
 
 def test_action_and_profile_adapters_map_nullable_fields(
@@ -340,6 +440,36 @@ def test_action_and_profile_adapters_map_nullable_fields(
     assert action["cashDividendPer10"] == "10"
     assert profile["englishName"] is None
     assert profile["establishedOn"] == "1999-11-20"
+
+
+def test_profile_adapter_rejects_multiple_current_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """巨潮多行响应没有稳定当前事实时必须 schema 隔离，不能任取首行发布。"""
+
+    def fake_profile(**_kwargs: object) -> FakeFrame:
+        """返回两条看似有效但无法判定当前性的公司资料。"""
+        return FakeFrame(
+            [
+                {"公司名称": "甲公司"},
+                {"公司名称": "乙公司"},
+            ]
+        )
+
+    monkeypatch.setattr(cninfo_company_profile.ak, "stock_profile_cninfo", fake_profile)
+
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(
+            AkshareCninfoCompanyProfileAdapter(request_timeout_seconds=2).fetch(
+                SourceRequest(
+                    capability="equity.profile",
+                    parameters=(("instrument", "SSE.600519"),),
+                )
+            )
+        )
+
+    assert captured.value.code is ProviderErrorCode.SCHEMA
+    assert captured.value.retryable is False
 
 
 @pytest.mark.parametrize("candidate_date", (None, "不是日期"))
@@ -498,3 +628,96 @@ def test_period_adapter_maps_provider_failure_to_retryable_unavailable(
 
     assert captured.value.code is ProviderErrorCode.UNAVAILABLE
     assert captured.value.retryable is True
+
+
+def test_period_adapter_retries_remote_disconnect_before_returning_weekly_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """东财主动断连只重试同一周线请求，成功后仍保留原生周线口径。"""
+    calls = 0
+
+    def transient_history(**_kwargs: object) -> FakeFrame:
+        """首次模拟东财断连，第二次返回冻结列顺序的有效周线。"""
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RemoteDisconnected("Remote end closed connection without response")
+        return FakeFrame(
+            [
+                {
+                    "日期": date(2026, 7, 24),
+                    "股票代码": "600519",
+                    "开盘": 10,
+                    "收盘": 11,
+                    "最高": 12,
+                    "最低": 9,
+                    "成交量": 10,
+                    "成交额": 10_500,
+                    "振幅": 3,
+                    "涨跌幅": 1,
+                    "涨跌额": 0.1,
+                    "换手率": 2,
+                }
+            ]
+        )
+
+    sleep = AsyncMock()
+    monkeypatch.setattr(eastmoney_equity_period_bars.ak, "stock_zh_a_hist", transient_history)
+    monkeypatch.setattr(eastmoney_equity_period_bars.asyncio, "sleep", sleep)
+    batch = asyncio.run(
+        AkshareEastmoneyEquityPeriodBarsAdapter(request_timeout_seconds=5).fetch(
+            SourceRequest(
+                capability="equity.bar.1w.raw",
+                parameters=(
+                    ("instrument", "SSE.600519"),
+                    ("period", "1w"),
+                    ("start", "2026-07-01"),
+                    ("end", "2026-07-28"),
+                ),
+            )
+        )
+    )
+
+    assert calls == 2
+    sleep.assert_awaited_once_with(0.5)
+    assert json.loads(batch.payload)["period"] == "1w"
+
+
+def test_period_adapter_does_not_retry_classified_provider_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """已识别的 schema 失败必须直接退出，不能被传输重试掩盖。"""
+    calls = 0
+    failure = ProviderError(ProviderErrorCode.SCHEMA, "provider schema changed", retryable=False)
+
+    def classified_failure(**_kwargs: object) -> FakeFrame:
+        """模拟适配器下游已判定的不可重试 schema 失败。"""
+        nonlocal calls
+        calls += 1
+        raise failure
+
+    monkeypatch.setattr(
+        eastmoney_equity_period_bars.ak,
+        "stock_zh_a_hist",
+        classified_failure,
+    )
+    adapter = AkshareEastmoneyEquityPeriodBarsAdapter(request_timeout_seconds=5)
+
+    with pytest.raises(ProviderError, match="provider schema changed") as captured:
+        asyncio.run(
+            adapter.fetch(
+                SourceRequest(
+                    capability="equity.bar.1mo.raw",
+                    parameters=(
+                        ("instrument", "SSE.600519"),
+                        ("period", "1mo"),
+                        ("start", "2026-01-01"),
+                        ("end", "2026-07-28"),
+                    ),
+                )
+            )
+        )
+
+    assert calls == 1
+    assert captured.value.code is ProviderErrorCode.SCHEMA
+    assert captured.value.retryable is False

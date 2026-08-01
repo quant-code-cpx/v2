@@ -16,16 +16,18 @@ from typing import Any, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Select, func, insert, or_, select, update
+from sqlalchemy import Select, and_, func, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.orm import Session
 
 from service_data_sync.application.ports.canonical_release import CanonicalLineageRecord
 from service_data_sync.application.ports.market_data import (
     EquityAvailabilityObservation,
+    EquityBarWindowCoveragePublication,
     EquityDatasetPublication,
     EquityIdentityReadConflictError,
     EquityMarketDataRepository,
+    EquityPublicationSource,
     EquitySourceObservation,
     PublishedDailyBars,
     PublishedEquityDataset,
@@ -49,7 +51,9 @@ from service_data_sync.infrastructure.database.connection import DatabaseClient
 from service_data_sync.infrastructure.database.fenced_execution import current_fenced_execution
 from service_data_sync.infrastructure.database.models.canonical import (
     CanonicalDataset,
+    DatasetRelease,
     MethodologyVersion,
+    NormalizationRun,
 )
 from service_data_sync.infrastructure.database.models.provenance.source_batch import SourceBatch
 from service_data_sync.infrastructure.persistence.bar_window_coverage import (
@@ -99,6 +103,9 @@ from ..database.models.publication.dataset_availability_observation import (
     DatasetAvailabilityObservation,
 )
 from ..database.models.publication.dataset_publication import DatasetPublication
+from ..database.models.publication.equity_bar_window_coverage import (
+    EquityBarWindowCoverage,
+)
 
 _DAILY_DATASET = "equity.bar.1d.raw"
 _FACTOR_DATASET = "equity.adjustment_factor"
@@ -130,11 +137,12 @@ def _current_publication_statement(
     *,
     dataset: str,
     partition_key: str,
-) -> Select[tuple[UUID, datetime]]:
-    """构造质量通过且尚未被替换的 publication 查询。"""
+) -> Select[tuple[UUID, datetime, str]]:
+    """构造质量通过且尚未被替换的 publication 查询，并保留真实质量状态。"""
     return select(
         DatasetPublication.data_version,
         DatasetPublication.published_at,
+        DatasetPublication.quality_status,
     ).where(
         DatasetPublication.dataset == dataset,
         DatasetPublication.partition_key == partition_key,
@@ -638,9 +646,12 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         source: EquitySourceObservation,
         window_end: date,
     ) -> PublishedEquityDataset:
-        """追加变化因子，并以单一 factor_version 原子发布完整当前序列。"""
-        if not factors:
-            raise ValueError("factors must not be empty")
+        """追加变化因子，并以单一 factor_version 原子发布完整当前序列。
+
+        累计因子是按生效日变化的稀疏序列。已通过 adapter 结构校验但窗口内没有新点时，
+        本方法仍登记来源、冻结当前序列并推进 checkpoint；它不写入数值为零的伪因子，
+        也不会删除此前版本中的有效因子。
+        """
         now = datetime.now(UTC)
         next_factor_version = uuid4()
         with self._database.transaction() as connection:
@@ -659,17 +670,24 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
             instrument = self._confirmed_instrument_on_connection(
                 connection,
                 identifier=identifier,
-                fact_dates=tuple(factor.effective_date for factor in factors),
+                # 空窗口没有事实日可解析，使用包含端 window_end 锁定这次来源观察对应的
+                # 确认身份；有因子时仍逐事实日解析，避免跨代码复用或生命周期边界写入。
+                fact_dates=(
+                    tuple(factor.effective_date for factor in factors) if factors else (window_end,)
+                ),
                 known_at=now,
             )
-            inserted_count, unchanged_count = self._write_factor_revisions(
-                connection,
-                security_id=instrument.security_id,
-                factors=factors,
-                factor_version=next_factor_version,
-                source_batch_id=source_batch_id,
-                observed_at=source.observed_at,
-            )
+            if factors:
+                inserted_count, unchanged_count = self._write_factor_revisions(
+                    connection,
+                    security_id=instrument.security_id,
+                    factors=factors,
+                    factor_version=next_factor_version,
+                    source_batch_id=source_batch_id,
+                    observed_at=source.observed_at,
+                )
+            else:
+                inserted_count, unchanged_count = 0, 0
             data_version = self._publish(
                 connection,
                 dataset=_FACTOR_DATASET,
@@ -691,6 +709,7 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
             inserted_count=inserted_count,
             unchanged_count=unchanged_count,
             instrument=instrument,
+            source_batch_id=source_batch_id,
         )
 
     def publish_corporate_actions(
@@ -915,6 +934,137 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
         return EquityDatasetPublication(
             data_version=UUID(str(row["data_version"])),
             published_at=row["published_at"],
+            quality_status=str(row.get("quality_status", "passed")),
+        )
+
+    def get_publication_source(
+        self,
+        *,
+        dataset: str,
+        data_version: UUID,
+    ) -> EquityPublicationSource | None:
+        """读取 immutable release 唯一绑定的来源观察，不以当前事实行或 raw URI 猜测来源。"""
+        statement = (
+            select(
+                SourceBatch.source_batch_id,
+                SourceBatch.provider_id,
+                SourceBatch.upstream_source,
+                SourceBatch.adapter_version,
+            )
+            .select_from(DatasetPublication)
+            .join(DatasetRelease, DatasetRelease.release_id == DatasetPublication.release_id)
+            .join(
+                NormalizationRun,
+                NormalizationRun.normalization_run_id == DatasetRelease.normalization_run_id,
+            )
+            .join(
+                SourceBatch,
+                and_(
+                    SourceBatch.run_id == NormalizationRun.run_id,
+                    SourceBatch.capability == DatasetPublication.dataset,
+                    SourceBatch.adapter_version == NormalizationRun.adapter_version,
+                    SourceBatch.schema_fingerprint == NormalizationRun.schema_fingerprint,
+                ),
+            )
+            .where(
+                DatasetPublication.dataset == dataset,
+                DatasetPublication.data_version == data_version,
+            )
+        )
+        with self._database.session() as connection:
+            rows = connection.execute(statement).mappings().all()
+        # 同一发布若不能精确归结到一个来源批次，返回空而不是任选一条错误谱系。
+        if len(rows) != 1:
+            return None
+        row = rows[0]
+        return EquityPublicationSource(
+            source_batch_id=UUID(str(row["source_batch_id"])),
+            provider_id=str(row["provider_id"]),
+            upstream_source=str(row["upstream_source"]),
+            adapter_version=str(row["adapter_version"]),
+        )
+
+    def get_bar_window_coverage(
+        self,
+        *,
+        identifier: EquityIdentifier,
+        security_id: int,
+        period: EquityBarPeriod,
+        start: date,
+        end: date,
+        data_version: UUID,
+    ) -> EquityBarWindowCoveragePublication | None:
+        """选择一个当前且精确绑定身份、窗口、版本和 publication 的行情 coverage。"""
+        if start > end:
+            raise ValueError("bar coverage request window is invalid")
+        statement = (
+            select(
+                EquityBarWindowCoverage.coverage_version,
+                EquityBarWindowCoverage.source_batch_id,
+                EquityBarWindowCoverage.publication_kind,
+                EquityBarWindowCoverage.record_count,
+                EquityBarWindowCoverage.observed_at,
+                DatasetPublication.data_version,
+                DatasetPublication.published_at,
+            )
+            .join(
+                DatasetPublication,
+                DatasetPublication.publication_id == EquityBarWindowCoverage.publication_id,
+            )
+            .join(
+                EquityIdentifierVersion,
+                EquityIdentifierVersion.version_id == EquityBarWindowCoverage.identifier_version_id,
+            )
+            .where(
+                EquityBarWindowCoverage.period == period.value,
+                EquityBarWindowCoverage.capability == period.capability,
+                EquityBarWindowCoverage.security_id == security_id,
+                EquityBarWindowCoverage.coverage_from == start,
+                EquityBarWindowCoverage.coverage_to == end,
+                EquityBarWindowCoverage.data_version == data_version,
+                EquityBarWindowCoverage.quality_status == "passed",
+                EquityBarWindowCoverage.superseded_at.is_(None),
+                EquityIdentifierVersion.security_id == security_id,
+                EquityIdentifierVersion.exchange == identifier.exchange.value,
+                EquityIdentifierVersion.symbol == identifier.symbol,
+                EquityIdentifierVersion.identity_state == "CONFIRMED",
+                # 读取方已按当前知识解析证券；coverage 绑定的同一身份版本也必须仍是
+                # 当前知识，并完整覆盖请求窗口，不能把官方更正前的版本留作可读证据。
+                EquityIdentifierVersion.effective_from <= start,
+                or_(
+                    EquityIdentifierVersion.effective_to.is_(None),
+                    EquityIdentifierVersion.effective_to > end,
+                ),
+                EquityIdentifierVersion.known_to.is_(None),
+                DatasetPublication.dataset == period.capability,
+                DatasetPublication.data_version == EquityBarWindowCoverage.data_version,
+                DatasetPublication.data_version == data_version,
+                DatasetPublication.release_id.is_not(None),
+                DatasetPublication.quality_status == "passed",
+            )
+        )
+        with self._database.session() as connection:
+            rows = connection.execute(statement).mappings().all()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            # 虽有数据库唯一约束，reader 仍拒绝意外重复，以免任选覆盖掩盖血缘漂移。
+            return None
+        row = rows[0]
+        publication_kind = str(row["publication_kind"])
+        record_count = int(row["record_count"])
+        if (publication_kind, record_count) not in {
+            ("ZERO_RECORD_COVERAGE", 0),
+        } and not (publication_kind == "DATA" and record_count > 0):
+            return None
+        return EquityBarWindowCoveragePublication(
+            data_version=UUID(str(row["data_version"])),
+            published_at=row["published_at"],
+            coverage_version=UUID(str(row["coverage_version"])),
+            source_batch_id=UUID(str(row["source_batch_id"])),
+            publication_kind=publication_kind,
+            record_count=record_count,
+            observed_at=row["observed_at"],
         )
 
     def get_daily_bar_availability(
@@ -1004,6 +1154,7 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
             EquityAdjustmentFactorModel.cumulative_factor,
             EquityAdjustmentFactorModel.revision,
             EquityAdjustmentFactorModel.factor_version,
+            EquityAdjustmentFactorModel.source_batch_id,
         ).where(
             EquityAdjustmentFactorModel.security_id == security_id,
             EquityAdjustmentFactorModel.effective_date <= end,
@@ -1023,6 +1174,7 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
                 ),
                 revision=int(row["revision"]),
                 factor_version=UUID(str(row["factor_version"])),
+                source_batch_id=UUID(str(row["source_batch_id"])),
             )
             for row in rows
         )
@@ -1048,6 +1200,7 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
             EquityCorporateActionVersion.cash_dividend_per_10,
             EquityCorporateActionVersion.bonus_shares_per_10,
             EquityCorporateActionVersion.transfer_shares_per_10,
+            EquityCorporateActionVersion.source_batch_id,
         ).where(
             EquityCorporateActionVersion.security_id == security_id,
         )
@@ -1091,7 +1244,11 @@ class SqlAlchemyEquityMarketDataRepository(EquityMarketDataRepository):
             row = connection.execute(statement).scalar_one_or_none()
         if row is None:
             return None
-        return StoredCompanyProfile(profile=_profile_from_model(row), revision=row.revision)
+        return StoredCompanyProfile(
+            profile=_profile_from_model(row),
+            revision=row.revision,
+            source_batch_id=UUID(str(row.source_batch_id)),
+        )
 
     def _confirmed_instrument_on_connection(
         self,
@@ -2141,6 +2298,7 @@ def _stored_action(row: Mapping[Any, Any]) -> StoredCorporateAction:
     return StoredCorporateAction(
         action_id=UUID(str(row["action_id"])),
         revision=int(row["revision"]),
+        source_batch_id=UUID(str(row["source_batch_id"])),
         action=EquityCorporateAction(
             source_event_key=str(row["source_event_key"]),
             report_period=row["report_period"],

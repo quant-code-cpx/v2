@@ -2653,7 +2653,27 @@ def _event_dataset_status(
             dataset=dataset,
             reason_code="NO_COVERAGE",
         )
+    fact_publication = (
+        _event_fact_publication(
+            session,
+            dataset=dataset,
+            security_id=security_id,
+            selection=selection,
+        )
+        if family == "CORPORATE_ACTION"
+        else None
+    )
+    if family == "CORPORATE_ACTION" and fact_publication is None:
+        # coverage manifest 能证明零事件窗口，但公开公司行动 leaf 读取的是证券累积事实
+        # publication。两者缺一不可，不能把 coverage 版本伪装成 leaf 可消费版本。
+        return _unavailable_status(
+            family=family,
+            dataset=dataset,
+            reason_code="FACT_PUBLICATION_UNAVAILABLE",
+        )
     publications = [item.evidence.publication for item in selection.segments]
+    if fact_publication is not None:
+        publications.append(fact_publication)
     quality = next(
         (
             status
@@ -2687,10 +2707,24 @@ def _event_dataset_status(
         family=family,
         dataset=dataset,
         availability="EMPTY" if empty else quality[0],
-        data_version=selection.data_version,
-        published_at=max(item.evidence.coverage.created_at for item in selection.segments),
+        # 公司行动状态必须交付 leaf 可验证的事实 publication；coverage composite 仅用于
+        # 状态证明，不能直接作为 `/corporate-actions` 的 dataVersion。
+        data_version=(
+            fact_publication.data_version
+            if fact_publication is not None
+            else selection.data_version
+        ),
+        published_at=(
+            fact_publication.published_at
+            if fact_publication is not None
+            else max(item.evidence.coverage.created_at for item in selection.segments)
+        ),
         effective_as_of=as_of or selection.coverage_to,
-        knowledge_cutoff=selection.view_cutoff,
+        knowledge_cutoff=(
+            fact_publication.knowledge_cutoff
+            if fact_publication is not None
+            else selection.view_cutoff
+        ),
         as_of=as_of,
         source_label=selection.source_label,
         methodology={
@@ -2699,6 +2733,27 @@ def _event_dataset_status(
         },
         reason_code="NO_EVENTS" if empty else quality[1],
         retryable=False if empty else quality[2],
+    )
+
+
+def _event_fact_publication(
+    session: Any,
+    *,
+    dataset: str,
+    security_id: int,
+    selection: _EventCoverageSelection,
+) -> DatasetPublication | None:
+    """按 coverage 已冻结的知识截止点解析公司行动 leaf 的证券事实版本。
+
+    coverage manifest 与累积公司行动事实使用不同 publication；只用 coverage 的
+    `view_cutoff` 查询 `security:{security_id}` 分区，可避免较晚的事实发布倒灌进已选择的
+    零事件窗口，同时让 data-status 返回 leaf 能严格验证的真实 `dataVersion`。
+    """
+    return _maybe_publication(
+        session,
+        dataset=dataset,
+        partition_key=f"security:{security_id}",
+        known_at=selection.view_cutoff,
     )
 
 

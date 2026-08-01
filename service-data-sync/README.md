@@ -31,6 +31,16 @@ canonical 数据或推进 checkpoint。
 回退到既有 token；STAGING/PRODUCTION 必须同时配置既有 token 和读、写两枚数据运维 token，且既有 token
 不能访问已拆分的数据运维路由。
 
+### 首批 A 股 equity 来源审计元数据
+
+本轮 A 股目录、生命周期、公司概况、日/周/月线、复权因子与公司行动八条 `equity.*` 链路的
+`providerId`、`upstreamSource`、adapter、方法学、`approvalStatus` 与 rights/license 引用会冻结到 source
+batch、run、publication 和 API lineage，用于追溯实际来源。仅对这些 equity targets，它们不参与
+`preflight`、command 受理、dispatcher、fenced executor、checkpoint、publication 或技术验收；这些路径只依据
+请求合同、adapter 可用性、provider 响应、schema、质量、fence、事务、coverage 与版本一致性判定。上游实际认证
+协议失败仍是可观察的 provider 获取失败，但静态来源分类不是其替代品。详见
+[ADR-0028](../docs/decisions/0028-source-metadata-nonblocking-data-operations.md)。
+
 - **仅失败留证：** 成功 AKShare 同步不再写入 raw 或 normalized S3 对象，只保存 canonical 数据、来源摘要和
   不可回放标记；适配器返回后的字节只在内存中暂存，发生获取后解析、质量或发布失败时才写入私有
   `failures/` 目录及最小 manifest。新成功批次不支持 `--replay-raw`；已有历史归档在清理前仍可回放。
@@ -204,28 +214,55 @@ service-data-sync/
 
 ## 个股日/周/月、复权与公司资料同步
 
-先启动本地数据同步基础设施并完成迁移，再显式开启研究来源：
+这批链路只允许通过 Data Operations 控制面运行。不要直接调用同步 use case、仓储或旧 CLI；
+`data-sync-equity-bars` 和 `data-sync-equity-reference` 仅保留为提交 `SYSTEM` command 的兼容入口，
+目录和生命周期旧 CLI 已明确拒绝执行。正式验收统一使用内部 HTTP 路由、dispatcher 与 fenced executor。
+
+先启动基础设施、内部 API 和 worker，并在同一受控环境显式开启来源：
 
 ~~~sh
-docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
-  --profile data-sync-infra up -d
-docker build --target test --tag quant-v2/service-data-sync:test service-data-sync
-docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
-  --profile data-sync-infra --profile data-sync-test run --rm data-sync-test \
-  /bin/sh -ec 'alembic upgrade head && DATA_SYNC_AKSHARE_ENABLED=true \
-  DATA_SYNC_EQUITY_MARKET_ENABLED=true \
-  data-sync-equity-bars --instrument SSE.600519 --period 1w --full-history'
+docker compose -f compose.yaml -f compose.dev.yaml --env-file .env \
+  --profile data-sync-infra --profile data-sync-api --profile data-sync-worker up -d
 ~~~
 
-未传 `--start` 与 `--end` 时，CLI 从当日向前取 31 个自然日。`--start`、`--end` 均为包含端 ISO 日期；
-重复同一窗口只记录新的 raw 观测，不会创建重复 canonical revision 或新的 publication version。参考数据使用：
+按以下顺序提交；内部 bearer 由受控环境注入，调用、日志和验收记录不得打印其值。
 
-~~~sh
-DATA_SYNC_AKSHARE_ENABLED=true DATA_SYNC_EQUITY_MARKET_ENABLED=true \
-data-sync-equity-reference --instrument SSE.600519 --dataset all --full-history
+1. 使用 read bearer 调用 `POST /internal/v1/data-operations/commands/preflight`，请求体为
+   `{"targets":[target]}`。
+2. 使用 operations bearer 调用 `POST /internal/v1/data-operations/commands/submit`，携带稳定的
+   `Idempotency-Key`；请求体必须原样带回 `preflightId`、`requestHash`、`targets`，并提供
+   `submissionId` 与 `actor`。
+3. worker 的 `service_data_sync.data_operations.dispatch` 取得 PostgreSQL execution slot 和 fencing
+   token 后才会执行。通过 `POST /internal/v1/data-operations/commands/detail` 和
+   `POST /internal/v1/data-operations/runs/detail` 轮询到 `SUCCEEDED`；不能以 command 已受理代替发布成功。
+
+目录必须先运行，再从已发布目录读取真实样本，不能把示例代码当作仍有效证券：
+
+~~~json
+{
+  "datasetCode": "equity.master.cn-a",
+  "mode": "FULL",
+  "selector": {"kind": "GLOBAL"},
+  "dateFrom": null,
+  "dateTo": null,
+  "observationDate": null
+}
 ~~~
 
-`--dataset` 可选 `factor`、`action`、`profile` 或 `all`。内部机器契约见
+成功后用 `GET /internal/v1/equities?exchange=SSE&status=LISTED&limit=1` 取得当前发布的 `symbol`，
+再以该值提交以下目标：
+
+- 生命周期：`equity.lifecycle.explicit`、`FULL`、`{"kind":"GLOBAL"}`，三个日期字段均为 `null`；
+- 日、周、月线：`equity.bar.1d.raw`、`equity.bar.1w.raw`、`equity.bar.1mo.raw`，`DATE_RANGE`，
+  `{"kind":"INSTRUMENT","exchange":"SSE","symbol":"<目录返回值>"}`；
+- 复权因子与公司行动：`equity.adjustment_factor`、`equity.corporate_action`，使用同一受控
+  `INSTRUMENT` selector 和包含端 `DATE_RANGE`；
+- 公司概况：`equity.profile`、`INCREMENTAL`、同一 `INSTRUMENT` selector，三个日期字段均为 `null`。
+
+每个 target 都要连续提交两次。第二次必须证明业务行没有重复、checkpoint 没有错误推进、
+`dataset_publication` 的 `dataVersion` 稳定；使用 `POST /internal/v1/data-operations/datasets/detail`
+读取 `latestPublication`，并通过证券、行情、因子、公司行动和概况内部读取路由核对 ETag、
+`X-Data-Version`、日期、来源批次和质量状态。内部机器契约见
 [`0018-data-sync-equity-market-data-internal.openapi.yaml`](../docs/contracts/0018-data-sync-equity-market-data-internal.openapi.yaml)；
 service-api 公开 POST 契约见
 [`0019-service-api-equity-market-data.openapi.yaml`](../docs/contracts/0019-service-api-equity-market-data.openapi.yaml)。
@@ -326,21 +363,14 @@ checkpoint、失败码与最终 `succeeded`/`partial`/`failed` 状态均写入 P
 
 ## A 股证券主数据与上市生命周期
 
-目录 CLI 可按交易所或按三所协调运行。东财目录来源仅支持当日 Shanghai 市场日，且只能用于已明确开启的
-research/pilot 环境；它不提供退市、暂停或恢复的证据。
+证券目录和上市生命周期同样只能走上节的 Data Operations `preflight → command → dispatcher → fenced
+executor` 路径。`data-sync-equity-catalog` 与 `data-sync-equity-lifecycle` 是已停用入口，会返回
+`data-operations-legacy-entrypoint-unavailable`，不能用于同步、重放、checkpoint 或 publication 验收。
 
-~~~sh
-docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
-  --profile data-sync-infra up -d
-docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.example \
-  --profile data-sync-infra --profile data-sync-test run --rm data-sync-test \
-  /bin/sh -ec 'alembic upgrade head && DATA_SYNC_AKSHARE_ENABLED=true \
-  data-sync-equity-catalog --all-exchanges'
-~~~
-
-`data-sync-equity-lifecycle --exchange SSE --target-date YYYY-MM-DD` 使用固定版本交易所显式事实 adapter；
-可通过 replay 模式从最后成功 checkpoint 恢复而不再次访问上游。退市后状态反转只能使用
-`OFFICIAL_CORRECTION` 并携带可追溯来源证据引用；代码复用候选会被隔离，不能绑定到已退市证券。
+东财目录只描述当前观察到的证券集合，不提供退市、暂停或恢复证据；目录缺席绝不能改写生命周期。
+生命周期 target 使用 `equity.lifecycle.explicit/FULL/GLOBAL`，由固定版本交易所显式事实 adapter 分别
+覆盖 SSE、SZSE、BSE。退市后状态反转只能使用 `OFFICIAL_CORRECTION` 并携带可追溯来源证据引用；
+代码复用候选会被隔离，不能绑定到已退市证券。
 
 ## 前置条件
 
@@ -356,6 +386,10 @@ cp .env.example .env
 docker compose -f compose.yaml -f compose.dev.yaml --env-file .env --profile data-sync-infra up -d
 docker compose -f compose.yaml -f compose.dev.yaml --env-file .env --profile data-sync-infra --profile data-sync-worker run --rm --no-deps data-sync-worker data-sync-diagnostics --format console
 ~~~
+
+常驻 `worker` 与 `scheduler` 的 Docker `healthcheck` 仅检查 PID 1 存活（`kill -0 1`），不会周期性发起
+PostgreSQL、Redis 或 S3 探测。基础设施连通性应在启动前以单次 `data-sync-diagnostics` 确认；实际同步仍必须
+经 Data Operations `preflight → command → dispatcher → fenced executor`，liveness 不能替代该控制面。
 
 诊断成功后启动真实 worker 与 scheduler；scheduler 会按固定 beat 唤醒 dispatcher，worker 取得全局
 execution slot 与 fencing token 后执行已提交或已到期的同步 run：

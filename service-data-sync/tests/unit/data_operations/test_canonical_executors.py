@@ -29,7 +29,7 @@ from service_data_sync.application.ports.delivery_manifest import (
 from service_data_sync.application.ports.sector_eod import SectorEodExecutionMode
 from service_data_sync.application.source_registry import SourceRegistry
 from service_data_sync.bootstrap.container import ServiceContainer
-from service_data_sync.domain.equity import EquityIdentifier
+from service_data_sync.domain.equity import EquityIdentifier, Exchange
 from service_data_sync.domain.etf import EtfIdentifier
 from service_data_sync.domain.sector import SectorScheme
 from service_data_sync.domain.stock_connect import StockConnectChannel
@@ -155,6 +155,263 @@ def test_frozen_provider_rejects_missing_snapshot_provider() -> None:
     assert raised.value.retryable is True
 
 
+def test_equity_master_counts_each_exchange_once_and_not_the_aggregate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """目录 run 只把三所 child release 计为分区，aggregate manifest 不能重复累计。"""
+    captured: dict[str, object] = {"progress": [], "exchanges": []}
+
+    class RecordingExecution:
+        """模拟统一发布器回写的 fencing 进度，并记录末次聚合是否武装。"""
+
+        def __init__(self) -> None:
+            """初始化零分区、零记录的控制面内存状态。"""
+            self.completed_partitions = 0
+            self.processed_records = 0
+            self.terminal_armed = False
+
+        def record_publication_progress(self, *, record_count: int) -> None:
+            """模拟每个 child canonical release 提交时的唯一进度回写。"""
+            cast(list[int], captured["progress"]).append(record_count)
+            self.completed_partitions += 1
+            self.processed_records += record_count
+
+        def arm_terminal_write(self) -> None:
+            """记录 aggregate publication 已成为同事务成功终态边界。"""
+            self.terminal_armed = True
+
+    class PublishingCatalogSyncService:
+        """模拟真实 catalog 用例在每所 child release 提交时自动累计一次。"""
+
+        def __init__(self, **_dependencies: object) -> None:
+            """接收真实执行器传入的依赖形状，但测试不访问外部来源。"""
+
+        async def sync(self, *, exchange: Exchange, target_date: date) -> SimpleNamespace:
+            """为一所交易所生成与 canonical child release 相同的进度副作用。"""
+            del target_date
+            ordinal = tuple(Exchange).index(exchange) + 1
+            cast(list[Exchange], captured["exchanges"]).append(exchange)
+            execution.record_publication_progress(record_count=ordinal)
+            return SimpleNamespace(inserted_count=ordinal, unchanged_count=0)
+
+    class RecordingRepository:
+        """记录最终 aggregate 调用，不创建第四个控制面分区。"""
+
+        def __init__(self, _database: object) -> None:
+            """接收组合根数据库占位，保持真实构造入口。"""
+
+        def publish_cn_a_aggregate(self) -> None:
+            """记录 aggregate manifest 已发布；其进度由仓储层显式关闭。"""
+            aggregate_calls = captured.get("aggregateCalls", 0)
+            if not isinstance(aggregate_calls, int):
+                raise AssertionError("aggregate call counter is invalid")
+            captured["aggregateCalls"] = aggregate_calls + 1
+
+    execution = RecordingExecution()
+    provider = FakeProvider("frozen-catalog", frozenset({"equity.master.catalog"}))
+    claim = ExecutionClaim(
+        run_id=uuid4(),
+        dataset_code="equity.master.cn-a",
+        fencing_token=1,
+        target={"mode": "FULL", "selector": {"kind": "GLOBAL"}},
+        source_snapshot=[],
+    )
+    container = cast(
+        ServiceContainer,
+        SimpleNamespace(database=object(), object_storage=object()),
+    )
+
+    monkeypatch.setattr(canonical_executors, "_frozen_provider", lambda *_args: provider)
+    monkeypatch.setattr(
+        canonical_executors, "SqlAlchemyEquityMasterRepository", RecordingRepository
+    )
+    monkeypatch.setattr(canonical_executors, "S3RawPayloadStore", lambda _client: object())
+    monkeypatch.setattr(
+        canonical_executors, "FailureEvidenceDataSource", lambda source, _raw: source
+    )
+    monkeypatch.setattr(
+        canonical_executors, "EquityCatalogSyncService", PublishingCatalogSyncService
+    )
+    monkeypatch.setattr(
+        canonical_executors,
+        "retain_failure_evidence",
+        lambda _raw_store, operation: operation(),
+    )
+    monkeypatch.setattr(canonical_executors, "_required_execution", lambda: execution)
+    monkeypatch.setattr(canonical_executors, "_cancel_requested", lambda _container: False)
+    monkeypatch.setattr(
+        canonical_executors, "_catalog_snapshot_date", lambda _target: date(2026, 8, 1)
+    )
+
+    outcome = canonical_executors._execute_equity_master(claim, container=container)
+
+    assert outcome.status == "SUCCEEDED"
+    assert outcome.completed_partitions == len(Exchange)
+    assert outcome.total_partitions == len(Exchange)
+    assert outcome.processed_records == sum(range(1, len(Exchange) + 1))
+    assert captured["exchanges"] == list(Exchange)
+    assert captured["progress"] == list(range(1, len(Exchange) + 1))
+    assert execution.completed_partitions == len(Exchange)
+    assert execution.processed_records == outcome.processed_records
+    assert execution.terminal_armed is True
+    assert captured["aggregateCalls"] == 1
+
+
+def test_equity_resolved_master_runs_only_the_providerless_fenced_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """resolved 主数据执行器不得读取 Provider，只能调用已注册的派生 publication 仓储。"""
+    data_version = uuid4()
+    captured: dict[str, object] = {}
+
+    class RecordingResolvedRepository:
+        """记录 providerless 仓储构造和发布调用，不接触真实数据库。"""
+
+        def __init__(self, database: object) -> None:
+            """保留 executor 注入的数据库依赖，验证没有额外来源依赖。"""
+            captured["database"] = database
+
+        def publish(self) -> SimpleNamespace:
+            """返回一个已固定六个输入组件的 resolved aggregate 结果。"""
+            captured["published"] = True
+            return SimpleNamespace(data_version=data_version, component_count=6)
+
+    claim = ExecutionClaim(
+        run_id=uuid4(),
+        dataset_code="equity.master.resolved",
+        fencing_token=1,
+        target={"mode": "FULL", "selector": {"kind": "GLOBAL"}},
+        source_snapshot=[{"sourceKind": "INTERNAL_EXECUTOR"}],
+    )
+    database = object()
+    container = cast(ServiceContainer, SimpleNamespace(database=database))
+    monkeypatch.setattr(
+        canonical_executors,
+        "SqlAlchemyResolvedEquityMasterRepository",
+        RecordingResolvedRepository,
+    )
+    monkeypatch.setattr(canonical_executors, "_cancel_requested", lambda _container: False)
+
+    outcome = canonical_executors._execute_equity_master_resolved(claim, container=container)
+
+    assert outcome.status == "SUCCEEDED"
+    assert outcome.processed_records == 6
+    assert outcome.checkpoint_kind == "data-version"
+    assert outcome.checkpoint_position == str(data_version)
+    assert captured == {"database": database, "published": True}
+
+
+def test_equity_backfill_discovery_passes_only_claimed_reference_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """历史 discovery 必须把控制面 claim 的精确组件交给仓储，不能自行读取 current。"""
+    components = [
+        {
+            "datasetCode": "equity.master.cn-a",
+            "partitionKey": "CN_A_STABLE",
+        }
+    ]
+    intent = {
+        "kind": "EQUITY_BACKFILL",
+        "referenceBundlePublicationId": str(uuid4()),
+        "referenceBundleDataVersion": str(uuid4()),
+        "referenceManifestHash": "a" * 64,
+    }
+    claim = ExecutionClaim(
+        run_id=uuid4(),
+        dataset_code="equity.discovery.eod",
+        fencing_token=1,
+        target={"mode": "OBSERVATION_DATE", "selector": {"kind": "GLOBAL"}},
+        source_snapshot=[],
+        execution_intent=intent,
+        input_manifest=(
+            {
+                "kind": "REFERENCE_BUNDLE",
+                "publicationId": intent["referenceBundlePublicationId"],
+                "dataVersion": intent["referenceBundleDataVersion"],
+                "manifestHash": intent["referenceManifestHash"],
+                "components": components,
+            },
+        ),
+    )
+    captured: dict[str, object] = {}
+
+    class RecordingDiscoveryRepository:
+        """记录执行器交给 discovery 仓储的参数，不触达数据库。"""
+
+        def __init__(self, database: object) -> None:
+            """保存容器数据库占位值，验证构造仍通过正常依赖入口。"""
+            captured["database"] = database
+
+        def build(self, *, as_of: date, reference_manifest: object) -> SimpleNamespace:
+            """记录精确 manifest 并返回一个最小已发布结果。"""
+            captured["asOf"] = as_of
+            captured["referenceManifest"] = reference_manifest
+            return SimpleNamespace(row_count=7)
+
+    class RecordingExecution:
+        """记录最终 publication 栅栏已在 discovery 写入前武装。"""
+
+        def arm_terminal_write(self) -> None:
+            """记录执行器正确遵守统一 fencing 写入顺序。"""
+            captured["armed"] = True
+
+    monkeypatch.setattr(
+        canonical_executors,
+        "SqlAlchemyEquityDiscoveryRepository",
+        RecordingDiscoveryRepository,
+    )
+    monkeypatch.setattr(canonical_executors, "_cancel_requested", lambda _container: False)
+    monkeypatch.setattr(
+        canonical_executors,
+        "_latest_complete_trading_day",
+        lambda _target, *, container: date(2026, 7, 31),
+    )
+    monkeypatch.setattr(
+        canonical_executors,
+        "_required_execution",
+        lambda: RecordingExecution(),
+    )
+
+    outcome = canonical_executors._execute_equity_discovery(
+        claim,
+        container=cast(ServiceContainer, SimpleNamespace(database=object())),
+    )
+
+    assert outcome.processed_records == 7
+    assert captured["armed"] is True
+    assert captured["referenceManifest"] == tuple(components)
+
+
+def test_equity_backfill_discovery_rejects_mismatched_reference_bundle() -> None:
+    """私有 intent 与 claim bundle 任一版本不一致时必须失败，禁止退回当前读取。"""
+    claim = ExecutionClaim(
+        run_id=uuid4(),
+        dataset_code="equity.discovery.eod",
+        fencing_token=1,
+        target={},
+        source_snapshot=[],
+        execution_intent={
+            "kind": "EQUITY_BACKFILL",
+            "referenceBundlePublicationId": str(uuid4()),
+            "referenceBundleDataVersion": str(uuid4()),
+            "referenceManifestHash": "a" * 64,
+        },
+        input_manifest=(
+            {
+                "kind": "REFERENCE_BUNDLE",
+                "publicationId": str(uuid4()),
+                "dataVersion": str(uuid4()),
+                "manifestHash": "b" * 64,
+                "components": [{"datasetCode": "equity.master.cn-a"}],
+            },
+        ),
+    )
+
+    with pytest.raises(ValueError, match="reference bundle"):
+        canonical_executors._equity_backfill_reference_manifest(claim)
+
+
 def test_stock_connect_resume_skips_success_and_keeps_business_days_atomic() -> None:
     """中段 worker 恢复只计划未成功日包，公平批次不得拆开其余同日通道。"""
     channels = tuple(
@@ -249,8 +506,8 @@ def test_stock_connect_manifest_reference_selects_only_the_pending_page() -> Non
         )
 
 
-def test_register_canonical_executors_includes_sector_and_etf_datasets() -> None:
-    """控制面 dispatcher 必须实际注册成分、派生、三个既有 sector 与四个 ETF 数据集。"""
+def test_register_canonical_executors_includes_all_registered_akshare_research_datasets() -> None:
+    """控制面必须注册板块、ETF、两融、指数和港通研究的真实落库执行器。"""
     control_plane = RecordingControlPlane()
 
     canonical_executors.register_canonical_executors(
@@ -260,15 +517,508 @@ def test_register_canonical_executors_includes_sector_and_etf_datasets() -> None
 
     assert {
         "sector.catalog.raw",
+        "sector.bar.1d.raw",
+        "sector.bar.1w.raw",
+        "sector.bar.1mo.raw",
         "sector.membership.release",
         "sector.quote.eod.snapshot",
         "sector.sw.taxonomy",
         "financial.derived-metric",
+        "equity.master.resolved",
         "fund.etf.profile.reported",
         "fund.etf.trading_state.reported",
         "fund.etf.bar.1d.reported",
         "fund.etf.nav.1d.reported",
+        "index.csi.catalog.snapshot",
+        "index.csi.constituent.snapshot",
+        "index.csi.weight.snapshot",
+        "index.cni.catalog.snapshot",
+        "index.cni.constituent.snapshot",
+        "index.cni.weight.snapshot",
+        "market.margin.market.1d.reported",
+        "market.margin.security.1d.reported",
+        "market.margin.eligibility.reported",
+        "market.stock_connect.market_stat.research",
+        "derivative.bar.1d.reported",
+        "money_flow.daily",
+        "money_flow.ranking",
     }.issubset(control_plane.executors)
+
+
+def test_margin_executor_yields_one_frozen_date_window_per_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """两融长窗口每次只推进一个已冻结的五日分区，续跑不会重新计算今天。"""
+    captured: dict[str, object] = {"partitions": []}
+
+    class RecordingExecution:
+        """模拟发布器写回的控制面进度，避免单测依赖 PostgreSQL。"""
+
+        def __init__(self) -> None:
+            """初始化模拟的 publication 进度和 checkpoint。"""
+            self.processed_records = 0
+            self.checkpoint_kind: str | None = None
+            self.checkpoint_position: str | None = None
+
+    class PublishingMarginService:
+        """模拟单窗口 canonical 发布，验证执行器传递的确切日期范围。"""
+
+        def __init__(self, **_dependencies: object) -> None:
+            """接收执行器注入的真实依赖形状。"""
+
+        async def sync(self, *, venue: object, start: date, end: date) -> SimpleNamespace:
+            """记录来源调用窗口并模拟仓储已在 fencing 事务内写入一个版本。"""
+            captured["venue"] = venue
+            captured["window"] = (start, end)
+            execution.processed_records = 7
+            execution.checkpoint_kind = "data-version"
+            execution.checkpoint_position = str(uuid4())
+            return SimpleNamespace(data_version=uuid4(), inserted_count=7, unchanged_count=0)
+
+    execution = RecordingExecution()
+    claim = ExecutionClaim(
+        run_id=uuid4(),
+        dataset_code="market.margin.market.1d.reported",
+        fencing_token=1,
+        target={
+            "mode": "FULL",
+            "selector": {
+                "kind": "MARGIN",
+                "operation": "MARKET",
+                "venue": "SSE",
+                "security": None,
+            },
+        },
+        source_snapshot=[],
+        execution_intent={
+            "akshareResolvedDateFrom": "2026-01-01",
+            "akshareResolvedDateTo": "2026-01-06",
+            "akshareExecutionBatchDays": 5,
+        },
+    )
+    provider = FakeProvider("akshare", frozenset({"market.margin.market.1d.reported"}))
+    container = cast(
+        ServiceContainer,
+        SimpleNamespace(database=object(), object_storage=object()),
+    )
+
+    monkeypatch.setattr(canonical_executors, "_frozen_provider", lambda *_args: provider)
+    monkeypatch.setattr(
+        canonical_executors, "_margin_repository", lambda *_args, **_kwargs: object()
+    )
+    monkeypatch.setattr(canonical_executors, "S3RawPayloadStore", lambda _client: object())
+    monkeypatch.setattr(
+        canonical_executors, "FailureEvidenceDataSource", lambda source, _raw: source
+    )
+    monkeypatch.setattr(
+        canonical_executors, "MarginMarketDailySyncService", PublishingMarginService
+    )
+    monkeypatch.setattr(
+        canonical_executors,
+        "retain_failure_evidence",
+        lambda _raw_store, operation: operation(),
+    )
+    monkeypatch.setattr(canonical_executors, "_required_execution", lambda: execution)
+    monkeypatch.setattr(canonical_executors, "_cancel_requested", lambda _container: False)
+    monkeypatch.setattr(
+        canonical_executors,
+        "_prepare_operation_partitions",
+        lambda *_args, **_kwargs: frozenset(),
+    )
+    monkeypatch.setattr(
+        canonical_executors,
+        "_record_operation_partition",
+        lambda _container, **kwargs: cast(list[dict[str, object]], captured["partitions"]).append(
+            kwargs
+        ),
+    )
+    monkeypatch.setattr(
+        canonical_executors,
+        "_operation_partition_counts",
+        lambda *_args, **_kwargs: (1, 0),
+    )
+
+    outcome = canonical_executors._execute_margin(
+        claim,
+        container=container,
+        dataset_code="market.margin.market.1d.reported",
+        operation="MARKET",
+        capability="market.margin.market.1d.reported",
+    )
+
+    assert outcome.status == "YIELDED"
+    assert outcome.completed_partitions == 1
+    assert outcome.total_partitions == 2
+    assert outcome.processed_records == 7
+    assert captured["window"] == (date(2026, 1, 1), date(2026, 1, 5))
+    assert [item["status"] for item in cast(list[dict[str, object]], captured["partitions"])] == [
+        "RUNNING",
+        "SUCCEEDED",
+    ]
+
+
+def test_index_shadow_executor_writes_one_research_partition_without_terminal_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """中证目录快照必须由控制面落库，并且不得调用正式 publication 的终态钩子。"""
+    captured: dict[str, object] = {"partitions": []}
+
+    class PublishingIndexShadowService:
+        """模拟真实 research 仓储的目录观察返回值。"""
+
+        def __init__(self, **_dependencies: object) -> None:
+            """接收执行器注入的来源、仓储与摘要存储。"""
+
+        async def sync_catalog(self, *, administrator: object) -> SimpleNamespace:
+            """记录管理人参数并返回不含 publication 的观察摘要。"""
+            captured["administrator"] = administrator
+            return SimpleNamespace(observation=SimpleNamespace(item_count=2_348))
+
+    claim = ExecutionClaim(
+        run_id=uuid4(),
+        dataset_code="index.csi.catalog.snapshot",
+        fencing_token=1,
+        target={
+            "mode": "FULL",
+            "selector": {
+                "kind": "INDEX",
+                "administrator": "CSI",
+                "capability": "index.catalog.snapshot",
+                "indexCode": None,
+            },
+        },
+        source_snapshot=[],
+    )
+    provider = FakeProvider("akshare-csindex-index-snapshot", frozenset({"index.catalog.snapshot"}))
+    container = cast(
+        ServiceContainer,
+        SimpleNamespace(database=object(), object_storage=object()),
+    )
+
+    monkeypatch.setattr(
+        canonical_executors, "_prepare_operation_partitions", lambda *_a, **_k: frozenset()
+    )
+    monkeypatch.setattr(canonical_executors, "_cancel_requested", lambda _container: False)
+    monkeypatch.setattr(canonical_executors, "_frozen_provider", lambda *_a: provider)
+    monkeypatch.setattr(canonical_executors, "S3RawPayloadStore", lambda _client: object())
+    monkeypatch.setattr(
+        canonical_executors, "FailureEvidenceDataSource", lambda source, _raw: source
+    )
+    monkeypatch.setattr(
+        canonical_executors, "SqlAlchemyIndexShadowRepository", lambda _db: object()
+    )
+    monkeypatch.setattr(canonical_executors, "IndexShadowSyncService", PublishingIndexShadowService)
+    monkeypatch.setattr(
+        canonical_executors, "retain_failure_evidence", lambda _raw, operation: operation()
+    )
+    monkeypatch.setattr(
+        canonical_executors,
+        "_record_operation_partition",
+        lambda _container, **kwargs: cast(list[dict[str, object]], captured["partitions"]).append(
+            kwargs
+        ),
+    )
+
+    outcome = canonical_executors._execute_index_shadow(
+        claim,
+        container=container,
+        dataset_code="index.csi.catalog.snapshot",
+    )
+
+    assert outcome.status == "SUCCEEDED"
+    assert outcome.completed_partitions == 1
+    assert outcome.total_partitions == 1
+    assert outcome.processed_records == 2_348
+    assert captured["administrator"] is canonical_executors.IndexAdministrator.CSI
+    assert [item["status"] for item in cast(list[dict[str, object]], captured["partitions"])] == [
+        "RUNNING",
+        "SUCCEEDED",
+    ]
+
+
+def test_stock_connect_research_executor_yields_independent_channel_direction_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AKShare 港通 research 必须逐通道方向续跑，且不调用官方完整包或正式发布器。"""
+    captured: dict[str, object] = {"partitions": []}
+
+    class PublishingResearchService:
+        """模拟 research-only 服务并回显实际通道和冻结日期窗口。"""
+
+        def __init__(self, **_dependencies: object) -> None:
+            """接收执行器注入的唯一 AKShare source、仓储和失败证据存储。"""
+
+        async def sync(self, **kwargs: object) -> SimpleNamespace:
+            """返回一条 research 写入，绝不返回 dataVersion 或 release。"""
+            captured.update(kwargs)
+            return SimpleNamespace(batch=SimpleNamespace(inserted_count=1))
+
+    claim = ExecutionClaim(
+        run_id=uuid4(),
+        dataset_code="market.stock_connect.market_stat.research",
+        fencing_token=1,
+        target={
+            "mode": "DATE_RANGE",
+            "selector": {
+                "kind": "STOCK_CONNECT_RESEARCH",
+                "operation": "MARKET_STAT",
+                "channel": "ALL",
+                "direction": None,
+            },
+            "dateFrom": "2026-07-27",
+            "dateTo": "2026-08-01",
+        },
+        source_snapshot=[],
+        execution_intent={
+            "akshareResolvedDateFrom": "2026-07-27",
+            "akshareResolvedDateTo": "2026-08-01",
+            "akshareExecutionBatchDays": 5,
+        },
+    )
+    provider = FakeProvider(
+        "akshare",
+        frozenset({"market.stock_connect.market_stat.reported"}),
+    )
+    container = cast(
+        ServiceContainer,
+        SimpleNamespace(database=object(), object_storage=object()),
+    )
+
+    monkeypatch.setattr(
+        canonical_executors, "_prepare_operation_partitions", lambda *_a, **_k: frozenset()
+    )
+    monkeypatch.setattr(canonical_executors, "_cancel_requested", lambda _container: False)
+    monkeypatch.setattr(canonical_executors, "_frozen_provider", lambda *_a: provider)
+    monkeypatch.setattr(canonical_executors, "S3RawPayloadStore", lambda _client: object())
+    monkeypatch.setattr(
+        canonical_executors.stock_connect_research_repository,
+        "SqlAlchemyStockConnectMarketStatResearchRepository",
+        lambda _db: object(),
+    )
+    monkeypatch.setattr(
+        canonical_executors,
+        "StockConnectMarketStatResearchSyncService",
+        PublishingResearchService,
+    )
+    monkeypatch.setattr(
+        canonical_executors,
+        "_record_operation_partition",
+        lambda _container, **kwargs: cast(list[dict[str, object]], captured["partitions"]).append(
+            kwargs
+        ),
+    )
+    monkeypatch.setattr(
+        canonical_executors,
+        "_operation_partition_counts",
+        lambda *_a, **_k: (1, 0),
+    )
+
+    outcome = canonical_executors._execute_stock_connect_market_stat_research(
+        claim,
+        container=container,
+    )
+
+    assert outcome.status == "YIELDED"
+    assert outcome.completed_partitions == 1
+    assert outcome.total_partitions == 8
+    assert outcome.processed_records == 1
+    channel = cast(canonical_executors.StockConnectChannel, captured["channel"])
+    assert channel.channel == "SH"
+    assert channel.direction == "NORTHBOUND"
+    assert captured["start"] == date(2026, 7, 27)
+    assert captured["end"] == date(2026, 7, 31)
+    assert [item["status"] for item in cast(list[dict[str, object]], captured["partitions"])] == [
+        "RUNNING",
+        "SUCCEEDED",
+    ]
+
+
+def test_sector_bar_executor_yields_one_frozen_identity_day_without_arming_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """板块 K 线按预检 roster 和一日窗续跑，最后终态仍交给普通控制面收敛。"""
+    captured: dict[str, object] = {"partitions": []}
+    roster = [
+        {
+            "sectorKey": "17",
+            "scheme": "eastmoney.industry",
+            "sectorCode": "BK0475",
+        }
+    ]
+    roster_hash = hashlib.sha256(
+        json.dumps(roster, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+
+    class PublishingSectorBarService:
+        """模拟真实板块发布并捕获一日窗口及冻结身份。"""
+
+        def __init__(self, **_dependencies: object) -> None:
+            """接收执行器依赖，不访问外部来源。"""
+
+        async def sync(self, **kwargs: object) -> SimpleNamespace:
+            """返回已发布原生周线计数，供执行器累计。"""
+            captured.update(kwargs)
+            return SimpleNamespace(inserted_count=2, unchanged_count=1)
+
+    claim = ExecutionClaim(
+        run_id=uuid4(),
+        dataset_code="sector.bar.1w.raw",
+        fencing_token=1,
+        target={"mode": "DATE_RANGE", "selector": {"kind": "GLOBAL"}},
+        source_snapshot=[],
+        execution_intent={
+            "sectorBarRoster": roster,
+            "sectorBarRosterHash": roster_hash,
+            "akshareResolvedDateFrom": "2026-07-01",
+            "akshareResolvedDateTo": "2026-07-02",
+            "akshareExecutionBatchDays": 1,
+        },
+    )
+    provider = FakeProvider("akshare-eastmoney-sector", frozenset({"sector.bar.1w.raw"}))
+    container = cast(
+        ServiceContainer,
+        SimpleNamespace(database=object(), object_storage=object()),
+    )
+
+    monkeypatch.setattr(
+        canonical_executors, "_completed_operation_partitions", lambda *_a, **_k: frozenset()
+    )
+    monkeypatch.setattr(
+        canonical_executors, "_prepare_operation_partitions", lambda *_a, **_k: frozenset()
+    )
+    monkeypatch.setattr(canonical_executors, "_cancel_requested", lambda _container: False)
+    monkeypatch.setattr(
+        canonical_executors, "_assert_frozen_sector_bar_identity", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(canonical_executors, "_frozen_provider", lambda *_a: provider)
+    monkeypatch.setattr(canonical_executors, "S3RawPayloadStore", lambda _client: object())
+    monkeypatch.setattr(
+        canonical_executors, "FailureEvidenceDataSource", lambda source, _raw: source
+    )
+    monkeypatch.setattr(
+        canonical_executors, "SqlAlchemySectorMarketDataRepository", lambda _db: object()
+    )
+    monkeypatch.setattr(canonical_executors, "SectorBarSyncService", PublishingSectorBarService)
+    monkeypatch.setattr(
+        canonical_executors, "retain_failure_evidence", lambda _raw, operation: operation()
+    )
+    monkeypatch.setattr(
+        canonical_executors,
+        "_record_operation_partition",
+        lambda _container, **kwargs: cast(list[dict[str, object]], captured["partitions"]).append(
+            kwargs
+        ),
+    )
+    monkeypatch.setattr(
+        canonical_executors, "_operation_partition_counts", lambda *_a, **_k: (1, 0)
+    )
+    monkeypatch.setattr(
+        canonical_executors,
+        "_required_execution",
+        lambda: SimpleNamespace(checkpoint_kind="data-version", checkpoint_position="version"),
+    )
+
+    outcome = canonical_executors._execute_sector_bar(
+        claim,
+        container=container,
+        period=canonical_executors.SectorPeriod.WEEK_1,
+    )
+
+    assert outcome.status == "YIELDED"
+    assert outcome.completed_partitions == 1
+    assert outcome.total_partitions == 2
+    assert outcome.processed_records == 3
+    assert captured["start"] == date(2026, 7, 1)
+    assert captured["end"] == date(2026, 7, 1)
+    identifier = cast(canonical_executors.SectorIdentifier, captured["identifier"])
+    assert identifier.qualified_key == "eastmoney.industry:BK0475"
+    assert [item["status"] for item in cast(list[dict[str, object]], captured["partitions"])] == [
+        "RUNNING",
+        "SUCCEEDED",
+    ]
+
+
+def test_money_flow_executor_persists_research_daily_observation_without_fake_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """资金流日序列成功写入研究表时 run 为 partial，不能伪造公开 dataVersion。"""
+    captured: dict[str, object] = {"partitions": []}
+
+    class PublishingMoneyFlowService:
+        """模拟已归档来源和研究写入，明确没有 canonical publication。"""
+
+        def __init__(self, **_dependencies: object) -> None:
+            """接收执行器依赖，不调用网络。"""
+
+        async def sync(self, **kwargs: object) -> SimpleNamespace:
+            """捕获固定 capability 与参数，并返回真实研究态摘要。"""
+            captured.update(kwargs)
+            return SimpleNamespace(
+                publication=SimpleNamespace(
+                    published=False,
+                    inserted_count=5,
+                    revised_count=0,
+                    unchanged_count=0,
+                )
+            )
+
+    claim = ExecutionClaim(
+        run_id=uuid4(),
+        dataset_code="money_flow.daily",
+        fencing_token=1,
+        target={
+            "mode": "FULL",
+            "selector": {
+                "kind": "MONEY_FLOW",
+                "operation": "DAILY",
+                "scope": "EQUITY",
+                "exchange": "SSE",
+                "symbol": "600000",
+            },
+        },
+        source_snapshot=[],
+    )
+    provider = FakeProvider(
+        "akshare-eastmoney-money-flow",
+        frozenset({"money_flow.order_size.daily.equity.raw"}),
+    )
+    container = cast(
+        ServiceContainer,
+        SimpleNamespace(database=object(), object_storage=object()),
+    )
+
+    monkeypatch.setattr(
+        canonical_executors, "_prepare_operation_partitions", lambda *_a, **_k: frozenset()
+    )
+    monkeypatch.setattr(canonical_executors, "_cancel_requested", lambda _container: False)
+    monkeypatch.setattr(canonical_executors, "_frozen_provider", lambda *_a: provider)
+    monkeypatch.setattr(canonical_executors, "S3RawPayloadStore", lambda _client: object())
+    monkeypatch.setattr(
+        canonical_executors, "FailureEvidenceDataSource", lambda source, _raw: source
+    )
+    monkeypatch.setattr(canonical_executors, "SqlAlchemyMoneyFlowRepository", lambda _db: object())
+    monkeypatch.setattr(canonical_executors, "MoneyFlowSyncService", PublishingMoneyFlowService)
+    monkeypatch.setattr(
+        canonical_executors, "retain_failure_evidence", lambda _raw, operation: operation()
+    )
+    monkeypatch.setattr(
+        canonical_executors,
+        "_record_operation_partition",
+        lambda _container, **kwargs: cast(list[dict[str, object]], captured["partitions"]).append(
+            kwargs
+        ),
+    )
+
+    outcome = canonical_executors._execute_money_flow(claim, container=container)
+
+    assert outcome.status == "PARTIAL"
+    assert outcome.processed_records == 5
+    assert captured["capability"] == "money_flow.order_size.daily.equity.raw"
+    assert captured["parameters"] == (("exchange", "SSE"), ("symbol", "600000"))
+    assert [item["status"] for item in cast(list[dict[str, object]], captured["partitions"])] == [
+        "RUNNING",
+        "SUCCEEDED",
+    ]
 
 
 def test_financial_derived_executor_uses_same_control_plane_run(

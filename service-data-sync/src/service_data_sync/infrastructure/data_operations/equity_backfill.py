@@ -28,12 +28,13 @@ _DATE_DATASETS = (
     "equity.bar.1mo.raw",
     "equity.adjustment_factor",
 )
-_CURRENT_DATASETS = (
+_CURRENT_REFRESH_DATASETS = (
     "equity.profile",
     "equity.share_capital.reported",
     "financial.report",
     "financial.provider-metric",
     "financial.valuation",
+    "financial.derived-metric",
 )
 _EVENT_DATASETS = (
     "equity.corporate_event.earnings.reported",
@@ -43,9 +44,7 @@ _EVENT_DATASETS = (
 _PLANNED_DATASETS = frozenset(
     (
         *_DATE_DATASETS,
-        *_CURRENT_DATASETS,
         "equity.corporate_action",
-        "financial.derived-metric",
         *_EVENT_DATASETS,
         "equity.discovery.eod",
     )
@@ -67,9 +66,7 @@ _REFERENCE_FIXED_COMPONENT_PARTITIONS = {
     "equity.master.cn-a": frozenset({"CN_A_STABLE"}),
     "equity.lifecycle.explicit": frozenset({"SSE", "SZSE", "BSE"}),
     "sector.catalog.raw": frozenset({"eastmoney.industry", "eastmoney.concept"}),
-    "sector.membership.release": frozenset(
-        {"eastmoney.industry", "eastmoney.concept"}
-    ),
+    "sector.membership.release": frozenset({"eastmoney.industry", "eastmoney.concept"}),
 }
 _REFERENCE_DATASETS = frozenset(
     {*_REFERENCE_FIXED_COMPONENT_COUNTS, "sector.sw2021.membership.snapshot"}
@@ -236,13 +233,12 @@ class FrozenReferenceBundle:
                 UUID(str(component["publicationId"]))
                 UUID(str(component["dataVersion"]))
                 release_id = component["releaseId"]
-                if release_id is not None:
-                    UUID(str(release_id))
+                if release_id is None:
+                    raise TypeError
+                UUID(str(release_id))
                 effective_value = component["effectiveAsOf"]
                 effective_as_of = (
-                    None
-                    if effective_value is None
-                    else date.fromisoformat(str(effective_value))
+                    None if effective_value is None else date.fromisoformat(str(effective_value))
                 )
                 observed_on = date.fromisoformat(str(component["observedOn"]))
                 raw_source_batch_ids = component["sourceBatchIds"]
@@ -273,10 +269,7 @@ class FrozenReferenceBundle:
                 effective_as_of is not None and effective_as_of > observed_on
             ):
                 raise ValueError("reference bundle component date is mixed")
-            if (
-                dataset_code == "equity.trading_status.1d"
-                and effective_as_of != self.market_as_of
-            ):
+            if dataset_code == "equity.trading_status.1d" and effective_as_of != self.market_as_of:
                 raise ValueError("reference bundle trading-status date is stale")
         for dataset_code, expected_count in _REFERENCE_FIXED_COMPONENT_COUNTS.items():
             if counts.get(dataset_code) != expected_count:
@@ -293,9 +286,7 @@ class FrozenReferenceBundle:
             f"sw.industry:{self.snapshot_observed_on.isoformat()}"
         }:
             raise ValueError("reference bundle SW taxonomy partition is invalid")
-        if partitions.get("equity.trading_status.1d") != {
-            f"date:{self.market_as_of.isoformat()}"
-        }:
+        if partitions.get("equity.trading_status.1d") != {f"date:{self.market_as_of.isoformat()}"}:
             raise ValueError("reference bundle trading-status partition is invalid")
         if any(
             not partition_key.startswith("SW2021:")
@@ -522,15 +513,11 @@ class _TopologyBuilder:
             "sourceEarliestDate": (
                 None if source.earliest_date is None else source.earliest_date.isoformat()
             ),
-            "backfillDateFrom": (
-                None if window_from is None else window_from.isoformat()
-            ),
+            "backfillDateFrom": (None if window_from is None else window_from.isoformat()),
             "backfillDateTo": None if window_to is None else window_to.isoformat(),
             "windowInclusionReason": inclusion_reason,
             "rosterHash": self._roster_hash,
-            "referenceBundlePublicationId": str(
-                self._reference_bundle.publication_id
-            ),
+            "referenceBundlePublicationId": str(self._reference_bundle.publication_id),
             "referenceBundleDataVersion": str(self._reference_bundle.data_version),
             "referenceManifestHash": self._reference_bundle.manifest_hash,
             "snapshotObservedOn": self._snapshot_observed_on.isoformat(),
@@ -649,40 +636,9 @@ def build_topology(
         sources=sources,
         reference_bundle=reference_bundle,
     )
-    current_dependencies: dict[int, str] = {}
     for identity in identities:
         _add_historical_market_children(builder, identity, market_as_of, sources)
-        financial_child = _add_current_security_children(
-            builder, identity, snapshot_observed_on, sources
-        )
-        if financial_child is not None:
-            current_dependencies[identity.ordinal] = financial_child.child_key
         _add_corporate_action_children(builder, identity, snapshot_observed_on, sources)
-    for identity in identities:
-        dependency = current_dependencies.get(identity.ordinal)
-        if dependency is None:
-            reason_code = (
-                "UPSTREAM_REPORT_UNAVAILABLE"
-                if identity.active_on(snapshot_observed_on)
-                else "IDENTITY_NOT_ACTIVE_AT_PLAN_AS_OF"
-            )
-            builder.exclude(
-                dataset_code="financial.derived-metric",
-                reason_code=reason_code,
-                identity=identity,
-                detail=(
-                    "平台衍生指标只能基于同计划成功发布的精确财务报表输入。"
-                    if identity.active_on(snapshot_observed_on)
-                    else "平台衍生指标只能基于计划日仍有效身份的已发布财务输入。"
-                ),
-            )
-            continue
-        builder.add(
-            phase="DERIVED_SECURITY",
-            targets=[_target("financial.derived-metric", "FULL", _instrument(identity))],
-            identity=identity,
-            dependency_keys=(dependency,),
-        )
     event_dependencies = _add_event_children(
         builder,
         snapshot_observed_on=snapshot_observed_on,
@@ -707,6 +663,15 @@ def build_topology(
         reason_code="UNSUPPORTED_PROVIDER_METHODOLOGY",
         detail="当前资金流来源和供应商方法学未获准用于股票中心，不生成 child 或成功状态。",
     )
+    for dataset_code in _CURRENT_REFRESH_DATASETS:
+        builder.exclude(
+            dataset_code=dataset_code,
+            reason_code="CURRENT_SOURCE_SEPARATE_REFRESH",
+            detail=(
+                "该数据集只能表达执行时当前值，不能伪装为历史计划快照；"
+                "由独立当前数据刷新 command 记录真实 observedAt 与 dataVersion。"
+            ),
+        )
     return builder.finish()
 
 
@@ -757,71 +722,6 @@ def _add_historical_market_children(
                 )
             },
         )
-
-
-def _add_current_security_children(
-    builder: _TopologyBuilder,
-    identity: FrozenIdentity,
-    as_of: date,
-    sources: Mapping[str, FrozenSource],
-) -> PlannedChild | None:
-    """仅为计划日有效身份加入独立可选当前来源，财务 child 单独作为派生依赖。"""
-    if not identity.active_on(as_of):
-        for dataset_code in (*_CURRENT_DATASETS,):
-            builder.exclude(
-                dataset_code=dataset_code,
-                reason_code="IDENTITY_NOT_ACTIVE_AT_PLAN_AS_OF",
-                identity=identity,
-                detail="来源仅提供当前证券快照，关闭身份不能安全回填。",
-            )
-        return None
-    grouped_targets: list[dict[str, Any]] = []
-    for dataset_code in (
-        "equity.profile",
-        "equity.share_capital.reported",
-        "financial.provider-metric",
-        "financial.valuation",
-    ):
-        source = sources[dataset_code]
-        if identity.exchange not in source.supported_exchanges:
-            builder.exclude(
-                dataset_code=dataset_code,
-                reason_code="SOURCE_EXCHANGE_UNAVAILABLE",
-                identity=identity,
-                detail="冻结当前快照来源未证明支持该交易所，不生成执行 target。",
-            )
-            continue
-        grouped_targets.append(_target(dataset_code, "FULL", _instrument(identity)))
-    if grouped_targets:
-        # 这些 target 无派生依赖且都只表达执行时当前值；合并 command 把 5,500 身份
-        # 的最坏规划数压在硬预算内，run/result 仍按 targetIndex 独立终止和审计。
-        builder.add(
-            phase="RAW_SECURITY",
-            targets=grouped_targets,
-            identity=identity,
-        )
-    report_child: PlannedChild | None = None
-    for dataset_code in ("financial.report",):
-        source = sources[dataset_code]
-        if identity.exchange not in source.supported_exchanges:
-            builder.exclude(
-                dataset_code=dataset_code,
-                reason_code="SOURCE_EXCHANGE_UNAVAILABLE",
-                identity=identity,
-                detail=(
-                    "冻结财务来源未证明支持该交易所；该能力不执行，"
-                    "报表缺失时平台派生指标同时不可执行。"
-                ),
-            )
-            continue
-        child = builder.add(
-            phase="RAW_SECURITY",
-            targets=[_target(dataset_code, "FULL", _instrument(identity))],
-            identity=identity,
-        )
-        if dataset_code == "financial.report":
-            report_child = child
-    return report_child
 
 
 def _add_corporate_action_children(
@@ -939,11 +839,13 @@ def validate_topology(
                 raise ValueError("child intent identity does not align with target")
             if intent.get("sourceSnapshotHash") != sources[dataset_code].source_snapshot_hash:
                 raise ValueError("child intent source snapshot does not align")
-            if intent.get("referenceBundlePublicationId") != str(
-                topology.reference_bundle.publication_id
-            ) or intent.get("referenceBundleDataVersion") != str(
-                topology.reference_bundle.data_version
-            ) or intent.get("referenceManifestHash") != topology.reference_bundle.manifest_hash:
+            if (
+                intent.get("referenceBundlePublicationId")
+                != str(topology.reference_bundle.publication_id)
+                or intent.get("referenceBundleDataVersion")
+                != str(topology.reference_bundle.data_version)
+                or intent.get("referenceManifestHash") != topology.reference_bundle.manifest_hash
+            ):
                 raise ValueError("child intent reference bundle does not align")
             if intent.get("observationSemantics") != _observation_semantics(dataset_code):
                 raise ValueError("child intent observation semantics do not align")
@@ -1004,8 +906,7 @@ def iter_topology_pages(
             raise ValueError(f"equity backfill child exceeds page budget: {child.child_key}")
         candidate_bytes = page_payload_bytes + payload_bytes + int(bool(children))
         if children and (
-            len(children) >= maximum_children
-            or candidate_bytes > maximum_payload_bytes
+            len(children) >= maximum_children or candidate_bytes > maximum_payload_bytes
         ):
             yield _topology_page(page_number, children, payloads)
             page_number += 1
@@ -1154,10 +1055,8 @@ def _instrument(identity: FrozenIdentity) -> dict[str, Any]:
 
 
 def _observation_semantics(dataset_code: str) -> str:
-    """标记来源是否只能表达执行时当前值，避免把模型能力误写为历史快照。"""
-    if dataset_code in _CURRENT_DATASETS:
-        return "CURRENT_AT_EXECUTION"
-    if dataset_code in {"financial.derived-metric", "equity.discovery.eod"}:
+    """标记历史回填 target 的冻结或精确派生语义。"""
+    if dataset_code == "equity.discovery.eod":
         return "DERIVED_FROM_EXACT_INPUTS"
     return "FROZEN_PLAN_BOUNDARY"
 

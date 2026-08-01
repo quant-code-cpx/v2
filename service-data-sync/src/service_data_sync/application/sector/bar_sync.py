@@ -19,7 +19,6 @@ from service_data_sync.application.ports.data_source import (
     ProviderErrorCode,
     SourceRequest,
 )
-from service_data_sync.application.ports.market_data import RawPayload, RawPayloadStore
 from service_data_sync.application.ports.sector_market_data import (
     PublishedSectorBars,
     SectorMarketDataRepository,
@@ -48,12 +47,10 @@ class SectorBarSyncService:
         *,
         source: DataSourcePort,
         repository: SectorMarketDataRepository,
-        raw_payload_store: RawPayloadStore,
     ) -> None:
-        """从组合根接收中立数据源、仓储和原始证据端口。"""
+        """从组合根接收中立数据源和仓储；失败证据由控制面包装器统一处理。"""
         self._source = source
         self._repository = repository
-        self._raw_payload_store = raw_payload_store
 
     async def sync(
         self,
@@ -89,25 +86,20 @@ class SectorBarSyncService:
         raw_payload = batch.raw_payload if batch.raw_payload is not None else batch.payload
         raw_content_type = batch.raw_content_type or batch.content_type
         raw_digest = hashlib.sha256(raw_payload).hexdigest()
-        # canonical 变更保留来源摘要；原始字节只在本次同步失败时供排障使用。
-        raw_uri = self._raw_payload_store.put(
-            RawPayload(
-                object_key=(
-                    f"raw/{capability}/{batch.provider_id}/{batch.observed_at:%Y/%m/%d}/"
-                    f"{raw_digest}.json"
-                ),
-                content_sha256=raw_digest,
-                content_type=raw_content_type,
-                payload=raw_payload,
-            )
-        )
+        normalized_digest = hashlib.sha256(batch.payload).hexdigest()
         publication = self._repository.publish_bars(
             identifier=identifier,
             period=period,
             bars=bars,
             provider_id=batch.provider_id,
             source_payload_sha256=raw_digest,
-            raw_uri=raw_uri,
+            raw_uri=f"unretained://sha256/{raw_digest}",
+            raw_content_type=raw_content_type,
+            raw_byte_size=len(raw_payload),
+            normalized_payload_sha256=normalized_digest,
+            normalized_uri=f"unretained://sha256/{normalized_digest}",
+            normalized_content_type=batch.content_type,
+            normalized_byte_size=len(batch.payload),
             observed_at=batch.observed_at,
         )
         return _result(identifier, period, publication)

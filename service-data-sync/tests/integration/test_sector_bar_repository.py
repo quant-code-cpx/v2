@@ -39,21 +39,30 @@ def test_repository_persists_each_direct_upstream_period(period: SectorPeriod) -
         change_amount=Decimal("0.5"),
         turnover_percent=Decimal("3"),
     )
+    source_payload_sha256 = {
+        SectorPeriod.DAY_1: "a",
+        SectorPeriod.WEEK_1: "b",
+        SectorPeriod.MONTH_1: "c",
+    }[period] * 64
+    normalized_payload_sha256 = {
+        SectorPeriod.DAY_1: "d",
+        SectorPeriod.WEEK_1: "e",
+        SectorPeriod.MONTH_1: "f",
+    }[period] * 64
     try:
         publication = repository.publish_bars(
             identifier=identifier,
             period=period,
             bars=(bar,),
             provider_id="integration-fixture",
-            source_payload_sha256=(
-                "a"
-                if period is SectorPeriod.DAY_1
-                else "b"
-                if period is SectorPeriod.WEEK_1
-                else "c"
-            )
-            * 64,
-            raw_uri=f"s3://integration-fixture/{period.value}.json",
+            source_payload_sha256=source_payload_sha256,
+            raw_uri=f"unretained://sha256/{source_payload_sha256}",
+            raw_content_type="application/json",
+            raw_byte_size=128,
+            normalized_payload_sha256=normalized_payload_sha256,
+            normalized_uri=f"unretained://sha256/{normalized_payload_sha256}",
+            normalized_content_type="application/json",
+            normalized_byte_size=96,
             observed_at=datetime(2026, 7, 1, tzinfo=UTC),
         )
         bars = repository.list_bars(

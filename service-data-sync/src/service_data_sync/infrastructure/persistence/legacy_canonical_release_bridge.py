@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import date, datetime
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -55,6 +55,10 @@ def publish_legacy_snapshot(
     now: datetime,
     quality_status: str = "passed",
     publication_effective_as_of: date | None = None,
+    write_publication: Callable[[Session, UUID, UUID, UUID], None] | None = None,
+    write_visibility: Callable[[Session, UUID, UUID, UUID], None] | None = None,
+    before_final_publication: Callable[[], None] | None = None,
+    record_fenced_progress: bool = True,
 ) -> PublishedCanonicalRelease:
     """将当前 revision 快照转换为可验证的 canonical release 并在原事务内发布。
 
@@ -62,7 +66,10 @@ def publish_legacy_snapshot(
     因此 release 内容可复验，重放相同快照会复用原 release/publication，不会生成任意 UUID；
     `quality_status` 只接受已通过发布门的规范状态，保留既有 `warned` 可见性语义。
     `publication_effective_as_of` 可保留 legacy 消费者版本的业务生效日期，避免把事实日期误作
-    公告或可用日期。
+    公告或可用日期。需要将聚合组件或依赖 `data_version` 的领域 release 与 publication 原子
+    绑定时，调用方可传入两个同事务回调；回调绝不能推进第二个消费者指针。
+    `record_fenced_progress` 仅供一个逻辑 run 内的汇总 publication 使用：它不是新的业务分区时
+    必须关闭，避免把同一批 child 数据重复记入控制面进度。
     """
     if quality_status not in {"passed", "warned", "partial"}:
         raise ValueError("legacy release bridge quality status is invalid")
@@ -123,7 +130,14 @@ def publish_legacy_snapshot(
         publication_effective_as_of=publication_effective_as_of,
     )
     # 既有仓储已在当前事务写入 revision；统一发布器只负责冻结、血缘和消费者指针。
-    return release_repository.publish_in_session(session=session, candidate=candidate)
+    return release_repository.publish_in_session(
+        session=session,
+        candidate=candidate,
+        write_publication=write_publication,
+        write_visibility=write_visibility,
+        before_final_publication=before_final_publication,
+        record_fenced_progress=record_fenced_progress,
+    )
 
 
 def _ensure_dataset(

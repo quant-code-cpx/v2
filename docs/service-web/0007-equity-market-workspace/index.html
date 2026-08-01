@@ -801,7 +801,7 @@
           <div class="meta-grid">
             <div>
               <div class="meta-label">方案状态</div>
-              <div class="meta-value">Implemented · 跨服务联调验证中</div>
+              <div class="meta-value">代码/路由已实现 · 运行态按 current publication 判定</div>
             </div>
             <div>
               <div class="meta-label">评审范围</div>
@@ -813,18 +813,21 @@
             </div>
             <div>
               <div class="meta-label">调研日期</div>
-              <div class="meta-value">2026-07-30 · Asia/Shanghai</div>
+              <div class="meta-value">2026-08-01 · runtime audit 修订 · Asia/Shanghai</div>
             </div>
           </div>
           <div class="decision-banner">
             <strong>决策边界</strong>
             <div>
-              本目录仍只承载调研、技术方案和原型；经后续明确授权，生产实现已在三个服务源码内同步落地，
-              但未新增 ADR、OpenAPI、package 或 lockfile。跨服务实现目标由
+              本目录仍只承载调研、技术方案和原型；生产实现已在三个服务源码内同步落地。
+              未新增 ADR 或 OpenAPI；为让实际异步来源调用可进入运行镜像并固定已验收的供应商版本，
+              data-sync 仅更新了必要的 production dependency 与冻结 lockfile。跨服务实现目标由
               <a href="../../service-api/0007-equity-market-workspace/index.html">service-api 0007</a> 与
               <a href="../../service-data-sync/0032-equity-market-workspace/index.html">service-data-sync 0032</a>
-              明确源码边界并完成公开 API 与 Web 接入；真实 publication 三服务 E2E 仍在验证。
-              资金流保持 research/UNAVAILABLE，不构成 BASE 阻塞，也不被描述为已冻结生产来源。
+              明确源码边界并完成代码级 API 与 Web 接入；这不等于任何环境已有 current publication。
+              页面只显示同一 <code>dataVersion</code> 的真实来源批次、交易所/数据集 coverage、质量通过的
+              <code>publication</code>；任一可选数据集缺失即显示独立的 <code>PARTIAL</code>、<code>STALE</code> 或
+              <code>SOURCE_UNAVAILABLE</code>。资金流保持 UNAVAILABLE，不构成 BASE 阻塞，也不被描述为已冻结来源。
             </div>
           </div>
         </section>
@@ -843,19 +846,21 @@
             </article>
             <article class="callout">
               <div class="callout-number">02 / DETAIL</div>
-              <h3>个股详情与 typed API 已接通</h3>
+              <h3>个股详情与 typed API 代码链已接通</h3>
               <p>
-                身份、生命周期、日/周/月线、复权、公司行动、公司概况、财务、估值、分类和事件已由
-                service-web 接入真实公开 POST API；资金流只接状态边界，因方法学仍为 research 而明确不可用。
+                身份、生命周期、日/周/月线、复权、公司行动、公司概况、财务、估值、分类和事件已有
+                service-web → POST API 代码路径；运行审计尚未形成可读 current publication。资金流只接状态边界，
+                因方法学尚未完成 validated 而明确不可用。
               </p>
             </article>
             <article class="callout">
               <div class="callout-number">03 / DISCOVERY</div>
-              <h3>统一横截面链路已落地</h3>
+              <h3>统一横截面代码链已落地</h3>
               <p>
                 <code>POST /api/v1/equities/search</code> 只读取
                 <code>equity.discovery.eod</code> 的单一冻结 publication，在服务端完成筛选、排序和游标分页；
-                浏览器不再通过逐证券 N+1 请求拼接股票列表。
+                浏览器不再通过逐证券 N+1 请求拼接股票列表；无 current publication 时该路由返回稳定
+                <code>NO_PUBLICATION</code>，而非空列表或示例数据。
               </p>
             </article>
             <article class="callout">
@@ -873,6 +878,25 @@
             页面展示的是“最近一个已发布、可复验的 EOD / 报告数据版本”，不是实时行情。
             本方案不引入 WebSocket、Level-2、实时盘口或任何未冻结 endpoint。
           </div>
+          <h3>真实发布读取规则（按 batch / coverage 判定）</h3>
+          <div class="table-wrap">
+            <table class="compact">
+              <thead><tr><th>验证项</th><th>必须存在的可审计证据</th><th>当前结论与失败行为</th></tr></thead>
+              <tbody>
+                <tr><td>代码与路由</td><td>Web、公开 POST API、data-sync reader 的实现、严格 schema 与错误投影。</td><td>已存在；仅证明代码路径，事实读取仍必须命中 current publication。</td></tr>
+                <tr><td>来源批次身份</td><td><code>dataset/capability + exchange + period + provider + upstreamSource + methodology/version + sourceBatchId + observedAt + adapterVersion + schemaFingerprint + sourceSnapshotSha256</code>。</td><td>来源批次缺失、不可读或无法校验时，该数据集显示 <code>SOURCE_UNAVAILABLE</code> 或 <code>QUARANTINED</code>；不得用 adapter 名称或模型行补位。</td></tr>
+                <tr><td>交易所 coverage</td><td>身份目录与 K 线/复权分别按 <code>exchange/period</code> 保存来源批次、窗口、质量和 publication。</td><td>BSE 的 <code>1d|1w|1mo</code> 与复权没有有效 coverage 时返回 <code>SOURCE_EXCHANGE_UNAVAILABLE</code>，不渲染空图，也不以身份可见推断行情可见。</td></tr>
+                <tr><td>质量 + 真实 publication</td><td>真实 <code>sourceBatchId</code>、raw/object 摘要或失败证据、质量结果、冻结 component manifest 与当前 <code>dataset_publication</code> 全部可回溯。</td><td>缺任一项为 <code>NO_PUBLICATION</code>/<code>PARTIAL</code>/<code>STALE</code>/<code>coverage-unavailable</code>；不能把表模型、可变最新行或 fixture 投影给用户。</td></tr>
+                <tr><td>容量 + 三服务 E2E</td><td>data-sync 容量实测与 API→浏览器真实抽样；同一 dataVersion 从 source batch 可追溯。</td><td>作为上线验收；超预算不推进新 current pointer，页面继续展示上一版本的 <code>STALE</code> 状态。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="evidence">
+            <strong>历史版本不会绕过来源绑定：</strong>
+            Web 只消费由 API 投影的 immutable <code>publicationId + dataVersion</code>，其中来源批次、provider、
+            methodology、observedAt、coverage 与 manifest 必须一致。任一来源证据或质量结果缺失时，页面按无 publication
+            处理，不从缓存、当前 catalog 或旧行恢复行情、详情或事件。
+          </div>
           <h3>能力分级</h3>
           <div class="legend">
             <span class="grade grade-a">A · 当前可直接实现</span>
@@ -882,14 +906,14 @@
           </div>
           <ul>
             <li>
-              <strong>A：</strong>仓库中已有存储、publication 读取和公开 API；“直接实现”指 Web
-              可接入，不代表当前开发库有数据。
+              <strong>A：</strong>仓库中已有存储、publication 读取和公开 API 代码；“直接实现”只指 Web
+              代码可接入，绝不代表当前开发库已有数据、真实来源批次或 current publication。
             </li>
             <li>
               <strong>B：</strong>数据模型或逐证券读取存在，但缺面向页面的安全聚合、稳定错误语义或公开身份桥接。
             </li>
             <li>
-              <strong>C：</strong>缺关键 canonical 数据集、真实来源 adapter 准入、同步任务或 publication。
+              <strong>C：</strong>缺关键 canonical 数据集、真实来源 adapter、同步任务、coverage 或 publication。
             </li>
             <li><strong>D：</strong>超出当前冻结能力，且本方案不建议在本模块内推测实现。</li>
           </ul>
@@ -913,8 +937,8 @@
               <h3>实施后仍明确非目标</h3>
               <ul>
                 <li>本方案已作为三服务生产实现基线；只实现冻结股票中心范围，不顺带重构其他市场模块。</li>
-                <li>不修改 Token、既有方案、ADR、OpenAPI、package 或 lockfile。</li>
-                <li>不承诺实时行情、推送、盘口、Level-2 或供应商未批准能力。</li>
+                <li>不修改 Token、既有方案、ADR 或 OpenAPI；依赖与 lockfile 仅保留真实异步来源、已验收供应商版本及全量回填入口所需的最小变更。</li>
+                <li>不承诺实时行情、推送、盘口、Level-2 或供应商未冻结能力。</li>
                 <li>不把公司概况中的自由文本“行业”当作行业 taxonomy。</li>
                 <li>不把不同资金流方法学或不同估值来源静默合并。</li>
               </ul>
@@ -926,7 +950,7 @@
             <li>运行时只读数据库查询：只证明本机开发环境当前 publication 状态。</li>
             <li>公开/内部契约与 Controller：证明可消费边界和 HTTP 语义。</li>
             <li>Repository、publication 与 ORM：证明存储、读取和冻结机制。</li>
-            <li>同步入口与来源门禁：证明能力可执行条件，不等于当前已发布。</li>
+            <li>同步入口与来源批次证据：证明能力可执行条件，不等于当前已发布。</li>
             <li>README 与既有方案：补充设计背景；与运行代码冲突时以代码和契约为准。</li>
           </ol>
 
@@ -1069,7 +1093,7 @@
                 </tr>
                 <tr>
                   <td>财务报告与报表行项目</td>
-                  <td>typed 同步、PIT revision、质量门和 publication 已实现；来源默认关闭</td>
+                  <td>typed 同步、PIT revision、质量门和 publication 已实现；等待真实首发来源批次</td>
                   <td><code>financial_report*</code>、<code>financial_statement_fact</code></td>
                   <td class="yes">有：列表 / 详情</td>
                   <td><code>POST …/financial-reports</code><br /><code>POST …/:reportRef</code></td>
@@ -1080,7 +1104,7 @@
                 </tr>
                 <tr>
                   <td>供应商财务指标</td>
-                  <td>模型、同步、方法学与 publication 已实现；来源默认关闭</td>
+                  <td>模型、同步、方法学与 publication 已实现；等待真实首发来源批次</td>
                   <td><code>provider_financial_metric_revision</code></td>
                   <td class="yes">有</td>
                   <td rowspan="2"><code>POST …/financial-metrics</code></td>
@@ -1101,7 +1125,7 @@
                 </tr>
                 <tr>
                   <td>历史估值</td>
-                  <td>供应商观察 revision 与 publication 已实现；来源默认关闭</td>
+                  <td>供应商观察 revision 与 publication 已实现；等待真实首发来源批次</td>
                   <td><code>valuation_observation_revision</code></td>
                   <td class="yes">有</td>
                   <td><code>POST …/valuations</code></td>
@@ -1118,7 +1142,7 @@
                   <td><code>POST /api/v1/market/money-flow/…</code></td>
                   <td class="partial">只接入明确不可用状态</td>
                   <td class="no">无生产 publication</td>
-                  <td>methodology=research、production_enabled=false；详情和列表都不请求或展示研究数据。</td>
+                  <td>方法学尚未完成 validated，且无完整 EOD 来源批次；详情和列表都不请求或展示未发布观察。</td>
                   <td><span class="grade grade-d">D 暂不支持</span></td>
                 </tr>
                 <tr>
@@ -1232,6 +1256,13 @@
               </tbody>
             </table>
           </div>
+          <div class="callout warn">
+            <strong>矩阵读取规则：</strong>上表的“已实现 / 已接入 / 有 API”均是代码与契约事实，不是当前数据可消费性声明。
+            日、周、月 K 线与复权因子按 <code>exchange=SSE|SZSE</code> 的真实来源批次与 coverage 读取；
+            <code>exchange=BSE</code> 没有 coverage 时必须在 API 与页面返回
+            <code>SOURCE_EXCHANGE_UNAVAILABLE</code> 或 <code>coverage-unavailable</code>，不返回空 K 线、
+            估算复权值或跨交易所替代值。其他数据集也必须逐 cell 命中真实 publication。
+          </div>
 
           <h3>列表字段结论</h3>
           <div class="table-wrap">
@@ -1277,8 +1308,8 @@
                 </tr>
                 <tr>
                   <td>个股资金流</td>
-                  <td class="no">仅有模型/reader；无 validated 方法学和生产 publication</td>
-                  <td class="partial">路由存在但生产数据失败关闭</td>
+                  <td class="no">仅有模型/reader；无 validated 方法学和 current publication</td>
+                  <td class="partial">路由存在但数据集返回 UNAVAILABLE</td>
                   <td><span class="grade grade-d">暂不支持；明确 UNAVAILABLE</span></td>
                 </tr>
                 <tr>
@@ -1373,7 +1404,7 @@
               <h3>现有基线能力（不单独上线）</h3>
               <ul>
                 <li>搜索代码/名称前缀。</li>
-                <li>单交易所或三所稳定聚合。</li>
+                <li>单交易所或已通过冻结来源矩阵的交易所稳定聚合；当前沪深行情仅完成来源正向 probe，仍待 E2E；北交所身份可见但周期行情不进入可消费聚合。</li>
                 <li>LISTED / DELISTED 可筛；SUSPENDED 枚举保留，但因没有已验证 producer 当前禁用并标注未覆盖。</li>
                 <li>固定 <code>exchange + symbol + instrumentId</code> 顺序。</li>
                 <li>服务端 cursor，每页默认 50、最多 100。</li>
@@ -1421,14 +1452,15 @@
 
           <figure class="prototype">
             <img
-              src="assets/prototype-equity-list.png"
+              src="prototype-equity-list.png"
               width="1440"
               height="900"
               alt="股票列表 1440×900 桌面原型"
             />
             <figcaption>
-              股票列表目标态原型。示例值只用于布局，不代表当前运行时数据；红色“↑”表示上涨，绿色“↓”表示下跌，
-              颜色始终与符号或文字共同表达。资金流方法学未准入，因此不展示资金流列或排序。
+              股票列表真实历史来源探测原型。静态快照明确标注为非实时；红色“↑”表示上涨，绿色“↓”表示下跌，
+              颜色始终与符号或文字共同表达。北交所 K 线与复权尚无有效 coverage 时显示来源不可用，资金流方法学尚未完成，
+              因此不展示资金流列或排序。
             </figcaption>
           </figure>
         </section>
@@ -1469,9 +1501,9 @@
                 </tr>
                 <tr>
                   <td>1 · 行情（默认）</td>
-                  <td>日/周/月 K 线、未复权/qfq/hfq、MA、VOL、成交量、成交额、换手率、公司行动标记</td>
+                  <td>SSE/SZSE：日/周/月 K 线、未复权/qfq/hfq、MA、VOL、成交量、成交额、换手率、公司行动标记；BSE：只显示不可用原因，不装载 K 线。</td>
                   <td><code>bars</code> + <code>adjustment-factors</code> + <code>corporate-actions</code></td>
-                  <td>KLineChart；三个 dataset 独立状态</td>
+                  <td>KLineChart；三个 dataset 独立状态；仅在 SSE/SZSE 命中有效来源 coverage 后装载。</td>
                   <td><span class="grade grade-a">A</span></td>
                 </tr>
                 <tr>
@@ -1518,7 +1550,7 @@
                 </tr>
                 <tr>
                   <td>8 · 数据说明</td>
-                  <td>每个 dataset 的来源、方法学、更新时间、publishedAt、knowledgeCutoff、quality、dataVersion、免责声明</td>
+                  <td>每个 dataset 的来源标签、方法学、更新时间、publishedAt、knowledgeCutoff、quality、dataVersion；bars 另列 coverageVersion、publicationKind、sourceBatchId；不显示内部 URI、凭据、原始载荷或数据库键</td>
                   <td>各 API release/meta/header</td>
                   <td>不以一个“页面更新时间”覆盖全部数据</td>
                   <td><span class="grade grade-a">A</span></td>
@@ -1540,7 +1572,7 @@
 
           <figure class="prototype">
             <img
-              src="assets/prototype-equity-detail.png"
+              src="prototype-equity-detail.png"
               width="1440"
               height="900"
               alt="个股详情 1440×900 桌面原型"
@@ -1618,6 +1650,10 @@
             Query key 包含请求输入，不把响应 dataVersion 反向塞入 key。dataVersion、ETag 和 release
             作为缓存数据元信息保存；cursor 链响应若出现版本变化则整体作废。
           </p>
+          <p>
+            当 <code>exchange=BSE</code> 时，行情页签不创建 bars 或 factor query key，也不动态 import
+            KLineChart；只读取身份与 data-status 并展示 fail-closed 原因。身份可见不能触发“试一次看看”的来源请求。
+          </p>
 
           <h3>请求与缓存策略</h3>
           <ul>
@@ -1692,7 +1728,7 @@
             <a href="../../service-api/0007-equity-market-workspace/index.html">service-api 0007</a>、
             <a href="../../service-data-sync/0032-equity-market-workspace/index.html">service-data-sync 0032</a>
             组成同一实施单元；本次不创建 OpenAPI/ADR。源码路径、数据集与状态语义已落地，
-            真实 publication E2E 仍在验证；资金流生产来源和方法学明确未准入。
+            真实 publication E2E 仍待首发执行；资金流尚未形成可比较的 EOD 来源批次和完成的方法学。
           </p>
 
           <h3>service-api：既有详情能力直接复用</h3>
@@ -1709,7 +1745,7 @@
               财务：<code>POST …/financial-reports</code>、<code>…/:reportRef</code>、
               <code>…/financial-metrics</code>、<code>…/valuations</code>。
             </li>
-            <li>资金流路由保留严格失败语义，但在 validated 方法学和生产 publication 出现前不发事实查询；行业/概念使用证券反向 membership。</li>
+            <li>资金流路由保留严格失败语义，在 validated 方法学和真实 EOD publication 出现前不发事实查询；行业/概念使用证券反向 membership。</li>
           </ul>
 
           <h3>service-api：新增能力已冻结</h3>
@@ -1745,7 +1781,7 @@
           <div class="flow">
             <div class="flow-step">
               <strong>真实来源</strong>
-              <span>目录、行情、财务、停复牌、行业/概念、SW 成分、股本和事件 adapter；资金流生产来源关闭。</span>
+              <span>目录、行情、财务、停复牌、行业/概念、SW 成分、股本和事件 adapter；资金流尚无可发布 EOD 来源批次。</span>
             </div>
             <div class="flow-step">
               <strong>独立 canonical</strong>
@@ -1761,7 +1797,7 @@
             </div>
             <div class="flow-step">
               <strong>原子发布</strong>
-              <span>BASE 身份门禁通过才推进 dataVersion；可选组件失败标 PARTIAL，已有版本保留 last-good stale。</span>
+              <span>BASE 身份来源证据与质量通过后推进 dataVersion；可选组件失败标 PARTIAL，已有版本保留 last-good stale。</span>
             </div>
           </div>
 
@@ -1803,11 +1839,13 @@
             </table>
           </div>
 
-          <h3>真实全量与 production 门禁</h3>
+          <h3>真实全量与失败语义</h3>
           <ul>
             <li>
-              “全量”表示覆盖三所当前与历史身份，以及来源真实可提供的完整历史；上游没有历史时显示
-              coverage start，不生成补造行。
+              “全量”表示覆盖三所当前与历史身份，以及每个交易所由冻结来源矩阵实际验证可提供的完整历史；
+              K 线与复权当前只有 SSE/SZSE 的有效 coverage。BSE 的日/周/月或复权为
+              <code>SOURCE_EXCHANGE_UNAVAILABLE</code>，只能失败关闭，绝不能写成合法空集、PARTIAL 数据值或完成全量。
+              上游没有历史时显示 coverage start，不生成补造行。
             </li>
             <li>
               BASE discovery 的身份、名称、交易所和生命周期必须全覆盖；可选组件存在
@@ -1864,7 +1902,7 @@
                 </tr>
                 <tr>
                   <td>无 publication</td>
-                  <td>稳定 availability / problem code 指明 SOURCE_UNAVAILABLE</td>
+                  <td>search 返回 <code>availability=UNAVAILABLE</code>、<code>reasonCode=NO_PUBLICATION</code>；详情叶子返回 <code>503 publication-unavailable</code></td>
                   <td>页内完整不可用状态；不显示 0 条</td>
                   <td>身份无发布则页面级；其他数据集无发布则面板级</td>
                   <td>仅用户手动或低频条件复验</td>
@@ -1918,6 +1956,13 @@
                   <td>否</td>
                 </tr>
                 <tr>
+                  <td>409 coverage-unavailable</td>
+                  <td>所选 period、身份、窗口与 dataVersion 没有精确成功 K 线 coverage</td>
+                  <td>不适用</td>
+                  <td>行情面板显示“该窗口尚无可验证覆盖”；保留身份头、切换与其他页签；不能显示为空行情</td>
+                  <td>否；仅等待同步发布后手动重试</td>
+                </tr>
+                <tr>
                   <td>429</td>
                   <td>服务端限流</td>
                   <td colspan="2">按 Retry-After 禁用刷新并倒计时；不并发放大请求。</td>
@@ -1947,7 +1992,7 @@
 
           <figure class="prototype">
             <img
-              src="assets/prototype-states.png"
+              src="prototype-states.png"
               width="1440"
               height="900"
               alt="股票中心复杂状态 1440×900 桌面原型"
@@ -1989,6 +2034,14 @@
             </div>
           </div>
 
+          <h3>真实容量实测（首发前执行，不能用估算替代）</h3>
+          <ul>
+            <li>data-sync 的全市场目录请求允许 <strong>600 秒</strong>墙钟上限；该值是异常边界，不是把 600 秒当作已证明的常态性能或公开 SLA。</li>
+            <li>每个 <code>dataset/capability + exchange + period</code> 必须在生产等价 egress 记录真实来源 <code>p50/p95</code>、成功率、重试次数和样本量；Web 不以开发机一次成功替代这些证据。</li>
+            <li>容量报告还必须记录 DB 写入/事务 <code>p50/p95</code>、WAL 字节与 checkpoint、对象存储 PUT/HEAD <code>p50/p95</code> 和字节量、worker CPU throttling、RSS/内存上限及 OOM=0。</li>
+            <li>以实测并发和重试余量计算 EOD 临界路径：目录、来源抓取、DB/WAL、对象存储、discovery build 与 publication 的 <code>p95</code> 总预算不得超过收盘后 120 分钟；超预算不推进新 current pointer，页面保留上一版本并标记 STALE。</li>
+          </ul>
+
           <h3>KLineChart 生命周期</h3>
           <ol>
             <li>进入“行情”页签时才动态 import KLineChart；股票列表不加载任何图表引擎。</li>
@@ -2028,7 +2081,7 @@
                 复用 data-sync 0031 全局 fence，并保持非 test 假数据路径关闭。
               </p>
             </div>
-            <div class="phase-gate">门禁：机器合同、架构测试与方法学版本固定</div>
+            <div class="phase-gate">校验：机器合同、架构测试与方法学版本固定</div>
           </div>
           <div class="phase">
             <div class="phase-id">PHASE 1</div>
@@ -2039,19 +2092,20 @@
                 对每条真实来源完成 probe、replay、migration、质量门和 publication。
               </p>
             </div>
-            <div class="phase-gate">门禁：真实来源 integration；没有 fixture publication</div>
+            <div class="phase-gate">校验：真实来源 integration；没有 fixture publication</div>
           </div>
           <div class="phase">
             <div class="phase-id">PHASE 2</div>
             <div>
-              <h3>真实全量回填与公开 API（代码已完成）</h3>
+              <h3>真实全量回填机制与公开 API（代码已完成，待首发来源执行）</h3>
               <p>
-                覆盖沪深京全部身份和每个来源全部可用历史，先生成可消费 BASE discovery publication；
+                覆盖沪深京全部身份，并在各交易所来源通过非空原始响应、口径、容量、coverage 与 publication 验收后覆盖其全部可用历史；
+                BSE K 线/复权尚无 coverage 时必须 fail closed；先生成 BASE discovery publication；
                 可选组件缺失时发布 PARTIAL 并逐项说明，不以等待宽表数据阻断真实基础链路；
                 实现 <code>/equities/search</code>、事件 search 与 data-status 三条 POST API。
               </p>
             </div>
-            <div class="phase-gate">门禁：全市场覆盖清单、cursor、回滚与性能预算</div>
+            <div class="phase-gate">校验：按交易所冻结来源矩阵、非空原始证据、全市场覆盖清单、cursor、回滚与性能预算</div>
           </div>
           <div class="phase">
             <div class="phase-id">PHASE 3</div>
@@ -2062,18 +2116,19 @@
                 无 publication、partial/stale、旧路由解析和可访问性；移除生产 fixture 依赖。
               </p>
             </div>
-            <div class="phase-gate">门禁：完整 desktop unit/build/E2E；所有列表列可追溯</div>
+            <div class="phase-gate">校验：完整 desktop unit/build/E2E；所有列表列可追溯</div>
           </div>
           <div class="phase">
             <div class="phase-id">PHASE 4</div>
             <div>
               <h3>三服务真实 E2E 与开放（验证进行中）</h3>
               <p>
-                staging 从真实来源执行全量同步，经 data-sync publication、API 到浏览器逐项抽样对账；
-                无 mock/fixture 请求且所有验收通过后，才部署包含股票中心入口的 production Web 版本。
+                staging 从真实来源执行已具 coverage 的交易所全量同步，经 data-sync publication、API 到浏览器逐项抽样对账；
+                BSE K 线/复权尚无 coverage 时返回来源不可用，不能以未来 probe 替代当前失败语义；
+                无 mock/fixture 请求且所有验收通过后，部署包含股票中心入口的 production Web 版本。
               </p>
             </div>
-            <div class="phase-gate">门禁：真实 sourceBatch 可追溯；不存在半链上线</div>
+            <div class="phase-gate">校验：真实 sourceBatch 可追溯；不存在半链上线</div>
           </div>
 
           <h3>发布与回滚</h3>
@@ -2095,7 +2150,7 @@
             <li>无 publication 与合法空结果文案、动作和埋点不同。</li>
             <li>旧 symbol-only route 不按代码前缀猜交易所。</li>
             <li>详情固定身份头和八个页签信息优先级符合本方案。</li>
-            <li>日/周/月线为独立物理周期，qfq/hfq 可追溯 adjustAsOf。</li>
+            <li>SSE/SZSE 的日/周/月线为独立物理周期，qfq/hfq 可追溯 adjustAsOf；BSE K 线与复权均 fail closed。</li>
             <li>K 线只用 KLineChart；非 K 线分析只用 ECharts。</li>
             <li>资金流当前显示明确 UNAVAILABLE；未来只有 validated publication 才显示 supplier/methodology/version/bucket/window，且禁止静默 fallback。</li>
             <li>估值标明供应商观察 finality，不宣传为官方最终值。</li>
@@ -2105,7 +2160,8 @@
             <li>列表、K 线和各页签达到 payload、Bundle、缓存与交互预算。</li>
             <li>键盘顺序、焦点可见、表头语义、图表 aria-label 与错误提示可访问。</li>
             <li>未引入实时、WebSocket、Level-2 或未冻结 endpoint。</li>
-            <li>staging 从真实同步首发到浏览器完成 E2E；生产运行无 fixture、mock、demo 或手填行情。</li>
+            <li>每个数据集 cell 有 sourceBatch、provider、methodology、coverage、质量结果和真实 publication；staging 从真实同步首发到浏览器完成 E2E，生产运行无 fixture、mock、demo 或手工构造来源。</li>
+            <li>容量实测记录目录 600 秒异常上限、来源 p50/p95、DB/WAL、对象存储、CPU/内存与 EOD 120 分钟临界路径；超预算不推进新 dataVersion。</li>
           </ul>
 
           <h3>实施阶段必须运行的验证</h3>
@@ -2136,7 +2192,7 @@
                   <td>service-data-sync</td>
                   <td>Ruff format/check、Pyright</td>
                   <td>完整 pytest；Repository 与 publication integration</td>
-                  <td>来源审批、质量门、component 一致性、回滚与 PIT 测试</td>
+                  <td>来源批次、质量门、component 一致性、回滚与 PIT 测试</td>
                 </tr>
               </tbody>
             </table>
@@ -2146,9 +2202,8 @@
         <section id="questions" class="section">
           <h2>11. 已冻结决策与执行责任</h2>
           <p class="lead">
-            本节没有阻断实现的开放问题。技术语义、路径、来源和上线门禁均已确定；
-            任务明确禁止新增 ADR/OpenAPI；本轮以源码内严格 schema、DTO 与跨服务测试固化这些决定，
-            不再重新选择方向。
+            代码实现没有待选方向，首发仍有明确验证项：逐 cell 的真实来源批次、coverage、质量与 publication、
+            容量实测和三服务 E2E。它们不是“代码已实现”可以自动跳过的数据事实；无 publication 时入口显示稳定状态而非示例数据。
           </p>
           <div class="open-issue">
             <div class="issue-id">D1</div>
@@ -2175,14 +2230,14 @@
             <div class="issue-id">D4</div>
             <div>
               <strong>列表估值默认口径</strong>
-              <p>默认展示 PE_TTM 与 PB 的 Eastmoney provider observation 已发布方法学；列头和数据说明展示 method/version，不宣传为官方最终值。</p>
+              <p>默认展示 PE_TTM 与 PB 的 provider observation 仅在其来源批次、质量、coverage 与 publication 全部通过时显示；列头和数据说明展示来源标签与 method/version，不宣传为官方最终值。</p>
             </div>
           </div>
           <div class="open-issue">
             <div class="issue-id">D5</div>
             <div>
               <strong>资金流列表默认口径</strong>
-              <p>当前没有默认口径：方法学为 research、production_enabled=false，列表与详情固定显示 UNAVAILABLE。只有完成来源许可、连续探针和方法学晋级后，才以新 publication 开放。</p>
+              <p>当前没有默认口径：方法学尚未达到 validated，列表与详情固定显示 UNAVAILABLE。只有完成连续探针、可比性验证、完整 EOD 来源批次和方法学晋级后，才以新 publication 显示。</p>
             </div>
           </div>
           <div class="open-issue">
@@ -2210,7 +2265,7 @@
             <div class="issue-id">D9</div>
             <div>
               <strong>实施顺序与上线责任</strong>
-              <p>data-sync 先完成真实全量 publication，API 再完成严格公开投影，Web 最后接入；平台 owner 只在三服务真实 E2E 全通过后部署包含股票中心入口的 Web 版本。</p>
+              <p>data-sync 先完成真实 source batch、coverage 与 publication，API 再完成严格数据版本投影，Web 最后接入；平台 owner 在质量、容量与三服务真实 E2E 全通过后部署包含股票中心入口的 Web 版本。</p>
             </div>
           </div>
         </section>
@@ -2263,12 +2318,17 @@
                 <tr>
                   <td>生产代码格式 / lint / test / build</td>
                   <td class="yes">通过</td>
-                  <td>完整 <code>vp check</code>（255 个格式文件、247 个 lint / type 文件）、43 个测试文件 / 170 项测试、production build 与最新 Docker local image 均通过。</td>
+                  <td>完整 <code>vp check</code>、<code>vp test</code>、production build 与 Docker local image 均通过；测试统计以最终 CI 运行输出为准，避免文档滞后。</td>
                 </tr>
                 <tr>
                   <td>真实浏览器 E2E</td>
                   <td class="partial">进行中</td>
-                  <td>隔离依赖已启动；等待 data-sync 最终 migration 与真实 publication 后验证 1440×900 列表、详情、无 publication、partial/stale 和网络响应。</td>
+                  <td>以真实来源执行首发全量回填，完成逐 dataset/exchange/capability 的 sourceBatch、质量、coverage、publication、容量及 API→浏览器抽样证据；未形成 publication 时页面返回 <code>NO_PUBLICATION</code>，不使用假数据。</td>
+                </tr>
+                <tr>
+                  <td>runtime audit 公开消费判定</td>
+                  <td class="partial">VALIDATING / PENDING</td>
+                  <td>代码、路由与 adapter 存在不等于当前已有可消费数据；逐 dataset/exchange/capability 的 sourceBatch、coverage、质量、真实 publication、容量与 E2E 仍待形成全量证据。</td>
                 </tr>
                 <tr>
                   <td>Git 操作</td>
@@ -2286,9 +2346,9 @@
             <li><a href="prototype.html?view=list">可编辑 prototype.html · 股票列表</a></li>
             <li><a href="prototype.html?view=detail">可编辑 prototype.html · 个股详情</a></li>
             <li><a href="prototype.html?view=states">可编辑 prototype.html · 复杂状态</a></li>
-            <li><a href="assets/prototype-equity-list.png">prototype-equity-list.png</a></li>
-            <li><a href="assets/prototype-equity-detail.png">prototype-equity-detail.png</a></li>
-            <li><a href="assets/prototype-states.png">prototype-states.png</a></li>
+            <li><a href="prototype-equity-list.png">prototype-equity-list.png</a></li>
+            <li><a href="prototype-equity-detail.png">prototype-equity-detail.png</a></li>
+            <li><a href="prototype-states.png">prototype-states.png</a></li>
           </ul>
 
           <h3>主要代码与契约证据</h3>
@@ -2453,7 +2513,7 @@
         </section>
 
         <footer>
-          QUANT V2 · 股票中心技术方案与真实链路实现基线 · 2026-07-30
+          QUANT V2 · 股票中心技术方案与真实链路实现基线 · runtime audit 修订 2026-08-01
         </footer>
       </main>
     </div>

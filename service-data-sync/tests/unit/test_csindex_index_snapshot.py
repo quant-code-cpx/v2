@@ -51,7 +51,8 @@ def test_catalog_snapshot_calls_only_catalog_sdk_and_emits_neutral_payload(
                     "基日": "2004-12-31",
                     "基点": "1000",
                     "发布日期": "2005-04-08",
-                    "样本数量": "300",
+                    # AKShare 1.18.81 会把目录整数投影成浮点展示文本；数值仍必须严格为整数。
+                    "样本数量": "300.0",
                 }
             ]
         )
@@ -85,6 +86,48 @@ def test_catalog_snapshot_calls_only_catalog_sdk_and_emits_neutral_payload(
         ],
     }
     assert raw["records"][0]["指数代码"] == 300
+
+
+def test_catalog_snapshot_preserves_real_alphanumeric_index_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """中证目录的 ``H00999`` 必须保留为指数身份，不能被旧纯数字质量门过滤。"""
+
+    def fake_catalog() -> FakeFrame:
+        """返回已由真实中证目录验证的六码字母数字索引代码。"""
+        return FakeFrame(
+            [
+                {
+                    "指数代码": "H00999",
+                    "指数简称": "中证A500",
+                    "指数全称": "中证A500指数",
+                    "基日": "2024-12-31",
+                    "基点": "1000",
+                    "发布日期": "2025-01-02",
+                    "样本数量": "500.0",
+                }
+            ]
+        )
+
+    monkeypatch.setattr(csindex_index_snapshot.ak, "index_csindex_all", fake_catalog)
+    batch = asyncio.run(
+        AkshareCsindexIndexSnapshotAdapter(request_timeout_seconds=5).fetch(
+            SourceRequest(
+                capability="index.catalog.snapshot",
+                parameters=(("administrator", "CSI"),),
+            )
+        )
+    )
+
+    payload = json.loads(batch.payload)
+    assert payload["records"][0]["indexCode"] == "H00999"
+
+
+@pytest.mark.parametrize("value", ("300.5", "Infinity", "-1"))
+def test_catalog_snapshot_rejects_non_integral_or_invalid_sample_count(value: str) -> None:
+    """样本数量兼容只接受数值上精确为非负整数的来源值。"""
+    with pytest.raises(ValueError, match="source count must be a non-negative integer"):
+        csindex_index_snapshot._optional_non_negative_int(value)
 
 
 def test_constituent_snapshot_preserves_observed_only_boundary(

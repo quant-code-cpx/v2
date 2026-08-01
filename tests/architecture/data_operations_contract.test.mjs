@@ -14,6 +14,18 @@ async function readRepositorySource(relativePath) {
   return readFile(new URL(relativePath, repositoryRoot), "utf8");
 }
 
+/** 提取顶层 Compose 服务块，避免健康检查断言误命中相邻服务。 */
+function composeServiceBlock(document, serviceName) {
+  const escapedName = serviceName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const expression = new RegExp(
+    `^  ${escapedName}:\\n(?<body>[\\s\\S]*?)(?=^  [a-z][a-z0-9-]*:\\n|^networks:|^volumes:|(?![\\s\\S]))`,
+    "mu",
+  );
+  const match = expression.exec(document);
+  assert.ok(match?.groups?.body, `编排缺少服务 ${serviceName}`);
+  return match.groups.body;
+}
+
 /** 从当前合同格式中提取每条路径唯一的 HTTP 方法和 operationId。 */
 function parseOperations(document) {
   const operations = [];
@@ -298,4 +310,16 @@ test("编排启动独立 data operations dispatcher 并等待迁移和 data-sync
   assert.match(development, /service-api-data-operations-dispatcher:/u);
   assert.match(development, /tsx src\/scripts\/dispatch-data-operations\.ts/u);
   assert.match(production, /service-api-data-operations-dispatcher:/u);
+});
+
+/** 验证 worker 与 scheduler 仅做无 I/O 存活探测，避免周期诊断堆积阻塞线程。 */
+test("data-sync worker 与 scheduler 使用无 I/O 存活健康检查", async () => {
+  const base = await readRepositorySource("compose.yaml");
+  const worker = composeServiceBlock(base, "data-sync-worker");
+  const scheduler = composeServiceBlock(base, "data-sync-scheduler");
+
+  assert.match(worker, /healthcheck:\n(?:      # [^\n]+\n)?      test: \["CMD-SHELL", "kill -0 1"\]/u);
+  assert.doesNotMatch(worker, /data-sync-diagnostics/u);
+  assert.match(scheduler, /extends:\n      service: data-sync-worker/u);
+  assert.doesNotMatch(scheduler, /healthcheck:/u);
 });

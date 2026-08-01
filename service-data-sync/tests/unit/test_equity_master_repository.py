@@ -6,20 +6,24 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from typing import cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
+from service_data_sync.application.ports.canonical_release import (
+    CanonicalLineageRecord,
+    PublishedCanonicalRelease,
+)
 from service_data_sync.domain.equity import EquityIdentifier, Exchange
 from service_data_sync.domain.equity_master import (
     EquityCatalogCompletenessError,
     EquityCatalogEntry,
 )
 from service_data_sync.infrastructure.database.connection import DatabaseClient
+from service_data_sync.infrastructure.persistence import equity_master_repository
 from service_data_sync.infrastructure.persistence.equity_master_repository import (
     SqlAlchemyEquityMasterRepository,
     _catalog_business_hash,
-    _effective_date,
 )
 
 
@@ -142,8 +146,8 @@ def test_repository_confirms_pending_anchor_without_creating_a_second_security()
     assert "current_master_version" in joined
 
 
-def test_repository_keeps_data_version_when_catalog_business_content_is_unchanged() -> None:
-    """相同目录仍保留独立来源和快照，但不得制造新的 dataVersion。"""
+def test_repository_keeps_new_source_evidence_when_catalog_business_content_is_unchanged() -> None:
+    """相同目录仍保留独立来源和快照；正式 release 由桥接层决定版本复用。"""
     entry = _entry()
     current_version = uuid4()
     engine = FakeEngine(
@@ -161,12 +165,12 @@ def test_repository_keeps_data_version_when_catalog_business_content_is_unchange
 
     publication = _publish(repository, entry)
 
-    assert publication.data_version == current_version
+    assert publication.data_version
     assert publication.inserted_count == 0
     assert publication.unchanged_count == 1
     joined = "\n".join(engine.connection.statements)
     assert "INSERT INTO equity_master_snapshot" in joined
-    assert "UPDATE dataset_publication SET superseded_at" not in joined
+    assert "equity_master_snapshot_member" in joined
 
 
 def test_repository_rejects_catalog_drop_larger_than_one_percent_before_writes() -> None:
@@ -194,9 +198,11 @@ def test_repository_records_presence_anomalies_without_mutating_listing_status()
 
 
 def test_repository_appends_observation_date_name_version_on_rename() -> None:
-    """目录名称变化从本次观察日开始，不会覆盖已有历史名称。"""
+    """目录改名以观察日切开有效期，不能把证券上市日误作改名生效日。"""
     entry = EquityCatalogEntry(
-        identifier=EquityIdentifier.parse("SSE.600519"), name="贵州茅台股份", listed_on=None
+        identifier=EquityIdentifier.parse("SSE.600519"),
+        name="贵州茅台股份",
+        listed_on=date(2001, 8, 27),
     )
     engine = FakeEngine(
         [
@@ -208,58 +214,202 @@ def test_repository_appends_observation_date_name_version_on_rename() -> None:
         ]
     )
     repository = _repository(engine)
+    captured: dict[str, object] = {}
+
+    def insert_name_version(*arguments: object, **keywords: object) -> None:
+        """记录目录改名使用的业务有效时间，隔离 SQL 插入细节。"""
+        del arguments
+        captured.update(keywords)
+
+    repository._insert_name_version = insert_name_version  # type: ignore[method-assign]
 
     publication = _publish(repository, entry)
 
     assert publication.inserted_count == 1
     joined = "\n".join(engine.connection.statements)
     assert "SET effective_to" in joined
-    assert _effective_date(entry, date(2026, 7, 27))[1] == "OBSERVATION_DATE"
+    assert captured["name_effective_from"] == date(2026, 7, 27)
+    assert captured["name_effective_date_precision"] == "OBSERVATION_DATE"
 
 
-def test_repository_publishes_and_reuses_stable_cn_a_aggregate() -> None:
-    """三所 child version 完整时原子聚合；组件未变时必须复用原 dataVersion。"""
+def test_repository_closes_knowledge_interval_for_same_observation_day_name_correction() -> None:
+    """同一观察日的目录更正保留相同有效区间，并只关闭旧知识版本。"""
+    entry = EquityCatalogEntry(
+        identifier=EquityIdentifier.parse("SSE.600519"), name="贵州茅台股份", listed_on=None
+    )
+    engine = FakeEngine(
+        [
+            None,
+            {"source_batch_id": uuid4()},
+            None,
+            {"security_id": 8, "identity_state": "CONFIRMED"},
+            {
+                "version_id": uuid4(),
+                "name": "贵州茅台",
+                "effective_from": date(2026, 7, 27),
+            },
+        ]
+    )
+    repository = _repository(engine)
+    captured: dict[str, object] = {}
+
+    def insert_name_version(*arguments: object, **keywords: object) -> None:
+        """记录更正版本的双时态边界，避免替身伪造数据库约束。"""
+        del arguments
+        captured.update(keywords)
+
+    repository._insert_name_version = insert_name_version  # type: ignore[method-assign]
+
+    _publish(repository, entry)
+
+    joined = "\n".join(engine.connection.statements)
+    assert "SET known_to" in joined
+    assert "SET effective_to" not in joined
+    assert captured["name_effective_from"] == date(2026, 7, 27)
+
+
+def test_repository_publishes_stable_cn_a_aggregate_with_release_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """三所 child release 完整时，聚合 publication 必须原子绑定三份 dataVersion。"""
     effective_as_of = date(2026, 7, 27)
     cutoff = datetime(2026, 7, 27, tzinfo=UTC)
     child_rows = [
         {
             "partition_key": exchange,
             "data_version": uuid4(),
+            "release_id": uuid4(),
             "effective_as_of": effective_as_of,
             "knowledge_cutoff": cutoff,
         }
         for exchange in ("BSE", "SSE", "SZSE")
     ]
-    engine = FakeEngine([child_rows, []])
+    source_rows = [
+        {
+            "partition_key": row["partition_key"],
+            "data_version": row["data_version"],
+            "source_batch_id": uuid4(),
+            "source_created_at": cutoff,
+        }
+        for row in child_rows
+    ]
+    engine = FakeEngine([child_rows, source_rows])
     repository = _repository(engine)
+    captured: dict[str, object] = {}
+
+    def publish(
+        connection: FakeConnection,
+        **keywords: object,
+    ) -> PublishedCanonicalRelease:
+        """模拟统一发布器，并执行聚合组件回调以验证原子写入位置。"""
+        captured.update(keywords)
+        callback = cast(object, keywords["write_publication"])
+        assert callable(callback)
+        callback(connection, uuid4(), uuid4(), uuid4())
+        return PublishedCanonicalRelease(
+            release_id=uuid4(),
+            data_version=uuid4(),
+            reused_release=False,
+            reused_publication=False,
+            published_at=cutoff,
+        )
+
+    monkeypatch.setattr(equity_master_repository, "publish_legacy_snapshot", publish)
 
     publication = repository.publish_cn_a_aggregate()
 
     assert publication.data_version
+    assert captured["record_fenced_progress"] is False
     joined = "\n".join(engine.connection.statements)
     assert "dataset_publication_component" in joined
-    assert joined.count("INSERT INTO dataset_publication_component") == 3
+    assert joined.count("INSERT INTO dataset_publication_component") == 1
 
-    existing_version = uuid4()
+
+def test_repository_keeps_cn_a_aggregate_release_content_stable_with_new_source_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同一 child release 新增来源证据时，聚合内容和 dataVersion 必须保持不变。"""
+    effective_as_of = date(2026, 7, 27)
+    cutoff = datetime(2026, 7, 27, tzinfo=UTC)
+    child_rows = [
+        {
+            "partition_key": exchange,
+            "data_version": uuid4(),
+            "release_id": uuid4(),
+            "effective_as_of": effective_as_of,
+            "knowledge_cutoff": cutoff,
+        }
+        for exchange in ("BSE", "SSE", "SZSE")
+    ]
+    first_source_rows = [
+        {
+            "partition_key": row["partition_key"],
+            "data_version": row["data_version"],
+            "source_batch_id": uuid4(),
+            "source_created_at": cutoff,
+        }
+        for row in child_rows
+    ]
+    later_source_rows = [
+        {
+            "partition_key": row["partition_key"],
+            "data_version": row["data_version"],
+            "source_batch_id": uuid4(),
+            "source_created_at": cutoff.replace(hour=1),
+        }
+        for row in child_rows
+    ]
     engine = FakeEngine(
         [
             child_rows,
-            [
-                {
-                    "component_partition_key": row["partition_key"],
-                    "component_data_version": row["data_version"],
-                }
-                for row in child_rows
-            ],
-            {"data_version": existing_version, "published_at": cutoff},
+            first_source_rows,
+            child_rows,
+            later_source_rows + first_source_rows,
         ]
     )
     repository = _repository(engine)
+    captured_records: list[tuple[CanonicalLineageRecord, ...]] = []
+    publications_by_content: dict[tuple[tuple[str, str], ...], PublishedCanonicalRelease] = {}
 
-    unchanged = repository.publish_cn_a_aggregate()
+    def publish(
+        connection: FakeConnection,
+        **keywords: object,
+    ) -> PublishedCanonicalRelease:
+        """按真实 release 内容键复用替身 publication，验证来源血缘不影响版本。"""
+        del connection
+        records = cast(tuple[CanonicalLineageRecord, ...], keywords["records"])
+        captured_records.append(records)
+        content = tuple(
+            (record.record_key_hash, record.content_hash)
+            for record in sorted(records, key=lambda item: item.record_key_hash)
+        )
+        existing = publications_by_content.get(content)
+        if existing is not None:
+            return existing
+        publication = PublishedCanonicalRelease(
+            release_id=uuid4(),
+            data_version=uuid4(),
+            reused_release=False,
+            reused_publication=False,
+            published_at=cutoff,
+        )
+        publications_by_content[content] = publication
+        return publication
 
-    assert unchanged.data_version == existing_version
-    assert len(engine.connection.statements) == 3
+    monkeypatch.setattr(equity_master_repository, "publish_legacy_snapshot", publish)
+
+    first = repository.publish_cn_a_aggregate()
+    second = repository.publish_cn_a_aggregate()
+
+    assert first.data_version == second.data_version
+    assert len(captured_records) == 2
+    assert len(captured_records[0]) == len(Exchange)
+    assert [(record.record_key_hash, record.content_hash) for record in captured_records[0]] == [
+        (record.record_key_hash, record.content_hash) for record in captured_records[1]
+    ]
+    assert {record.source_batch_id for record in captured_records[1]} == {
+        UUID(str(row["source_batch_id"])) for row in first_source_rows
+    }
 
 
 def test_repository_refuses_mixed_target_dates_for_cn_a_aggregate() -> None:
@@ -297,7 +447,15 @@ def test_repository_refuses_mixed_target_dates_for_cn_a_aggregate() -> None:
 
 def _repository(engine: FakeEngine) -> SqlAlchemyEquityMasterRepository:
     """围绕带短 Session 边界的替身数据库构造仓储。"""
-    return SqlAlchemyEquityMasterRepository(cast(DatabaseClient, FakeDatabase(engine)))
+    repository = SqlAlchemyEquityMasterRepository(cast(DatabaseClient, FakeDatabase(engine)))
+
+    def publish_catalog_release(*arguments: object, **keywords: object) -> UUID:
+        """隔离身份 SQL 编排单测，不在替身连接中重演统一 release 仓储。"""
+        del arguments, keywords
+        return uuid4()
+
+    repository._publish_catalog_release = publish_catalog_release  # type: ignore[method-assign]
+    return repository
 
 
 def _entry() -> EquityCatalogEntry:

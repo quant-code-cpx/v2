@@ -528,7 +528,8 @@ services:
       DATA_SYNC_ETF_AUTO_RETRY_BASE_SECONDS: ${DATA_SYNC_ETF_AUTO_RETRY_BASE_SECONDS:-2}
       DATA_SYNC_ETF_AUTO_RETRY_MAX_SECONDS: ${DATA_SYNC_ETF_AUTO_RETRY_MAX_SECONDS:-30}
     healthcheck:
-      test: ["CMD", "data-sync-diagnostics", "--format", "json"]
+      # 依赖就绪由启动依赖和 Data Operations preflight 验证；周期性诊断可能遗留不可取消的 I/O。
+      test: ["CMD-SHELL", "kill -0 1"]
       interval: 10s
       timeout: 10s
       retries: 6

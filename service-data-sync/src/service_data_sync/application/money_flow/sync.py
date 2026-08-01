@@ -20,7 +20,6 @@ from service_data_sync.application.ports.data_source import (
     ProviderErrorCode,
     SourceRequest,
 )
-from service_data_sync.application.ports.market_data import RawPayload, RawPayloadStore
 from service_data_sync.application.ports.money_flow import (
     MoneyFlowRepository,
     MoneyFlowSourceObservation,
@@ -65,12 +64,10 @@ class MoneyFlowSyncService:
         *,
         source: DataSourcePort,
         repository: MoneyFlowRepository,
-        raw_payload_store: RawPayloadStore,
     ) -> None:
-        """接收中立来源、canonical 仓储和不可变 raw 存储。"""
+        """接收中立来源与 canonical 仓储；失败证据由控制面包装器统一处理。"""
         self._source = source
         self._repository = repository
-        self._raw_payload_store = raw_payload_store
 
     async def sync(
         self,
@@ -80,7 +77,7 @@ class MoneyFlowSyncService:
         run_id: UUID | None = None,
         partition_key: str | None = None,
     ) -> MoneyFlowSyncResult:
-        """先归档一次来源响应，再按载荷类型发布日序列或 supplier ranking。"""
+        """按载荷类型发布日序列或 supplier ranking，不持久化成功来源字节。"""
         if capability not in self._source.capabilities():
             raise ProviderError(
                 ProviderErrorCode.INVALID_REQUEST,
@@ -117,26 +114,22 @@ class MoneyFlowSyncService:
         )
 
     def _archive(self, batch: ProviderBatch) -> MoneyFlowSourceObservation:
-        """把供应商原始响应先写入对象存储，再构造 canonical 血缘。"""
+        """构造来源摘要与不可回放标记，成功路径绝不写对象存储。"""
         raw_payload = batch.raw_payload if batch.raw_payload is not None else batch.payload
         raw_content_type = batch.raw_content_type or batch.content_type
-        digest = hashlib.sha256(raw_payload).hexdigest()
-        raw_uri = self._raw_payload_store.put(
-            RawPayload(
-                object_key=(
-                    f"raw/{batch.capability}/{batch.provider_id}/"
-                    f"{batch.observed_at:%Y/%m/%d}/{digest}.json"
-                ),
-                content_sha256=digest,
-                content_type=raw_content_type,
-                payload=raw_payload,
-            )
-        )
+        raw_digest = hashlib.sha256(raw_payload).hexdigest()
+        normalized_digest = hashlib.sha256(batch.payload).hexdigest()
         return MoneyFlowSourceObservation(
             provider_id=batch.provider_id,
             capability=batch.capability,
-            source_payload_sha256=digest,
-            raw_uri=raw_uri,
+            source_payload_sha256=raw_digest,
+            raw_uri=f"unretained://sha256/{raw_digest}",
+            raw_content_type=raw_content_type,
+            raw_byte_size=len(raw_payload),
+            normalized_payload_sha256=normalized_digest,
+            normalized_uri=f"unretained://sha256/{normalized_digest}",
+            normalized_content_type=batch.content_type,
+            normalized_byte_size=len(batch.payload),
             observed_at=batch.observed_at,
             upstream_source=batch.upstream_source or batch.provider_id,
             adapter_version=batch.adapter_version,
@@ -284,23 +277,32 @@ def _ranking_snapshot(
         raise _schema_error("money-flow ranking payload has no items")
     items: list[MoneyFlowRankingItem] = []
     for record in records:
-        if not isinstance(record, dict) or not isinstance(record.get("metrics"), list):
+        metric_records = record.get("metrics") if isinstance(record, dict) else None
+        if not isinstance(metric_records, list) or not metric_records:
             raise _schema_error("money-flow ranking item is invalid")
         scope = _ranking_scope(record.get("scope"))
-        for metric in record["metrics"]:
+        for metric in metric_records:
             if not isinstance(metric, dict):
                 raise _schema_error("money-flow ranking metric is invalid")
-            items.append(
-                MoneyFlowRankingItem(
+            gross_inflow = _optional_decimal(metric.get("grossInflow"))
+            gross_outflow = _optional_decimal(metric.get("grossOutflow"))
+            net_amount = _optional_decimal(metric.get("netAmount"))
+            net_ratio = _optional_decimal(metric.get("netRatio"))
+            if all(value is None for value in (gross_inflow, gross_outflow, net_amount, net_ratio)):
+                raise _schema_error("money-flow ranking metric has no measures")
+            try:
+                item = MoneyFlowRankingItem(
                     supplier_position=_required_int(record, "supplierPosition"),
                     scope=scope,
                     bucket=_required_text(metric, "bucket"),
-                    gross_inflow=_optional_decimal(metric.get("grossInflow")),
-                    gross_outflow=_optional_decimal(metric.get("grossOutflow")),
-                    net_amount=_optional_decimal(metric.get("netAmount")),
-                    net_ratio=_optional_decimal(metric.get("netRatio")),
+                    gross_inflow=gross_inflow,
+                    gross_outflow=gross_outflow,
+                    net_amount=net_amount,
+                    net_ratio=net_ratio,
                 )
-            )
+            except ValueError as error:
+                raise _schema_error("money-flow ranking metric is invalid") from error
+            items.append(item)
     return MoneyFlowRankingSnapshot(
         target_trade_date=date.fromisoformat(_required_text(payload, "targetTradeDate")),
         observed_at=observed_at,

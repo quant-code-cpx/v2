@@ -43,6 +43,7 @@ _EXPECTED_COLUMNS = (
     ("created_at", "TIMESTAMP WITH TIME ZONE", False),
     ("superseded_at", "TIMESTAMP WITH TIME ZONE", True),
 )
+_LATER_DATA_VERSION_COLUMN = ("data_version", "UUID", False)
 _EXPECTED_UNIQUES = {
     "equity_bar_window_coverage_coverage_version_key": ("coverage_version",),
     "uq_equity_bar_coverage_observation": (
@@ -79,6 +80,12 @@ _EXPECTED_FOREIGN_KEYS = {
         "RESTRICT",
     ),
 }
+_LATER_DATA_VERSION_FOREIGN_KEY = (
+    ("data_version",),
+    "dataset_publication",
+    ("data_version",),
+    "RESTRICT",
+)
 _EXPECTED_INDEXES = {
     "uq_equity_bar_coverage_current": (
         True,
@@ -343,7 +350,12 @@ def _validate_preserved_schema(connection: Connection) -> None:
         )
         for column in inspector.get_columns(_TABLE_NAME)
     )
-    if actual_columns != _EXPECTED_COLUMNS:
+    # 0019 以后会以追加列保存 publication 的精确 `data_version`。降级时保留不可变
+    # 证据，重新前滚 0017 因而必须接受这一项已知、只增不改的后继结构。
+    if actual_columns not in {
+        _EXPECTED_COLUMNS,
+        (*_EXPECTED_COLUMNS, _LATER_DATA_VERSION_COLUMN),
+    }:
         raise RuntimeError("preserved equity bar coverage columns have drifted")
     primary_key = inspector.get_pk_constraint(_TABLE_NAME)
     if primary_key.get("name") != f"{_TABLE_NAME}_pkey" or tuple(
@@ -365,7 +377,14 @@ def _validate_preserved_schema(connection: Connection) -> None:
         )
         for item in inspector.get_foreign_keys(_TABLE_NAME)
     }
-    if actual_foreign_keys != _EXPECTED_FOREIGN_KEYS:
+    allowed_foreign_keys = (
+        _EXPECTED_FOREIGN_KEYS,
+        {
+            **_EXPECTED_FOREIGN_KEYS,
+            "fk_equity_bar_coverage_data_version": _LATER_DATA_VERSION_FOREIGN_KEY,
+        },
+    )
+    if actual_foreign_keys not in allowed_foreign_keys:
         raise RuntimeError("preserved equity bar coverage foreign keys have drifted")
     _validate_checks(connection, inspector.get_check_constraints(_TABLE_NAME))
     _validate_indexes(inspector.get_indexes(_TABLE_NAME))

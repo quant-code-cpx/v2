@@ -135,10 +135,46 @@ class PublishedEquityDataset:
 
 @dataclass(frozen=True, slots=True)
 class EquityDatasetPublication:
-    """保存 API 读取所需的当前发布版本与发布时间。"""
+    """保存 API 读取所需的当前发布版本、时间和质量状态。
+
+    `quality_status` 来自真实 `DatasetPublication`；默认值保留旧测试替身和历史调用方的已通过语义。
+    """
 
     data_version: UUID
     published_at: datetime
+    quality_status: str = "passed"
+
+
+@dataclass(frozen=True, slots=True)
+class EquityPublicationSource:
+    """描述一个已发布市场数据版本唯一、可公开复验的来源观察。
+
+    该对象指向形成 immutable release 的来源批次，而非任意当前事实行的来源；因此即使筛选窗口
+    合法为空，消费者仍可审计本次 publication 使用的 adapter 与上游身份。私有 raw URI、账号及
+    响应正文不属于该投影。
+    """
+
+    source_batch_id: UUID
+    provider_id: str
+    upstream_source: str
+    adapter_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class EquityBarWindowCoveragePublication:
+    """保存一条可消费行情窗口 coverage 与其精确 publication、来源血缘。
+
+    只有 `DATA` 或经质量门确认的 `ZERO_RECORD_COVERAGE` 才能构造本对象。读取方必须以
+    `data_version`、周期和包含端窗口再次选择它，不能仅把任意当前行情 publication 当作可用。
+    """
+
+    data_version: UUID
+    published_at: datetime
+    coverage_version: UUID
+    source_batch_id: UUID
+    publication_kind: str
+    record_count: int
+    observed_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,28 +201,31 @@ class StoredEquityBar:
 
 @dataclass(frozen=True, slots=True)
 class StoredAdjustmentFactor:
-    """把当前累计因子与其发布版本组合为读取记录。"""
+    """把当前累计因子、发布版本和来源批次组合为读取记录。"""
 
     factor: EquityAdjustmentFactor
     revision: int
     factor_version: UUID
+    source_batch_id: UUID
 
 
 @dataclass(frozen=True, slots=True)
 class StoredCorporateAction:
-    """把当前公司行动与平台稳定身份、revision 组合为读取记录。"""
+    """把当前公司行动与平台稳定身份、修订和来源批次组合为读取记录。"""
 
     action_id: UUID
     action: EquityCorporateAction
     revision: int
+    source_batch_id: UUID
 
 
 @dataclass(frozen=True, slots=True)
 class StoredCompanyProfile:
-    """把当前公司概况与 revision 组合为读取记录。"""
+    """把当前公司概况、修订和来源批次组合为读取记录。"""
 
     profile: EquityCompanyProfile
     revision: int
+    source_batch_id: UUID
 
 
 class EquityMarketDataReadUnavailable(RuntimeError):
@@ -327,7 +366,7 @@ class EquityMarketDataRepository(EquityDailyBarRepository, Protocol):
         source: EquitySourceObservation,
         window_end: date,
     ) -> PublishedEquityDataset:
-        """发布完整稀疏累计后复权因子序列。"""
+        """发布完整稀疏累计后复权因子序列或已证实无新增点的零记录快照。"""
         ...
 
     def publish_corporate_actions(
@@ -359,6 +398,28 @@ class EquityMarketDataRepository(EquityDailyBarRepository, Protocol):
         instrument: StoredEquityInstrument,
     ) -> EquityDatasetPublication | None:
         """按永久证券分区返回当前发布，并受控兼容未发生代码复用的旧分区。"""
+        ...
+
+    def get_publication_source(
+        self,
+        *,
+        dataset: str,
+        data_version: UUID,
+    ) -> EquityPublicationSource | None:
+        """返回一个版本唯一的公开来源投影；缺失或歧义时返回 `None`，禁止猜测来源。"""
+        ...
+
+    def get_bar_window_coverage(
+        self,
+        *,
+        identifier: EquityIdentifier,
+        security_id: int,
+        period: EquityBarPeriod,
+        start: date,
+        end: date,
+        data_version: UUID,
+    ) -> EquityBarWindowCoveragePublication | None:
+        """返回一个当前、精确匹配身份/周期/窗口/版本的已通过行情覆盖；缺失或歧义均不可读。"""
         ...
 
     def get_daily_bar_availability(

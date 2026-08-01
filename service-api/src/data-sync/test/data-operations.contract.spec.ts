@@ -11,7 +11,7 @@ import { validateDataOperationsRequest } from '../../apps/data-operations/data-o
 
 /** 覆盖数据运维 selector 严格并集与公开 400/422 请求边界。 */
 describe('data operations contract schemas', () => {
-  /** 验证合同允许的十一类 selector 均能被严格 schema 接受。 */
+  /** 验证合同允许的十三类 selector 均能被严格 schema 接受。 */
   it('accepts every contract target selector kind', () => {
     const selectors = [
       { kind: 'GLOBAL' },
@@ -32,16 +32,40 @@ describe('data operations contract schemas', () => {
         kind: 'MARGIN',
         operation: 'SECURITY',
         venue: 'SSE',
-        security: { kind: 'INSTRUMENT', exchange: 'SSE', symbol: '600000' },
+        security: null,
       },
       { kind: 'STOCK_CONNECT', operation: 'MARKET', channel: 'SH', direction: 'NORTHBOUND' },
       { kind: 'STOCK_CONNECT', operation: 'MARKET', channel: 'ALL', direction: null },
+      {
+        kind: 'STOCK_CONNECT_RESEARCH',
+        operation: 'MARKET_STAT',
+        channel: 'ALL',
+        direction: null,
+      },
       { kind: 'TRADING_EVENT', operation: 'DRAGON_TIGER' },
-      { kind: 'INDEX', administrator: 'CSI', capability: 'constituents', indexCode: '000300' },
+      {
+        kind: 'INDEX',
+        administrator: 'CSI',
+        capability: 'index.catalog.snapshot',
+        indexCode: null,
+      },
+      {
+        kind: 'INDEX',
+        administrator: 'CSI',
+        capability: 'index.constituent.snapshot',
+        indexCode: '000300',
+      },
+      {
+        kind: 'INDEX',
+        administrator: 'CNI',
+        capability: 'index.weight.snapshot',
+        indexCode: 'ABC12345',
+      },
+      { kind: 'MONEY_FLOW', operation: 'DAILY', scope: 'MARKET' },
     ];
 
     expect(selectors.map((selector) => targetSelectorSchema.safeParse(selector).success)).toEqual(
-      new Array<boolean>(13).fill(true),
+      new Array<boolean>(17).fill(true),
     );
   });
 
@@ -63,6 +87,128 @@ describe('data operations contract schemas', () => {
         direction: null,
       }).success,
     ).toBe(false);
+  });
+
+  /** 港通市场统计 `research` 只能使用唯一数据集，且不允许借用官方 `bundle` 或透传未知字段。 */
+  it('keeps stock-connect market-stat research isolated and fail-closed', () => {
+    const researchSelector = {
+      kind: 'STOCK_CONNECT_RESEARCH',
+      operation: 'MARKET_STAT',
+      channel: 'ALL',
+      direction: null,
+    };
+    const accepted = {
+      targets: [
+        {
+          ...fullTarget('market.stock_connect.market_stat.research'),
+          selector: researchSelector,
+        },
+      ],
+    };
+
+    expect(targetSelectorSchema.safeParse(researchSelector).success).toBe(true);
+    expect(syncPreflightRequestSchema.safeParse(accepted).success).toBe(true);
+    expect(
+      targetSelectorSchema.safeParse({ ...researchSelector, providerCursor: 'forbidden' }).success,
+    ).toBe(false);
+
+    const mismatches = [
+      {
+        targets: [
+          {
+            ...fullTarget('market.stock_connect.overview.bundle'),
+            selector: researchSelector,
+          },
+        ],
+      },
+      {
+        targets: [
+          {
+            ...fullTarget('market.stock_connect.market_stat.research'),
+            selector: {
+              kind: 'STOCK_CONNECT',
+              operation: 'MARKET',
+              channel: 'ALL',
+              direction: null,
+            },
+          },
+        ],
+      },
+      {
+        targets: [
+          {
+            ...fullTarget('market.stock_connect.unknown.research'),
+            selector: researchSelector,
+          },
+        ],
+      },
+    ];
+
+    expect(
+      mismatches.map((request) => syncPreflightRequestSchema.safeParse(request).success),
+    ).toEqual(new Array<boolean>(3).fill(false));
+    expect(() => validateDataOperationsRequest(syncPreflightRequestSchema, mismatches[0])).toThrow(
+      expect.objectContaining({ status: 422 }),
+    );
+  });
+
+  /** 两融 selector 必须按数据集冻结操作、按能力限制市场，并拒绝尚未实现的证券子选择器。 */
+  it('keeps margin operations, venues and selector fields fail-closed', () => {
+    const allowedTargets = [
+      marginTarget('market.margin.market.1d.reported', {
+        kind: 'MARGIN',
+        operation: 'MARKET',
+        venue: 'SSE',
+        security: null,
+      }),
+      marginTarget('market.margin.security.1d.reported', {
+        kind: 'MARGIN',
+        operation: 'SECURITY',
+        venue: 'SZSE',
+        security: null,
+      }),
+      marginTarget('market.margin.eligibility.reported', {
+        kind: 'MARGIN',
+        operation: 'ELIGIBILITY',
+        venue: 'BSE',
+        security: null,
+      }),
+    ];
+    expect(
+      allowedTargets.map(
+        (target) => syncPreflightRequestSchema.safeParse({ targets: [target] }).success,
+      ),
+    ).toEqual(new Array<boolean>(3).fill(true));
+
+    const invalidSelectors = [
+      { kind: 'MARGIN', operation: 'MARKET', venue: 'BSE', security: null },
+      { kind: 'MARGIN', operation: 'SECURITY', venue: 'BSE', security: null },
+      { kind: 'MARGIN', operation: 'ELIGIBILITY', venue: 'SSE', security: null },
+      {
+        kind: 'MARGIN',
+        operation: 'SECURITY',
+        venue: 'SSE',
+        security: { kind: 'INSTRUMENT', exchange: 'SSE', symbol: '600000' },
+      },
+    ];
+    expect(
+      invalidSelectors.map((selector) => targetSelectorSchema.safeParse(selector).success),
+    ).toEqual(new Array<boolean>(4).fill(false));
+
+    const operationMismatch = {
+      targets: [
+        marginTarget('market.margin.eligibility.reported', {
+          kind: 'MARGIN',
+          operation: 'MARKET',
+          venue: 'SSE',
+          security: null,
+        }),
+      ],
+    };
+    expect(syncPreflightRequestSchema.safeParse(operationMismatch).success).toBe(false);
+    expect(() =>
+      validateDataOperationsRequest(syncPreflightRequestSchema, operationMismatch),
+    ).toThrow(expect.objectContaining({ status: 422 }));
   });
 
   /** 验证 selector 拒绝任意 Provider 参数和不完整 ETF 范围，同时保留单只 ETF 兼容形状。 */
@@ -178,6 +324,296 @@ describe('data operations contract schemas', () => {
         ],
       }).success,
     ).toBe(false);
+  });
+
+  /** 六个指数数据集必须冻结管理方、能力和目录或单指数代码范围，不能由调用方自由组合。 */
+  it('binds each index datasetCode to one controlled selector shape', () => {
+    const targets = [
+      indexTarget('index.csi.catalog.snapshot', {
+        kind: 'INDEX',
+        administrator: 'CSI',
+        capability: 'index.catalog.snapshot',
+        indexCode: null,
+      }),
+      indexTarget('index.csi.constituent.snapshot', {
+        kind: 'INDEX',
+        administrator: 'CSI',
+        capability: 'index.constituent.snapshot',
+        indexCode: '000300',
+      }),
+      indexTarget('index.csi.weight.snapshot', {
+        kind: 'INDEX',
+        administrator: 'CSI',
+        capability: 'index.weight.snapshot',
+        indexCode: 'ABC1234',
+      }),
+      indexTarget('index.cni.catalog.snapshot', {
+        kind: 'INDEX',
+        administrator: 'CNI',
+        capability: 'index.catalog.snapshot',
+        indexCode: null,
+      }),
+      indexTarget('index.cni.constituent.snapshot', {
+        kind: 'INDEX',
+        administrator: 'CNI',
+        capability: 'index.constituent.snapshot',
+        indexCode: 'ABC12345',
+      }),
+      indexTarget('index.cni.weight.snapshot', {
+        kind: 'INDEX',
+        administrator: 'CNI',
+        capability: 'index.weight.snapshot',
+        indexCode: 'H11040',
+      }),
+    ];
+
+    expect(
+      targets.map((target) => syncPreflightRequestSchema.safeParse({ targets: [target] }).success),
+    ).toEqual(new Array<boolean>(6).fill(true));
+    expect(
+      syncPreflightRequestSchema.safeParse({
+        targets: [
+          indexTarget('index.csi.catalog.snapshot', {
+            kind: 'INDEX',
+            administrator: 'CSI',
+            capability: 'index.catalog.snapshot',
+            indexCode: '000300',
+          }),
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      syncPreflightRequestSchema.safeParse({
+        targets: [
+          indexTarget('index.csi.constituent.snapshot', {
+            kind: 'INDEX',
+            administrator: 'CNI',
+            capability: 'index.constituent.snapshot',
+            indexCode: '000300',
+          }),
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      syncPreflightRequestSchema.safeParse({
+        targets: [
+          {
+            ...fullTarget('equity.daily'),
+            selector: {
+              kind: 'INDEX',
+              administrator: 'CSI',
+              capability: 'index.catalog.snapshot',
+              indexCode: null,
+            },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  /** 目录 selector 与单指数 selector 分别锁死 `null` 和实测的六码至八码大写字母数字格式。 */
+  it('rejects invalid index code scope and format', () => {
+    const invalidSelectors = [
+      {
+        kind: 'INDEX',
+        administrator: 'CSI',
+        capability: 'index.catalog.snapshot',
+        indexCode: '000300',
+      },
+      {
+        kind: 'INDEX',
+        administrator: 'CSI',
+        capability: 'index.constituent.snapshot',
+        indexCode: null,
+      },
+      {
+        kind: 'INDEX',
+        administrator: 'CNI',
+        capability: 'index.weight.snapshot',
+        indexCode: 'ABC12',
+      },
+      {
+        kind: 'INDEX',
+        administrator: 'CNI',
+        capability: 'index.weight.snapshot',
+        indexCode: 'ABC123456',
+      },
+      {
+        kind: 'INDEX',
+        administrator: 'CNI',
+        capability: 'index.weight.snapshot',
+        indexCode: 'abc123',
+      },
+    ];
+
+    expect(
+      invalidSelectors.map((selector) => targetSelectorSchema.safeParse(selector).success),
+    ).toEqual(new Array<boolean>(5).fill(false));
+  });
+
+  /** 两个资金流数据集只能执行各自操作，且每种来源方法学范围都保持独立严格 shape。 */
+  it('binds money flow datasets to daily or ranking selector shapes', () => {
+    const validTargets = [
+      moneyFlowTarget('money_flow.daily', {
+        kind: 'MONEY_FLOW',
+        operation: 'DAILY',
+        scope: 'EQUITY',
+        exchange: 'SSE',
+        symbol: '600000',
+      }),
+      moneyFlowTarget('money_flow.daily', {
+        kind: 'MONEY_FLOW',
+        operation: 'DAILY',
+        scope: 'SECTOR',
+        scheme: 'eastmoney.industry',
+        sectorCode: 'BK0475',
+      }),
+      moneyFlowTarget('money_flow.daily', {
+        kind: 'MONEY_FLOW',
+        operation: 'DAILY',
+        scope: 'MARKET',
+      }),
+      moneyFlowTarget('money_flow.ranking', {
+        kind: 'MONEY_FLOW',
+        operation: 'RANKING',
+        methodology: 'EASTMONEY_ORDER_SIZE',
+        scope: 'EQUITY',
+        window: 'DAY_3',
+      }),
+      moneyFlowTarget('money_flow.ranking', {
+        kind: 'MONEY_FLOW',
+        operation: 'RANKING',
+        methodology: 'EASTMONEY_ORDER_SIZE',
+        scope: 'SECTOR',
+        sectorType: 'CONCEPT',
+        window: 'DAY_5',
+      }),
+      moneyFlowTarget('money_flow.ranking', {
+        kind: 'MONEY_FLOW',
+        operation: 'RANKING',
+        methodology: 'THS_TRADE_DIRECTION',
+        scope: 'CONCEPT',
+        window: 'DAY_20',
+      }),
+    ];
+
+    expect(
+      validTargets.map(
+        (target) => syncPreflightRequestSchema.safeParse({ targets: [target] }).success,
+      ),
+    ).toEqual(new Array<boolean>(6).fill(true));
+    const dailyWithRanking = {
+      targets: [
+        moneyFlowTarget('money_flow.daily', {
+          kind: 'MONEY_FLOW',
+          operation: 'RANKING',
+          methodology: 'EASTMONEY_ORDER_SIZE',
+          scope: 'EQUITY',
+          window: 'TODAY',
+        }),
+      ],
+    };
+    expect(syncPreflightRequestSchema.safeParse(dailyWithRanking).success).toBe(false);
+    expect(() =>
+      validateDataOperationsRequest(syncPreflightRequestSchema, dailyWithRanking),
+    ).toThrow(expect.objectContaining({ status: 422 }));
+    expect(
+      syncPreflightRequestSchema.safeParse({
+        targets: [
+          moneyFlowTarget('money_flow.ranking', {
+            kind: 'MONEY_FLOW',
+            operation: 'DAILY',
+            scope: 'MARKET',
+          }),
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      syncPreflightRequestSchema.safeParse({
+        targets: [
+          {
+            ...fullTarget('equity.daily'),
+            selector: {
+              kind: 'MONEY_FLOW',
+              operation: 'DAILY',
+              scope: 'MARKET',
+            },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  /** 拒绝资金流日频、排行窗口、方法学范围及字段集合的交叉拼接。 */
+  it('rejects invalid money flow selector branches', () => {
+    const invalidSelectors = [
+      {
+        kind: 'MONEY_FLOW',
+        operation: 'DAILY',
+        scope: 'EQUITY',
+        exchange: 'SSE',
+        symbol: '60000',
+      },
+      {
+        kind: 'MONEY_FLOW',
+        operation: 'DAILY',
+        scope: 'EQUITY',
+        symbol: '600000',
+      },
+      {
+        kind: 'MONEY_FLOW',
+        operation: 'DAILY',
+        scope: 'SECTOR',
+        scheme: 'eastmoney.concept',
+        sectorCode: 'BK0475',
+      },
+      {
+        kind: 'MONEY_FLOW',
+        operation: 'DAILY',
+        scope: 'MARKET',
+        exchange: 'SSE',
+      },
+      {
+        kind: 'MONEY_FLOW',
+        operation: 'RANKING',
+        methodology: 'EASTMONEY_ORDER_SIZE',
+        scope: 'EQUITY',
+        window: 'DAY_20',
+      },
+      {
+        kind: 'MONEY_FLOW',
+        operation: 'RANKING',
+        methodology: 'EASTMONEY_ORDER_SIZE',
+        scope: 'SECTOR',
+        sectorType: 'INDUSTRY',
+        window: 'DAY_3',
+      },
+      {
+        kind: 'MONEY_FLOW',
+        operation: 'RANKING',
+        methodology: 'EASTMONEY_ORDER_SIZE',
+        scope: 'SECTOR',
+        window: 'TODAY',
+      },
+      {
+        kind: 'MONEY_FLOW',
+        operation: 'RANKING',
+        methodology: 'THS_TRADE_DIRECTION',
+        scope: 'SECTOR',
+        window: 'DAY_5',
+      },
+      {
+        kind: 'MONEY_FLOW',
+        operation: 'RANKING',
+        methodology: 'THS_TRADE_DIRECTION',
+        scope: 'INDUSTRY',
+        window: 'TODAY',
+      },
+    ];
+
+    expect(
+      invalidSelectors.map((selector) => targetSelectorSchema.safeParse(selector).success),
+    ).toEqual(new Array<boolean>(9).fill(false));
   });
 
   /** 单只 ETF 的可选冗余 venue 必须与 qualified identity 一致，冲突在公开 API 映射为 422。 */
@@ -383,6 +819,14 @@ function fullTarget(datasetCode: string): Record<string, unknown> {
   };
 }
 
+/** 构造按两融数据集冻结 operation 的完整 target，避免测试绕过跨数据集语义校验。 */
+function marginTarget(
+  datasetCode: string,
+  selector: Record<string, unknown>,
+): Record<string, unknown> {
+  return { ...fullTarget(datasetCode), selector };
+}
+
 /** 构造兼容既有公开合同的单只 ETF selector；代码只是用户输入的 canonical identity。 */
 function oneEtfSelector(): Record<string, unknown> {
   return {
@@ -443,6 +887,36 @@ function etfTarget(selector: Record<string, unknown>): Record<string, unknown> {
 function etfProfileTarget(selector: Record<string, unknown>): Record<string, unknown> {
   return {
     datasetCode: 'fund.etf.profile.reported',
+    mode: 'INCREMENTAL',
+    selector,
+    dateFrom: null,
+    dateTo: null,
+    observationDate: null,
+  };
+}
+
+/** 构造冻结的指数同步 target，显式覆盖目录与单指数快照的 dataset 绑定。 */
+function indexTarget(
+  datasetCode: string,
+  selector: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    datasetCode,
+    mode: 'INCREMENTAL',
+    selector,
+    dateFrom: null,
+    dateTo: null,
+    observationDate: null,
+  };
+}
+
+/** 构造资金流同步 target，覆盖日频与排行数据集的固定 operation 绑定。 */
+function moneyFlowTarget(
+  datasetCode: string,
+  selector: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    datasetCode,
     mode: 'INCREMENTAL',
     selector,
     dateFrom: null,

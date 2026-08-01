@@ -27,7 +27,7 @@ from service_data_sync.application.ports.data_source import (
 _CAPABILITY = "sector.sw.snapshot.raw"
 _SCHEMA = "quant-v2.sw-industry-snapshot.v1"
 _SCHEME = "sw.industry"
-_ADAPTER_VERSION = "akshare-1.18.78-legulegu-sw-overview-v1"
+_ADAPTER_VERSION = "akshare-1.18.81-legulegu-sw-overview-v1"
 _UPSTREAM_SOURCE = "legulegu.sw-industry-overview"
 _METHODOLOGY_CODE = "legulegu-sw-industry-overview"
 _METHODOLOGY_VERSION = 1

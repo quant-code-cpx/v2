@@ -653,6 +653,69 @@ def test_event_dataset_status_uses_coverage_empty_and_metadata(
     }
 
 
+def test_corporate_action_status_uses_leaf_fact_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """公司行动 status 必须返回 `/corporate-actions` 能严格验证的事实版本。"""
+    selection = _selection(family="CORPORATE_ACTION", record_count=0)
+    fact_publication = _publication(
+        dataset=reader._EVENT_DATASETS["CORPORATE_ACTION"],
+        data_version=UUID("40000000-0000-4000-8000-000000000001"),
+    )
+
+    def select_point(*_args: object, **_kwargs: object) -> reader._EventCoverageSelection:
+        """返回已证明当前日期的公司行动零记录 coverage。"""
+        return selection
+
+    def no_facts(*_args: object, **_kwargs: object) -> list[dict[str, Any]]:
+        """返回与 coverage 一致的精确日期空事实集。"""
+        return []
+
+    monkeypatch.setattr(reader, "_event_coverage_selection", select_point)
+    monkeypatch.setattr(reader, "_event_rows", no_facts)
+    monkeypatch.setattr(
+        reader, "_event_fact_publication", lambda *_args, **_kwargs: fact_publication
+    )
+
+    status = reader._event_dataset_status(
+        object(),
+        family="CORPORATE_ACTION",
+        security_id=7,
+        identifier_version_id=selection.identifier_version_id,
+        as_of=date(2026, 1, 15),
+        known_at=datetime(2026, 2, 2, tzinfo=UTC),
+    )
+
+    assert status["availability"] == "EMPTY"
+    assert status["dataVersion"] == str(fact_publication.data_version)
+
+
+def test_corporate_action_status_fails_closed_without_leaf_fact_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """coverage 即使完整，缺少与之同知识切片的事实 publication 也不能给出伪版本。"""
+    selection = _selection(family="CORPORATE_ACTION", record_count=0)
+
+    def select_point(*_args: object, **_kwargs: object) -> reader._EventCoverageSelection:
+        """返回已证明当前日期的公司行动零记录 coverage。"""
+        return selection
+
+    monkeypatch.setattr(reader, "_event_coverage_selection", select_point)
+    monkeypatch.setattr(reader, "_event_fact_publication", lambda *_args, **_kwargs: None)
+
+    status = reader._event_dataset_status(
+        object(),
+        family="CORPORATE_ACTION",
+        security_id=7,
+        identifier_version_id=selection.identifier_version_id,
+        as_of=date(2026, 1, 15),
+        known_at=datetime(2026, 2, 2, tzinfo=UTC),
+    )
+
+    assert status["availability"] == "SOURCE_UNAVAILABLE"
+    assert status["reasonCode"] == "FACT_PUBLICATION_UNAVAILABLE"
+
+
 def test_event_dataset_status_uses_same_fact_view_for_overlapping_observations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

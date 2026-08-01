@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import cast
@@ -12,9 +13,11 @@ from fastapi.testclient import TestClient
 from service_data_sync.application.ports.financial_read import FinancialReadRepository
 from service_data_sync.application.ports.market_data import (
     EquityAvailabilityObservation,
+    EquityBarWindowCoveragePublication,
     EquityDatasetPublication,
     EquityIdentityReadConflictError,
     EquityMarketDataRepository,
+    EquityPublicationSource,
     StoredAdjustmentFactor,
     StoredCompanyProfile,
     StoredCorporateAction,
@@ -37,6 +40,11 @@ _BAR_VERSION = UUID("10000000-0000-4000-8000-000000000001")
 _FACTOR_VERSION = UUID("10000000-0000-4000-8000-000000000002")
 _ACTION_VERSION = UUID("10000000-0000-4000-8000-000000000003")
 _PROFILE_VERSION = UUID("10000000-0000-4000-8000-000000000004")
+_COVERAGE_VERSION = UUID("10000000-0000-4000-8000-000000000005")
+_SOURCE_BATCH_ID = UUID("10000000-0000-4000-8000-000000000006")
+_FACTOR_SOURCE_BATCH_ID = UUID("10000000-0000-4000-8000-000000000007")
+_ACTION_SOURCE_BATCH_ID = UUID("10000000-0000-4000-8000-000000000008")
+_PROFILE_SOURCE_BATCH_ID = UUID("10000000-0000-4000-8000-000000000009")
 
 
 class FakeMarketRepository:
@@ -60,14 +68,22 @@ class FakeMarketRepository:
             listing_status="DELISTED",
         )
         self.missing_dataset: str | None = None
+        self.publication_source: EquityPublicationSource | None = EquityPublicationSource(
+            source_batch_id=_FACTOR_SOURCE_BATCH_ID,
+            provider_id="akshare-sina-adjustment-factor",
+            upstream_source="sina-hfq-factor",
+            adapter_version="akshare-1.18.81-v1",
+        )
         self.identity_conflict = False
         self.identity_requests: list[tuple[date | None, date | None]] = []
+        self.coverage_requests: list[tuple[EquityBarPeriod, date, date, UUID]] = []
+        self.bar_coverage: EquityBarWindowCoveragePublication | None = _bar_coverage(_BAR_VERSION)
         self.availability: EquityAvailabilityObservation | None = None
         self.publications = {
             "equity.bar.1w.raw": _publication(_BAR_VERSION),
-            "equity.adjustment_factor": _publication(_FACTOR_VERSION),
-            "equity.corporate_action": _publication(_ACTION_VERSION),
-            "equity.profile": _publication(_PROFILE_VERSION),
+            "equity.adjustment_factor": _publication(_FACTOR_VERSION, quality_status="warned"),
+            "equity.corporate_action": _publication(_ACTION_VERSION, quality_status="partial"),
+            "equity.profile": _publication(_PROFILE_VERSION, quality_status="warned"),
         }
 
     def get_instrument_by_identifier(
@@ -96,6 +112,46 @@ class FakeMarketRepository:
         """按数据集返回当前发布，并验证永久证券分区。"""
         assert instrument.security_id in {1, 2}
         return None if dataset == self.missing_dataset else self.publications.get(dataset)
+
+    def get_publication_source(
+        self,
+        *,
+        dataset: str,
+        data_version: UUID,
+    ) -> EquityPublicationSource | None:
+        """仅为因子 publication 返回唯一冻结来源，允许测试缺失血缘的失败关闭。"""
+        assert dataset == "equity.adjustment_factor"
+        assert data_version == _FACTOR_VERSION
+        return self.publication_source
+
+    def get_bar_window_coverage(
+        self,
+        *,
+        identifier: EquityIdentifier,
+        security_id: int,
+        period: EquityBarPeriod,
+        start: date,
+        end: date,
+        data_version: UUID,
+    ) -> EquityBarWindowCoveragePublication | None:
+        """只为已验证的周线精确窗口返回 coverage，并保留调用参数供断言。"""
+        assert identifier == self.instrument.identifier
+        assert security_id == self.instrument.security_id
+        self.coverage_requests.append((period, start, end, data_version))
+        coverage = self.bar_coverage
+        if (
+            coverage is None
+            or self.missing_dataset == period.capability
+            or period is not EquityBarPeriod.WEEK_1
+            or coverage.data_version != data_version
+        ):
+            return None
+        if coverage.publication_kind == "ZERO_RECORD_COVERAGE":
+            return coverage
+        record_count = sum(
+            start <= period_end <= end for period_end in (date(2025, 12, 26), date(2026, 7, 24))
+        )
+        return replace(coverage, record_count=record_count)
 
     def get_daily_bar_availability(
         self,
@@ -148,6 +204,7 @@ class FakeMarketRepository:
                 ),
                 revision=1,
                 factor_version=_FACTOR_VERSION,
+                source_batch_id=_FACTOR_SOURCE_BATCH_ID,
             ),
             StoredAdjustmentFactor(
                 factor=EquityAdjustmentFactor(
@@ -156,6 +213,7 @@ class FakeMarketRepository:
                 ),
                 revision=1,
                 factor_version=_FACTOR_VERSION,
+                source_batch_id=_FACTOR_SOURCE_BATCH_ID,
             ),
         )
         return tuple(row for row in rows if row.factor.effective_date <= end)
@@ -187,6 +245,7 @@ class FakeMarketRepository:
                     bonus_shares_per_10=None,
                     transfer_shares_per_10=None,
                 ),
+                source_batch_id=_ACTION_SOURCE_BATCH_ID,
             ),
         )
 
@@ -218,6 +277,7 @@ class FakeMarketRepository:
                 summary=None,
             ),
             revision=3,
+            source_batch_id=_PROFILE_SOURCE_BATCH_ID,
         )
 
 
@@ -244,6 +304,10 @@ def test_bars_use_direct_weekly_rows_adjustment_and_conditional_etag(
     assert response.json()["factorVersion"] == str(_FACTOR_VERSION)
     assert response.json()["formulaVersion"] == "cumulative-hfq-v1"
     assert response.json()["availability"] == "AVAILABLE"
+    assert response.json()["coverageVersion"] == str(_COVERAGE_VERSION)
+    assert response.json()["publicationKind"] == "DATA"
+    assert response.json()["sourceBatchId"] == str(_SOURCE_BATCH_ID)
+    assert response.json()["qualityStatus"] == "passed"
     assert response.json()["items"][0]["open"] == "5.000000"
     assert response.json()["items"][1]["open"] == "20.000000"
     assert response.headers["x-data-version"] == str(_BAR_VERSION)
@@ -252,6 +316,10 @@ def test_bars_use_direct_weekly_rows_adjustment_and_conditional_etag(
     assert repository.identity_requests == [
         (date(2025, 1, 1), date(2026, 7, 28)),
         (date(2025, 1, 1), date(2026, 7, 28)),
+    ]
+    assert repository.coverage_requests == [
+        (EquityBarPeriod.WEEK_1, date(2025, 1, 1), date(2026, 7, 28), _BAR_VERSION),
+        (EquityBarPeriod.WEEK_1, date(2025, 1, 1), date(2026, 7, 28), _BAR_VERSION),
     ]
 
 
@@ -312,16 +380,54 @@ def test_factor_action_and_profile_routes_return_published_contracts(
 
     assert factors.status_code == 200
     assert factors.json()["items"][1]["cumulativeFactor"] == "2"
+    assert factors.json()["qualityStatus"] == "warned"
+    assert factors.json()["source"] == {
+        "sourceBatchId": str(_FACTOR_SOURCE_BATCH_ID),
+        "providerId": "akshare-sina-adjustment-factor",
+        "upstreamSource": "sina-hfq-factor",
+        "adapterVersion": "akshare-1.18.81-v1",
+    }
+    assert factors.json()["items"][1]["sourceBatchId"] == str(_FACTOR_SOURCE_BATCH_ID)
     assert actions.status_code == 200
     assert actions.json()["items"][0]["cashDividendPer10"] == "10"
     assert actions.json()["items"][0]["bonusSharesPer10"] is None
+    assert actions.json()["qualityStatus"] == "partial"
+    assert actions.json()["items"][0]["sourceBatchId"] == str(_ACTION_SOURCE_BATCH_ID)
     assert profile.status_code == 200
     assert profile.json()["profile"]["industry"] == "白酒"
     assert profile.json()["revision"] == 3
+    assert profile.json()["qualityStatus"] == "warned"
+    assert profile.json()["sourceBatchId"] == str(_PROFILE_SOURCE_BATCH_ID)
     assert repository.identity_requests[0] == (None, date(2026, 7, 28))
     assert repository.identity_requests[1] == (None, None)
     profile_window = repository.identity_requests[2]
     assert profile_window[0] is not None and profile_window[0] == profile_window[1]
+
+
+def test_factor_route_keeps_publication_source_for_legal_empty_window(
+    configured_environment: None,
+) -> None:
+    """合法空因子窗口仍必须保留冻结来源，不能因没有事实行而丢失审计身份。"""
+    del configured_environment
+    client, headers, repository = _client()
+
+    empty = client.get(
+        "/internal/v1/equities/SSE/600519/adjustment-factors"
+        f"?start=2026-08-01&end=2026-08-01&dataVersion={_FACTOR_VERSION}",
+        headers=headers,
+    )
+    assert empty.status_code == 200
+    assert empty.json()["items"] == []
+    assert empty.json()["source"]["sourceBatchId"] == str(_FACTOR_SOURCE_BATCH_ID)
+
+    repository.publication_source = None
+    unavailable = client.get(
+        "/internal/v1/equities/SSE/600519/adjustment-factors"
+        f"?start=2026-08-01&end=2026-08-01&dataVersion={_FACTOR_VERSION}",
+        headers=headers,
+    )
+    assert unavailable.status_code == 503
+    assert unavailable.json()["code"] == "publication-provenance-unavailable"
 
 
 def test_company_profile_as_of_resolves_code_reuse_and_binds_representation(
@@ -404,19 +510,41 @@ def test_market_routes_fail_closed_for_auth_validation_and_expired_publication(
     assert missing_auth.status_code == 401
     assert bad_range.status_code == 400
     assert unpublished.status_code == 409
-    assert unpublished.json()["code"] == "snapshot-expired"
+    assert unpublished.json()["code"] == "coverage-unavailable"
 
 
-def test_market_routes_bind_recorded_empty_window_to_expected_publication(
+def test_market_routes_reject_legacy_empty_observation_without_verified_coverage(
     configured_environment: None,
 ) -> None:
-    """合法空窗口必须仍绑定调用方指定的当前 publication。"""
+    """旧诊断空观测不是成功证据；没有新 coverage 时不得返回 200 空数组。"""
     del configured_environment
     client, headers, repository = _client()
     repository.availability = EquityAvailabilityObservation(
         availability="empty",
         reason_code="no_session",
         observed_at=datetime(2026, 7, 29, 12, tzinfo=UTC),
+    )
+    repository.bar_coverage = None
+
+    response = client.get(
+        "/internal/v1/equities/SSE/600519/bars"
+        f"?period=1w&start=2026-01-01&end=2026-07-28&dataVersion={_BAR_VERSION}",
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "coverage-unavailable"
+
+
+def test_market_routes_return_zero_record_coverage_with_real_lineage(
+    configured_environment: None,
+) -> None:
+    """严格验证的零记录 coverage 是可消费发布，必须返回真实版本、来源和空 items。"""
+    del configured_environment
+    client, headers, repository = _client()
+    repository.bar_coverage = _bar_coverage(
+        _BAR_VERSION,
+        publication_kind="ZERO_RECORD_COVERAGE",
     )
 
     response = client.get(
@@ -426,16 +554,19 @@ def test_market_routes_bind_recorded_empty_window_to_expected_publication(
     )
 
     assert response.status_code == 200
-    assert response.json()["availability"] == "EMPTY"
+    assert response.json()["availability"] == "AVAILABLE"
+    assert response.json()["publicationKind"] == "ZERO_RECORD_COVERAGE"
+    assert response.json()["coverageVersion"] == str(_COVERAGE_VERSION)
+    assert response.json()["sourceBatchId"] == str(_SOURCE_BATCH_ID)
     assert response.json()["dataVersion"] == str(_BAR_VERSION)
     assert response.json()["items"] == []
-    assert response.headers["x-data-version"] == str(_BAR_VERSION)
+    assert response.json()["nextCursor"] is None
 
 
-def test_market_routes_keep_last_publication_when_source_becomes_unavailable(
+def test_market_routes_keeps_verified_coverage_semantics_when_legacy_source_diagnostic_exists(
     configured_environment: None,
 ) -> None:
-    """来源失败不能用空结果覆盖已发布事实，读取方仍须看见 stale 状态。"""
+    """来源失败诊断不得覆盖已验证 coverage 的可读性、血缘或零记录语义。"""
     del configured_environment
     client, headers, repository = _client()
     repository.availability = EquityAvailabilityObservation(
@@ -451,9 +582,10 @@ def test_market_routes_keep_last_publication_when_source_becomes_unavailable(
     )
 
     assert response.status_code == 200
-    assert response.json()["availability"] == "SOURCE_UNAVAILABLE"
-    assert response.json()["stale"] is True
+    assert response.json()["availability"] == "AVAILABLE"
+    assert response.json()["stale"] is False
     assert response.json()["dataVersion"] == str(_BAR_VERSION)
+    assert response.json()["coverageVersion"] == str(_COVERAGE_VERSION)
 
 
 def test_market_routes_reject_mismatched_bar_and_factor_versions(
@@ -477,7 +609,7 @@ def test_market_routes_reject_mismatched_bar_and_factor_versions(
     )
 
     assert wrong_bar.status_code == 409
-    assert wrong_bar.json()["code"] == "snapshot-expired"
+    assert wrong_bar.json()["code"] == "coverage-unavailable"
     assert wrong_factor.status_code == 409
     assert wrong_factor.json()["code"] == "snapshot-expired"
 
@@ -500,11 +632,33 @@ def _client() -> tuple[TestClient, dict[str, str], FakeMarketRepository]:
     )
 
 
-def _publication(data_version: UUID) -> EquityDatasetPublication:
-    """构造确定性当前发布。"""
+def _publication(
+    data_version: UUID,
+    *,
+    quality_status: str = "passed",
+) -> EquityDatasetPublication:
+    """构造确定性当前发布，并允许验证真实质量状态透传。"""
     return EquityDatasetPublication(
         data_version=data_version,
         published_at=datetime(2026, 7, 28, 12, tzinfo=UTC),
+        quality_status=quality_status,
+    )
+
+
+def _bar_coverage(
+    data_version: UUID,
+    *,
+    publication_kind: str = "DATA",
+) -> EquityBarWindowCoveragePublication:
+    """构造仅测试内部 reader 的已通过精确 coverage 血缘。"""
+    return EquityBarWindowCoveragePublication(
+        data_version=data_version,
+        published_at=datetime(2026, 7, 28, 12, tzinfo=UTC),
+        coverage_version=_COVERAGE_VERSION,
+        source_batch_id=_SOURCE_BATCH_ID,
+        publication_kind=publication_kind,
+        record_count=0 if publication_kind == "ZERO_RECORD_COVERAGE" else 1,
+        observed_at=datetime(2026, 7, 28, 11, 59, tzinfo=UTC),
     )
 
 

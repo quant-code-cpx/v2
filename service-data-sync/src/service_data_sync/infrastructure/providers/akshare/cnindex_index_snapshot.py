@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import akshare as ak
+import requests
 
 from service_data_sync.application.ports.data_source import (
     ProviderBatch,
@@ -29,6 +30,7 @@ from service_data_sync.domain.index import (
     IndexIdentifier,
 )
 from service_data_sync.infrastructure.providers.akshare.csindex_index_snapshot import (
+    _index_code,
     _json_default,
     _required_date_text,
     _required_text,
@@ -36,10 +38,47 @@ from service_data_sync.infrastructure.providers.akshare.csindex_index_snapshot i
     _six_digit,
 )
 
-_ADAPTER_VERSION = "akshare-1.18.78-cnindex-index-snapshot-v1"
+_ADAPTER_VERSION = "akshare-1.18.81-cnindex-index-snapshot-v3"
 _CATALOG_SCHEMA = "quant-v2.index-catalog-snapshot.v1"
 _CONSTITUENT_SCHEMA = "quant-v2.index-constituent-observed-snapshot.v1"
 _WEIGHT_SCHEMA = "quant-v2.index-weight-close-observed-snapshot.v1"
+_CNI_CATALOG_URL = "https://www.cnindex.com.cn/index/indexList"
+_CNI_CATALOG_PARAMS = {"channelCode": "-1", "rows": "2000", "pageNum": "1"}
+_CNI_CATALOG_MAX_BYTES = 4 * 1024 * 1024
+_CNI_CATALOG_FIELDS = (
+    "id",
+    "docchannel",
+    "indexcode",
+    "indextype",
+    "showcnindex",
+    "indexsource",
+    "realtimemarket",
+    "remark",
+    "indexname",
+    "indexename",
+    "indexfullename",
+    "indexfullcname",
+    "samplesize",
+    "closeingPoint",
+    "percent",
+    "peStatic",
+    "peDynamic",
+    "pb",
+    "volume",
+    "amount",
+    "totalMarketValue",
+    "freeMarketValue",
+    "sampleshowdate",
+    "prefixmonth",
+    "showDetail",
+    "dataSource",
+)
+
+
+class _CnindexCatalogSchemaError(ValueError):
+    """表示国证目录原始 JSON 结构或冻结字段集发生漂移。"""
+
+    pass
 
 
 class AkshareCnindexIndexSnapshotAdapter:
@@ -72,12 +111,49 @@ class AkshareCnindexIndexSnapshotAdapter:
         capability, identifier = _request_values(request)
         try:
             async with asyncio.timeout(self._request_timeout_seconds):
-                frame = await asyncio.to_thread(_fetch_frame, capability, identifier)
+                if capability is IndexCapability.CATALOG_SNAPSHOT:
+                    records, raw_payload = await asyncio.to_thread(
+                        _fetch_catalog_records,
+                        self._request_timeout_seconds,
+                    )
+                else:
+                    assert identifier is not None
+                    frame = await asyncio.to_thread(_fetch_frame, capability, identifier)
+                    records = frame.to_dict(orient="records")
+                    raw_payload = json.dumps(
+                        {
+                            "administrator": IndexAdministrator.CNI.value,
+                            "capability": capability.value,
+                            "indexCode": identifier.code,
+                            "records": records,
+                        },
+                        ensure_ascii=False,
+                        default=_json_default,
+                        separators=(",", ":"),
+                    ).encode()
         except TimeoutError as error:
             raise ProviderError(
                 ProviderErrorCode.UNAVAILABLE,
                 "provider request timed out",
                 retryable=True,
+            ) from error
+        except requests.Timeout as error:
+            raise ProviderError(
+                ProviderErrorCode.UNAVAILABLE,
+                "provider request timed out",
+                retryable=True,
+            ) from error
+        except requests.RequestException as error:
+            raise ProviderError(
+                ProviderErrorCode.UNAVAILABLE,
+                "provider request failed",
+                retryable=True,
+            ) from error
+        except _CnindexCatalogSchemaError as error:
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                "provider index catalog schema changed",
+                retryable=False,
             ) from error
         except Exception as error:
             raise ProviderError(
@@ -85,14 +161,13 @@ class AkshareCnindexIndexSnapshotAdapter:
                 "provider request failed",
                 retryable=True,
             ) from error
-        if frame.empty:
+        if not records:
             raise ProviderError(
                 ProviderErrorCode.SCHEMA,
                 "provider returned an empty index snapshot",
                 retryable=False,
             )
         try:
-            records = frame.to_dict(orient="records")
             payload = _normalize_payload(capability, identifier, records)
         except (KeyError, TypeError, ValueError, InvalidOperation) as error:
             raise ProviderError(
@@ -100,17 +175,6 @@ class AkshareCnindexIndexSnapshotAdapter:
                 "provider index snapshot schema changed",
                 retryable=False,
             ) from error
-        raw_payload = json.dumps(
-            {
-                "administrator": IndexAdministrator.CNI.value,
-                "capability": capability.value,
-                "indexCode": None if identifier is None else identifier.code,
-                "records": records,
-            },
-            ensure_ascii=False,
-            default=_json_default,
-            separators=(",", ":"),
-        ).encode()
         return ProviderBatch(
             provider_id=self.provider_id,
             capability=capability.value,
@@ -180,10 +244,59 @@ def _request_values(
 
 def _fetch_frame(capability: IndexCapability, identifier: IndexIdentifier | None) -> Any:
     """将国证 SDK 函数和固定参数限制在本 adapter 内。"""
-    if capability is IndexCapability.CATALOG_SNAPSHOT:
-        return ak.index_all_cni()
     assert identifier is not None
     return ak.index_detail_cni(symbol=identifier.code)
+
+
+def _fetch_catalog_records(request_timeout_seconds: int) -> tuple[list[dict[str, Any]], bytes]:
+    """读取 AKShare 同源国证目录 JSON，冻结字段名而不依赖其失配的列重命名实现。
+
+    `AKShare` 1.18.81 的 ``index_all_cni`` 仍把 26 个原始字段强行命名为 25 列，导致
+    `DataFrame` 在 adapter 之前失败。这里复用该固定版本函数已验证的 URL 和参数，但仅
+    接受来源明确返回的字典字段；不根据位置补列，也不把未知新增字段静默丢弃。
+    """
+    response = requests.get(
+        _CNI_CATALOG_URL,
+        params=_CNI_CATALOG_PARAMS,
+        timeout=float(request_timeout_seconds),
+    )
+    response.raise_for_status()
+    raw_payload = bytes(response.content)
+    if not raw_payload or len(raw_payload) > _CNI_CATALOG_MAX_BYTES:
+        raise _CnindexCatalogSchemaError("cnindex catalog payload size is invalid")
+    try:
+        decoded = json.loads(raw_payload)
+    except json.JSONDecodeError as error:
+        raise _CnindexCatalogSchemaError("cnindex catalog payload is not JSON") from error
+    return _catalog_records_from_payload(decoded), raw_payload
+
+
+def _catalog_records_from_payload(payload: object) -> list[dict[str, Any]]:
+    """从原始国证 envelope 提取带完整冻结字段集的字典目录记录。
+
+    2026-08-01 的真实响应含 1450 个字典行、没有字段头数组；字段集合本身是唯一可审计的
+    schema 证据。不能沿用 SDK 的位置列名，也不能为了兼容猜测性地接受列表行。
+    """
+    if not isinstance(payload, dict):
+        raise _CnindexCatalogSchemaError("cnindex catalog root must be an object")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise _CnindexCatalogSchemaError("cnindex catalog has no data object")
+    rows = data.get("rows")
+    if not isinstance(rows, list):
+        raise _CnindexCatalogSchemaError("cnindex catalog has no rows array")
+
+    records: list[dict[str, Any]] = []
+    expected_fields = frozenset(_CNI_CATALOG_FIELDS)
+    for row in rows:
+        if not isinstance(row, dict):
+            raise _CnindexCatalogSchemaError("cnindex catalog row type changed")
+        if frozenset(row) != expected_fields:
+            raise _CnindexCatalogSchemaError("cnindex catalog record fields changed")
+        records.append({str(key): value for key, value in row.items()})
+    if not records:
+        raise _CnindexCatalogSchemaError("cnindex catalog contains no records")
+    return records
 
 
 def _normalize_payload(
@@ -247,10 +360,10 @@ def _normalize_payload(
 def _normalize_catalog_entry(record: dict[str, Any]) -> dict[str, object]:
     """映射目录稳定身份和样本数，不把 AKShare 已换算数值伪装成未经验证单位。"""
     entry = IndexCatalogEntry(
-        identifier=IndexIdentifier(IndexAdministrator.CNI, _six_digit(record["指数代码"])),
-        name=_required_text(record["指数简称"]),
+        identifier=IndexIdentifier(IndexAdministrator.CNI, _index_code(record["indexcode"])),
+        name=_required_text(record["indexname"]),
     )
-    sample_count = _optional_count(record.get("样本数"))
+    sample_count = _optional_count(record.get("samplesize"))
     return {
         "indexCode": entry.identifier.code,
         "indexName": entry.name,
@@ -287,16 +400,19 @@ def _optional_text(value: object) -> str | None:
 
 
 def _optional_count(value: object) -> int | None:
-    """解析可选样本数，拒绝小数、布尔值和负数。"""
+    """解析可选样本数，只接受数值上严格等于整数的非负来源值。"""
     normalized = _optional_text(value)
     if normalized is None:
         return None
     if isinstance(value, bool):
         raise ValueError("sample count must be a non-negative integer")
-    result = int(normalized)
-    if result < 0 or str(result) != normalized:
+    try:
+        decimal = Decimal(normalized)
+    except InvalidOperation as error:
+        raise ValueError("sample count must be a non-negative integer") from error
+    if not decimal.is_finite() or decimal < 0 or decimal != decimal.to_integral_value():
         raise ValueError("sample count must be a non-negative integer")
-    return result
+    return int(decimal)
 
 
 def _optional_decimal_text(value: object) -> str | None:

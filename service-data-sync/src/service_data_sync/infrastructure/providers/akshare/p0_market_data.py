@@ -58,7 +58,6 @@ _CAPABILITIES = frozenset(
         _MARGIN_SECURITY,
         _MARGIN_ELIGIBILITY,
         _CONNECT_MARKET,
-        _CONNECT_ACTIVE,
         _CORPORATE,
         _DRAGON_TIGER,
         _BLOCK_TRADE,
@@ -77,7 +76,6 @@ _SCHEMAS = {
     _MARGIN_SECURITY: "quant-v2.margin-security-daily.v1",
     _MARGIN_ELIGIBILITY: "quant-v2.margin-eligibility.v1",
     _CONNECT_MARKET: "quant-v2.stock-connect-market-daily.v1",
-    _CONNECT_ACTIVE: "quant-v2.stock-connect-active-security.v1",
     _CORPORATE: "quant-v2.corporate-earnings-events.v1",
     _DRAGON_TIGER: "quant-v2.dragon-tiger-disclosure.v1",
     _BLOCK_TRADE: "quant-v2.block-trade-execution.v1",
@@ -87,11 +85,28 @@ _SCHEMAS = {
     _SW_MEMBERSHIP: "quant-v2.sw2021-membership.v1",
 }
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
-_ADAPTER_VERSION = "akshare-1.18.78-p0-market-data-v8"
+_ADAPTER_VERSION = "akshare-1.18.81-p0-market-data-v9"
+_BSE_MARGIN_ELIGIBILITY_COLUMNS = (
+    "证券代码",
+    "证券简称",
+    "融资标的",
+    "融券标的",
+    "当日可融资",
+    "当日可融券",
+)
+_BSE_MARGIN_STATUS = {
+    ("Y", "Y"): "ELIGIBLE",
+    ("Y", "N"): "FINANCING_ONLY",
+    ("N", "Y"): "LENDING_ONLY",
+    ("N", "N"): "INELIGIBLE",
+}
 _EVENT_CAPABILITIES = frozenset({_CORPORATE, _DRAGON_TIGER, _BLOCK_TRADE})
 _THREADED_EVENT_CAPABILITIES = frozenset({_BLOCK_TRADE})
 _EVENT_FETCH_MAX_ATTEMPTS = 3
 _EVENT_FETCH_RETRY_BASE_SECONDS = 0.5
+# 通用 P0 SDK 调用会遇到交易所网关主动断连；只对未分类的传输异常做有限重试。
+_P0_FETCH_MAX_ATTEMPTS = 3
+_P0_FETCH_RETRY_BASE_SECONDS = 0.5
 _EARNINGS_URL = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
 _EARNINGS_PAGE_SIZE = 500
 _EARNINGS_MAX_PAGES = 64
@@ -275,7 +290,7 @@ _EASTMONEY_ETF_NAV_REQUIRED_FIELDS = frozenset({"FSRQ", "DWJZ", "LJJZ", "NAVTYPE
 class AkshareP0MarketDataAdapter:
     """将 `AKShare` `P0` 可验证字段隔离成一个默认 `akshare` 数据源。
 
-    适配器只声明已完成字段映射或可安全返回空集的能力，未知请求不会成为任意 SDK 调用。
+    适配器只声明已完成且可诚实发布的字段映射；未知请求不会成为任意 SDK 调用。
     """
 
     provider_id = "akshare"
@@ -285,7 +300,7 @@ class AkshareP0MarketDataAdapter:
         self._request_timeout_seconds = request_timeout_seconds
 
     def capabilities(self) -> frozenset[str]:
-        """声明全部已完成映射或可安全返回空集的 P0 capability。"""
+        """声明已完成映射且不依赖伪空成功的 P0 capability。"""
         return _CAPABILITIES
 
     async def fetch(self, request: SourceRequest) -> ProviderBatch:
@@ -294,8 +309,15 @@ class AkshareP0MarketDataAdapter:
         可重试错误只代表上游暂不可用；参数、单位、字段和来源语义问题会以不可重试错误
         停止发布，避免重试把同一错误响应写成多次观察。
         """
-        _validate_capability(request.capability)
         parameters = dict(request.parameters)
+        if request.capability == _CONNECT_ACTIVE:
+            # 该能力不能以持股或估算排行替代；即使有旧任务直调，也必须失败关闭。
+            raise _currently_unsupported(
+                capability=_CONNECT_ACTIVE,
+                parameters=parameters,
+                reason_code="NO_VERIFIED_ACTIVE_SECURITY_SOURCE",
+            )
+        _validate_capability(request.capability)
         try:
             if request.capability == _CORPORATE:
                 payload_object, raw_object = await _fetch_corporate_events(
@@ -318,8 +340,7 @@ class AkshareP0MarketDataAdapter:
                 )
             else:
                 async with asyncio.timeout(self._request_timeout_seconds):
-                    payload_object, raw_object, upstream_source = await asyncio.to_thread(
-                        _fetch_payload,
+                    payload_object, raw_object, upstream_source = await _fetch_payload_with_retry(
                         capability=request.capability,
                         parameters=parameters,
                         request_timeout_seconds=self._request_timeout_seconds,
@@ -359,6 +380,35 @@ class AkshareP0MarketDataAdapter:
             adapter_version=_ADAPTER_VERSION,
             schema_fingerprint=_schema_fingerprint(raw_object),
         )
+
+
+async def _fetch_payload_with_retry(
+    *,
+    capability: str,
+    parameters: dict[str, str],
+    request_timeout_seconds: int,
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """在一个总超时预算内重试短暂的通用 SDK 传输故障。
+
+    `ProviderError` 已携带经过适配器确认的业务语义，不能因重试而把 schema、权限或当前不支持
+    的能力误当网络抖动。其余异常沿用既有“来源暂不可用”分类，并只重试两次以避免单个分区长期
+    占据全局执行槽。
+    """
+    for attempt in range(_P0_FETCH_MAX_ATTEMPTS):
+        try:
+            return await asyncio.to_thread(
+                _fetch_payload,
+                capability=capability,
+                parameters=parameters,
+                request_timeout_seconds=request_timeout_seconds,
+            )
+        except ProviderError:
+            raise
+        except Exception:
+            if attempt + 1 >= _P0_FETCH_MAX_ATTEMPTS:
+                raise
+            await asyncio.sleep(_P0_FETCH_RETRY_BASE_SECONDS * (2**attempt))
+    raise AssertionError("P0 fetch retry loop must return or raise")
 
 
 async def _fetch_event_payload_with_retry(
@@ -467,11 +517,16 @@ def _fetch_payload(
     if capability == _MARGIN_SECURITY:
         return (*_margin_security(parameters), "sse-szse.margin")
     if capability == _MARGIN_ELIGIBILITY:
-        return (*_margin_eligibility(parameters), "szse.margin-underlying")
+        payload, raw = _margin_eligibility(parameters)
+        return payload, raw, _margin_eligibility_upstream_source(parameters)
     if capability == _CONNECT_MARKET:
         return (*_stock_connect_market(parameters), "eastmoney.stock-connect")
     if capability == _CONNECT_ACTIVE:
-        return (*_stock_connect_active(parameters), "akshare.unsupported-stock-connect-active")
+        raise _currently_unsupported(
+            capability=_CONNECT_ACTIVE,
+            parameters=parameters,
+            reason_code="NO_VERIFIED_ACTIVE_SECURITY_SOURCE",
+        )
     if capability == _CORPORATE:
         raise AssertionError("earnings fetch must use its cancellable async transport")
     if capability == _DRAGON_TIGER:
@@ -909,7 +964,7 @@ def _optional_iso_date(value: object) -> str | None:
 def _szse_fund_directory(*, request_timeout_seconds: int) -> pd.DataFrame:
     """兼容读取深交所官方 XLSX，并对网络、状态、体积和文件格式设置有限边界。
 
-    AKShare 1.18.78 将响应 `bytes` 直接传给新版 pandas，触发 `TypeError`。这里仅在
+    AKShare 1.18.81 将响应 `bytes` 直接传给新版 pandas，触发 `TypeError`。这里仅在
     provider adapter 内用 `BytesIO` 修复，不修改全局 pandas/AKShare 行为。
     """
     timeout = max(1, request_timeout_seconds)
@@ -1359,9 +1414,15 @@ def _eastmoney_etf_nav_page(
 
 
 def _margin_market(parameters: dict[str, str]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """读取沪深场所两融汇总；深市接口按单交易日逐日请求。"""
-    venue = _venue(parameters)
+    """读取沪深场所两融汇总；北交所资格清单不能被误作汇总数据。"""
+    venue = _margin_venue(parameters)
     start, end = _window(parameters)
+    if venue == "BSE":
+        raise _currently_unsupported(
+            capability=_MARGIN_MARKET,
+            parameters=parameters,
+            reason_code="BSE_MARGIN_MARKET_NOT_MAPPED",
+        )
     if venue == "SSE":
         frames = [
             (
@@ -1417,9 +1478,15 @@ def _margin_market(parameters: dict[str, str]) -> tuple[dict[str, Any], dict[str
 
 
 def _margin_security(parameters: dict[str, str]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """读取两融证券明细，深市未披露的融资偿还额保持空值并说明原因。"""
-    venue = _venue(parameters)
+    """读取沪深证券明细；北交所资格清单不能被误作证券余额明细。"""
+    venue = _margin_venue(parameters)
     start, end = _window(parameters)
+    if venue == "BSE":
+        raise _currently_unsupported(
+            capability=_MARGIN_SECURITY,
+            parameters=parameters,
+            reason_code="BSE_MARGIN_SECURITY_NOT_MAPPED",
+        )
     function = ak.stock_margin_detail_sse if venue == "SSE" else ak.stock_margin_detail_szse
     frames = [
         (day, _akshare_frame_or_empty(lambda day=day: function(day.strftime("%Y%m%d"))))
@@ -1461,28 +1528,33 @@ def _margin_security(parameters: dict[str, str]) -> tuple[dict[str, Any], dict[s
 
 
 def _margin_eligibility(parameters: dict[str, str]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """读取深市当日标的观察名单；AKShare 未提供上交所等价接口时返回空集。"""
-    venue = _venue(parameters)
+    """读取沪深北当日资格观察名单，只将标的资格列映射为 canonical 资格状态。"""
+    venue = _margin_venue(parameters)
     start, end = _window(parameters)
     if venue == "SSE":
-        return (
-            {"schema": _SCHEMAS[_MARGIN_ELIGIBILITY], "venue": venue, "records": []},
-            _raw_empty(
-                _MARGIN_ELIGIBILITY, parameters, "AKShare has no SSE underlying-security endpoint"
-            ),
+        raise _currently_unsupported(
+            capability=_MARGIN_ELIGIBILITY,
+            parameters=parameters,
+            reason_code="SSE_MARGIN_ELIGIBILITY_NO_UNDERLYING_ENDPOINT",
         )
+    fetch = (
+        (lambda day: ak.stock_margin_underlying_info_szse(day.strftime("%Y%m%d")))
+        if venue == "SZSE"
+        else (lambda day: ak.stock_margin_underlying_info_bse(day.strftime("%Y%m%d")))
+    )
     frames = [
         (
             day,
-            _akshare_frame_or_empty(
-                lambda day=day: ak.stock_margin_underlying_info_szse(day.strftime("%Y%m%d"))
-            ),
+            _akshare_frame_or_empty(lambda day=day: fetch(day)),
         )
         for day in _days(start, end)
     ]
     raw_records = _frames_raw(frames)
     records: list[dict[str, object]] = []
     for observation_date, frame in frames:
+        if venue == "BSE":
+            records.extend(_bse_margin_eligibility_records(observation_date, frame))
+            continue
         for row in _frame_records(frame):
             security_code = _security_code(row.get("证券代码"))
             if security_code is not None:
@@ -1500,6 +1572,72 @@ def _margin_eligibility(parameters: dict[str, str]) -> tuple[dict[str, Any], dic
         {"schema": _SCHEMAS[_MARGIN_ELIGIBILITY], "venue": venue, "records": records},
         {"capability": _MARGIN_ELIGIBILITY, "parameters": parameters, "records": raw_records},
     )
+
+
+def _margin_eligibility_upstream_source(parameters: dict[str, str]) -> str:
+    """返回已证实资格名单的上游身份；上交所请求应已在获取前失败关闭。"""
+    venue = _margin_venue(parameters)
+    if venue == "SZSE":
+        return "szse.margin-underlying"
+    if venue == "BSE":
+        return "bse.margin-underlying"
+    raise _currently_unsupported(
+        capability=_MARGIN_ELIGIBILITY,
+        parameters=parameters,
+        reason_code="SSE_MARGIN_ELIGIBILITY_NO_UNDERLYING_ENDPOINT",
+    )
+
+
+def _bse_margin_eligibility_records(observation_date: date, frame: Any) -> list[dict[str, object]]:
+    """严格映射北交所标的列；当日可用列仅保留 raw，绝不改变资格结论。"""
+    if isinstance(frame, tuple):
+        # AKShare 对非交易日的已知零列表构造异常已在公共包装器转成空观察。
+        return []
+    columns = tuple(str(column).strip() for column in frame.columns)
+    if columns != _BSE_MARGIN_ELIGIBILITY_COLUMNS:
+        raise ProviderError(
+            ProviderErrorCode.SCHEMA,
+            "BSE margin underlying column contract changed",
+            retryable=False,
+        )
+    records: list[dict[str, object]] = []
+    for row_index, row in enumerate(_frame_records(frame)):
+        security_code = _security_code(row.get("证券代码"))
+        security_name = _optional_text(row.get("证券简称"))
+        if security_code is None or not security_code.isdecimal() or security_name is None:
+            raise ProviderError(
+                ProviderErrorCode.SCHEMA,
+                f"BSE margin underlying identity is invalid at row {row_index}",
+                retryable=False,
+            )
+        financing_underlying = _bse_margin_flag(row, "融资标的", row_index)
+        lending_underlying = _bse_margin_flag(row, "融券标的", row_index)
+        # 这两个列反映当日可用性，不是标的资格；只校验并保留在 raw source evidence。
+        _bse_margin_flag(row, "当日可融资", row_index)
+        _bse_margin_flag(row, "当日可融券", row_index)
+        records.append(
+            {
+                "securityCode": security_code,
+                "status": _BSE_MARGIN_STATUS[(financing_underlying, lending_underlying)],
+                "effectiveFrom": observation_date.isoformat(),
+                "effectiveTo": None,
+                "announcementOn": None,
+                "evidenceBasis": "OBSERVED_LIST",
+            }
+        )
+    return records
+
+
+def _bse_margin_flag(row: dict[str, object | None], field: str, row_index: int) -> str:
+    """读取北交所明确的 `Y`/`N` 标识；未知值不能被降级、填补或猜测。"""
+    value = _optional_text(row.get(field))
+    if value not in {"Y", "N"}:
+        raise ProviderError(
+            ProviderErrorCode.SCHEMA,
+            f"BSE margin underlying {field} must be Y or N at row {row_index}",
+            retryable=False,
+        )
+    return value
 
 
 def _stock_connect_market(
@@ -1543,28 +1681,6 @@ def _stock_connect_market(
             "records": records,
         },
         {"capability": _CONNECT_MARKET, "parameters": parameters, "records": raw_records},
-    )
-
-
-def _stock_connect_active(
-    parameters: dict[str, str],
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """为无官方成交前十来源的 AKShare 保留安全空结果，绝不把持股估算冒充成交榜。"""
-    channel, direction = _channel(parameters)
-    _window(parameters)
-    return (
-        {
-            "schema": _SCHEMAS[_CONNECT_ACTIVE],
-            "channel": channel,
-            "direction": direction,
-            "valueKind": "REPORTED",
-            "records": [],
-        },
-        _raw_empty(
-            _CONNECT_ACTIVE,
-            parameters,
-            "AKShare holding and estimated-increase rankings are not official active-trading lists",
-        ),
     )
 
 
@@ -3052,7 +3168,7 @@ def _sw_membership(parameters: dict[str, str]) -> tuple[dict[str, Any], dict[str
 def _sw_membership_frame(node_code: str) -> tuple[pd.DataFrame, str]:
     """直读真实页面并只按四个明确语义列投影，拒绝表头污染影响身份字段。
 
-    当前 AKShare 1.18.78 会用固定 17 列覆盖已漂移的 18 列页面并抛出异常。这里不按位置
+    当前 AKShare 1.18.81 会用固定 17 列覆盖已漂移的 18 列页面并抛出异常。这里不按位置
     猜测或修补分析列，只要求 capability 所需的四个命名列唯一存在；完整 HTML 留在失败
     证据载荷中，任何身份列漂移都会以不可重试 schema 错误停止发布。
     """
@@ -3141,6 +3257,14 @@ def _venue(parameters: dict[str, str]) -> str:
     venue = parameters.get("venue")
     if venue not in {"SSE", "SZSE"}:
         raise _invalid_request("venue must be SSE or SZSE")
+    return venue
+
+
+def _margin_venue(parameters: dict[str, str]) -> str:
+    """读取两融场所；北交所仅由资格名单分支进一步允许。"""
+    venue = parameters.get("venue")
+    if venue not in {"SSE", "SZSE", "BSE"}:
+        raise _invalid_request("margin venue must be SSE, SZSE, or BSE")
     return venue
 
 
@@ -3670,14 +3794,6 @@ def _conservative_visible_at(day: date) -> str:
     return datetime(day.year, day.month, day.day, 20, tzinfo=_SHANGHAI).isoformat()
 
 
-def _raw_empty(capability: str, parameters: dict[str, str], reason: str) -> dict[str, object]:
-    """记录语义不兼容的安全空结果原因；字节仍只会在失败路径落盘。
-
-    这不是来源成功却无记录的同义词，而是 adapter 明确无法诚实满足该请求形状的证据。
-    """
-    return {"capability": capability, "parameters": parameters, "records": [], "reason": reason}
-
-
 def _json_bytes(value: object) -> bytes:
     """序列化标准或原始内存对象，禁止 NaN 以免对象存储失败证据失真。"""
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
@@ -3700,3 +3816,38 @@ def _shape(value: object) -> object:
 def _invalid_request(message: str) -> ProviderError:
     """构造不可重试请求错误，调用方可安全投影为 source_unavailable。"""
     return ProviderError(ProviderErrorCode.INVALID_REQUEST, message, retryable=False)
+
+
+def _currently_unsupported(
+    *, capability: str, parameters: dict[str, str], reason_code: str
+) -> ProviderError:
+    """构造带脱敏请求摘要的当前不支持错误，禁止以成功空数组替代来源缺口。"""
+    error = ProviderError(
+        ProviderErrorCode.CURRENTLY_UNSUPPORTED,
+        f"{capability} is currently unsupported: {reason_code}",
+        retryable=False,
+    )
+    request_material = _json_bytes(
+        {
+            "capability": capability,
+            "parameters": sorted(parameters.items()),
+        }
+    )
+    error.attach_failure_evidence(
+        _json_bytes(
+            {
+                "schema": "quant-v2.provider-failure-evidence.v1",
+                "provider": "akshare",
+                "capability": capability,
+                "errorCode": ProviderErrorCode.CURRENTLY_UNSUPPORTED.value,
+                "retryable": False,
+                "reasonCode": reason_code,
+                # 仅暴露参数名与稳定摘要，避免把证券、日期或调用方选择器复制到失败证据。
+                "request": {
+                    "parameterNames": sorted(parameters),
+                    "requestFingerprint": hashlib.sha256(request_material).hexdigest(),
+                },
+            }
+        )
+    )
+    return error

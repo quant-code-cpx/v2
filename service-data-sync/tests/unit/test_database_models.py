@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from sqlalchemy import String
+from sqlalchemy import CheckConstraint, String
+from sqlalchemy.dialects.postgresql import JSONB
 
 from service_data_sync.infrastructure.database.models.registry import ALL_MODELS, Base
 
@@ -92,6 +93,8 @@ def test_registry_explicitly_exposes_every_logical_business_table() -> None:
         "stock_connect_overview_publication",
         "stock_connect_holding_snapshot",
         "stock_connect_holding_item",
+        "stock_connect_market_stat_research_batch",
+        "stock_connect_market_stat_research_observation",
         "source_batch",
         "sync_run",
         "sync_partition",
@@ -100,10 +103,10 @@ def test_registry_explicitly_exposes_every_logical_business_table() -> None:
         "stock_connect_status_coverage_boundary_lock",
         "data_operation_idempotency",
         "data_operation_preflight",
-            "data_operation_command",
-            "data_operation_run",
-            "data_operation_run_source_batch",
-            "data_operation_partition",
+        "data_operation_command",
+        "data_operation_run",
+        "data_operation_run_source_batch",
+        "data_operation_partition",
         "data_operation_execution_slot",
         "data_operation_event",
         "data_operation_health_check",
@@ -113,25 +116,25 @@ def test_registry_explicitly_exposes_every_logical_business_table() -> None:
         "data_operation_schedule",
         "data_operation_schedule_revision",
         "data_operation_schedule_fire",
-            "dataset_publication",
-            "dataset_publication_component",
-            "dataset_availability_observation",
-            "equity_bar_window_coverage",
-            "equity_event_window_coverage",
-            "data_quality_issue",
-            "equity_backfill_plan",
-            "equity_backfill_plan_state",
-            "equity_reference_generation_attempt",
-            "equity_reference_generation_step",
-            "equity_backfill_plan_identity",
-            "equity_backfill_plan_source",
-            "equity_backfill_plan_page",
-            "equity_backfill_plan_seal",
-            "equity_backfill_child_spec",
-            "equity_backfill_child_state",
-            "equity_backfill_partition_checkpoint",
-            "equity_backfill_child_result",
-            "equity_instrument",
+        "dataset_publication",
+        "dataset_publication_component",
+        "dataset_availability_observation",
+        "equity_bar_window_coverage",
+        "equity_event_window_coverage",
+        "data_quality_issue",
+        "equity_backfill_plan",
+        "equity_backfill_plan_state",
+        "equity_reference_generation_attempt",
+        "equity_reference_generation_step",
+        "equity_backfill_plan_identity",
+        "equity_backfill_plan_source",
+        "equity_backfill_plan_page",
+        "equity_backfill_plan_seal",
+        "equity_backfill_child_spec",
+        "equity_backfill_child_state",
+        "equity_backfill_partition_checkpoint",
+        "equity_backfill_child_result",
+        "equity_instrument",
         "equity_identifier_version",
         "equity_name_version",
         "equity_listing_status_version",
@@ -179,6 +182,9 @@ def test_registry_explicitly_exposes_every_logical_business_table() -> None:
         "money_flow_ranking_item",
         "money_flow_ranking_metric",
         "money_flow_ranking_manifest",
+        "money_flow_ranking_research_observation",
+        "money_flow_ranking_research_item",
+        "money_flow_ranking_research_metric",
         "money_flow_quality_result",
         "sector_scheme",
         "sector_entity",
@@ -241,9 +247,17 @@ def test_shared_lifecycle_models_preserve_legacy_compatibility_and_release_linea
 
 def test_index_shadow_models_keep_observations_separate_from_pit_facts() -> None:
     """指数 P0-A 表仅关联来源与规范化运行，缺失来源日期或交易所时不伪造事实。"""
+    definition = Base.metadata.tables["index_definition"]
     snapshot = Base.metadata.tables["index_observed_snapshot"]
     item = Base.metadata.tables["index_observed_snapshot_item"]
 
+    source_code_constraint = next(
+        constraint
+        for constraint in definition.constraints
+        if constraint.name == "ck_index_definition_source_code"
+    )
+    assert isinstance(source_code_constraint, CheckConstraint)
+    assert "^[A-Z0-9]{6,8}$" in str(source_code_constraint.sqltext)
     assert snapshot.c.source_as_of_date.nullable is True
     assert item.c.source_exchange.nullable is True
     assert {foreign_key.target_fullname for foreign_key in snapshot.foreign_keys} >= {
@@ -263,11 +277,13 @@ def test_index_shadow_models_keep_observations_separate_from_pit_facts() -> None
 
 def test_market_identity_models_preserve_cross_asset_boundaries() -> None:
     """市场根、可交易工具和新资产扩展必须保留双时间与资产域隔离。"""
+    venue = Base.metadata.tables["trading_venue"]
     entity = Base.metadata.tables["market_entity"]
     instrument = Base.metadata.tables["market_instrument"]
     identifier = Base.metadata.tables["instrument_identifier_version"]
     contract = Base.metadata.tables["derivative_contract"]
 
+    assert venue.c.reference_seed_revision.nullable is True
     assert {"entity_id", "entity_kind", "created_at", "retired_at"} == set(entity.c.keys())
     assert {foreign_key.target_fullname for foreign_key in instrument.foreign_keys} >= {
         "market_entity.entity_id",
@@ -314,6 +330,31 @@ def test_margin_and_stock_connect_models_preserve_disclosure_boundaries() -> Non
     assert {foreign_key.target_fullname for foreign_key in holding_item.foreign_keys} >= {
         "stock_connect_holding_snapshot.snapshot_date",
         "stock_connect_holding_snapshot.snapshot_id",
+    }
+
+
+def test_stock_connect_market_stat_research_models_cannot_reference_publication_or_pit() -> None:
+    """AKShare 市场统计研究表只保留来源与规范化血缘，不能隐式接入正式港通读取。"""
+    batch = Base.metadata.tables["stock_connect_market_stat_research_batch"]
+    observation = Base.metadata.tables["stock_connect_market_stat_research_observation"]
+    foreign_key_targets = {
+        foreign_key.target_fullname
+        for table in (batch, observation)
+        for foreign_key in table.foreign_keys
+    }
+
+    assert batch.c.status.default is None
+    assert batch.c.status.server_default is None
+    assert observation.c.turnover_amount.nullable is True
+    assert observation.c.field_availability.nullable is True
+    assert isinstance(observation.c.field_availability.type, JSONB)
+    assert observation.c.field_availability.type.none_as_null is True
+    assert "dataset_release.release_id" not in foreign_key_targets
+    assert "dataset_publication.publication_id" not in foreign_key_targets
+    assert "stock_connect_channel_daily_revision.row_id" not in foreign_key_targets
+    assert {constraint.name for constraint in batch.constraints} >= {
+        "ck_sc_msr_batch_status",
+        "uq_sc_msr_batch_source_batch",
     }
 
 

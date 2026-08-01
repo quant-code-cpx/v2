@@ -52,6 +52,28 @@ class FakeEtfProvider:
         raise AssertionError("ETF preflight must not fetch provider data")
 
 
+class FakeP0MarketProvider:
+    """声明首批两融与真实合约日线能力，预检不得访问真实 AKShare。"""
+
+    provider_id = "akshare"
+
+    def capabilities(self) -> frozenset[str]:
+        """返回当前可经统一 dispatcher 调用的四个已审核 P0 capability。"""
+        return frozenset(
+            {
+                "market.margin.market.1d.reported",
+                "market.margin.security.1d.reported",
+                "market.margin.eligibility.reported",
+                "derivative.bar.1d.reported",
+            }
+        )
+
+    async def fetch(self, request: SourceRequest) -> ProviderBatch:
+        """预检不允许抓取来源；若错误触发即失败。"""
+        del request
+        raise AssertionError("P0 market preflight must not fetch provider data")
+
+
 class FakeSectorMembershipProvider:
     """声明东财板块成分能力，预检不得触发真实网络。"""
 
@@ -264,22 +286,28 @@ def test_operations_routes_separate_read_and_mutation_service_identities(
 
 
 def test_catalog_validates_orm_manifest_and_providerless_derivation(configured_environment) -> None:
-    """目录校验 ORM manifest，并把平台派生指标声明为单证券零来源调用任务。"""
+    """目录校验 ORM manifest，并把 providerless 派生任务声明为零来源调用。"""
     del configured_environment
     catalog = build_catalog(load_settings(), SourceRegistry())
     derived = catalog["financial.derived-metric"]
+    resolved = catalog["equity.master.resolved"]
 
-    assert len(catalog) == 34
+    assert len(catalog) == 46
     assert derived.model_only is False
     assert derived.providerless is True
     assert derived.dispatcher_ready is True
     assert derived.modes == ("FULL", "INCREMENTAL")
     assert derived.schedule_modes == ("INCREMENTAL",)
     assert derived.selector_kinds == ("INSTRUMENT",)
+    assert resolved.providerless is True
+    assert resolved.dispatcher_ready is True
+    assert resolved.modes == ("FULL",)
+    assert resolved.schedule_modes == ()
+    assert resolved.selector_kinds == ("GLOBAL",)
 
 
 def test_catalog_registers_complete_canonical_dataset_codes(configured_environment) -> None:
-    """完整清单必须覆盖 34 个可独立运维资产，财务三类输出各自拥有发布边界。"""
+    """完整清单必须覆盖 46 个独立运维资产，包含 resolved 主数据与指数边界。"""
     del configured_environment
     catalog = build_catalog(load_settings(), SourceRegistry())
 
@@ -296,23 +324,35 @@ def test_catalog_registers_complete_canonical_dataset_codes(configured_environme
         "equity.discovery.eod",
         "equity.lifecycle.explicit",
         "equity.master.cn-a",
+        "equity.master.resolved",
         "equity.profile",
         "equity.share_capital.reported",
         "equity.trading_status.1d",
-            "financial.derived-metric",
-            "financial.provider-metric",
-            "financial.report",
-            "financial.valuation",
+        "financial.derived-metric",
+        "financial.provider-metric",
+        "financial.report",
+        "financial.valuation",
         "fund.etf.bar.1d.reported",
         "fund.etf.nav.1d.reported",
         "fund.etf.profile.reported",
         "fund.etf.trading_state.reported",
+        "index.cni.catalog.snapshot",
+        "index.cni.constituent.snapshot",
+        "index.cni.weight.snapshot",
+        "index.csi.catalog.snapshot",
+        "index.csi.constituent.snapshot",
+        "index.csi.weight.snapshot",
         "market.margin.eligibility.reported",
         "market.margin.market.1d.reported",
         "market.margin.security.1d.reported",
         "market.overview-and-sectors.bundle",
+        "market.stock_connect.market_stat.research",
         "market.stock_connect.overview.bundle",
         "money_flow.daily",
+        "money_flow.ranking",
+        "sector.bar.1d.raw",
+        "sector.bar.1mo.raw",
+        "sector.bar.1w.raw",
         "sector.catalog.raw",
         "sector.membership.release",
         "sector.quote.eod.snapshot",
@@ -335,7 +375,7 @@ def test_membership_preflight_rejects_historical_observation_before_queue(
     control_plane = object.__new__(DataOperationsControlPlane)
     control_plane._catalog = build_catalog(load_settings(), registry)
     control_plane._source_registry = registry
-    control_plane._now = lambda: datetime(2026, 7, 30, 8, tzinfo=UTC)
+    control_plane._now = lambda: datetime(2099, 1, 1, 8, tzinfo=UTC)
     target = control_plane._validate_targets(
         [
             {
@@ -362,6 +402,7 @@ def test_catalog_keeps_declared_source_when_adapter_is_disabled(configured_envir
     """来源开关关闭时仍展示已登记血缘，但明确标记当前绑定未生效。"""
     del configured_environment
     control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2099, 1, 1, 8, tzinfo=UTC)
     control_plane._source_registry = SourceRegistry()
     definition = build_catalog(load_settings(), SourceRegistry())["fund.etf.profile.reported"]
 
@@ -393,6 +434,7 @@ def test_etf_catalog_preflight_marks_all_four_real_executors_eligible(
     registry.register(FakeEtfProvider())
     catalog = build_catalog(load_settings(), registry)
     control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2099, 1, 1, 8, tzinfo=UTC)
     control_plane._catalog = catalog
     control_plane._source_registry = registry
     selectors = {
@@ -461,6 +503,7 @@ def test_etf_catalog_preflight_marks_all_four_real_executors_eligible(
 def test_etf_single_selector_rejects_conflicting_explicit_venue() -> None:
     """单只 ETF 的 venue 与 qualified identifier 必须一致，不能静默忽略任一身份。"""
     control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2099, 1, 1, 8, tzinfo=UTC)
 
     with pytest.raises(OperationProblem) as raised:
         control_plane._etf_selector(
@@ -474,6 +517,242 @@ def test_etf_single_selector_rejects_conflicting_explicit_venue() -> None:
         )
 
     assert raised.value.code == "invalid-target-selector"
+
+
+def test_margin_and_derivative_preflight_freeze_batched_windows(
+    configured_environment,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """四个 P0 数据集必须可调度，并把日期窗和逐日调用规模在预检时固定下来。"""
+    del configured_environment
+    monkeypatch.setenv("DATA_SYNC_AKSHARE_ENABLED", "true")
+    registry = SourceRegistry()
+    registry.register(FakeP0MarketProvider())
+    control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2026, 8, 1, 8, tzinfo=UTC)
+    control_plane._catalog = build_catalog(load_settings(), registry)
+    control_plane._source_registry = registry
+    targets = control_plane._validate_targets(
+        [
+            {
+                "datasetCode": "market.margin.market.1d.reported",
+                "mode": "DATE_RANGE",
+                "selector": {
+                    "kind": "MARGIN",
+                    "operation": "MARKET",
+                    "venue": "SSE",
+                    "security": None,
+                },
+                "dateFrom": "2026-01-01",
+                "dateTo": "2026-01-06",
+            },
+            {
+                "datasetCode": "market.margin.security.1d.reported",
+                "mode": "DATE_RANGE",
+                "selector": {
+                    "kind": "MARGIN",
+                    "operation": "SECURITY",
+                    "venue": "SZSE",
+                    "security": None,
+                },
+                "dateFrom": "2026-01-01",
+                "dateTo": "2026-01-06",
+            },
+            {
+                "datasetCode": "market.margin.eligibility.reported",
+                "mode": "OBSERVATION_DATE",
+                "selector": {
+                    "kind": "MARGIN",
+                    "operation": "ELIGIBILITY",
+                    "venue": "SZSE",
+                    "security": None,
+                },
+                "observationDate": "2026-01-06",
+            },
+            {
+                "datasetCode": "derivative.bar.1d.reported",
+                "mode": "DATE_RANGE",
+                "selector": {"kind": "CONTRACT", "venue": "CFFEX", "contract": "IF2608"},
+                "dateFrom": "2026-01-01",
+                "dateTo": "2026-01-06",
+            },
+        ]
+    )
+
+    results = [control_plane._preflight_target(target) for target in targets]
+
+    assert [item["eligible"] for item in results] == [True, True, True, True]
+    assert [item["estimatedPartitions"] for item in results] == [2, 2, 1, 1]
+    assert [item["estimatedProviderCalls"] for item in results] == [2, 6, 1, 1]
+    assert all(
+        control_plane._catalog[str(target["datasetCode"])].dispatcher_ready for target in targets
+    )
+    assert all(
+        item["resolvedDateFrom"] is not None and item["resolvedDateTo"] is not None
+        for item in results
+    )
+
+
+@pytest.mark.parametrize(
+    ("target", "code"),
+    [
+        (
+            {
+                "datasetCode": "market.margin.market.1d.reported",
+                "mode": "FULL",
+                "selector": {
+                    "kind": "MARGIN",
+                    "operation": "SECURITY",
+                    "venue": "SSE",
+                    "security": None,
+                },
+            },
+            "margin-dataset-operation-mismatch",
+        ),
+        (
+            {
+                "datasetCode": "market.margin.security.1d.reported",
+                "mode": "FULL",
+                "selector": {
+                    "kind": "MARGIN",
+                    "operation": "SECURITY",
+                    "venue": "SSE",
+                    "security": {"kind": "INSTRUMENT", "exchange": "SSE", "symbol": "600000"},
+                },
+            },
+            "margin-security-selector-unsupported",
+        ),
+        (
+            {
+                "datasetCode": "market.margin.eligibility.reported",
+                "mode": "FULL",
+                "selector": {
+                    "kind": "MARGIN",
+                    "operation": "ELIGIBILITY",
+                    "venue": "SSE",
+                    "security": None,
+                },
+            },
+            "margin-eligibility-venue-unsupported",
+        ),
+    ],
+)
+def test_margin_target_validation_rejects_unmapped_or_false_scope(
+    target: dict[str, Any],
+    code: str,
+    configured_environment,
+) -> None:
+    """两融命令必须拒绝 dataset 错配、未实现单证券过滤和没有来源的 SSE 资格名单。"""
+    del configured_environment
+    control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2026, 8, 1, 8, tzinfo=UTC)
+    control_plane._catalog = build_catalog(load_settings(), SourceRegistry())
+
+    with pytest.raises(OperationProblem) as raised:
+        control_plane._validate_targets([target])
+
+    assert raised.value.code == code
+
+
+def test_index_research_stock_connect_research_and_bse_margin_targets_are_strictly_bound(
+    configured_environment,
+) -> None:
+    """三个新增 research 路径必须与唯一数据集、能力和真实场所范围一一绑定。"""
+    del configured_environment
+    control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2026, 8, 1, 8, tzinfo=UTC)
+    control_plane._catalog = build_catalog(load_settings(), SourceRegistry())
+
+    targets = control_plane._validate_targets(
+        [
+            {
+                "datasetCode": "market.margin.eligibility.reported",
+                "mode": "OBSERVATION_DATE",
+                "selector": {
+                    "kind": "MARGIN",
+                    "operation": "ELIGIBILITY",
+                    "venue": "BSE",
+                    "security": None,
+                },
+                "observationDate": "2026-07-31",
+            },
+            {
+                "datasetCode": "index.csi.catalog.snapshot",
+                "mode": "FULL",
+                "selector": {
+                    "kind": "INDEX",
+                    "administrator": "CSI",
+                    "capability": "index.catalog.snapshot",
+                    "indexCode": None,
+                },
+            },
+            {
+                "datasetCode": "index.cni.constituent.snapshot",
+                "mode": "FULL",
+                "selector": {
+                    "kind": "INDEX",
+                    "administrator": "CNI",
+                    "capability": "index.constituent.snapshot",
+                    "indexCode": "AITCNYG",
+                },
+            },
+            {
+                "datasetCode": "market.stock_connect.market_stat.research",
+                "mode": "DATE_RANGE",
+                "selector": {
+                    "kind": "STOCK_CONNECT_RESEARCH",
+                    "operation": "MARKET_STAT",
+                    "channel": "ALL",
+                    "direction": None,
+                },
+                "dateFrom": "2026-07-30",
+                "dateTo": "2026-07-31",
+            },
+        ]
+    )
+
+    assert [target["selector"]["kind"] for target in targets] == [
+        "MARGIN",
+        "INDEX",
+        "INDEX",
+        "STOCK_CONNECT_RESEARCH",
+    ]
+
+    with pytest.raises(OperationProblem) as index_mismatch:
+        control_plane._validate_targets(
+            [
+                {
+                    "datasetCode": "index.csi.catalog.snapshot",
+                    "mode": "FULL",
+                    "selector": {
+                        "kind": "INDEX",
+                        "administrator": "CNI",
+                        "capability": "index.catalog.snapshot",
+                        "indexCode": None,
+                    },
+                }
+            ]
+        )
+    with pytest.raises(OperationProblem) as research_mismatch:
+        control_plane._validate_targets(
+            [
+                {
+                    "datasetCode": "market.stock_connect.overview.bundle",
+                    "mode": "DATE_RANGE",
+                    "selector": {
+                        "kind": "STOCK_CONNECT_RESEARCH",
+                        "operation": "MARKET_STAT",
+                        "channel": "SH",
+                        "direction": "NORTHBOUND",
+                    },
+                    "dateFrom": "2026-07-31",
+                    "dateTo": "2026-07-31",
+                }
+            ]
+        )
+
+    assert index_mismatch.value.code == "index-dataset-selector-mismatch"
+    assert research_mismatch.value.code == "unsupported-target-selector"
 
 
 @pytest.mark.parametrize(
@@ -513,6 +792,7 @@ def test_target_validation_rejects_duplicate_and_unsupported_mode(
     """批量 target 必须数据集唯一，模式必须来自服务端 capability。"""
     del configured_environment
     control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2099, 1, 1, 8, tzinfo=UTC)
     control_plane._catalog = build_catalog(load_settings(), SourceRegistry())
 
     with pytest.raises(OperationProblem) as raised:
@@ -546,7 +826,7 @@ def test_target_validation_rejects_duplicate_and_unsupported_mode(
                 "kind": "MARGIN",
                 "operation": "SECURITY",
                 "venue": "SSE",
-                "security": {"kind": "INSTRUMENT", "exchange": "SSE", "symbol": "600000"},
+                "security": None,
             },
             "MARGIN",
         ),
@@ -559,13 +839,22 @@ def test_target_validation_rejects_duplicate_and_unsupported_mode(
             },
             "STOCK_CONNECT",
         ),
+        (
+            {
+                "kind": "STOCK_CONNECT_RESEARCH",
+                "operation": "MARKET_STAT",
+                "channel": "ALL",
+                "direction": None,
+            },
+            "STOCK_CONNECT_RESEARCH",
+        ),
         ({"kind": "TRADING_EVENT", "operation": "BLOCK_TRADE"}, "TRADING_EVENT"),
         (
             {
                 "kind": "INDEX",
                 "administrator": "CSI",
-                "capability": "components",
-                "indexCode": "000300",
+                "capability": "index.catalog.snapshot",
+                "indexCode": None,
             },
             "INDEX",
         ),
@@ -577,6 +866,7 @@ def test_selector_union_is_strict_and_returns_normalized_contract_shape(
     """所有合同 selector 分支都能规范化，避免 CLI 继续携带自由 Provider 参数。"""
     del configured_environment
     control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2099, 1, 1, 8, tzinfo=UTC)
     definition = build_catalog(load_settings(), SourceRegistry())["equity.bar.1d.raw"]
     definition = replace(
         definition,
@@ -590,6 +880,7 @@ def test_selector_union_is_strict_and_returns_normalized_contract_shape(
             "ETF",
             "MARGIN",
             "STOCK_CONNECT",
+            "STOCK_CONNECT_RESEARCH",
             "TRADING_EVENT",
             "INDEX",
         ),
@@ -606,6 +897,7 @@ def test_selector_rejects_unknown_field_and_unsupported_dataset_kind(
     """selector 不能透传 URI、凭据或不属于数据集 capability 的种类。"""
     del configured_environment
     control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2099, 1, 1, 8, tzinfo=UTC)
     definition = build_catalog(load_settings(), SourceRegistry())["equity.bar.1d.raw"]
 
     with pytest.raises(OperationProblem) as malformed:
@@ -627,6 +919,7 @@ def test_etf_profile_all_venues_is_exact_two_partition_scope(
     """双市场目录必须显式使用 ALL_VENUES，预检按 SSE、SZSE 两个 authority 分区估算。"""
     del configured_environment
     control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2099, 1, 1, 8, tzinfo=UTC)
     control_plane._catalog = build_catalog(load_settings(), SourceRegistry())
     definition = control_plane._catalog["fund.etf.profile.reported"]
     selector = {
@@ -670,6 +963,7 @@ def test_etf_profile_schedule_uses_current_local_date_policy(
     """current-only 双市场目录计划只能绑定 scheduled 上海自然日，不能标记最近完成交易日。"""
     del configured_environment
     control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2099, 1, 1, 8, tzinfo=UTC)
     definition = build_catalog(load_settings(), SourceRegistry())["fund.etf.profile.reported"]
 
     assert control_plane._schedule_target_policy_options(definition) == [
@@ -690,6 +984,7 @@ def test_event_time_filter_rejects_invalid_or_reversed_timestamp_range(
     """事件时间边界必须是带时区 RFC 3339，开始时间不得晚于结束时间。"""
     del configured_environment
     control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2099, 1, 1, 8, tzinfo=UTC)
 
     with pytest.raises(OperationProblem) as invalid:
         control_plane._datetime_or_none("2026-07-29T08:00:00", "occurredFrom")
@@ -701,6 +996,7 @@ def test_public_submit_rejects_private_legacy_intent_field(configured_environmen
     """0022 公开 submit 不能通过额外字段注入仅 Python 可用的遗留执行意图。"""
     del configured_environment
     control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2099, 1, 1, 8, tzinfo=UTC)
 
     with pytest.raises(OperationProblem) as rejected:
         control_plane.submit_command(
@@ -735,6 +1031,7 @@ def test_private_legacy_intent_has_closed_shape(
     """兼容层只接受五种闭集意图，不能携带 URI、凭据或任意 Provider 参数。"""
     del configured_environment
     control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2099, 1, 1, 8, tzinfo=UTC)
 
     assert control_plane._validate_legacy_execution_intent(intent) == intent
 
@@ -743,6 +1040,7 @@ def test_private_legacy_intent_rejects_unknown_fields(configured_environment) ->
     """私有 intent 也不能成为绕过 target 合同的自由参数通道。"""
     del configured_environment
     control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2099, 1, 1, 8, tzinfo=UTC)
 
     with pytest.raises(OperationProblem) as rejected:
         control_plane._validate_legacy_execution_intent(
@@ -756,12 +1054,27 @@ def test_dispatch_failure_disarms_pending_terminal_callback(configured_environme
     """末次 canonical 写失败后，失败终态事务不能错误触发此前已 arm 的成功回调。"""
     del configured_environment
     control_plane = object.__new__(DataOperationsControlPlane)
+    control_plane._now = lambda: datetime(2099, 1, 1, 8, tzinfo=UTC)
     claim = ExecutionClaim(
         run_id=UUID("00000000-0000-0000-0000-000000000003"),
         dataset_code="equity.bar.1d.raw",
         fencing_token=7,
         target={},
-        source_snapshot=[],
+        source_snapshot=[
+            {
+                "providerId": "licensed-equity-provider",
+                "upstreamSource": "licensed.equity-kline",
+                "sourceDataset": "equity.bar.1d.raw",
+                "adapterId": "licensed-equity-provider:equity.bar.1d.raw",
+                "methodologyCode": "equity.bar.1d.raw",
+                "methodologyVersion": 1,
+                "approvalStatus": "APPROVED",
+                "rightsStatus": "licensed",
+                "licenseScope": "commercial-redistribution-approved",
+                "role": "PRIMARY",
+                "effective": True,
+            }
+        ],
     )
     seen: dict[str, object] = {}
 

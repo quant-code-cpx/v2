@@ -9,7 +9,6 @@ from typing import cast
 from uuid import UUID, uuid4
 
 from service_data_sync.application.ports.data_source import ProviderBatch, SourceRequest
-from service_data_sync.application.ports.market_data import RawPayload
 from service_data_sync.application.ports.sector_market_data import (
     PublishedSectorBars,
     SectorMarketDataRepository,
@@ -66,35 +65,18 @@ class FakeSource:
         )
 
 
-class FakeRawPayloadStore:
-    """捕获写入顺序前的来源证据，不使用对象存储客户端。"""
-
-    def __init__(self) -> None:
-        """创建空的原始证据记录容器。"""
-        self.payloads: list[RawPayload] = []
-
-    def put(self, payload: RawPayload) -> str:
-        """记录证据并返回可断言的稳定对象 URI。"""
-        self.payloads.append(payload)
-        return f"s3://test/{payload.object_key}"
-
-    def get(self, uri: str) -> bytes:
-        """板块 K 线同步不支持从该替身 replay，调用表示测试流程错误。"""
-        raise AssertionError(f"unexpected raw replay read: {uri}")
-
-
 class FakeRepository:
     """捕获标准写入输入并返回最小发布结果。"""
 
-    def __init__(self, raw_store: FakeRawPayloadStore) -> None:
-        """保存原始存储引用，以验证证据归档先于 canonical 发布。"""
-        self._raw_store = raw_store
+    def __init__(self) -> None:
+        """保存最后一次 canonical 发布输入。"""
         self.bars: tuple[SectorBar, ...] = ()
         self.period: SectorPeriod | None = None
+        self.call: dict[str, object] | None = None
 
     def publish_bars(self, **kwargs: object) -> PublishedSectorBars:
-        """断言先有 raw 证据，再记录领域行和周期。"""
-        assert self._raw_store.payloads
+        """记录领域行、周期和不可回放来源引用。"""
+        self.call = kwargs
         identifier = kwargs["identifier"]
         assert isinstance(identifier, SectorIdentifier)
         period = kwargs["period"]
@@ -134,17 +116,15 @@ class FakeRepository:
         return ()
 
 
-def test_sync_archives_raw_evidence_and_publishes_direct_weekly_bars() -> None:
-    """周线必须从周线 capability 获取、归档并发布，不能由日线产生。"""
-    raw_store = FakeRawPayloadStore()
-    repository = FakeRepository(raw_store)
+def test_sync_keeps_success_payload_unretained_and_publishes_direct_weekly_bars() -> None:
+    """周线必须从周线 capability 获取并入库，成功来源字节不能落对象存储。"""
+    repository = FakeRepository()
     identifier = SectorIdentifier(SectorScheme.EASTMONEY_INDUSTRY, "BK0475")
 
     result = asyncio.run(
         SectorBarSyncService(
             source=FakeSource(),
             repository=cast(SectorMarketDataRepository, repository),
-            raw_payload_store=raw_store,
         ).sync(
             identifier=identifier,
             period=SectorPeriod.WEEK_1,
@@ -155,6 +135,8 @@ def test_sync_archives_raw_evidence_and_publishes_direct_weekly_bars() -> None:
 
     assert result.period is SectorPeriod.WEEK_1
     assert result.inserted_count == 1
-    assert raw_store.payloads[0].payload == b'{"raw":true}'
+    assert repository.call is not None
+    assert str(repository.call["raw_uri"]).startswith("unretained://sha256/")
+    assert str(repository.call["normalized_uri"]).startswith("unretained://sha256/")
     assert repository.period is SectorPeriod.WEEK_1
     assert repository.bars[0].period_end == date(2026, 6, 26)

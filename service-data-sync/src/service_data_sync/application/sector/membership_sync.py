@@ -37,6 +37,7 @@ from service_data_sync.domain.sector import (
 
 _CAPABILITY = "sector.membership.snapshot.raw"
 _SCHEMA = "quant-v2.sector-membership-snapshot.v1"
+_B_SHARE_SYMBOL_PREFIXES = ("200", "201", "900")
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,7 +280,12 @@ def decode_sector_membership_batch(
             retryable=False,
         )
     try:
-        candidates = tuple(_candidate_from_record(record) for record in decoded["members"])
+        candidates = tuple(
+            candidate
+            for record in decoded["members"]
+            for candidate in (_candidate_from_record(record),)
+            if not _is_b_share_symbol(candidate.source_symbol)
+        )
     except (TypeError, ValueError) as error:
         raise ProviderError(
             ProviderErrorCode.SCHEMA,
@@ -318,6 +324,16 @@ def _candidate_from_record(record: object) -> SectorMembershipCandidate:
     if not isinstance(symbol, str) or not isinstance(name, str):
         raise ValueError("membership record fields must be strings")
     return SectorMembershipCandidate(source_symbol=symbol, source_name=name)
+
+
+def _is_b_share_symbol(symbol: str) -> bool:
+    """仅在 A 股 `canonical` 边界排除东财明确标识的深沪 B 股代码。
+
+    `200`、`201` 为深市 B 股前缀，`900` 为沪市 B 股前缀。该判断只发生在
+    已归档原始响应转换为 A 股候选项时；其余六位代码仍交给身份解析和质量门，不能因
+    未识别就被静默删除。
+    """
+    return symbol.startswith(_B_SHARE_SYMBOL_PREFIXES)
 
 
 def _partition_key(identifier: SectorIdentifier, observation_date: date) -> str:

@@ -11,6 +11,7 @@ import base64
 import hashlib
 import inspect
 import json
+import logging
 import marshal
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -25,6 +26,7 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from service_data_sync.application.ports.data_source import (
@@ -130,6 +132,9 @@ from service_data_sync.infrastructure.persistence.etf_universe_repository import
     load_frozen_etf_universe,
     resolve_current_etf_profile_data_versions,
 )
+from service_data_sync.infrastructure.persistence.event_window_coverage import (
+    EquityWindowIdentityUnavailable,
+)
 from service_data_sync.infrastructure.persistence.stock_connect_readiness_repository import (
     SqlAlchemyStockConnectReadinessRepository,
     StockConnectReadinessProbeOutcome,
@@ -148,8 +153,39 @@ from service_data_sync.infrastructure.providers.official.stock_connect import (
 
 _TERMINAL_RUNS = frozenset({"SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED", "SKIPPED"})
 _TERMINAL_COMMANDS = frozenset({"SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED", "REJECTED"})
+_LOGGER = logging.getLogger(__name__)
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _ETF_HISTORY_START = date(1990, 12, 19)
+_AKSHARE_BATCHED_DATASETS = frozenset(
+    {
+        "market.margin.market.1d.reported",
+        "market.margin.security.1d.reported",
+        "market.margin.eligibility.reported",
+        "market.stock_connect.market_stat.research",
+        "derivative.bar.1d.reported",
+        "sector.bar.1d.raw",
+        "sector.bar.1w.raw",
+        "sector.bar.1mo.raw",
+    }
+)
+_MARGIN_EXECUTION_BATCH_DAYS = 5
+_STOCK_CONNECT_RESEARCH_EXECUTION_BATCH_DAYS = 5
+_DERIVATIVE_EXECUTION_BATCH_DAYS = 31
+# EastMoney 板块历史接口尚未获得大窗口成功实测；先以最小日窗证实每次真实请求，
+# 后续只能经新探针和显式版本调整放大，不能凭经验把失败窗口伪装成可恢复进度。
+_SECTOR_BAR_EXECUTION_BATCH_DAYS = 1
+_SECTOR_BAR_DATASETS = frozenset({"sector.bar.1d.raw", "sector.bar.1w.raw", "sector.bar.1mo.raw"})
+_MONEY_FLOW_DAILY_DATASET = "money_flow.daily"
+_MONEY_FLOW_RANKING_DATASET = "money_flow.ranking"
+_STOCK_CONNECT_RESEARCH_DATASET = "market.stock_connect.market_stat.research"
+_INDEX_DATASET_TARGETS: dict[str, tuple[str, str, bool]] = {
+    "index.csi.catalog.snapshot": ("CSI", "index.catalog.snapshot", False),
+    "index.csi.constituent.snapshot": ("CSI", "index.constituent.snapshot", True),
+    "index.csi.weight.snapshot": ("CSI", "index.weight.snapshot", True),
+    "index.cni.catalog.snapshot": ("CNI", "index.catalog.snapshot", False),
+    "index.cni.constituent.snapshot": ("CNI", "index.constituent.snapshot", True),
+    "index.cni.weight.snapshot": ("CNI", "index.weight.snapshot", True),
+}
 _TERMINAL_HEALTH_CHECKS = frozenset({"SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED", "REJECTED"})
 _LEASE_SECONDS = 60
 _PREFLIGHT_TTL_SECONDS = 600
@@ -166,30 +202,80 @@ _EQUITY_BACKFILL_DATASETS = frozenset(
         "equity.bar.1mo.raw",
         "equity.adjustment_factor",
         "equity.corporate_action",
-        "equity.profile",
-        "equity.share_capital.reported",
-        "financial.report",
-        "financial.provider-metric",
-        "financial.valuation",
-        "financial.derived-metric",
         "equity.corporate_event.earnings.reported",
         "equity.dragon_tiger.disclosure.reported",
         "equity.block_trade.execution.reported",
         "equity.discovery.eod",
     }
 )
-_EQUITY_BACKFILL_CURRENT_DATASETS = frozenset(
-    {
-        "equity.profile",
-        "equity.share_capital.reported",
-        "financial.report",
-        "financial.provider-metric",
-        "financial.valuation",
-    }
-)
-_EQUITY_BACKFILL_DERIVED_DATASETS = frozenset(
-    {"financial.derived-metric", "equity.discovery.eod"}
-)
+_EQUITY_BACKFILL_DERIVED_DATASETS = frozenset({"equity.discovery.eod"})
+
+
+def _akshare_execution_batch_days(dataset_code: str) -> int:
+    """返回已审核 AKShare 同步能力的公平日期批次上限，未知数据集必须失败关闭。"""
+    if dataset_code in {
+        "market.margin.market.1d.reported",
+        "market.margin.security.1d.reported",
+        "market.margin.eligibility.reported",
+    }:
+        return _MARGIN_EXECUTION_BATCH_DAYS
+    if dataset_code == _STOCK_CONNECT_RESEARCH_DATASET:
+        return _STOCK_CONNECT_RESEARCH_EXECUTION_BATCH_DAYS
+    if dataset_code == "derivative.bar.1d.reported":
+        return _DERIVATIVE_EXECUTION_BATCH_DAYS
+    if dataset_code in _SECTOR_BAR_DATASETS:
+        return _SECTOR_BAR_EXECUTION_BATCH_DAYS
+    raise ValueError("AKShare dataset is not configured for batched execution")
+
+
+def _akshare_batched_partition_count(*, start: date, end: date, dataset_code: str) -> int:
+    """计算冻结包含端日期窗的恢复分区数，预检和执行必须使用同一切分口径。"""
+    if start > end:
+        raise ValueError("AKShare date window is reversed")
+    batch_days = _akshare_execution_batch_days(dataset_code)
+    return ((end - start).days + batch_days) // batch_days
+
+
+def money_flow_source_capability(
+    dataset_code: str,
+    selector: Mapping[str, object],
+) -> str:
+    """由已规范化资金流目标选择唯一真实 adapter capability，禁止方法学间回退。"""
+    if selector.get("kind") != "MONEY_FLOW":
+        raise ValueError("money-flow selector is invalid")
+    scope = selector.get("scope")
+    if dataset_code == _MONEY_FLOW_DAILY_DATASET:
+        if selector.get("operation") != "DAILY":
+            raise ValueError("money-flow daily operation is invalid")
+        try:
+            return {
+                "EQUITY": "money_flow.order_size.daily.equity.raw",
+                "SECTOR": "money_flow.order_size.daily.sector.raw",
+                "MARKET": "money_flow.order_size.daily.market.raw",
+            }[str(scope)]
+        except KeyError as error:
+            raise ValueError("money-flow daily scope is invalid") from error
+    if dataset_code != _MONEY_FLOW_RANKING_DATASET or selector.get("operation") != "RANKING":
+        raise ValueError("money-flow ranking operation is invalid")
+    methodology = selector.get("methodology")
+    if methodology == "EASTMONEY_ORDER_SIZE":
+        try:
+            return {
+                "EQUITY": "money_flow.order_size.ranking.equity.raw",
+                "SECTOR": "money_flow.order_size.ranking.sector.raw",
+            }[str(scope)]
+        except KeyError as error:
+            raise ValueError("EastMoney money-flow ranking scope is invalid") from error
+    if methodology == "THS_TRADE_DIRECTION":
+        try:
+            return {
+                "EQUITY": "money_flow.trade_direction.ranking.equity.raw",
+                "INDUSTRY": "money_flow.trade_direction.ranking.industry.raw",
+                "CONCEPT": "money_flow.trade_direction.ranking.concept.raw",
+            }[str(scope)]
+        except KeyError as error:
+            raise ValueError("THS money-flow ranking scope is invalid") from error
+    raise ValueError("money-flow ranking methodology is invalid")
 
 
 def _stock_connect_selected_channels(target: Mapping[str, object]) -> tuple[str, ...]:
@@ -271,7 +357,10 @@ class DatasetDefinition:
     publication_dataset_code: str | None = None
     provider_id: str | None = None
     upstream_source: str | None = None
+    # 来源准入元数据仅写入不可变审计快照，绝不能替代连通性、schema 或质量等技术门。
     approval_status: str = "APPROVED"
+    rights_status: str | None = None
+    license_scope: str | None = None
     data_as_of_kind: str = "OBSERVATION_DATE"
     data_as_of_label: str = "数据截至日"
 
@@ -314,7 +403,7 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
     `providerId` 与真实 `upstreamSource` 不从界面猜测，而是在每次响应内由此目录和当前
     adapter 注册共同投影。未注册 adapter 的数据集仍可发现，但会明确显示 SOURCE_UNAVAILABLE。
     """
-    definitions = (
+    definitions: tuple[DatasetDefinition, ...] = (
         DatasetDefinition(
             "equity.master.cn-a",
             "A 股证券目录",
@@ -331,6 +420,8 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             provider_id="akshare-eastmoney-equity-catalog",
             upstream_source="eastmoney.equity-catalog",
             approval_status="CANDIDATE",
+            rights_status="unverified",
+            license_scope="unverified",
             data_as_of_label="目录观察日",
         ),
         DatasetDefinition(
@@ -349,8 +440,29 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             provider_id="akshare-official-exchange-equity-lifecycle",
             upstream_source="sse.szse.bse.lifecycle",
             approval_status="CANDIDATE",
+            rights_status="unverified",
+            license_scope="unverified",
             data_as_of_kind="EVENT_DATE",
             data_as_of_label="状态生效日",
+        ),
+        DatasetDefinition(
+            "equity.master.resolved",
+            "A 股已解析主数据",
+            "equity",
+            "仅由已发布目录和显式生命周期组件固定的可重放主数据视图",
+            "交易所 × 固定目录版本 × 固定生命周期版本",
+            None,
+            ("FULL",),
+            (),
+            selector_kinds=("GLOBAL",),
+            dispatcher_ready=True,
+            # providerless 派生 publication 只依赖已有 canonical 输入；不能被某个 Provider
+            # 的实时开关误判为不可运行。
+            config_enabled=True,
+            providerless=True,
+            provider_id="platform",
+            upstream_source="platform-derived",
+            data_as_of_label="输入组件共同可安全读取的最早业务日期",
         ),
         DatasetDefinition(
             "equity.bar.1d.raw",
@@ -364,8 +476,12 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             selector_kinds=("GLOBAL", "INSTRUMENT"),
             dispatcher_ready=True,
             config_enabled=settings.equity_market_enabled,
+            lifecycle="RESEARCH",
             provider_id="akshare-tencent",
             upstream_source="tencent.equity-kline",
+            approval_status="RESEARCH",
+            rights_status="unverified",
+            license_scope="unverified",
             data_as_of_kind="TRADING_DATE",
             data_as_of_label="行情交易日",
         ),
@@ -381,8 +497,12 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             selector_kinds=("GLOBAL", "INSTRUMENT"),
             dispatcher_ready=True,
             config_enabled=settings.equity_market_enabled,
+            lifecycle="RESEARCH",
             provider_id="akshare-eastmoney-equity-period",
             upstream_source="eastmoney.equity-kline",
+            approval_status="RESEARCH",
+            rights_status="unverified",
+            license_scope="unverified",
             data_as_of_kind="TRADING_DATE",
             data_as_of_label="行情交易日",
         ),
@@ -398,8 +518,12 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             selector_kinds=("GLOBAL", "INSTRUMENT"),
             dispatcher_ready=True,
             config_enabled=settings.equity_market_enabled,
+            lifecycle="RESEARCH",
             provider_id="akshare-eastmoney-equity-period",
             upstream_source="eastmoney.equity-kline",
+            approval_status="RESEARCH",
+            rights_status="unverified",
+            license_scope="unverified",
             data_as_of_kind="TRADING_DATE",
             data_as_of_label="行情交易日",
         ),
@@ -416,8 +540,12 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             dispatcher_ready=True,
             config_enabled=settings.equity_market_enabled,
             max_range_days=365 * 40,
+            lifecycle="RESEARCH",
             provider_id="akshare-sina-adjustment-factor",
             upstream_source="sina.hfq-factor",
+            approval_status="RESEARCH",
+            rights_status="unverified",
+            license_scope="unverified",
             data_as_of_kind="EVENT_DATE",
             data_as_of_label="因子生效日",
         ),
@@ -434,8 +562,12 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             dispatcher_ready=True,
             config_enabled=settings.equity_market_enabled,
             max_range_days=3 * 366,
+            lifecycle="RESEARCH",
             provider_id="akshare-eastmoney-corporate-action",
             upstream_source="eastmoney.share-bonus",
+            approval_status="RESEARCH",
+            rights_status="unverified",
+            license_scope="unverified",
             data_as_of_kind="EVENT_DATE",
             data_as_of_label="公司行动日",
         ),
@@ -451,8 +583,12 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             selector_kinds=("GLOBAL", "INSTRUMENT"),
             dispatcher_ready=True,
             config_enabled=settings.equity_market_enabled,
+            lifecycle="RESEARCH",
             provider_id="akshare-cninfo-company-profile",
             upstream_source="cninfo.company-profile",
+            approval_status="RESEARCH",
+            rights_status="unverified",
+            license_scope="unverified",
             data_as_of_label="资料观察日",
         ),
         DatasetDefinition(
@@ -523,9 +659,68 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             selector_kinds=("GLOBAL", "SCHEME"),
             dispatcher_ready=True,
             config_enabled=settings.sector_enabled,
+            lifecycle="RESEARCH",
             provider_id="akshare-eastmoney-sector",
             upstream_source="eastmoney.sector-catalog",
+            approval_status="RESEARCH",
             data_as_of_label="目录观察日",
+        ),
+        DatasetDefinition(
+            "sector.bar.1d.raw",
+            "东财板块日线",
+            "sector",
+            "东财行业与概念板块的上游原生日线，不由周月线或日线互相派生",
+            "分类体系 × 板块 × 交易日",
+            "sector.bar.1d.raw",
+            ("FULL", "INCREMENTAL", "DATE_RANGE"),
+            (),
+            selector_kinds=("GLOBAL", "SCHEME", "SECTOR"),
+            dispatcher_ready=True,
+            config_enabled=settings.akshare_enabled and settings.sector_enabled,
+            lifecycle="CANDIDATE",
+            provider_id="akshare-eastmoney-sector",
+            upstream_source="eastmoney.sector-hist",
+            approval_status="CANDIDATE",
+            data_as_of_kind="TRADING_DATE",
+            data_as_of_label="板块交易日",
+        ),
+        DatasetDefinition(
+            "sector.bar.1w.raw",
+            "东财板块周线",
+            "sector",
+            "东财行业与概念板块的上游原生周线，不从日线聚合",
+            "分类体系 × 板块 × 周期结束日",
+            "sector.bar.1w.raw",
+            ("FULL", "INCREMENTAL", "DATE_RANGE"),
+            (),
+            selector_kinds=("GLOBAL", "SCHEME", "SECTOR"),
+            dispatcher_ready=True,
+            config_enabled=settings.akshare_enabled and settings.sector_enabled,
+            lifecycle="CANDIDATE",
+            provider_id="akshare-eastmoney-sector",
+            upstream_source="eastmoney.sector-hist",
+            approval_status="CANDIDATE",
+            data_as_of_kind="PERIOD_END_DATE",
+            data_as_of_label="板块周线周期结束日",
+        ),
+        DatasetDefinition(
+            "sector.bar.1mo.raw",
+            "东财板块月线",
+            "sector",
+            "东财行业与概念板块的上游原生月线，不从日线或周线聚合",
+            "分类体系 × 板块 × 周期结束日",
+            "sector.bar.1mo.raw",
+            ("FULL", "INCREMENTAL", "DATE_RANGE"),
+            (),
+            selector_kinds=("GLOBAL", "SCHEME", "SECTOR"),
+            dispatcher_ready=True,
+            config_enabled=settings.akshare_enabled and settings.sector_enabled,
+            lifecycle="CANDIDATE",
+            provider_id="akshare-eastmoney-sector",
+            upstream_source="eastmoney.sector-hist",
+            approval_status="CANDIDATE",
+            data_as_of_kind="PERIOD_END_DATE",
+            data_as_of_label="板块月线周期结束日",
         ),
         DatasetDefinition(
             "sector.membership.release",
@@ -642,27 +837,53 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             data_as_of_label="财务报告期",
         ),
         DatasetDefinition(
-            "money_flow.daily",
+            _MONEY_FLOW_DAILY_DATASET,
             "日频资金流",
             "money_flow",
-            "个股、板块与市场日频资金流",
+            "东财订单规模个股、板块与市场日频资金流；仅研究方法学，未形成公开 publication",
             "对象 × 交易日",
             "money_flow.order_size.daily.equity.raw",
-            ("FULL", "INCREMENTAL", "DATE_RANGE"),
             ("FULL", "INCREMENTAL"),
+            (),
             source_capabilities=(
                 "money_flow.order_size.daily.equity.raw",
                 "money_flow.order_size.daily.sector.raw",
                 "money_flow.order_size.daily.market.raw",
             ),
-            selector_kinds=("GLOBAL", "INSTRUMENT", "SECTOR", "EXCHANGE"),
+            selector_kinds=("MONEY_FLOW",),
+            dispatcher_ready=True,
             config_enabled=settings.money_flow_enabled,
-            lifecycle="CANDIDATE",
+            lifecycle="RESEARCH",
             provider_id="akshare-eastmoney-money-flow",
             upstream_source="eastmoney.money-flow",
-            approval_status="CANDIDATE",
+            approval_status="RESEARCH",
             data_as_of_kind="TRADING_DATE",
             data_as_of_label="资金流交易日",
+        ),
+        DatasetDefinition(
+            _MONEY_FLOW_RANKING_DATASET,
+            "供应商资金流排行",
+            "money_flow",
+            "东财订单规模与同花顺交易方向排行的真实来源研究观察；"
+            "未证完整分页不进入正式排行 publication",
+            "方法学 × 样本池 × 窗口 × 观察日 × 供应商位置",
+            None,
+            ("OBSERVATION_DATE",),
+            (),
+            source_capabilities=(
+                "money_flow.order_size.ranking.equity.raw",
+                "money_flow.order_size.ranking.sector.raw",
+                "money_flow.trade_direction.ranking.equity.raw",
+                "money_flow.trade_direction.ranking.industry.raw",
+                "money_flow.trade_direction.ranking.concept.raw",
+            ),
+            selector_kinds=("MONEY_FLOW",),
+            dispatcher_ready=True,
+            config_enabled=settings.money_flow_enabled,
+            lifecycle="RESEARCH",
+            approval_status="RESEARCH",
+            data_as_of_kind="OBSERVATION_DATE",
+            data_as_of_label="供应商排行观察日",
         ),
         DatasetDefinition(
             "sector.sw.taxonomy",
@@ -676,8 +897,10 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             selector_kinds=("GLOBAL", "SCHEME", "SECTOR"),
             dispatcher_ready=True,
             config_enabled=settings.sector_enabled and settings.sw_sector_enabled,
+            lifecycle="RESEARCH",
             provider_id="akshare-legulegu-sw-industry",
             upstream_source="legulegu.sw-industry",
+            approval_status="RESEARCH",
             data_as_of_kind="SNAPSHOT_DATE",
             data_as_of_label="行业快照日",
         ),
@@ -778,6 +1001,126 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             data_as_of_label="净值日期",
         ),
         DatasetDefinition(
+            "index.csi.catalog.snapshot",
+            "中证指数目录研究快照",
+            "index",
+            "AKShare 转发的中证指数当前目录观察；不声明历史有效期或消费者 publication",
+            "中证管理人 × 当前来源观察批次",
+            "index.catalog.snapshot",
+            ("FULL",),
+            (),
+            selector_kinds=("INDEX",),
+            dispatcher_ready=True,
+            config_enabled=settings.index_enabled
+            and settings.index_source_policy in {"akshare-csindex", "akshare-csindex-cnindex"},
+            lifecycle="RESEARCH",
+            provider_id="akshare-csindex-index-snapshot",
+            upstream_source="csindex",
+            approval_status="RESEARCH",
+            data_as_of_kind="OBSERVATION_DATE",
+            data_as_of_label="来源目录观测日",
+        ),
+        DatasetDefinition(
+            "index.csi.constituent.snapshot",
+            "中证指数成分研究快照",
+            "index",
+            "AKShare 转发的中证指数当前成分观察；不推断成分历史生效区间",
+            "中证管理人 × 指数代码 × 当前来源观察批次",
+            "index.constituent.snapshot",
+            ("FULL",),
+            (),
+            selector_kinds=("INDEX",),
+            dispatcher_ready=True,
+            config_enabled=settings.index_enabled
+            and settings.index_source_policy in {"akshare-csindex", "akshare-csindex-cnindex"},
+            lifecycle="RESEARCH",
+            provider_id="akshare-csindex-index-snapshot",
+            upstream_source="csindex",
+            approval_status="RESEARCH",
+            data_as_of_kind="OBSERVATION_DATE",
+            data_as_of_label="来源成分观测日",
+        ),
+        DatasetDefinition(
+            "index.csi.weight.snapshot",
+            "中证指数权重研究快照",
+            "index",
+            "AKShare 转发的中证指数当前权重观察；不转换为历史正式权重",
+            "中证管理人 × 指数代码 × 当前来源观察批次",
+            "index.weight.snapshot",
+            ("FULL",),
+            (),
+            selector_kinds=("INDEX",),
+            dispatcher_ready=True,
+            config_enabled=settings.index_enabled
+            and settings.index_source_policy in {"akshare-csindex", "akshare-csindex-cnindex"},
+            lifecycle="RESEARCH",
+            provider_id="akshare-csindex-index-snapshot",
+            upstream_source="csindex",
+            approval_status="RESEARCH",
+            data_as_of_kind="OBSERVATION_DATE",
+            data_as_of_label="来源权重观测日",
+        ),
+        DatasetDefinition(
+            "index.cni.catalog.snapshot",
+            "国证指数目录研究快照",
+            "index",
+            "AKShare 转发的国证指数当前目录观察；不声明历史有效期或消费者 publication",
+            "国证管理人 × 当前来源观察批次",
+            "index.catalog.snapshot",
+            ("FULL",),
+            (),
+            selector_kinds=("INDEX",),
+            dispatcher_ready=True,
+            config_enabled=settings.index_enabled
+            and settings.index_source_policy in {"akshare-cnindex", "akshare-csindex-cnindex"},
+            lifecycle="RESEARCH",
+            provider_id="akshare-cnindex-index-snapshot",
+            upstream_source="cnindex",
+            approval_status="RESEARCH",
+            data_as_of_kind="OBSERVATION_DATE",
+            data_as_of_label="来源目录观测日",
+        ),
+        DatasetDefinition(
+            "index.cni.constituent.snapshot",
+            "国证指数成分研究快照",
+            "index",
+            "AKShare 转发的国证指数当前成分观察；不推断成分历史生效区间",
+            "国证管理人 × 指数代码 × 当前来源观察批次",
+            "index.constituent.snapshot",
+            ("FULL",),
+            (),
+            selector_kinds=("INDEX",),
+            dispatcher_ready=True,
+            config_enabled=settings.index_enabled
+            and settings.index_source_policy in {"akshare-cnindex", "akshare-csindex-cnindex"},
+            lifecycle="RESEARCH",
+            provider_id="akshare-cnindex-index-snapshot",
+            upstream_source="cnindex",
+            approval_status="RESEARCH",
+            data_as_of_kind="OBSERVATION_DATE",
+            data_as_of_label="来源成分观测日",
+        ),
+        DatasetDefinition(
+            "index.cni.weight.snapshot",
+            "国证指数权重研究快照",
+            "index",
+            "AKShare 转发的国证指数当前权重观察；不转换为历史正式权重",
+            "国证管理人 × 指数代码 × 当前来源观察批次",
+            "index.weight.snapshot",
+            ("FULL",),
+            (),
+            selector_kinds=("INDEX",),
+            dispatcher_ready=True,
+            config_enabled=settings.index_enabled
+            and settings.index_source_policy in {"akshare-cnindex", "akshare-csindex-cnindex"},
+            lifecycle="RESEARCH",
+            provider_id="akshare-cnindex-index-snapshot",
+            upstream_source="cnindex",
+            approval_status="RESEARCH",
+            data_as_of_kind="OBSERVATION_DATE",
+            data_as_of_label="来源权重观测日",
+        ),
+        DatasetDefinition(
             "market.margin.market.1d.reported",
             "融资融券市场汇总",
             "margin",
@@ -787,6 +1130,7 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             ("FULL", "INCREMENTAL", "DATE_RANGE"),
             (),
             selector_kinds=("MARGIN",),
+            dispatcher_ready=True,
             config_enabled=settings.akshare_enabled,
             lifecycle="RESEARCH",
             provider_id="akshare",
@@ -805,6 +1149,7 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             ("FULL", "INCREMENTAL", "DATE_RANGE"),
             (),
             selector_kinds=("MARGIN",),
+            dispatcher_ready=True,
             config_enabled=settings.akshare_enabled,
             lifecycle="RESEARCH",
             provider_id="akshare",
@@ -823,13 +1168,35 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             ("FULL", "OBSERVATION_DATE"),
             (),
             selector_kinds=("MARGIN",),
+            dispatcher_ready=True,
             config_enabled=settings.akshare_enabled,
             lifecycle="RESEARCH",
             provider_id="akshare",
-            upstream_source="szse.margin-underlying",
+            upstream_source="szse.margin-underlying,bse.margin-underlying",
             approval_status="RESEARCH",
             data_as_of_kind="SNAPSHOT_DATE",
             data_as_of_label="资格快照日",
+        ),
+        DatasetDefinition(
+            "market.stock_connect.market_stat.research",
+            "港通市场统计研究观察",
+            "stock_connect",
+            "AKShare/EastMoney 报告的港通市场统计研究观察；独立于官方完整包，"
+            "永不形成正式 publication",
+            "通道 × 方向 × 来源报告交易日",
+            "market.stock_connect.market_stat.reported",
+            ("OBSERVATION_DATE", "DATE_RANGE"),
+            (),
+            selector_kinds=("STOCK_CONNECT_RESEARCH",),
+            dispatcher_ready=True,
+            config_enabled=settings.akshare_enabled,
+            lifecycle="RESEARCH",
+            max_range_days=31,
+            provider_id="akshare",
+            upstream_source="eastmoney.stock-connect",
+            approval_status="RESEARCH",
+            data_as_of_kind="TRADING_DATE",
+            data_as_of_label="来源报告交易日",
         ),
         DatasetDefinition(
             "market.stock_connect.overview.bundle",
@@ -977,6 +1344,7 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             ("FULL", "INCREMENTAL", "DATE_RANGE"),
             (),
             selector_kinds=("CONTRACT",),
+            dispatcher_ready=True,
             config_enabled=settings.akshare_enabled,
             lifecycle="RESEARCH",
             provider_id="akshare",
@@ -987,7 +1355,7 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
         ),
     )
     # 显式 manifest 承载业务名称与粒度；启动时检查它所引用的现有 ORM 逻辑表，防止漂移。
-    required_tables = {
+    required_tables: dict[str, tuple[str, ...]] = {
         "equity.master.cn-a": (
             "equity_instrument",
             "equity_master_snapshot",
@@ -996,6 +1364,12 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
         "equity.lifecycle.explicit": (
             "equity_listing_status_version",
             "equity_lifecycle_checkpoint",
+        ),
+        "equity.master.resolved": (
+            "dataset_publication",
+            "dataset_publication_component",
+            "dataset_release",
+            "canonical_record_lineage",
         ),
         "equity.bar.1d.raw": ("equity_daily_bar",),
         "equity.bar.1w.raw": ("equity_weekly_bar",),
@@ -1011,6 +1385,9 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             "equity_discovery_availability",
         ),
         "sector.catalog.raw": ("sector_entity", "sector_scheme"),
+        "sector.bar.1d.raw": ("sector_daily_bar",),
+        "sector.bar.1w.raw": ("sector_weekly_bar",),
+        "sector.bar.1mo.raw": ("sector_monthly_bar",),
         "sector.membership.release": (
             "sector_membership_release",
             "sector_membership_release_sector",
@@ -1031,7 +1408,24 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             "financial_publication",
             "sync_run",
         ),
-        "money_flow.daily": ("money_flow_daily_observation",),
+        _MONEY_FLOW_DAILY_DATASET: (
+            "money_flow_methodology",
+            "money_flow_methodology_version",
+            "money_flow_bucket_definition",
+            "money_flow_universe_version",
+            "money_flow_series",
+            "money_flow_daily_observation",
+            "money_flow_quality_result",
+        ),
+        _MONEY_FLOW_RANKING_DATASET: (
+            "money_flow_methodology",
+            "money_flow_methodology_version",
+            "money_flow_bucket_definition",
+            "money_flow_ranking_research_observation",
+            "money_flow_ranking_research_item",
+            "money_flow_ranking_research_metric",
+            "money_flow_quality_result",
+        ),
         "sector.sw.taxonomy": ("sw_sector_node_revision", "sw_sector_publication"),
         "sector.sw2021.membership.snapshot": (
             "sw_membership_release",
@@ -1041,9 +1435,43 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
         "fund.etf.trading_state.reported": ("etf_status_revision",),
         "fund.etf.bar.1d.reported": ("etf_daily_bar_revision",),
         "fund.etf.nav.1d.reported": ("etf_nav_revision",),
+        "index.csi.catalog.snapshot": (
+            "index_definition",
+            "index_catalog_observation",
+            "index_catalog_observation_item",
+        ),
+        "index.csi.constituent.snapshot": (
+            "index_definition",
+            "index_observed_snapshot",
+            "index_observed_snapshot_item",
+        ),
+        "index.csi.weight.snapshot": (
+            "index_definition",
+            "index_observed_snapshot",
+            "index_observed_snapshot_item",
+        ),
+        "index.cni.catalog.snapshot": (
+            "index_definition",
+            "index_catalog_observation",
+            "index_catalog_observation_item",
+        ),
+        "index.cni.constituent.snapshot": (
+            "index_definition",
+            "index_observed_snapshot",
+            "index_observed_snapshot_item",
+        ),
+        "index.cni.weight.snapshot": (
+            "index_definition",
+            "index_observed_snapshot",
+            "index_observed_snapshot_item",
+        ),
         "market.margin.market.1d.reported": ("margin_market_daily_revision",),
         "market.margin.security.1d.reported": ("margin_security_daily_revision",),
         "market.margin.eligibility.reported": ("margin_eligibility_revision",),
+        _STOCK_CONNECT_RESEARCH_DATASET: (
+            "stock_connect_market_stat_research_batch",
+            "stock_connect_market_stat_research_observation",
+        ),
         "market.stock_connect.overview.bundle": (
             "stock_connect_channel_daily_revision",
             "stock_connect_active_security_revision",
@@ -1077,8 +1505,8 @@ def build_catalog(settings: Settings, registry: SourceRegistry) -> dict[str, Dat
             "derivative_daily_bar_revision",
         ),
     }
-    if len(definitions) != 34 or len({item.dataset_code for item in definitions}) != 34:
-        raise RuntimeError("data operations catalog must contain 34 unique datasets")
+    if len(definitions) != 46 or len({item.dataset_code for item in definitions}) != 46:
+        raise RuntimeError("data operations catalog must contain 46 unique datasets")
     registered_tables = {model.__tablename__ for model in ALL_MODELS}
     missing = sorted(
         table
@@ -1265,12 +1693,18 @@ class DataOperationsControlPlane:
                 for index, target in enumerate(frozen_targets)
                 if target["datasetCode"] == "equity.share_capital.reported"
             }
+            sector_bar_rosters = {
+                index: self._freeze_sector_bar_roster(session, target=target)
+                for index, target in enumerate(frozen_targets)
+                if target["datasetCode"] in _SECTOR_BAR_DATASETS
+            }
             request_hash = self._hash(frozen_targets)
             results = [
                 self._preflight_target(
                     target,
                     etf_universe=universe_by_dataset.get(str(target["datasetCode"])),
                     equity_roster=equity_rosters.get(index),
+                    sector_bar_roster=sector_bar_rosters.get(index),
                 )
                 for index, target in enumerate(frozen_targets)
             ]
@@ -1310,6 +1744,8 @@ class DataOperationsControlPlane:
                     not in {
                         "equityInstrumentRoster",
                         "equityInstrumentRosterHash",
+                        "sectorBarRoster",
+                        "sectorBarRosterHash",
                         "deliveryManifestRef",
                         "minimumExecutionWindowSeconds",
                         "readinessSnapshotRef",
@@ -1400,13 +1836,9 @@ class DataOperationsControlPlane:
             )
         preflight = self.preflight(normalized_targets)
         actor_ref = (
-            "system:equity-backfill"
-            if intent_kinds == {"EQUITY_BACKFILL"}
-            else "system:legacy"
+            "system:equity-backfill" if intent_kinds == {"EQUITY_BACKFILL"} else "system:legacy"
         )
-        actor = self._actor(
-            {"actor": {"actorRef": actor_ref, "role": "SYSTEM", "reason": reason}}
-        )
+        actor = self._actor({"actor": {"actorRef": actor_ref, "role": "SYSTEM", "reason": reason}})
         return self._submit_validated_command(
             targets=normalized_targets,
             submission_id=submission_id,
@@ -1493,7 +1925,7 @@ class DataOperationsControlPlane:
             for index, target in enumerate(targets):
                 definition = self._definition(target["datasetCode"])
                 preflight_result = preflight.result_json[index]
-                source_snapshot = self._source_snapshot(definition)
+                source_snapshot = self._source_snapshot(definition, target=target)
                 resolved_execution_intent = (
                     execution_intents[index]
                     if execution_intents[index] is not None
@@ -1587,9 +2019,7 @@ class DataOperationsControlPlane:
         submitted_at: datetime,
     ) -> None:
         """在 command 可见前原子绑定唯一 frozen child，消除 worker 抢跑窗口。"""
-        plan_child_keys = {
-            (str(intent["planId"]), str(intent["childKey"])) for intent in intents
-        }
+        plan_child_keys = {(str(intent["planId"]), str(intent["childKey"])) for intent in intents}
         if len(plan_child_keys) != 1:
             raise OperationProblem(
                 status=409,
@@ -1613,11 +2043,7 @@ class DataOperationsControlPlane:
                 detail="Frozen equity backfill child does not exist",
             )
         state = session.get(EquityBackfillChildState, child.child_id, with_for_update=True)
-        if (
-            state is None
-            or state.status != "SUBMITTING"
-            or state.command_id is not None
-        ):
+        if state is None or state.status != "SUBMITTING" or state.command_id is not None:
             raise OperationProblem(
                 status=409,
                 code="equity-backfill-precondition-failed",
@@ -1832,11 +2258,7 @@ class DataOperationsControlPlane:
             return None
         child_keys = {str(intent["childKey"]) for intent in intents}
         plan_ids = {UUID(str(intent["planId"])) for intent in intents}
-        if (
-            len(intents) != len(originals)
-            or len(child_keys) != 1
-            or len(plan_ids) != 1
-        ):
+        if len(intents) != len(originals) or len(child_keys) != 1 or len(plan_ids) != 1:
             raise OperationProblem(
                 status=409,
                 code="equity-backfill-retry-mismatch",
@@ -1897,8 +2319,7 @@ class DataOperationsControlPlane:
         if not all_runs or any(
             not isinstance(run.execution_intent_json, dict)
             or run.execution_intent_json.get("kind") != "EQUITY_BACKFILL"
-            or run.status
-            not in {"SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED", "INTERRUPTED"}
+            or run.status not in {"SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED", "INTERRUPTED"}
             for run in all_runs
         ):
             raise OperationProblem(
@@ -1941,11 +2362,13 @@ class DataOperationsControlPlane:
             and isinstance(selector, dict)
             and selector.get("kind") == "STOCK_CONNECT"
         )
+        akshare_batched = run.dataset_code in _AKSHARE_BATCHED_DATASETS
         if (
             run.dataset_code != "equity.share_capital.reported"
             and not etf_all
             and not etf_all_venues
             and not stock_connect
+            and not akshare_batched
         ):
             return ()
         # `retry_command` 不接受新的 target 或来源；若未来放宽该合同，调用方必须先增加
@@ -1957,6 +2380,17 @@ class DataOperationsControlPlane:
             if etf_all_venues
             else "stock-connect:"
             if stock_connect
+            else "margin:"
+            if run.dataset_code
+            in {
+                "market.margin.market.1d.reported",
+                "market.margin.security.1d.reported",
+                "market.margin.eligibility.reported",
+            }
+            else "derivative:"
+            if run.dataset_code == "derivative.bar.1d.reported"
+            else "sector-bar:"
+            if run.dataset_code in _SECTOR_BAR_DATASETS
             else "security:"
         )
         checkpoint_kind = "stock-connect-bundle" if stock_connect else "canonical-partition"
@@ -2059,18 +2493,14 @@ class DataOperationsControlPlane:
             )
             if len(active_backfill_plan_ids) > 1:
                 raise RuntimeError("multiple equity backfill plans are running")
-            run_statement = select(DataOperationRun).where(
-                DataOperationRun.status == "QUEUED"
-            )
+            run_statement = select(DataOperationRun).where(DataOperationRun.status == "QUEUED")
             if active_backfill_plan_ids:
                 active_plan_id = active_backfill_plan_ids[0]
                 # 全量回填期间只消费同一冻结计划的 child；普通命令仍可排队但不能
                 # 在 discovery 之前推进 current publication，计划终态后会恢复正常公平队列。
                 run_statement = run_statement.where(
-                    DataOperationRun.execution_intent_json["kind"].astext
-                    == "EQUITY_BACKFILL",
-                    DataOperationRun.execution_intent_json["planId"].astext
-                    == str(active_plan_id),
+                    DataOperationRun.execution_intent_json["kind"].astext == "EQUITY_BACKFILL",
+                    DataOperationRun.execution_intent_json["planId"].astext == str(active_plan_id),
                 )
             run = session.scalars(
                 run_statement.order_by(
@@ -2343,12 +2773,22 @@ class DataOperationsControlPlane:
             return False
         command = session.get(DataOperationCommand, run.command_id, with_for_update=True)
         assert command is not None
-        self._record_run_source_batches(
-            session,
-            run_id=run_id,
-            source_batch_ids=source_batch_ids,
-            linked_at=now,
+        final_status = (
+            "CANCELLED"
+            if run.cancel_requested and outcome.status in {"SUCCEEDED", "FAILED", "CANCELLED"}
+            else outcome.status
         )
+        if final_status not in {"FAILED", "CANCELLED"}:
+            # 来源批次血缘只对会产生成功产物的终态有意义：执行器失败时其 canonical
+            # 事务已回滚，但 FencedExecution 内存中的批次 ID 不会随事务回滚，是
+            # 不可达的幽灵引用；在这里严格校验会让失败终态永远无法落账，只能等待
+            # 租约过期被 reaper 收尾，并把真实失败原因掩盖成 lease-expired。
+            self._record_run_source_batches(
+                session,
+                run_id=run_id,
+                source_batch_ids=source_batch_ids,
+                linked_at=now,
+            )
         if outcome.status == "YIELDED":
             # 长回填只完成一个内部公平批次：保留同一 run 和分区水位，移到队尾后释放全局槽。
             run.status = "QUEUED"
@@ -2391,11 +2831,6 @@ class DataOperationsControlPlane:
             slot.lease_until = None
             slot.heartbeat_at = None
             return True
-        final_status = (
-            "CANCELLED"
-            if run.cancel_requested and outcome.status in {"SUCCEEDED", "FAILED", "CANCELLED"}
-            else outcome.status
-        )
         final_error = outcome.error
         quality_gate = outcome.quality_gate
         if (
@@ -2485,6 +2920,8 @@ class DataOperationsControlPlane:
                         DataOperationPartition.partition_key.startswith("etf:"),
                         DataOperationPartition.partition_key.startswith("venue:"),
                         DataOperationPartition.partition_key.startswith("stock-connect:"),
+                        DataOperationPartition.partition_key.startswith("margin:"),
+                        DataOperationPartition.partition_key.startswith("derivative:"),
                     ),
                 )
             )
@@ -2693,13 +3130,9 @@ class DataOperationsControlPlane:
         checkpoint_position: str | None,
     ) -> DatasetPublication | None:
         """把受控 dataVersion、行情或事件 coverage checkpoint 解析为精确 publication。"""
-        data_version = self._checkpoint_data_version(
-            checkpoint_kind, checkpoint_position
-        )
+        data_version = self._checkpoint_data_version(checkpoint_kind, checkpoint_position)
         if data_version is not None:
-            return self._publication_for_data_version(
-                session, run.dataset_code, data_version
-            )
+            return self._publication_for_data_version(session, run.dataset_code, data_version)
         if checkpoint_kind == "event-coverage-version" and checkpoint_position is not None:
             intent = run.execution_intent_json
             if not isinstance(intent, dict):
@@ -2721,10 +3154,8 @@ class DataOperationsControlPlane:
                 select(EquityBackfillPartitionCheckpoint).where(
                     EquityBackfillPartitionCheckpoint.child_id == child.child_id,
                     EquityBackfillPartitionCheckpoint.target_index == run.target_index,
-                    EquityBackfillPartitionCheckpoint.coverage_version
-                    == coverage_version,
-                    EquityBackfillPartitionCheckpoint.checkpoint_kind
-                    == "EVENT_COVERAGE_VERSION",
+                    EquityBackfillPartitionCheckpoint.coverage_version == coverage_version,
+                    EquityBackfillPartitionCheckpoint.checkpoint_kind == "EVENT_COVERAGE_VERSION",
                 )
             )
             return (
@@ -2893,6 +3324,19 @@ class DataOperationsControlPlane:
                         "PRECONDITION",
                         False,
                         "Frozen equity backfill precondition failed",
+                    ),
+                )
+            except EquityWindowIdentityUnavailable:
+                # 身份窗口缺口发生在 canonical 写事务内；不能误报为 Provider 或数据库故障，
+                # 否则重试会重复抓取相同来源，却仍可能把历史事实绑定到错误证券。
+                execution.disarm_terminal_write()
+                outcome = ExecutionOutcome(
+                    status="FAILED",
+                    error=self._error(
+                        "equity-identity-window-unavailable",
+                        "PRECONDITION",
+                        False,
+                        "Equity identity does not cover requested window",
                     ),
                 )
             except ProviderError as error:
@@ -3066,9 +3510,7 @@ class DataOperationsControlPlane:
             )
         intent = run.execution_intent_json
         if not isinstance(intent, dict):
-            raise EquityBackfillPreconditionFailed(
-                "Equity backfill output intent is unavailable"
-            )
+            raise EquityBackfillPreconditionFailed("Equity backfill output intent is unavailable")
         source = session.get(
             EquityBackfillPlanSource,
             (UUID(str(intent["planId"])), run.dataset_code),
@@ -3106,8 +3548,7 @@ class DataOperationsControlPlane:
                 or coverage.capability != run.dataset_code
                 or coverage.period != expected_period
                 or coverage.security_id != int(identity["securityId"])
-                or coverage.identifier_version_id
-                != UUID(str(identity["identifierVersionId"]))
+                or coverage.identifier_version_id != UUID(str(identity["identifierVersionId"]))
                 or selector.get("kind") != "INSTRUMENT"
                 or selector.get("exchange") != identity.get("exchange")
                 or selector.get("symbol") != identity.get("symbol")
@@ -3130,16 +3571,12 @@ class DataOperationsControlPlane:
                     <= coverage.coverage_to
                     <= date.fromisoformat(backfill_to)
                 )
-                or (
-                    coverage.publication_kind == "DATA"
-                    and coverage.record_count <= 0
-                )
+                or (coverage.publication_kind == "DATA" and coverage.record_count <= 0)
                 or (
                     coverage.publication_kind == "ZERO_RECORD_COVERAGE"
                     and coverage.record_count != 0
                 )
-                or coverage.publication_kind
-                not in {"DATA", "ZERO_RECORD_COVERAGE"}
+                or coverage.publication_kind not in {"DATA", "ZERO_RECORD_COVERAGE"}
             ):
                 raise EquityBackfillPreconditionFailed(
                     "Equity backfill bar coverage window or result kind is invalid"
@@ -3228,9 +3665,10 @@ class DataOperationsControlPlane:
             )
             for window_from, window_to in expected_windows
         )
-        if len(checkpoints) != len(expected_windows) or tuple(
-            checkpoint.partition_key for checkpoint in checkpoints
-        ) != expected_keys:
+        if (
+            len(checkpoints) != len(expected_windows)
+            or tuple(checkpoint.partition_key for checkpoint in checkpoints) != expected_keys
+        ):
             raise EquityBackfillPreconditionFailed(
                 "Equity backfill bar partition seal is incomplete"
             )
@@ -3241,9 +3679,7 @@ class DataOperationsControlPlane:
         }.get(run.dataset_code)
         execution_sources = set(source_batch_ids)
         sealed_sources: set[UUID] = set()
-        for checkpoint, (window_from, window_to) in zip(
-            checkpoints, expected_windows, strict=True
-        ):
+        for checkpoint, (window_from, window_to) in zip(checkpoints, expected_windows, strict=True):
             try:
                 checkpoint_sources = tuple(
                     UUID(value) for value in checkpoint.source_batch_ids_json
@@ -3256,8 +3692,7 @@ class DataOperationsControlPlane:
             release = session.get(DatasetRelease, checkpoint.release_id)
             coverage = session.scalar(
                 select(EquityBarWindowCoverage).where(
-                    EquityBarWindowCoverage.coverage_version
-                    == checkpoint.coverage_version
+                    EquityBarWindowCoverage.coverage_version == checkpoint.coverage_version
                 )
             )
             output = {
@@ -3284,15 +3719,13 @@ class DataOperationsControlPlane:
                 or len(checkpoint_sources) != len(set(checkpoint_sources))
                 or list(map(str, sorted(checkpoint_sources, key=str)))
                 != checkpoint.source_batch_ids_json
-                or self._hash(checkpoint.source_batch_ids_json)
-                != checkpoint.source_batch_hash
+                or self._hash(checkpoint.source_batch_ids_json) != checkpoint.source_batch_hash
                 or self._hash(output) != checkpoint.output_hash
                 or not set(checkpoint_sources) <= execution_sources
                 or publication is None
                 or release is None
                 or coverage is None
-                or checkpoint.coverage_versions_json
-                != [str(checkpoint.coverage_version)]
+                or checkpoint.coverage_versions_json != [str(checkpoint.coverage_version)]
                 or publication.publication_id != checkpoint.publication_id
                 or publication.data_version != checkpoint.data_version
                 or publication.release_id != checkpoint.release_id
@@ -3304,8 +3737,7 @@ class DataOperationsControlPlane:
                 or coverage.period != expected_period
                 or coverage.capability != run.dataset_code
                 or coverage.security_id != int(identity["securityId"])
-                or coverage.identifier_version_id
-                != UUID(str(identity["identifierVersionId"]))
+                or coverage.identifier_version_id != UUID(str(identity["identifierVersionId"]))
                 or coverage.coverage_from != window_from
                 or coverage.coverage_to != window_to
                 or coverage.source_batch_id not in checkpoint_sources
@@ -3319,8 +3751,7 @@ class DataOperationsControlPlane:
             sealed_sources.update(checkpoint_sources)
         if (
             sealed_sources != execution_sources
-            or checkpoints[-1].coverage_version
-            != final_coverage.coverage_version
+            or checkpoints[-1].coverage_version != final_coverage.coverage_version
         ):
             raise EquityBackfillPreconditionFailed(
                 "Equity backfill bar partition source or final coverage seal differs"
@@ -3350,11 +3781,7 @@ class DataOperationsControlPlane:
             "equity.block_trade.execution.reported": ("BLOCK_TRADE",),
         }
         families = families_by_dataset.get(run.dataset_code)
-        if (
-            not isinstance(start_text, str)
-            or not isinstance(end_text, str)
-            or families is None
-        ):
+        if not isinstance(start_text, str) or not isinstance(end_text, str) or families is None:
             raise EquityBackfillPreconditionFailed(
                 "Equity backfill event partition boundaries are unavailable"
             )
@@ -3393,18 +3820,17 @@ class DataOperationsControlPlane:
             ).all()
         )
         expected = {
-            (
-                f"{run.dataset_code}:{family}:"
-                f"{window_from.isoformat()}:{window_to.isoformat()}"
-            ): (family, window_from, window_to)
+            (f"{run.dataset_code}:{family}:{window_from.isoformat()}:{window_to.isoformat()}"): (
+                family,
+                window_from,
+                window_to,
+            )
             for window_from, window_to in windows
             for family in families
         }
-        if (
-            len(checkpoints) != len(expected)
-            or {checkpoint.partition_key for checkpoint in checkpoints}
-            != set(expected)
-        ):
+        if len(checkpoints) != len(expected) or {
+            checkpoint.partition_key for checkpoint in checkpoints
+        } != set(expected):
             raise EquityBackfillPreconditionFailed(
                 "Equity backfill event partition seal is incomplete"
             )
@@ -3428,11 +3854,7 @@ class DataOperationsControlPlane:
             coverages = tuple(
                 session.scalars(
                     select(EquityEventWindowCoverage)
-                    .where(
-                        EquityEventWindowCoverage.coverage_version.in_(
-                            coverage_versions
-                        )
-                    )
+                    .where(EquityEventWindowCoverage.coverage_version.in_(coverage_versions))
                     .order_by(
                         EquityEventWindowCoverage.security_id,
                         EquityEventWindowCoverage.coverage_from,
@@ -3451,9 +3873,7 @@ class DataOperationsControlPlane:
             publication = session.get(DatasetPublication, checkpoint.publication_id)
             release = session.get(DatasetRelease, checkpoint.release_id)
             record_count = sum(coverage.record_count for coverage in coverages)
-            publication_kind = (
-                "ZERO_RECORD_COVERAGE" if record_count == 0 else "DATA"
-            )
+            publication_kind = "ZERO_RECORD_COVERAGE" if record_count == 0 else "DATA"
             output = {
                 "datasetCode": run.dataset_code,
                 "partitionKey": checkpoint.partition_key,
@@ -3476,15 +3896,12 @@ class DataOperationsControlPlane:
                 or checkpoint.coverage_version != aggregate_version
                 or not coverage_versions
                 or len(coverage_versions) != len(set(coverage_versions))
-                or checkpoint.coverage_versions_json
-                != sorted(map(str, coverage_versions))
+                or checkpoint.coverage_versions_json != sorted(map(str, coverage_versions))
                 or len(coverages) != len(coverage_versions)
                 or not checkpoint_sources
                 or len(checkpoint_sources) != len(set(checkpoint_sources))
-                or checkpoint.source_batch_ids_json
-                != sorted(map(str, checkpoint_sources))
-                or self._hash(checkpoint.source_batch_ids_json)
-                != checkpoint.source_batch_hash
+                or checkpoint.source_batch_ids_json != sorted(map(str, checkpoint_sources))
+                or self._hash(checkpoint.source_batch_ids_json) != checkpoint.source_batch_hash
                 or self._hash(output) != checkpoint.output_hash
                 or not set(checkpoint_sources) <= execution_sources
                 or publication is None
@@ -3514,8 +3931,7 @@ class DataOperationsControlPlane:
             if isinstance(identity, Mapping) and (
                 len(coverages) != 1
                 or coverages[0].security_id != int(identity["securityId"])
-                or coverages[0].identifier_version_id
-                != UUID(str(identity["identifierVersionId"]))
+                or coverages[0].identifier_version_id != UUID(str(identity["identifierVersionId"]))
                 or coverages[0].coverage_scope != "INSTRUMENT"
                 or coverages[0].coverage_from != window_from
                 or coverages[0].coverage_to != window_to
@@ -3538,10 +3954,7 @@ class DataOperationsControlPlane:
             raise EquityBackfillPreconditionFailed(
                 "Equity backfill final event coverage is invalid"
             ) from error
-        if (
-            sealed_sources != execution_sources
-            or final_coverage_version != requested_final
-        ):
+        if sealed_sources != execution_sources or final_coverage_version != requested_final:
             raise EquityBackfillPreconditionFailed(
                 "Equity backfill event source or final coverage seal differs"
             )
@@ -3648,20 +4061,10 @@ class DataOperationsControlPlane:
                         None if coverage is None else str(coverage.coverage_version)
                     ),
                     "coverageFrom": (
-                        None
-                        if coverage is None
-                        else coverage.coverage_from.isoformat()
+                        None if coverage is None else coverage.coverage_from.isoformat()
                     ),
-                    "coverageTo": (
-                        None
-                        if coverage is None
-                        else coverage.coverage_to.isoformat()
-                    ),
-                    "publicationKind": (
-                        "DATA"
-                        if coverage is None
-                        else coverage.publication_kind
-                    ),
+                    "coverageTo": (None if coverage is None else coverage.coverage_to.isoformat()),
+                    "publicationKind": ("DATA" if coverage is None else coverage.publication_kind),
                     "partitionManifest": [
                         {
                             "partitionKey": checkpoint.partition_key,
@@ -3684,8 +4087,7 @@ class DataOperationsControlPlane:
                         for checkpoint in partition_checkpoints
                     ],
                     "releaseSourceBatchIds": [
-                        str(source_batch_id)
-                        for source_batch_id in release_source_batch_ids
+                        str(source_batch_id) for source_batch_id in release_source_batch_ids
                     ],
                     "executionSourceBatchIds": [
                         str(source_batch_id)
@@ -3727,9 +4129,7 @@ class DataOperationsControlPlane:
         }
         result_id = uuid5(run.run_id, f"equity-backfill-result:{run.target_index}")
         existing = session.scalar(
-            select(EquityBackfillChildResult).where(
-                EquityBackfillChildResult.run_id == run.run_id
-            )
+            select(EquityBackfillChildResult).where(EquityBackfillChildResult.run_id == run.run_id)
         )
         values = {
             "result_id": result_id,
@@ -3816,9 +4216,7 @@ class DataOperationsControlPlane:
         )
         state.audit_json = {
             "commandId": str(command.command_id),
-            "submissionId": (
-                None if command.submission_id is None else str(command.submission_id)
-            ),
+            "submissionId": (None if command.submission_id is None else str(command.submission_id)),
             "status": state.status,
             "resultHashes": [result.audit_hash for result in results],
         }
@@ -3841,7 +4239,22 @@ class DataOperationsControlPlane:
         """按 lease 的三分之一续租；发现 token 已失效后立即退出而不尝试复活。"""
         interval = max(1, _LEASE_SECONDS // 3)
         while not stop.wait(interval):
-            if not self.heartbeat(run_id=run_id, fencing_token=fencing_token):
+            try:
+                current = self.heartbeat(run_id=run_id, fencing_token=fencing_token)
+            except SQLAlchemyError as error:
+                # 续租事务未确认提交时不能把连接故障当作成功，也不能在后台重试而延长
+                # 不确定的 owner；停止心跳后由 lease 到期与 recovery 收敛，后续写入仍会
+                # 通过 `FencedExecution` 在事务内重验 token。
+                _LOGGER.warning(
+                    "数据运维心跳数据库事务失败（%s）；停止续租并等待租约回收",
+                    type(error).__name__,
+                    extra={
+                        "data_operation_run_id": str(run_id),
+                        "fencing_token": fencing_token,
+                    },
+                )
+                return
+            if not current:
                 return
 
     def reap_expired_slots(self) -> int:
@@ -4136,6 +4549,9 @@ class DataOperationsControlPlane:
             etf_all_profile_versions="DRAFT",
         )
         self._validate_etf_dataset_operation(selector, definition)
+        self._validate_margin_dataset_operation(selector, definition)
+        self._validate_index_dataset_selector(selector, definition)
+        self._validate_stock_connect_research_dataset_selector(selector, definition)
         policy = self._require_dict(request, "targetPolicy")
         frequency = self._require_dict(request, "frequency")
         frequency = self._validate_schedule(definition, mode, policy, frequency)
@@ -4721,7 +5137,12 @@ class DataOperationsControlPlane:
                 "observationDate": raw.get("observationDate"),
             }
             self._validate_etf_dataset_operation(target["selector"], definition)
+            self._validate_margin_dataset_operation(target["selector"], definition)
+            self._validate_index_dataset_selector(target["selector"], definition)
+            self._validate_stock_connect_research_dataset_selector(target["selector"], definition)
             self._validate_target_shape(target, definition)
+            self._validate_sector_bar_dataset_selector(target["selector"], definition)
+            self._validate_money_flow_dataset_operation(target, definition)
             normalized.append(target)
         return normalized
 
@@ -4832,7 +5253,6 @@ class DataOperationsControlPlane:
             )
         self._validated_datetime_text(raw.get("knownAt"), "knownAt")
         if raw.get("observationSemantics") not in {
-            "CURRENT_AT_EXECUTION",
             "DERIVED_FROM_EXACT_INPUTS",
             "FROZEN_PLAN_BOUNDARY",
         }:
@@ -4853,12 +5273,8 @@ class DataOperationsControlPlane:
                 detail="Equity backfill internal window is incomplete",
             )
         if backfill_from is not None and backfill_to is not None:
-            resolved_backfill_from = self._validated_date_text(
-                backfill_from, "backfillDateFrom"
-            )
-            resolved_backfill_to = self._validated_date_text(
-                backfill_to, "backfillDateTo"
-            )
+            resolved_backfill_from = self._validated_date_text(backfill_from, "backfillDateFrom")
+            resolved_backfill_to = self._validated_date_text(backfill_to, "backfillDateTo")
             if resolved_backfill_from > resolved_backfill_to:
                 raise OperationProblem(
                     status=422,
@@ -4914,9 +5330,11 @@ class DataOperationsControlPlane:
                 )
             self._validated_uuid_text(identity.get("identifierVersionId"), "identifierVersionId")
             self._validated_uuid_text(identity.get("instrumentId"), "instrumentId")
-            if identity.get("exchange") not in {"SSE", "SZSE", "BSE"} or not isinstance(
-                identity.get("symbol"), str
-            ) or re.fullmatch(r"[0-9]{6}", identity["symbol"]) is None:
+            if (
+                identity.get("exchange") not in {"SSE", "SZSE", "BSE"}
+                or not isinstance(identity.get("symbol"), str)
+                or re.fullmatch(r"[0-9]{6}", identity["symbol"]) is None
+            ):
                 raise OperationProblem(
                     status=422,
                     code="invalid-equity-backfill-intent",
@@ -5005,7 +5423,8 @@ class DataOperationsControlPlane:
                         intent=intent,
                         submission_id=submission_id,
                         source_snapshot=self._source_snapshot(
-                            self._definition(str(target["datasetCode"]))
+                            self._definition(str(target["datasetCode"])),
+                            target=target,
                         ),
                         child_statuses=frozenset({"SUBMITTING"}),
                     )
@@ -5068,10 +5487,9 @@ class DataOperationsControlPlane:
             raise EquityBackfillPreconditionFailed("Frozen child submission identity changed")
         if not 0 <= target_index < len(child.targets_json):
             raise EquityBackfillPreconditionFailed("Frozen child target index is out of range")
-        if (
-            child.targets_json[target_index] != dict(target)
-            or child.intents_json[target_index] != dict(intent)
-        ):
+        if child.targets_json[target_index] != dict(target) or child.intents_json[
+            target_index
+        ] != dict(intent):
             raise EquityBackfillPreconditionFailed("Frozen child target or intent changed")
         if len(child.targets_json) != len(child.intents_json) or child.target_count != len(
             child.targets_json
@@ -5099,12 +5517,9 @@ class DataOperationsControlPlane:
             intent.get("rosterHash") != plan.roster_hash
             or intent.get("referenceBundlePublicationId")
             != str(plan.reference_bundle_publication_id)
-            or intent.get("referenceBundleDataVersion")
-            != str(plan.reference_bundle_data_version)
+            or intent.get("referenceBundleDataVersion") != str(plan.reference_bundle_data_version)
             or intent.get("referenceManifestHash") != plan.reference_manifest_hash
-            or self._validated_date_text(
-                intent.get("snapshotObservedOn"), "snapshotObservedOn"
-            )
+            or self._validated_date_text(intent.get("snapshotObservedOn"), "snapshotObservedOn")
             != plan.snapshot_observed_on
             or self._validated_date_text(intent.get("marketAsOf"), "marketAsOf")
             != plan.market_as_of
@@ -5114,18 +5529,12 @@ class DataOperationsControlPlane:
         self._validate_equity_backfill_publications(session, plan)
         dataset_code = str(target.get("datasetCode"))
         expected_observation_semantics = (
-            "CURRENT_AT_EXECUTION"
-            if dataset_code in _EQUITY_BACKFILL_CURRENT_DATASETS
-            else (
-                "DERIVED_FROM_EXACT_INPUTS"
-                if dataset_code in _EQUITY_BACKFILL_DERIVED_DATASETS
-                else "FROZEN_PLAN_BOUNDARY"
-            )
+            "DERIVED_FROM_EXACT_INPUTS"
+            if dataset_code in _EQUITY_BACKFILL_DERIVED_DATASETS
+            else "FROZEN_PLAN_BOUNDARY"
         )
         if intent.get("observationSemantics") != expected_observation_semantics:
-            raise EquityBackfillPreconditionFailed(
-                "Frozen dataset observation semantics changed"
-            )
+            raise EquityBackfillPreconditionFailed("Frozen dataset observation semantics changed")
         source = session.get(EquityBackfillPlanSource, (plan_id, dataset_code))
         if source is None:
             raise EquityBackfillPreconditionFailed("Frozen source contract is missing")
@@ -5133,8 +5542,7 @@ class DataOperationsControlPlane:
             child.source_hashes_json.get(dataset_code) != source.source_snapshot_hash
             or intent.get("sourceSnapshotHash") != source.source_snapshot_hash
             or intent.get("sourceContractHash") != source.source_contract_hash
-            or intent.get("sourceSupportedExchanges")
-            != source.supported_exchanges_json
+            or intent.get("sourceSupportedExchanges") != source.supported_exchanges_json
             or source.source_snapshot_json != source_snapshot
             or self._hash(source_snapshot) != source.source_snapshot_hash
         ):
@@ -5215,9 +5623,7 @@ class DataOperationsControlPlane:
                 )
                 .where(
                     EquityBackfillChildSpec.plan_id == child.plan_id,
-                    EquityBackfillChildSpec.child_key.in_(
-                        child.completion_dependency_keys_json
-                    ),
+                    EquityBackfillChildSpec.child_key.in_(child.completion_dependency_keys_json),
                 )
             ).all()
             terminal_statuses = {
@@ -5230,8 +5636,7 @@ class DataOperationsControlPlane:
             if len(completion_dependencies) != len(
                 set(child.completion_dependency_keys_json)
             ) or any(
-                state.status not in terminal_statuses
-                for _spec, state in completion_dependencies
+                state.status not in terminal_statuses for _spec, state in completion_dependencies
             ):
                 raise EquityBackfillPreconditionFailed(
                     "Equity backfill completion dependencies are not terminal"
@@ -5349,9 +5754,7 @@ class DataOperationsControlPlane:
                 or publication.data_version != data_version
                 or publication.quality_status != "passed"
             ):
-                raise EquityBackfillPreconditionFailed(
-                    "Frozen lifecycle publication changed"
-                )
+                raise EquityBackfillPreconditionFailed("Frozen lifecycle publication changed")
         if len(plan.lifecycle_publications_json) != 3:
             raise EquityBackfillPreconditionFailed("Lifecycle publication coverage is incomplete")
         bundle = session.get(
@@ -5367,9 +5770,7 @@ class DataOperationsControlPlane:
             or bundle.quality_status != "passed"
             or self._hash(plan.reference_manifest_json) != plan.reference_manifest_hash
         ):
-            raise EquityBackfillPreconditionFailed(
-                "Frozen equity reference bundle changed"
-            )
+            raise EquityBackfillPreconditionFailed("Frozen equity reference bundle changed")
         if session.get(DatasetRelease, bundle.release_id) is None:
             raise EquityBackfillPreconditionFailed(
                 "Frozen equity reference bundle release is missing"
@@ -5395,9 +5796,7 @@ class DataOperationsControlPlane:
                 component_publication_id = UUID(str(component["publicationId"]))
                 component_data_version = UUID(str(component["dataVersion"]))
                 release_value = component["releaseId"]
-                component_release_id = (
-                    None if release_value is None else UUID(str(release_value))
-                )
+                component_release_id = None if release_value is None else UUID(str(release_value))
                 component_source_batch_ids = tuple(
                     UUID(str(value)) for value in component["sourceBatchIds"]
                 )
@@ -5428,9 +5827,7 @@ class DataOperationsControlPlane:
                 or component_publication.quality_status not in {"passed", "warned"}
                 or not component_source_batch_ids
             ):
-                raise EquityBackfillPreconditionFailed(
-                    "Frozen equity reference component changed"
-                )
+                raise EquityBackfillPreconditionFailed("Frozen equity reference component changed")
             source_batches = session.scalars(
                 select(SourceBatch).where(
                     SourceBatch.source_batch_id.in_(component_source_batch_ids)
@@ -5444,8 +5841,7 @@ class DataOperationsControlPlane:
             row.component_partition_key: row.component_data_version
             for row in session.scalars(
                 select(DatasetPublicationComponent).where(
-                    DatasetPublicationComponent.aggregate_publication_id
-                    == bundle.publication_id
+                    DatasetPublicationComponent.aggregate_publication_id == bundle.publication_id
                 )
             ).all()
         }
@@ -5482,9 +5878,7 @@ class DataOperationsControlPlane:
             or seal.page_count != len(pages)
             or sum(page.child_count for page in pages) != plan.child_count
         ):
-            raise EquityBackfillPreconditionFailed(
-                "Equity backfill plan is not completely sealed"
-            )
+            raise EquityBackfillPreconditionFailed("Equity backfill plan is not completely sealed")
         expected_first = 1
         page_roster: list[dict[str, Any]] = []
         for expected_page_number, page in enumerate(pages, start=1):
@@ -5512,9 +5906,7 @@ class DataOperationsControlPlane:
                 "Equity backfill page roster differs from its seal"
             )
 
-    def _validate_equity_backfill_roster(
-        self, session: Session, plan: EquityBackfillPlan
-    ) -> None:
+    def _validate_equity_backfill_roster(self, session: Session, plan: EquityBackfillPlan) -> None:
         """重验全部计划身份与实时双时态行，覆盖全局事件和 discovery 执行。"""
         rows = session.scalars(
             select(EquityBackfillPlanIdentity)
@@ -5616,21 +6008,6 @@ class DataOperationsControlPlane:
                 raise EquityBackfillPreconditionFailed(
                     "Target window exceeds identity, source or plan boundary"
                 )
-        elif target.get("datasetCode") in {
-            "equity.profile",
-            "equity.share_capital.reported",
-            "financial.report",
-            "financial.derived-metric",
-        } and not (
-            identity.effective_from <= plan.snapshot_observed_on
-            and (
-                identity.effective_to is None
-                or plan.snapshot_observed_on < identity.effective_to
-            )
-        ):
-            raise EquityBackfillPreconditionFailed(
-                "Current-only target uses an identity closed at snapshotObservedOn"
-            )
 
     def _validate_equity_backfill_global_window(
         self,
@@ -5644,8 +6021,7 @@ class DataOperationsControlPlane:
             end = self._validated_date_text(target.get("dateTo"), "dateTo")
             target_boundary = (
                 plan.snapshot_observed_on
-                if target.get("datasetCode")
-                == "equity.corporate_event.earnings.reported"
+                if target.get("datasetCode") == "equity.corporate_event.earnings.reported"
                 else plan.market_as_of
             )
             if (
@@ -5660,14 +6036,11 @@ class DataOperationsControlPlane:
             dataset_code = target.get("datasetCode")
             expected_observation_date = (
                 plan.market_as_of
-                if dataset_code
-                in {"equity.trading_status.1d", "equity.discovery.eod"}
+                if dataset_code in {"equity.trading_status.1d", "equity.discovery.eod"}
                 else plan.snapshot_observed_on
             )
             if (
-                self._validated_date_text(
-                    target.get("observationDate"), "observationDate"
-                )
+                self._validated_date_text(target.get("observationDate"), "observationDate")
                 != expected_observation_date
             ):
                 raise EquityBackfillPreconditionFailed(
@@ -5803,6 +6176,14 @@ class DataOperationsControlPlane:
     ) -> dict[str, Any]:
         """严格规范化合同允许的业务选择器，拒绝任意 Provider 参数和未知字段。"""
         kind = self._require_string(raw, "kind", max_length=24)
+        if kind == "MONEY_FLOW":
+            if kind not in definition.selector_kinds:
+                raise OperationProblem(
+                    status=422,
+                    code="unsupported-target-selector",
+                    detail="Dataset does not support this target selector",
+                )
+            return self._money_flow_selector(raw, definition)
         allowed_keys: dict[str, set[str]] = {
             "GLOBAL": {"kind"},
             "INSTRUMENT": {"kind", "exchange", "symbol"},
@@ -5813,6 +6194,7 @@ class DataOperationsControlPlane:
             "ETF": set(raw),
             "MARGIN": {"kind", "operation", "venue", "security"},
             "STOCK_CONNECT": {"kind", "operation", "channel", "direction"},
+            "STOCK_CONNECT_RESEARCH": {"kind", "operation", "channel", "direction"},
             "TRADING_EVENT": {"kind", "operation"},
             "INDEX": {"kind", "administrator", "capability", "indexCode"},
         }
@@ -5862,17 +6244,150 @@ class DataOperationsControlPlane:
             return self._margin_selector(raw)
         if kind == "STOCK_CONNECT":
             return self._stock_connect_selector(raw)
+        if kind == "STOCK_CONNECT_RESEARCH":
+            return self._stock_connect_research_selector(raw)
         if kind == "TRADING_EVENT":
             return {
                 "kind": kind,
                 "operation": self._enum(raw, "operation", {"DRAGON_TIGER", "BLOCK_TRADE"}),
             }
-        return {
-            "kind": kind,
-            "administrator": self._enum(raw, "administrator", {"CSI", "CNI"}),
-            "capability": self._require_string(raw, "capability", max_length=120),
-            "indexCode": self._require_string(raw, "indexCode", max_length=64),
-        }
+        if kind == "INDEX":
+            return self._index_selector(raw)
+        raise OperationProblem(
+            status=422,
+            code="invalid-target-selector",
+            detail="Target selector kind is invalid",
+        )
+
+    def _money_flow_selector(
+        self,
+        raw: dict[str, Any],
+        definition: DatasetDefinition,
+    ) -> dict[str, Any]:
+        """冻结资金流唯一方法学、范围与窗口，拒绝把自由 AKShare 参数透传到 adapter。"""
+        if definition.dataset_code == _MONEY_FLOW_DAILY_DATASET:
+            operation = raw.get("operation")
+            scope = raw.get("scope")
+            if operation != "DAILY" or scope not in {"EQUITY", "SECTOR", "MARKET"}:
+                raise OperationProblem(
+                    status=422,
+                    code="invalid-target-selector",
+                    detail="Money-flow daily selector is invalid",
+                )
+            allowed = {
+                "EQUITY": {"kind", "operation", "scope", "exchange", "symbol"},
+                "SECTOR": {"kind", "operation", "scope", "scheme", "sectorCode"},
+                "MARKET": {"kind", "operation", "scope"},
+            }[scope]
+            if set(raw) != allowed:
+                raise OperationProblem(
+                    status=422,
+                    code="invalid-target-selector",
+                    detail="Money-flow daily selector shape is invalid",
+                )
+            result: dict[str, Any] = {
+                "kind": "MONEY_FLOW",
+                "operation": "DAILY",
+                "scope": scope,
+            }
+            if scope == "EQUITY":
+                result.update(
+                    {
+                        "exchange": self._exchange(raw, "exchange"),
+                        "symbol": self._pattern_string(
+                            raw, "symbol", max_length=6, pattern=r"[0-9]{6}"
+                        ),
+                    }
+                )
+            elif scope == "SECTOR":
+                scheme = self._require_string(raw, "scheme", max_length=64)
+                if scheme != "eastmoney.industry":
+                    raise OperationProblem(
+                        status=422,
+                        code="money-flow-sector-scheme-unsupported",
+                        detail="EastMoney daily sector money flow only supports eastmoney.industry",
+                    )
+                result.update(
+                    {
+                        "scheme": scheme,
+                        "sectorCode": self._require_string(raw, "sectorCode", max_length=120),
+                    }
+                )
+            return result
+        if definition.dataset_code != _MONEY_FLOW_RANKING_DATASET:
+            raise OperationProblem(
+                status=422,
+                code="money-flow-dataset-operation-mismatch",
+                detail="Money-flow selector is not valid for this dataset",
+            )
+        if raw.get("operation") != "RANKING":
+            raise OperationProblem(
+                status=422,
+                code="invalid-target-selector",
+                detail="Money-flow ranking operation is invalid",
+            )
+        methodology = raw.get("methodology")
+        scope = raw.get("scope")
+        if methodology == "EASTMONEY_ORDER_SIZE":
+            if scope == "EQUITY":
+                allowed = {"kind", "operation", "methodology", "scope", "window"}
+                windows = {"TODAY", "DAY_3", "DAY_5", "DAY_10"}
+            elif scope == "SECTOR":
+                allowed = {
+                    "kind",
+                    "operation",
+                    "methodology",
+                    "scope",
+                    "window",
+                    "sectorType",
+                }
+                windows = {"TODAY", "DAY_5", "DAY_10"}
+            else:
+                allowed, windows = set(), set()
+            if set(raw) != allowed or raw.get("window") not in windows:
+                raise OperationProblem(
+                    status=422,
+                    code="invalid-target-selector",
+                    detail="EastMoney money-flow ranking selector is invalid",
+                )
+            result = {
+                "kind": "MONEY_FLOW",
+                "operation": "RANKING",
+                "methodology": methodology,
+                "scope": scope,
+                "window": str(raw["window"]),
+            }
+            if scope == "SECTOR":
+                result["sectorType"] = self._enum(
+                    raw,
+                    "sectorType",
+                    {"INDUSTRY", "CONCEPT", "REGION"},
+                )
+            return result
+        if methodology == "THS_TRADE_DIRECTION":
+            allowed = {"kind", "operation", "methodology", "scope", "window"}
+            if (
+                set(raw) != allowed
+                or scope not in {"EQUITY", "INDUSTRY", "CONCEPT"}
+                or raw.get("window") not in {"INTRADAY", "DAY_3", "DAY_5", "DAY_10", "DAY_20"}
+            ):
+                raise OperationProblem(
+                    status=422,
+                    code="invalid-target-selector",
+                    detail="THS money-flow ranking selector is invalid",
+                )
+            return {
+                "kind": "MONEY_FLOW",
+                "operation": "RANKING",
+                "methodology": methodology,
+                "scope": str(scope),
+                "window": str(raw["window"]),
+            }
+        raise OperationProblem(
+            status=422,
+            code="invalid-target-selector",
+            detail="Money-flow ranking methodology is invalid",
+        )
 
     def _instrument_selector(self, raw: dict[str, Any]) -> dict[str, Any]:
         """规范化股票交易所与代码，作为顶层或保证金嵌套选择器复用。"""
@@ -6022,28 +6537,171 @@ class DataOperationsControlPlane:
                 detail="ETF dataset and selector operation do not match",
             )
 
+    def _validate_margin_dataset_operation(
+        self,
+        selector: dict[str, Any],
+        definition: DatasetDefinition,
+    ) -> None:
+        """绑定两融数据集、场所和可真实执行的全场所抓取范围。
+
+        当前 `AKShare` 两融接口只支持沪深全场所批次；不能接受单证券后悄然把整所
+        明细入库，且上交所资格名单没有可用来源接口，必须在受理前明确拒绝。
+        """
+        if selector.get("kind") != "MARGIN":
+            return
+        expected = {
+            "market.margin.market.1d.reported": "MARKET",
+            "market.margin.security.1d.reported": "SECURITY",
+            "market.margin.eligibility.reported": "ELIGIBILITY",
+        }.get(definition.dataset_code)
+        if expected is None or selector.get("operation") != expected:
+            raise OperationProblem(
+                status=422,
+                code="margin-dataset-operation-mismatch",
+                detail="Margin dataset and selector operation do not match",
+            )
+        if selector.get("security") is not None:
+            raise OperationProblem(
+                status=422,
+                code="margin-security-selector-unsupported",
+                detail="Margin P0 only supports venue-wide source batches",
+            )
+        venue = selector.get("venue")
+        if expected == "ELIGIBILITY" and venue not in {"SZSE", "BSE"}:
+            raise OperationProblem(
+                status=422,
+                code="margin-eligibility-venue-unsupported",
+                detail="AKShare margin eligibility is only available for SZSE or BSE",
+            )
+        if expected in {"MARKET", "SECURITY"} and venue not in {"SSE", "SZSE"}:
+            raise OperationProblem(
+                status=422,
+                code="margin-venue-unsupported",
+                detail="AKShare margin market and security data only support SSE or SZSE",
+            )
+
+    @staticmethod
+    def _validate_index_dataset_selector(
+        selector: dict[str, Any],
+        definition: DatasetDefinition,
+    ) -> None:
+        """把六个指数 research 数据集绑定到唯一管理人、能力和代码空值语义。"""
+        if selector.get("kind") != "INDEX":
+            return
+        expected = _INDEX_DATASET_TARGETS.get(definition.dataset_code)
+        if expected is None:
+            raise OperationProblem(
+                status=422,
+                code="index-dataset-selector-unsupported",
+                detail="Index selector is not available for this dataset",
+            )
+        administrator, capability, requires_index_code = expected
+        if (
+            selector.get("administrator") != administrator
+            or selector.get("capability") != capability
+            or (requires_index_code and not isinstance(selector.get("indexCode"), str))
+            or (not requires_index_code and selector.get("indexCode") is not None)
+        ):
+            raise OperationProblem(
+                status=422,
+                code="index-dataset-selector-mismatch",
+                detail="Index dataset and selector do not match",
+            )
+
+    @staticmethod
+    def _validate_stock_connect_research_dataset_selector(
+        selector: dict[str, Any],
+        definition: DatasetDefinition,
+    ) -> None:
+        """隔离 AKShare 港通统计 research 命令，禁止复用官方完整包或未登记数据集。"""
+        if selector.get("kind") != "STOCK_CONNECT_RESEARCH":
+            return
+        if (
+            definition.dataset_code != _STOCK_CONNECT_RESEARCH_DATASET
+            or selector.get("operation") != "MARKET_STAT"
+        ):
+            raise OperationProblem(
+                status=422,
+                code="stock-connect-research-dataset-selector-mismatch",
+                detail="Stock-connect research dataset and selector do not match",
+            )
+
+    def _validate_money_flow_dataset_operation(
+        self,
+        target: dict[str, Any],
+        definition: DatasetDefinition,
+    ) -> None:
+        """把资金流数据集和 selector 绑定到真实 SDK 能力，并阻断伪历史排行。"""
+        selector = target["selector"]
+        if selector.get("kind") != "MONEY_FLOW":
+            return
+        if definition.dataset_code == _MONEY_FLOW_DAILY_DATASET:
+            if selector.get("operation") != "DAILY":
+                raise OperationProblem(
+                    status=422,
+                    code="money-flow-dataset-operation-mismatch",
+                    detail="Money-flow daily dataset requires DAILY selector",
+                )
+            return
+        if (
+            definition.dataset_code != _MONEY_FLOW_RANKING_DATASET
+            or selector.get("operation") != "RANKING"
+        ):
+            raise OperationProblem(
+                status=422,
+                code="money-flow-dataset-operation-mismatch",
+                detail="Money-flow ranking dataset requires RANKING selector",
+            )
+        observation = target.get("observationDate")
+        if (
+            not isinstance(observation, str)
+            or date.fromisoformat(observation) != self._now().astimezone(_SHANGHAI).date()
+        ):
+            # 上游接口没有历史日期参数；禁止以今日 SDK 页面倒填任意历史 observationDate。
+            raise OperationProblem(
+                status=422,
+                code="money-flow-ranking-historical-observation-unsupported",
+                detail="Money-flow ranking only supports the current Shanghai observation date",
+            )
+
+    @staticmethod
+    def _validate_sector_bar_dataset_selector(
+        selector: dict[str, Any],
+        definition: DatasetDefinition,
+    ) -> None:
+        """限定东财板块原生 K 线只能使用其行业、概念目录身份。"""
+        if definition.dataset_code not in _SECTOR_BAR_DATASETS:
+            return
+        if selector.get("kind") not in {"GLOBAL", "SCHEME", "SECTOR"}:
+            raise OperationProblem(
+                status=422,
+                code="sector-bar-selector-unsupported",
+                detail="Sector bar dataset requires a sector catalog selector",
+            )
+        scheme = selector.get("scheme")
+        if scheme is not None and scheme not in {"eastmoney.industry", "eastmoney.concept"}:
+            raise OperationProblem(
+                status=422,
+                code="sector-bar-scheme-unsupported",
+                detail="EastMoney sector bars only support industry or concept schemes",
+            )
+
     def _margin_selector(self, raw: dict[str, Any]) -> dict[str, Any]:
-        """校验两融市场、证券和资格范围，嵌套证券不得携带额外字段。"""
+        """校验两融场所、操作和全场所批次范围，禁止尚未实现的单证券筛选。"""
         security = raw["security"]
         if security is not None:
-            if not isinstance(security, dict) or set(security) != {"kind", "exchange", "symbol"}:
-                raise OperationProblem(
-                    status=422,
-                    code="invalid-target-selector",
-                    detail="Margin security selector is invalid",
-                )
-            if security.get("kind") != "INSTRUMENT":
-                raise OperationProblem(
-                    status=422,
-                    code="invalid-target-selector",
-                    detail="Margin security selector is invalid",
-                )
-            security = self._instrument_selector(security)
+            raise OperationProblem(
+                status=422,
+                code="margin-security-selector-unsupported",
+                detail="Margin security selector must be null",
+            )
+        operation = self._enum(raw, "operation", {"MARKET", "SECURITY", "ELIGIBILITY"})
+        venue = self._enum(raw, "venue", {"SSE", "SZSE", "BSE"})
         return {
             "kind": "MARGIN",
-            "operation": self._enum(raw, "operation", {"MARKET", "SECURITY", "ELIGIBILITY"}),
-            "venue": self._exchange(raw, "venue"),
-            "security": security,
+            "operation": operation,
+            "venue": venue,
+            "security": None,
         }
 
     def _stock_connect_selector(self, raw: dict[str, Any]) -> dict[str, Any]:
@@ -6061,6 +6719,62 @@ class DataOperationsControlPlane:
             "operation": self._enum(raw, "operation", {"MARKET"}),
             "channel": self._enum(raw, "channel", {"ALL", "SH", "SZ"}),
             "direction": direction,
+        }
+
+    def _stock_connect_research_selector(self, raw: dict[str, Any]) -> dict[str, Any]:
+        """校验 AKShare 港通统计 research 通道范围，不让其伪装为官方完整包。"""
+        direction = raw["direction"]
+        if direction not in {"NORTHBOUND", "SOUTHBOUND", None}:
+            raise OperationProblem(
+                status=422,
+                code="invalid-target-selector",
+                detail="Stock-connect research direction is invalid",
+            )
+        return {
+            "kind": "STOCK_CONNECT_RESEARCH",
+            "operation": self._enum(raw, "operation", {"MARKET_STAT"}),
+            "channel": self._enum(raw, "channel", {"ALL", "SH", "SZ"}),
+            "direction": direction,
+        }
+
+    def _index_selector(self, raw: dict[str, Any]) -> dict[str, Any]:
+        """校验指数研究观察的管理人、当前快照能力和 indexCode 空值规则。"""
+        administrator = self._enum(raw, "administrator", {"CSI", "CNI"})
+        capability = self._enum(
+            raw,
+            "capability",
+            {"index.catalog.snapshot", "index.constituent.snapshot", "index.weight.snapshot"},
+        )
+        index_code = raw["indexCode"]
+        if capability == "index.catalog.snapshot":
+            if index_code is not None:
+                raise OperationProblem(
+                    status=422,
+                    code="invalid-target-selector",
+                    detail="Index catalog selector requires null indexCode",
+                )
+            return {
+                "kind": "INDEX",
+                "administrator": administrator,
+                "capability": capability,
+                "indexCode": None,
+            }
+        if index_code is None:
+            raise OperationProblem(
+                status=422,
+                code="invalid-target-selector",
+                detail="Index snapshot selector requires indexCode",
+            )
+        return {
+            "kind": "INDEX",
+            "administrator": administrator,
+            "capability": capability,
+            "indexCode": self._pattern_string(
+                raw,
+                "indexCode",
+                max_length=8,
+                pattern=r"[A-Z0-9]{6,8}",
+            ),
         }
 
     def _exchange(self, raw: dict[str, Any], key: str) -> str:
@@ -6189,23 +6903,85 @@ class DataOperationsControlPlane:
             raise RuntimeError("share capital roster contains duplicate permanent identities")
         return roster
 
-    def _preflight_target(
+    def _freeze_sector_bar_roster(
         self,
-        target: dict[str, Any],
+        session: Session,
         *,
-        etf_universe: EtfUniverseSnapshot | None = None,
-        equity_roster: tuple[dict[str, str], ...] | None = None,
-    ) -> dict[str, Any]:
-        """产生有界预检；互联互通额外在线验证官方 entitlement 与最终落地。"""
-        definition = self._definition(target["datasetCode"])
-        providers = self._providers_for(definition)
-        eligible = (
+        target: dict[str, Any],
+    ) -> tuple[dict[str, str], ...]:
+        """冻结东财板块 K 线的 ACTIVE 目录身份，执行和重试绝不读取后来新增板块。"""
+        selector = target["selector"]
+        statement = select(
+            SectorEntity.sector_key,
+            SectorEntity.scheme,
+            SectorEntity.sector_code,
+        ).where(
+            SectorEntity.status == "ACTIVE",
+            SectorEntity.scheme.in_(("eastmoney.industry", "eastmoney.concept")),
+        )
+        if selector["kind"] in {"SCHEME", "SECTOR"}:
+            statement = statement.where(SectorEntity.scheme == selector["scheme"])
+        if selector["kind"] == "SECTOR":
+            statement = statement.where(SectorEntity.sector_code == selector["sectorCode"])
+        rows = session.execute(
+            statement.order_by(
+                SectorEntity.scheme,
+                SectorEntity.sector_code,
+                SectorEntity.sector_key,
+            )
+        ).mappings()
+        roster = tuple(
+            {
+                "sectorKey": str(row["sector_key"]),
+                "scheme": str(row["scheme"]),
+                "sectorCode": str(row["sector_code"]),
+            }
+            for row in rows
+        )
+        if selector["kind"] == "SECTOR" and len(roster) != 1:
+            raise OperationProblem(
+                status=409,
+                code="sector-catalog-identity-unavailable",
+                detail="Selected active EastMoney sector is missing or ambiguous",
+            )
+        if len({item["sectorKey"] for item in roster}) != len(roster) or len(
+            {(item["scheme"], item["sectorCode"]) for item in roster}
+        ) != len(roster):
+            raise RuntimeError("sector bar roster contains duplicate identities")
+        return roster
+
+    def _technical_preflight_eligible(
+        self,
+        definition: DatasetDefinition,
+        providers: tuple[str, ...],
+    ) -> bool:
+        """仅按可执行技术条件判断预检资格，来源准入元数据只保留审计用途。
+
+        `approvalStatus`、`rightsStatus` 与 `licenseScope` 会随 run 快照冻结，方便追溯来源
+        声明；它们不代表 adapter 连通性、载荷结构或质量结论，不能阻断 command、dispatcher
+        或 fenced executor。真正的技术失败仍由已注册 provider、能力匹配、配置开关、在线探针
+        与后续 schema/质量门决定。
+        """
+        return (
             not definition.model_only
             and (bool(providers) or definition.providerless)
             and definition.dispatcher_ready
             and definition.config_enabled
             and bool(definition.modes)
         )
+
+    def _preflight_target(
+        self,
+        target: dict[str, Any],
+        *,
+        etf_universe: EtfUniverseSnapshot | None = None,
+        equity_roster: tuple[dict[str, str], ...] | None = None,
+        sector_bar_roster: tuple[dict[str, str], ...] | None = None,
+    ) -> dict[str, Any]:
+        """产生有界预检；互联互通额外在线验证官方 entitlement 与最终落地。"""
+        definition = self._definition(target["datasetCode"])
+        providers = self._providers_for(definition, target=target)
+        eligible = self._technical_preflight_eligible(definition, providers)
         membership_historical_snapshot = (
             definition.dataset_code == "sector.membership.release"
             and target["mode"] == "OBSERVATION_DATE"
@@ -6409,7 +7185,12 @@ class DataOperationsControlPlane:
         resolved_from = target["dateFrom"]
         resolved_to = target["dateTo"] or target["observationDate"]
         selector = target["selector"]
-        if selector.get("kind") == "ETF" and selector.get("operation") != "MASTER":
+        if definition.dataset_code in _AKSHARE_BATCHED_DATASETS:
+            resolved_from, resolved_to = self._resolve_akshare_batched_window(
+                target,
+                anchor_date=self._now().astimezone(_SHANGHAI).date(),
+            )
+        elif selector.get("kind") == "ETF" and selector.get("operation") != "MASTER":
             resolved_from, resolved_to = self._resolve_etf_window(
                 target,
                 anchor_date=self._now().astimezone(_SHANGHAI).date(),
@@ -6420,6 +7201,9 @@ class DataOperationsControlPlane:
             eligible=eligible,
             etf_universe=etf_universe,
             equity_roster=equity_roster,
+            sector_bar_roster=sector_bar_roster,
+            resolved_from=resolved_from,
+            resolved_to=resolved_to,
         )
         membership_catalog_empty = (
             definition.dataset_code == "sector.membership.release"
@@ -6428,6 +7212,14 @@ class DataOperationsControlPlane:
         )
         if membership_catalog_empty:
             # 没有 ACTIVE 目录时执行必然失败，预检直接阻断并要求先完成板块目录同步。
+            eligible = False
+        sector_bar_catalog_empty = (
+            definition.dataset_code in _SECTOR_BAR_DATASETS
+            and eligible
+            and estimated_partitions == 0
+        )
+        if sector_bar_catalog_empty:
+            # K 线只能基于预检冻结的 ACTIVE 东财目录，空名单不可提交空 publication。
             eligible = False
         if (
             eligible
@@ -6445,7 +7237,14 @@ class DataOperationsControlPlane:
             "eligible": eligible,
             "estimatedPartitions": estimated_partitions,
             "estimatedProviderCalls": (
-                0 if eligible and definition.providerless else estimated_partitions
+                self._estimated_provider_calls(
+                    target,
+                    definition=definition,
+                    eligible=eligible,
+                    estimated_partitions=estimated_partitions,
+                    resolved_from=resolved_from,
+                    resolved_to=resolved_to,
+                )
             ),
             "resolvedDateFrom": resolved_from,
             "resolvedDateTo": resolved_to,
@@ -6455,6 +7254,8 @@ class DataOperationsControlPlane:
             result["warnings"] = ["东财板块成分仅支持当前观察日，不能伪装为历史快照"]
         elif membership_catalog_empty:
             result["warnings"] = ["当前没有 ACTIVE 板块目录，请先同步 sector.catalog.raw"]
+        elif sector_bar_catalog_empty:
+            result["warnings"] = ["当前没有可同步的 ACTIVE 东财板块，请先同步 sector.catalog.raw"]
         if etf_universe is not None:
             result["universeCount"] = etf_universe.count
             result["universeHash"] = etf_universe.universe_hash
@@ -6463,6 +7264,9 @@ class DataOperationsControlPlane:
         if equity_roster is not None:
             result["equityInstrumentRoster"] = list(equity_roster)
             result["equityInstrumentRosterHash"] = self._hash(equity_roster)
+        if sector_bar_roster is not None:
+            result["sectorBarRoster"] = list(sector_bar_roster)
+            result["sectorBarRosterHash"] = self._hash(sector_bar_roster)
         if source_checks:
             result["sourceChecks"] = [
                 {
@@ -6492,11 +7296,33 @@ class DataOperationsControlPlane:
         eligible: bool,
         etf_universe: EtfUniverseSnapshot | None = None,
         equity_roster: tuple[dict[str, str], ...] | None = None,
+        sector_bar_roster: tuple[dict[str, str], ...] | None = None,
+        resolved_from: str | None = None,
+        resolved_to: str | None = None,
     ) -> int:
         """按真实 selector 粒度估算 Provider 调用，避免把全市场逐证券任务显示成一次调用。"""
         if not eligible:
             return 0
         selector = target["selector"]
+        if definition.dataset_code in _SECTOR_BAR_DATASETS:
+            if sector_bar_roster is None:
+                raise RuntimeError("frozen sector bar roster is required for preflight")
+            if not isinstance(resolved_from, str) or not isinstance(resolved_to, str):
+                raise RuntimeError("sector bar target is missing its resolved date window")
+            return len(sector_bar_roster) * _akshare_batched_partition_count(
+                start=date.fromisoformat(resolved_from),
+                end=date.fromisoformat(resolved_to),
+                dataset_code=definition.dataset_code,
+            )
+        if definition.dataset_code in _AKSHARE_BATCHED_DATASETS:
+            if not isinstance(resolved_from, str) or not isinstance(resolved_to, str):
+                raise RuntimeError("AKShare batched target is missing its resolved date window")
+            start, end = date.fromisoformat(resolved_from), date.fromisoformat(resolved_to)
+            return _akshare_batched_partition_count(
+                start=start,
+                end=end,
+                dataset_code=definition.dataset_code,
+            )
         if selector.get("kind") == "ETF" and selector.get("scope") == "ALL_ETFS":
             if etf_universe is None:
                 raise RuntimeError("frozen ETF universe is required for ALL_ETFS preflight")
@@ -6528,6 +7354,37 @@ class DataOperationsControlPlane:
                 return int(session.execute(statement).scalar_one())
         return 1
 
+    def _estimated_provider_calls(
+        self,
+        target: dict[str, Any],
+        *,
+        definition: DatasetDefinition,
+        eligible: bool,
+        estimated_partitions: int,
+        resolved_from: str | None,
+        resolved_to: str | None,
+    ) -> int:
+        """按 adapter 实际调用粒度估算来源请求，逐日两融接口不能伪装成单次调用。"""
+        if not eligible:
+            return 0
+        if definition.providerless:
+            return 0
+        if definition.dataset_code not in _AKSHARE_BATCHED_DATASETS:
+            return estimated_partitions
+        if not isinstance(resolved_from, str) or not isinstance(resolved_to, str):
+            raise RuntimeError("AKShare batched target is missing its resolved date window")
+        start, end = date.fromisoformat(resolved_from), date.fromisoformat(resolved_to)
+        selector = target["selector"]
+        if definition.dataset_code in {
+            "market.margin.security.1d.reported",
+            "market.margin.eligibility.reported",
+        } or (
+            definition.dataset_code == "market.margin.market.1d.reported"
+            and selector.get("venue") == "SZSE"
+        ):
+            return (end - start).days + 1
+        return estimated_partitions
+
     def _resolve_etf_window(
         self,
         target: dict[str, Any],
@@ -6546,6 +7403,24 @@ class DataOperationsControlPlane:
         if mode == "DATE_RANGE":
             return str(target["dateFrom"]), str(target["dateTo"])
         raise RuntimeError("ETF preflight mode has no frozen date window")
+
+    def _resolve_akshare_batched_window(
+        self,
+        target: dict[str, Any],
+        *,
+        anchor_date: date,
+    ) -> tuple[str, str]:
+        """冻结两融和真实合约日线的日期边界，续跑绝不因跨日而扩展请求范围。"""
+        mode = target["mode"]
+        if mode == "FULL":
+            return _ETF_HISTORY_START.isoformat(), anchor_date.isoformat()
+        if mode == "INCREMENTAL":
+            return (anchor_date - timedelta(days=31)).isoformat(), anchor_date.isoformat()
+        if mode == "OBSERVATION_DATE":
+            return str(target["observationDate"]), str(target["observationDate"])
+        if mode == "DATE_RANGE":
+            return str(target["dateFrom"]), str(target["dateTo"])
+        raise RuntimeError("AKShare batched target mode is unsupported")
 
     def _execution_intent_from_preflight(
         self,
@@ -6615,6 +7490,37 @@ class DataOperationsControlPlane:
                 "equityInstrumentRoster": roster,
                 "equityInstrumentRosterHash": roster_hash,
             }
+        if target["datasetCode"] in _SECTOR_BAR_DATASETS:
+            roster = result.get("sectorBarRoster")
+            roster_hash = result.get("sectorBarRosterHash")
+            resolved_from = result.get("resolvedDateFrom")
+            resolved_to = result.get("resolvedDateTo")
+            if (
+                not isinstance(roster, list)
+                or not isinstance(roster_hash, str)
+                or len(roster_hash) != 64
+                or not isinstance(resolved_from, str)
+                or not isinstance(resolved_to, str)
+            ):
+                raise RuntimeError("sector bar preflight did not freeze its roster and date window")
+            return {
+                "sectorBarRoster": roster,
+                "sectorBarRosterHash": roster_hash,
+                "akshareResolvedDateFrom": resolved_from,
+                "akshareResolvedDateTo": resolved_to,
+                "akshareExecutionBatchDays": _akshare_execution_batch_days(target["datasetCode"]),
+            }
+        if target["datasetCode"] in _AKSHARE_BATCHED_DATASETS:
+            resolved_from = result.get("resolvedDateFrom")
+            resolved_to = result.get("resolvedDateTo")
+            if not isinstance(resolved_from, str) or not isinstance(resolved_to, str):
+                raise RuntimeError("AKShare batched preflight did not freeze its date window")
+            # 只冻结已验证的日期边界和固定批次大小；运行期不得重新读取当前日期或扩张范围。
+            return {
+                "akshareResolvedDateFrom": resolved_from,
+                "akshareResolvedDateTo": resolved_to,
+                "akshareExecutionBatchDays": _akshare_execution_batch_days(target["datasetCode"]),
+            }
         if selector.get("kind") != "ETF" or selector.get("operation") == "MASTER":
             return None
         intent: dict[str, Any] = {
@@ -6655,17 +7561,23 @@ class DataOperationsControlPlane:
                 raise OperationProblem(
                     status=409,
                     code="equity-backfill-source-unavailable",
-                    detail=f"Approved source is unavailable for {dataset_code}",
+                    detail=f"Frozen technical source is unavailable for {dataset_code}",
                 )
             result[dataset_code] = snapshot
         return result
 
-    def _source_snapshot(self, definition: DatasetDefinition) -> list[dict[str, Any]]:
+    def _source_snapshot(
+        self,
+        definition: DatasetDefinition,
+        *,
+        target: Mapping[str, object] | None = None,
+    ) -> list[dict[str, Any]]:
         """在 run 受理时冻结 provider、真实上游、adapter 与方法学标识。"""
+        snapshot: list[dict[str, Any]]
         if definition.providerless:
             executor_identity = self._internal_executor_identity(definition.dataset_code)
             if executor_identity is not None:
-                return [
+                snapshot = [
                     {
                         "providerId": "platform",
                         "upstreamSource": "platform-derived",
@@ -6676,38 +7588,51 @@ class DataOperationsControlPlane:
                         "mappingCodeSha256": executor_identity["codeSha256"],
                         "methodologyCode": definition.dataset_code,
                         "methodologyVersion": 1,
-                        "approvalStatus": "APPROVED",
+                        **self._source_admission_audit(definition),
                         "role": "PRIMARY",
                         "effective": True,
                         "sourceKind": "INTERNAL_EXECUTOR",
                     }
                 ]
-        bindings = self._source_bindings(definition, self._providers_for(definition))
-        if bindings:
-            executor_identity = self._internal_executor_identity(definition.dataset_code)
-            if executor_identity is None:
-                return bindings
-            return [
-                {
-                    **binding,
-                    "mappingExecutor": executor_identity["executorCode"],
-                    "mappingCodeSha256": executor_identity["codeSha256"],
-                }
-                for binding in bindings
-            ]
-        return [
-            {
-                "providerId": "unavailable",
-                "upstreamSource": "unavailable",
-                "sourceDataset": definition.dataset_code,
-                "adapterId": "unavailable",
-                "methodologyCode": "unavailable",
-                "methodologyVersion": 1,
-                "approvalStatus": "UNSUPPORTED",
-                "role": "PRIMARY",
-                "effective": False,
-            }
-        ]
+            else:
+                snapshot = []
+        else:
+            snapshot = []
+        if not snapshot:
+            bindings = self._source_bindings(
+                definition,
+                self._providers_for(definition, target=target),
+                target=target,
+            )
+            if bindings:
+                executor_identity = self._internal_executor_identity(definition.dataset_code)
+                snapshot = (
+                    bindings
+                    if executor_identity is None
+                    else [
+                        {
+                            **binding,
+                            "mappingExecutor": executor_identity["executorCode"],
+                            "mappingCodeSha256": executor_identity["codeSha256"],
+                        }
+                        for binding in bindings
+                    ]
+                )
+            else:
+                snapshot = [
+                    {
+                        "providerId": "unavailable",
+                        "upstreamSource": "unavailable",
+                        "sourceDataset": definition.dataset_code,
+                        "adapterId": "unavailable",
+                        "methodologyCode": "unavailable",
+                        "methodologyVersion": 1,
+                        **self._source_admission_audit(definition),
+                        "role": "PRIMARY",
+                        "effective": False,
+                    }
+                ]
+        return snapshot
 
     def _internal_executor_identity(self, dataset_code: str) -> dict[str, str] | None:
         """解包注册器并冻结真实函数、字节码、源码和稳定绑定参数。"""
@@ -6780,32 +7705,74 @@ class DataOperationsControlPlane:
         # 容器、客户端等运行时依赖只冻结类型，避免对象地址或密钥进入证据。
         return {"type": f"{value.__class__.__module__}:{value.__class__.__qualname__}"}
 
-    def _providers_for(self, definition: DatasetDefinition) -> tuple[str, ...]:
-        """返回目录指定且具备全部能力的 provider，禁止同名 capability 越权替换来源。"""
-        capabilities = definition.source_capabilities or (
+    def _source_capabilities_for(
+        self,
+        definition: DatasetDefinition,
+        *,
+        target: Mapping[str, object] | None = None,
+    ) -> tuple[str, ...]:
+        """返回目标真正会调用的来源能力；未给目标时仅用于目录摘要。"""
+        if target is not None and definition.dataset_code in {
+            _MONEY_FLOW_DAILY_DATASET,
+            _MONEY_FLOW_RANKING_DATASET,
+        }:
+            selector = target.get("selector")
+            if not isinstance(selector, Mapping):
+                raise ValueError("money-flow target selector is unavailable")
+            return (money_flow_source_capability(definition.dataset_code, selector),)
+        return definition.source_capabilities or (
             (definition.capability,) if definition.capability is not None else ()
         )
+
+    def _providers_for(
+        self,
+        definition: DatasetDefinition,
+        *,
+        target: Mapping[str, object] | None = None,
+    ) -> tuple[str, ...]:
+        """返回目录指定且具备全部能力的 provider，禁止同名 capability 越权替换来源。"""
+        capabilities = self._source_capabilities_for(definition, target=target)
         if not capabilities:
             return ()
         provider_ids = set(self._source_registry.provider_ids())
         if definition.provider_id is not None:
-            # 目录中的 provider 是审批边界；AKShare 即使伪声明官方 capability 也不能接管。
+            # 目录中的 provider 是技术能力和血缘绑定边界；AKShare 即使伪声明官方
+            # capability 也不能接管。
             provider_ids.intersection_update({definition.provider_id})
-        for capability in capabilities:
+        if definition.dataset_code == _MONEY_FLOW_RANKING_DATASET and target is None:
             provider_ids.intersection_update(
-                provider.provider_id
-                for provider in self._source_registry.for_capability(capability)
+                {
+                    provider.provider_id
+                    for capability in capabilities
+                    for provider in self._source_registry.for_capability(capability)
+                }
             )
+        else:
+            for capability in capabilities:
+                provider_ids.intersection_update(
+                    provider.provider_id
+                    for provider in self._source_registry.for_capability(capability)
+                )
         return tuple(sorted(provider_ids))
 
+    def _source_admission_audit(self, definition: DatasetDefinition) -> dict[str, str | None]:
+        """返回随 source snapshot 冻结的来源声明，不把声明解释为运行准入结论。"""
+        return {
+            "approvalStatus": definition.approval_status,
+            "rightsStatus": definition.rights_status,
+            "licenseScope": definition.license_scope,
+        }
+
     def _source_bindings(
-        self, definition: DatasetDefinition, providers: Iterable[str]
+        self,
+        definition: DatasetDefinition,
+        providers: Iterable[str],
+        *,
+        target: Mapping[str, object] | None = None,
     ) -> list[dict[str, Any]]:
         """将 provider 标识投影为明确区分 adapter 与真实 upstream 的安全绑定。"""
         values = list(providers)
-        capabilities = definition.source_capabilities or (
-            (definition.capability,) if definition.capability is not None else ()
-        )
+        capabilities = self._source_capabilities_for(definition, target=target)
         if not values and (definition.model_only or definition.providerless):
             return [
                 {
@@ -6815,7 +7782,7 @@ class DataOperationsControlPlane:
                     "adapterId": "platform-derived",
                     "methodologyCode": "platform-derived",
                     "methodologyVersion": 1,
-                    "approvalStatus": definition.approval_status,
+                    **self._source_admission_audit(definition),
                     "role": "PRIMARY",
                     "effective": True,
                 }
@@ -6830,27 +7797,34 @@ class DataOperationsControlPlane:
                     "adapterId": f"{definition.provider_id}:{capability}",
                     "methodologyCode": definition.dataset_code,
                     "methodologyVersion": 1,
-                    "approvalStatus": definition.approval_status,
+                    **self._source_admission_audit(definition),
                     "role": "PRIMARY",
                     "effective": False,
                 }
                 for capability in capabilities
             ]
-        return [
-            {
-                "providerId": provider,
-                "upstreamSource": self._upstream_source(provider, definition),
-                "sourceDataset": capability,
-                "adapterId": f"{provider}:{capability}",
-                "methodologyCode": definition.dataset_code,
-                "methodologyVersion": 1,
-                "approvalStatus": definition.approval_status,
-                "role": "PRIMARY" if provider_index == 0 else "SHADOW",
-                "effective": provider_index == 0,
-            }
-            for provider_index, provider in enumerate(values)
-            for capability in capabilities
-        ]
+        bindings: list[dict[str, Any]] = []
+        for capability in capabilities:
+            capable_providers = tuple(
+                provider
+                for provider in values
+                if capability in self._source_registry.get(provider).capabilities()
+            )
+            for provider_index, provider in enumerate(capable_providers):
+                bindings.append(
+                    {
+                        "providerId": provider,
+                        "upstreamSource": self._upstream_source(provider, definition),
+                        "sourceDataset": capability,
+                        "adapterId": f"{provider}:{capability}",
+                        "methodologyCode": definition.dataset_code,
+                        "methodologyVersion": 1,
+                        **self._source_admission_audit(definition),
+                        "role": "PRIMARY" if provider_index == 0 else "SHADOW",
+                        "effective": provider_index == 0,
+                    }
+                )
+        return bindings
 
     def _upstream_source(self, provider: str, definition: DatasetDefinition) -> str:
         """返回 provider 包装器后真实上游来源名称，避免误把 AKShare 当原始来源。"""
@@ -7003,11 +7977,13 @@ class DataOperationsControlPlane:
             command.status = (
                 "CANCEL_REQUESTED" if command.status == "CANCEL_REQUESTED" else "RUNNING"
             )
+            command.error_json = None
             return
         if any(status == "QUEUED" for status in statuses):
             command.status = (
                 "CANCEL_REQUESTED" if command.status == "CANCEL_REQUESTED" else "QUEUED"
             )
+            command.error_json = None
             return
         if statuses and all(status == "CANCELLED" for status in statuses):
             command.status = "CANCELLED"
@@ -7017,7 +7993,26 @@ class DataOperationsControlPlane:
             command.status = "PARTIAL"
         else:
             command.status = "FAILED"
+        command.error_json = self._command_error_from_runs(runs, command.status)
         command.finished_at = now
+
+    @staticmethod
+    def _command_error_from_runs(
+        runs: Sequence[DataOperationRun], command_status: str
+    ) -> dict[str, Any] | None:
+        """从终态 child 选择可执行的脱敏错误，供 command 详情和整批重试入口使用。
+
+        一个 command 可能混合多个失败原因。若存在可重试 child，优先暴露按提交顺序最早的
+        可重试错误，使 Web 的整批重试入口与控制面实际可复制的 run 一致；否则保留最早的
+        失败摘要。成功或取消不继承历史错误，避免旧失败误导当前已完成 command。
+        """
+        if command_status in {"SUCCEEDED", "CANCELLED"}:
+            return None
+        errors = [dict(run.error_json) for run in runs if isinstance(run.error_json, dict)]
+        if not errors:
+            return None
+        retryable = [error for error in errors if error.get("retryable") is True]
+        return retryable[0] if retryable else errors[0]
 
     def _request_cancel(
         self,
@@ -8473,7 +9468,7 @@ class DataOperationsControlPlane:
                 dataset_code=revision.dataset_code,
                 mode=revision.mode,
                 target_json=target,
-                source_snapshot=self._source_snapshot(definition),
+                source_snapshot=self._source_snapshot(definition, target=target),
                 execution_intent_json=execution_intent,
                 status="QUEUED",
                 queue_position=None,

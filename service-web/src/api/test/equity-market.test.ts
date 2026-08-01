@@ -13,12 +13,14 @@ import { authSession } from "../auth-session";
 import { queryClient } from "../query-client";
 import { setHttpTransportForTests } from "../http";
 import type { HttpTransportRequest } from "../http";
-import { equitySearchResponseSchema } from "../../types/equity-market";
+import { equityBarPageSchema, equitySearchResponseSchema } from "../../types/equity-market";
 
 /** 固定非敏感 UUID，便于验证 publication 与条件缓存身份。 */
 const identifiers = {
   user: "16b6bc36-b3ec-4e8c-b2c8-9f704a83d415",
   dataVersion: "8f401b48-5b0e-4a76-8d85-2c7101a28955",
+  coverageVersion: "a6fb18c8-c0e1-4c66-9f57-cf3e12d83f12",
+  sourceBatchId: "ef4d71e4-a122-43d3-96e2-706ec55ff1ca",
 } as const;
 
 /** 返回登录合同需要的最小普通用户投影。 */
@@ -165,6 +167,9 @@ function barPage(periodEnd: string, nextCursor: string | null) {
     adjustAsOf: null,
     factorVersion: null,
     formulaVersion: null,
+    coverageVersion: identifiers.coverageVersion,
+    publicationKind: "DATA",
+    sourceBatchId: identifiers.sourceBatchId,
     dataVersion: identifiers.dataVersion,
     publishedAt: "2026-07-30T01:00:00.000Z",
     availability: "AVAILABLE",
@@ -596,6 +601,44 @@ describe("equity market public API", () => {
     expect(new URL(barRequests[1]?.url ?? "", "http://apex.local").searchParams.get("cursor")).toBe(
       "signed-cursor-2",
     );
+    expect(result.data).toMatchObject({
+      coverageVersion: identifiers.coverageVersion,
+      publicationKind: "DATA",
+      sourceBatchId: identifiers.sourceBatchId,
+    });
+  });
+
+  /** K 线只接受带精确覆盖谱系的公开合同，零记录与数据页不能互相伪装。 */
+  it("requires exact coverage lineage and a valid publication shape for bars", () => {
+    const data = barPage("2026-07-28", null);
+    const zeroRecordCoverage = {
+      ...data,
+      publicationKind: "ZERO_RECORD_COVERAGE",
+      items: [],
+    };
+    const missingCoverage = { ...data } as Record<string, unknown>;
+    delete missingCoverage.coverageVersion;
+
+    expect(equityBarPageSchema.parse(data)).toMatchObject({
+      coverageVersion: identifiers.coverageVersion,
+      publicationKind: "DATA",
+      sourceBatchId: identifiers.sourceBatchId,
+    });
+    expect(equityBarPageSchema.parse(zeroRecordCoverage).publicationKind).toBe(
+      "ZERO_RECORD_COVERAGE",
+    );
+    expect(() => equityBarPageSchema.parse(missingCoverage)).toThrow();
+    expect(() =>
+      equityBarPageSchema.parse({
+        ...data,
+        securityId: "b8dcd29a-0ec5-4e4e-a8cf-1768a5c4a980",
+      }),
+    ).toThrow();
+    expect(() =>
+      equityBarPageSchema.parse({ ...data, formulaVersion: "unapproved-formula-v1" }),
+    ).toThrow();
+    expect(() => equityBarPageSchema.parse({ ...data, items: [] })).toThrow();
+    expect(() => equityBarPageSchema.parse({ ...zeroRecordCoverage, items: data.items })).toThrow();
   });
 
   /** 搜索 response 没有显式 completeness 时必须 fail-closed。 */

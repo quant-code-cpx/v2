@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from datetime import date
 
@@ -33,27 +34,89 @@ class FakeFrame:
         return self._rows
 
 
-def test_catalog_snapshot_keeps_unverified_provider_units_out_of_payload(
+class FakeResponse:
+    """提供受控 HTTP 目录读取所需的最小响应接口。"""
+
+    def __init__(self, payload: dict[str, object]) -> None:
+        """序列化固定来源 envelope，供测试核对原始证据保留行为。"""
+        self.content = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+
+    def raise_for_status(self) -> None:
+        """模拟成功 HTTP 响应，不额外抛出传输错误。"""
+
+
+def _catalog_record(**overrides: object) -> dict[str, object]:
+    """构造与真实国证原始 JSON 完全同名的最小目录记录。"""
+    record: dict[str, object] = {
+        "id": 3000,
+        "docchannel": 1027,
+        "indexcode": "399001",
+        "indextype": "100",
+        "showcnindex": "1",
+        "indexsource": "1",
+        "realtimemarket": "1",
+        "remark": None,
+        "indexname": "深证成指",
+        "indexename": "Shenzhen Index",
+        "indexfullename": "Shenzhen Component Index",
+        "indexfullcname": "深证成份指数",
+        "samplesize": 500,
+        "closeingPoint": "13578.9301",
+        "percent": "0.0221",
+        "peStatic": "28.0748",
+        "peDynamic": "26.5763",
+        "pb": "2.72",
+        "volume": 28352911825,
+        "amount": "849697787993.46",
+        "totalMarketValue": "28240417560056.2",
+        "freeMarketValue": "15536953424540.73",
+        "sampleshowdate": None,
+        "prefixmonth": None,
+        "showDetail": "1",
+        "dataSource": 0,
+    }
+    record.update(overrides)
+    return record
+
+
+def _catalog_payload(*records: dict[str, object]) -> dict[str, object]:
+    """构造真实来源当前使用的全字典行 envelope。"""
+    return {
+        "code": 0,
+        "data": {
+            "status": 0,
+            "rows": list(records),
+        },
+    }
+
+
+def test_catalog_snapshot_uses_frozen_raw_json_contract_and_keeps_raw_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """国证目录只输出稳定身份和样本数，不把 adapter 已换算的行情单位当作 canonical 事实。"""
-    captured: list[bool] = []
+    """国证目录以真实上游 JSON 字段读取，保留原文且不依赖失配 SDK 列名。"""
+    source_payload = _catalog_payload(
+        _catalog_record(),
+        _catalog_record(id=3225, indexcode="AITCNYG", indexname="中华陆股通行业龙头R"),
+        _catalog_record(id=4162, indexcode="39926401", indexname="创业软件R"),
+    )
+    captured: dict[str, object] = {}
 
-    def fake_catalog() -> FakeFrame:
-        """记录唯一 SDK 调用并返回含单位不明数值的一条目录记录。"""
-        captured.append(True)
-        return FakeFrame(
-            [
-                {
-                    "指数代码": "399001",
-                    "指数简称": "深证成指",
-                    "样本数": "500",
-                    "总市值": 123.45,
-                }
-            ]
-        )
+    def fake_get(
+        url: str,
+        *,
+        params: dict[str, str],
+        timeout: float,
+    ) -> FakeResponse:
+        """记录受控 URL、冻结参数和超时，并返回真实形状的来源 envelope。"""
+        captured.update({"url": url, "params": params, "timeout": timeout})
+        return FakeResponse(source_payload)
 
-    monkeypatch.setattr(cnindex_index_snapshot.ak, "index_all_cni", fake_catalog)
+    def unexpected_sdk_catalog() -> FakeFrame:
+        """阻止测试意外退回 AKShare 已知失配的目录列重命名实现。"""
+        pytest.fail("catalog must use the controlled raw JSON reader")
+
+    monkeypatch.setattr(cnindex_index_snapshot.requests, "get", fake_get)
+    monkeypatch.setattr(cnindex_index_snapshot.ak, "index_all_cni", unexpected_sdk_catalog)
     batch = asyncio.run(
         AkshareCnindexIndexSnapshotAdapter(request_timeout_seconds=5).fetch(
             SourceRequest(
@@ -64,10 +127,93 @@ def test_catalog_snapshot_keeps_unverified_provider_units_out_of_payload(
     )
 
     payload = json.loads(batch.payload)
-    assert captured == [True]
+    raw = json.loads(batch.raw_payload or b"{}")
+    expected_fingerprint = hashlib.sha256(
+        json.dumps(
+            sorted(cnindex_index_snapshot._CNI_CATALOG_FIELDS),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    assert captured == {
+        "url": "https://www.cnindex.com.cn/index/indexList",
+        "params": {"channelCode": "-1", "rows": "2000", "pageNum": "1"},
+        "timeout": 5.0,
+    }
     assert payload["records"] == [
-        {"indexCode": "399001", "indexName": "深证成指", "constituentCount": 500}
+        {"indexCode": "399001", "indexName": "深证成指", "constituentCount": 500},
+        {
+            "indexCode": "AITCNYG",
+            "indexName": "中华陆股通行业龙头R",
+            "constituentCount": 500,
+        },
+        {"indexCode": "39926401", "indexName": "创业软件R", "constituentCount": 500},
     ]
+    assert raw == source_payload
+    assert batch.schema_fingerprint == expected_fingerprint
+
+
+def test_catalog_snapshot_rejects_unknown_raw_column_without_dropping_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """国证目录出现未冻结字段时必须以不可重试 schema 错误停止，而非猜测列含义。"""
+    source_payload = _catalog_payload(_catalog_record(unexpectedColumn="new"))
+
+    def fake_get(
+        url: str,
+        *,
+        params: dict[str, str],
+        timeout: float,
+    ) -> FakeResponse:
+        """返回带未知列的来源 envelope。"""
+        del url, params, timeout
+        return FakeResponse(source_payload)
+
+    monkeypatch.setattr(cnindex_index_snapshot.requests, "get", fake_get)
+
+    with pytest.raises(ProviderError) as raised:
+        asyncio.run(
+            AkshareCnindexIndexSnapshotAdapter(request_timeout_seconds=5).fetch(
+                SourceRequest(
+                    capability="index.catalog.snapshot",
+                    parameters=(("administrator", "CNI"),),
+                )
+            )
+        )
+
+    assert raised.value.code.value == "schema"
+    assert raised.value.retryable is False
+
+
+def test_catalog_snapshot_marks_transport_timeout_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """受控国证 HTTP 超时必须保持来源不可用且可重试的稳定分类。"""
+
+    def fake_get(
+        url: str,
+        *,
+        params: dict[str, str],
+        timeout: float,
+    ) -> FakeResponse:
+        """模拟在来源读取前发生的网络超时。"""
+        del url, params, timeout
+        raise cnindex_index_snapshot.requests.Timeout("catalog timeout")
+
+    monkeypatch.setattr(cnindex_index_snapshot.requests, "get", fake_get)
+
+    with pytest.raises(ProviderError) as raised:
+        asyncio.run(
+            AkshareCnindexIndexSnapshotAdapter(request_timeout_seconds=5).fetch(
+                SourceRequest(
+                    capability="index.catalog.snapshot",
+                    parameters=(("administrator", "CNI"),),
+                )
+            )
+        )
+
+    assert raised.value.code.value == "unavailable"
+    assert raised.value.retryable is True
 
 
 @pytest.mark.parametrize(

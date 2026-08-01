@@ -18,6 +18,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import akshare as ak
+import requests
 
 from service_data_sync.application.ports.data_source import (
     ProviderBatch,
@@ -49,8 +50,12 @@ _ORDER_BUCKETS = (
     ("medium", "中单"),
     ("small", "小单"),
 )
-_EASTMONEY_ADAPTER_VERSION = "akshare-1.18.78-eastmoney-money-flow-v1"
-_THS_ADAPTER_VERSION = "akshare-1.18.78-ths-money-flow-v1"
+_EASTMONEY_ADAPTER_VERSION = "akshare-1.18.81-eastmoney-money-flow-v2"
+_THS_ADAPTER_VERSION = "akshare-1.18.81-ths-money-flow-v1"
+# 固定 SDK 先读取总页数再逐页下载个股排行；实测约 5,300 行需要超过默认单页 30 秒的整批时间。
+_EASTMONEY_EQUITY_RANKING_MIN_TOTAL_TIMEOUT_SECONDS = 180
+# 固定 SDK 先读取总页数再逐页下载个股排行；实测约 5,200 行需要超过默认单页 30 秒的整批时间。
+_THS_EQUITY_RANKING_MIN_TOTAL_TIMEOUT_SECONDS = 180
 
 FrameFetcher = Callable[..., Any]
 
@@ -66,7 +71,7 @@ class AkshareEastmoneyMoneyFlowAdapter:
     def __init__(
         self,
         *,
-        request_timeout_seconds: int,
+        request_timeout_seconds: float,
         equity_daily_fetcher: FrameFetcher = ak.stock_individual_fund_flow,
         sector_daily_fetcher: FrameFetcher = ak.stock_sector_fund_flow_hist,
         market_daily_fetcher: FrameFetcher = ak.stock_market_fund_flow,
@@ -94,8 +99,8 @@ class AkshareEastmoneyMoneyFlowAdapter:
             raise _invalid_request("unsupported money-flow capability")
         parameters = dict(request.parameters)
         try:
-            async with asyncio.timeout(self._request_timeout_seconds):
-                frame = await asyncio.to_thread(self._fetch_frame, request.capability, parameters)
+            async with asyncio.timeout(self._total_timeout_seconds(request.capability)):
+                frame = await self._fetch_frame_with_retry(request.capability, parameters)
         except TimeoutError as error:
             raise ProviderError(
                 ProviderErrorCode.UNAVAILABLE,
@@ -118,6 +123,30 @@ class AkshareEastmoneyMoneyFlowAdapter:
             upstream_source="eastmoney.money-flow",
             adapter_version=_EASTMONEY_ADAPTER_VERSION,
         )
+
+    def _total_timeout_seconds(self, capability: str) -> float:
+        """为多页东财个股排行保留已验证的整批上限，其他接口沿用单页配置。"""
+        if capability == _EQUITY_RANKING:
+            return max(
+                self._request_timeout_seconds,
+                _EASTMONEY_EQUITY_RANKING_MIN_TOTAL_TIMEOUT_SECONDS,
+            )
+        return self._request_timeout_seconds
+
+    async def _fetch_frame_with_retry(self, capability: str, parameters: dict[str, str]) -> Any:
+        """仅在个股全量排行的可重试传输失败后重扫一次完整 `SDK` 扫描。
+
+        固定 `AKShare` 函数只能在所有页完成后返回 `DataFrame`，因此失败时不会把部分页
+        当成成功结果。两次扫描共用外层整批 deadline，其他 capability 保持一次调用语义。
+        """
+        attempts = 2 if capability == _EQUITY_RANKING else 1
+        for attempt in range(attempts):
+            try:
+                return await asyncio.to_thread(self._fetch_frame, capability, parameters)
+            except requests.RequestException:
+                if attempt + 1 == attempts:
+                    raise
+        raise RuntimeError("money-flow ranking retry attempts exhausted")
 
     def _fetch_frame(self, capability: str, parameters: dict[str, str]) -> Any:
         """把中立 capability 映射到固定版本的精确 AKShare 函数签名。"""
@@ -213,7 +242,7 @@ class AkshareThsMoneyFlowAdapter:
         if indicator not in {"即时", "3日排行", "5日排行", "10日排行", "20日排行"}:
             raise _invalid_request("ths money-flow indicator is invalid")
         try:
-            async with asyncio.timeout(self._request_timeout_seconds):
+            async with asyncio.timeout(self._total_timeout_seconds(request.capability)):
                 frame = await asyncio.to_thread(
                     self._fetchers[request.capability], symbol=indicator
                 )
@@ -255,6 +284,15 @@ class AkshareThsMoneyFlowAdapter:
             upstream_source="10jqka.money-flow",
             adapter_version=_THS_ADAPTER_VERSION,
         )
+
+    def _total_timeout_seconds(self, capability: str) -> int:
+        """为多页个股排行保留已验证的整批上限，其他同花顺接口沿用单页配置。"""
+        if capability == _TRADE_EQUITY_RANKING:
+            return max(
+                self._request_timeout_seconds,
+                _THS_EQUITY_RANKING_MIN_TOTAL_TIMEOUT_SECONDS,
+            )
+        return self._request_timeout_seconds
 
 
 def _normalize_order_size_daily(
@@ -316,6 +354,11 @@ def _normalize_order_size_ranking(
             }
             for bucket_code, vendor_label in _ORDER_BUCKETS
         ]
+        # 上游会为少数尚未形成资金流量的证券返回全空五桶；这些不是零值，不能入库成假观测。
+        metrics = [metric for metric in metrics if _ranking_metric_has_measure(metric)]
+        # supplier position 的排序依据固定为主力桶；主力缺失时不能拿侧桶替代它继续声明排名。
+        if not any(metric["bucket"] == "main" for metric in metrics):
+            continue
         if capability == _EQUITY_RANKING:
             scope = {
                 "scopeType": "equity",
@@ -353,6 +396,14 @@ def _normalize_order_size_ranking(
         "isComplete": False,
         "items": items,
     }
+
+
+def _ranking_metric_has_measure(metric: dict[str, object]) -> bool:
+    """判断供应商排行分桶是否实际披露了至少一项可消费度量。"""
+    return any(
+        metric[measure] is not None
+        for measure in ("grossInflow", "grossOutflow", "netAmount", "netRatio")
+    )
 
 
 def _normalize_ths_ranking(

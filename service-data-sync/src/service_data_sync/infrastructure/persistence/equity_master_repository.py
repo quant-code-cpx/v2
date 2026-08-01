@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -18,6 +18,7 @@ from sqlalchemy import case, exists, func, insert, literal, literal_column, sele
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.orm import Session
 
+from service_data_sync.application.ports.canonical_release import CanonicalLineageRecord
 from service_data_sync.application.ports.equity_master import (
     EquityMasterRepository,
     PublishedCnAAggregate,
@@ -31,6 +32,7 @@ from service_data_sync.domain.equity_master import (
 
 from ..database.connection import DatabaseClient
 from ..database.fenced_execution import current_fenced_execution
+from ..database.models.canonical import CanonicalRecordLineage
 from ..database.models.equity.identity.equity_identifier_version import (
     EquityIdentifierVersion,
 )
@@ -52,12 +54,15 @@ from ..database.models.equity.identity.equity_name_version import (
 from ..database.models.equity.identity.equity_presence_anomaly import (
     EquityPresenceAnomaly,
 )
+from ..database.models.provenance.source_batch import SourceBatch
 from ..database.models.publication.dataset_publication import (
     DatasetPublication,
 )
 from ..database.models.publication.dataset_publication_component import (
     DatasetPublicationComponent,
 )
+from .canonical_release_repository import SqlAlchemyCanonicalReleaseRepository
+from .legacy_canonical_release_bridge import publish_legacy_snapshot
 from .source_batch import record_source_observation
 
 _DATASET = "equity.master.catalog"
@@ -71,6 +76,7 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
     def __init__(self, database: DatabaseClient) -> None:
         """使用服务自有数据库引擎，避免应用层接触 SQLAlchemy 细节。"""
         self._database = database
+        self._release_repository = SqlAlchemyCanonicalReleaseRepository(database)
 
     def publish_catalog(
         self,
@@ -95,9 +101,6 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
         business_hash = _catalog_business_hash(entries)
         with self._database.transaction() as connection:
             previous_catalog = self._latest_catalog(connection, exchange)
-            previous_hash = (
-                None if previous_catalog is None else bytes(previous_catalog["business_sha256"])
-            )
             self._validate_catalog_completeness(previous_catalog, current_count=len(entries))
             source_batch_id = record_source_observation(
                 connection,
@@ -148,7 +151,8 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
             data_version = self._publish(
                 connection,
                 exchange=exchange,
-                business_changed=previous_hash != business_hash,
+                snapshot_id=snapshot_id,
+                source_batch_id=source_batch_id,
                 effective_as_of=target_date,
                 published_at=now,
             )
@@ -175,6 +179,7 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
                     select(
                         DatasetPublication.partition_key,
                         DatasetPublication.data_version,
+                        DatasetPublication.release_id,
                         DatasetPublication.effective_as_of,
                         DatasetPublication.knowledge_cutoff,
                     )
@@ -196,89 +201,94 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
                 raise ValueError("all exchange catalog publications are required")
             if len({row["effective_as_of"] for row in rows}) != 1:
                 raise ValueError("all exchange catalog publications must share a target date")
+            if any(row["release_id"] is None for row in rows):
+                raise ValueError("all exchange catalog publications require canonical releases")
             components = tuple(
                 (str(row["partition_key"]), UUID(str(row["data_version"]))) for row in rows
             )
-            current_components = (
+            effective_as_of = min(row["effective_as_of"] for row in rows)
+            source_rows = (
                 connection.execute(
                     select(
-                        DatasetPublicationComponent.component_partition_key,
-                        DatasetPublicationComponent.component_data_version,
+                        DatasetPublication.partition_key,
+                        DatasetPublication.data_version,
+                        CanonicalRecordLineage.source_batch_id,
+                        SourceBatch.created_at.label("source_created_at"),
+                    )
+                    .distinct()
+                    .join(
+                        CanonicalRecordLineage,
+                        CanonicalRecordLineage.release_id == DatasetPublication.release_id,
                     )
                     .join(
-                        DatasetPublication,
-                        DatasetPublicationComponent.aggregate_publication_id
-                        == DatasetPublication.publication_id,
+                        SourceBatch,
+                        SourceBatch.source_batch_id == CanonicalRecordLineage.source_batch_id,
                     )
                     .where(
-                        DatasetPublication.dataset == _CN_A_DATASET,
-                        DatasetPublication.partition_key == _CN_A_PARTITION,
-                        DatasetPublication.superseded_at.is_(None),
+                        DatasetPublication.release_id.in_(
+                            tuple(UUID(str(row["release_id"])) for row in rows)
+                        )
                     )
-                    .order_by(DatasetPublicationComponent.component_partition_key)
+                    .order_by(
+                        DatasetPublication.partition_key,
+                        DatasetPublication.data_version,
+                        SourceBatch.created_at,
+                        CanonicalRecordLineage.source_batch_id,
+                    )
                 )
                 .mappings()
                 .all()
             )
-            current = tuple(
-                (str(row["component_partition_key"]), UUID(str(row["component_data_version"])))
-                for row in current_components
+            records = _cn_a_aggregate_records(
+                components=components,
+                source_rows=source_rows,
             )
-            if current == components:
-                existing = (
-                    connection.execute(
-                        select(
-                            DatasetPublication.data_version, DatasetPublication.published_at
-                        ).where(
-                            DatasetPublication.dataset == _CN_A_DATASET,
-                            DatasetPublication.partition_key == _CN_A_PARTITION,
-                            DatasetPublication.superseded_at.is_(None),
-                        )
-                    )
-                    .mappings()
-                    .one()
-                )
-                _record_fenced_aggregate_checkpoint(UUID(str(existing["data_version"])))
-                return PublishedCnAAggregate(
-                    data_version=UUID(str(existing["data_version"])),
-                    published_at=existing["published_at"],
-                )
-            effective_as_of = min(row["effective_as_of"] for row in rows)
-            knowledge_cutoff = max(row["knowledge_cutoff"] for row in rows)
-            connection.execute(
-                update(DatasetPublication)
-                .where(
-                    DatasetPublication.dataset == _CN_A_DATASET,
-                    DatasetPublication.partition_key == _CN_A_PARTITION,
-                    DatasetPublication.superseded_at.is_(None),
-                )
-                .values(superseded_at=published_at)
-            )
-            publication_id = uuid4()
-            data_version = uuid4()
-            connection.execute(
-                insert(DatasetPublication).values(
-                    publication_id=publication_id,
-                    dataset=_CN_A_DATASET,
-                    partition_key=_CN_A_PARTITION,
-                    data_version=data_version,
-                    quality_status="passed",
-                    effective_as_of=effective_as_of,
-                    knowledge_cutoff=knowledge_cutoff,
-                    published_at=published_at,
-                    superseded_at=None,
-                )
-            )
-            for partition_key, component_data_version in components:
-                connection.execute(
+
+            def write_publication(
+                session: Session,
+                publication_id: UUID,
+                data_version: UUID,
+                release_id: UUID,
+            ) -> None:
+                """把三所 child dataVersion 和 aggregate release/publication 原子绑定。"""
+                del data_version, release_id
+                session.execute(
                     insert(DatasetPublicationComponent).values(
-                        aggregate_publication_id=publication_id,
-                        component_partition_key=partition_key,
-                        component_data_version=component_data_version,
+                        [
+                            {
+                                "aggregate_publication_id": publication_id,
+                                "component_partition_key": partition_key,
+                                "component_data_version": component_data_version,
+                            }
+                            for partition_key, component_data_version in components
+                        ]
                     )
                 )
-            _record_fenced_aggregate_checkpoint(data_version)
-        return PublishedCnAAggregate(data_version=data_version, published_at=published_at)
+
+            published = publish_legacy_snapshot(
+                connection,
+                release_repository=self._release_repository,
+                dataset_code=_CN_A_DATASET,
+                partition_key=_CN_A_PARTITION,
+                domain="equity",
+                grain="CN A stable aggregate + exchange catalog release manifest",
+                semantic_family="derived-equity-reference",
+                mapping_version="equity-master-cn-a-aggregate-release-v1",
+                source_batch_id=records[0].source_batch_id,
+                records=records,
+                fact_min=effective_as_of,
+                fact_max=effective_as_of,
+                now=published_at,
+                publication_effective_as_of=effective_as_of,
+                write_publication=write_publication,
+                # 三所 child catalog 已各自代表一个控制面分区；全市场 manifest 不是第四分区。
+                record_fenced_progress=False,
+            )
+            _record_fenced_aggregate_checkpoint(published.data_version)
+        return PublishedCnAAggregate(
+            data_version=published.data_version,
+            published_at=published.published_at,
+        )
 
     def _latest_catalog(self, connection: Session, exchange: Exchange) -> Mapping[Any, Any] | None:
         """读取上一份稳定目录的哈希和行数，供版本与完整性门共用。"""
@@ -640,18 +650,21 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
         source_batch_id: UUID,
         now: datetime,
     ) -> bool:
-        """名称变化以观测日生效；相同名称只保留新快照证据而不制造历史版本。"""
+        """将目录中的名称变动按观测日追加，目录不具备回填改名生效日的证据。"""
         current = (
             connection.execute(
                 select(
                     EquityNameVersion.version_id,
                     EquityNameVersion.name,
                     EquityNameVersion.effective_from,
-                ).where(
+                )
+                .where(
                     EquityNameVersion.security_id == security_id,
                     EquityNameVersion.effective_to.is_(None),
                     EquityNameVersion.known_to.is_(None),
                 )
+                # 同一代码的并发目录发布必须串行，避免留下两个开放名称版本。
+                .with_for_update()
             )
             .mappings()
             .one_or_none()
@@ -681,6 +694,8 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
             target_date=target_date,
             source_batch_id=source_batch_id,
             now=now,
+            name_effective_from=target_date,
+            name_effective_date_precision="OBSERVATION_DATE",
         )
         return True
 
@@ -723,9 +738,17 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
         target_date: date,
         source_batch_id: UUID,
         now: datetime,
+        name_effective_from: date | None = None,
+        name_effective_date_precision: str | None = None,
     ) -> None:
-        """追加独立可修订的名称事实，名称日期不能冒充官方上市日期。"""
-        effective_from, precision = _effective_date(entry, target_date)
+        """追加独立可修订的名称事实，目录改名不得借用证券上市日倒灌历史。"""
+        if (name_effective_from is None) != (name_effective_date_precision is None):
+            raise ValueError("catalog name effective date and precision must be supplied together")
+        if name_effective_from is None:
+            effective_from, precision = _effective_date(entry, target_date)
+        else:
+            effective_from = name_effective_from
+            precision = name_effective_date_precision
         connection.execute(
             insert(EquityNameVersion).values(
                 version_id=uuid4(),
@@ -806,50 +829,133 @@ class SqlAlchemyEquityMasterRepository(EquityMasterRepository):
         connection: Session,
         *,
         exchange: Exchange,
-        business_changed: bool,
+        snapshot_id: UUID,
+        source_batch_id: UUID,
         effective_as_of: date,
         published_at: datetime,
     ) -> UUID:
-        """仅在目录业务内容变化时推进单交易所发布版本。"""
-        partition_key = exchange.value
-        if not business_changed:
-            current = (
-                connection.execute(
-                    select(DatasetPublication.data_version).where(
-                        DatasetPublication.dataset == _DATASET,
-                        DatasetPublication.partition_key == partition_key,
-                        DatasetPublication.superseded_at.is_(None),
-                    )
-                )
-                .mappings()
-                .one_or_none()
-            )
-            if current is not None:
-                return UUID(str(current["data_version"]))
-        connection.execute(
-            update(DatasetPublication)
-            .where(
-                DatasetPublication.dataset == _DATASET,
-                DatasetPublication.partition_key == partition_key,
-                DatasetPublication.superseded_at.is_(None),
-            )
-            .values(superseded_at=published_at)
+        """把完整目录快照经统一 release 事务发布为带真实 lineage 的消费者版本。"""
+        return self._publish_catalog_release(
+            connection,
+            exchange=exchange,
+            snapshot_id=snapshot_id,
+            source_batch_id=source_batch_id,
+            effective_as_of=effective_as_of,
+            published_at=published_at,
         )
-        data_version = uuid4()
+
+    def _publish_catalog_release(
+        self,
+        connection: Session,
+        *,
+        exchange: Exchange,
+        snapshot_id: UUID,
+        source_batch_id: UUID,
+        effective_as_of: date,
+        published_at: datetime,
+    ) -> UUID:
+        """从已落库目录成员构造 release 候选并委托统一消费者可见性事务。"""
+        records = _catalog_release_records(
+            connection,
+            snapshot_id=snapshot_id,
+            source_batch_id=source_batch_id,
+        )
+        published = publish_legacy_snapshot(
+            connection,
+            release_repository=self._release_repository,
+            dataset_code=_DATASET,
+            partition_key=exchange.value,
+            domain="equity",
+            grain="exchange catalog snapshot + confirmed identity/name rows",
+            semantic_family="reported-equity-reference",
+            mapping_version="equity-master-catalog-release-v1",
+            source_batch_id=source_batch_id,
+            records=records,
+            fact_min=effective_as_of,
+            fact_max=effective_as_of,
+            now=published_at,
+            publication_effective_as_of=effective_as_of,
+        )
+        return published.data_version
+
+
+def _catalog_release_records(
+    connection: Session,
+    *,
+    snapshot_id: UUID,
+    source_batch_id: UUID,
+) -> tuple[CanonicalLineageRecord, ...]:
+    """从刚写入的完整目录快照构造每行可复验的 canonical lineage。"""
+    rows = (
         connection.execute(
-            insert(DatasetPublication).values(
-                publication_id=uuid4(),
-                dataset=_DATASET,
-                partition_key=partition_key,
-                data_version=data_version,
-                quality_status="passed",
-                effective_as_of=effective_as_of,
-                knowledge_cutoff=published_at,
-                published_at=published_at,
-                superseded_at=None,
+            select(
+                EquityMasterSnapshotMember.exchange,
+                EquityMasterSnapshotMember.symbol,
+                EquityMasterSnapshotMember.content_sha256,
+            )
+            .where(EquityMasterSnapshotMember.snapshot_id == snapshot_id)
+            .order_by(
+                EquityMasterSnapshotMember.exchange,
+                EquityMasterSnapshotMember.symbol,
             )
         )
-        return data_version
+        .mappings()
+        .all()
+    )
+    if not rows:
+        raise ValueError("catalog snapshot has no members for canonical release")
+    transform_hash = hashlib.sha256(b"equity-master-catalog-release-v1").hexdigest()
+    return tuple(
+        CanonicalLineageRecord(
+            record_key_hash=hashlib.sha256(
+                f"catalog:{row['exchange']}:{row['symbol']}".encode()
+            ).hexdigest(),
+            content_hash=bytes(row["content_sha256"]).hex(),
+            source_batch_id=source_batch_id,
+            transform_hash=transform_hash,
+            role="primary",
+        )
+        for row in rows
+    )
+
+
+def _cn_a_aggregate_records(
+    *,
+    components: tuple[tuple[str, UUID], ...],
+    source_rows: Sequence[Mapping[Any, Any]],
+) -> tuple[CanonicalLineageRecord, ...]:
+    """将每个 child publication 归约为一条不受重复来源证据影响的聚合记录。"""
+    expected_components = set(components)
+    selected_sources: dict[tuple[str, UUID], tuple[datetime, UUID]] = {}
+    for row in source_rows:
+        component = (str(row["partition_key"]), UUID(str(row["data_version"])))
+        if component not in expected_components:
+            raise ValueError("aggregate source lineage does not match a current catalog component")
+        source_created_at = row["source_created_at"]
+        if not isinstance(source_created_at, datetime) or source_created_at.tzinfo is None:
+            raise ValueError("aggregate source lineage requires a timezone-aware creation time")
+        source_batch_id = UUID(str(row["source_batch_id"]))
+        candidate = (source_created_at, source_batch_id)
+        # child release 可累积相同目录内容的多次来源证据；选择最早登记证据只用于
+        # 聚合 manifest 的确定性 lineage，完整证据仍可经 child release 审计。
+        if component not in selected_sources or candidate < selected_sources[component]:
+            selected_sources[component] = candidate
+    if set(selected_sources) != expected_components:
+        raise ValueError("all exchange catalog releases require canonical source lineage")
+    transform_hash = hashlib.sha256(b"equity-master-cn-a-aggregate-release-v1").hexdigest()
+    return tuple(
+        CanonicalLineageRecord(
+            # record key 和内容仅冻结 component 身份；新来源证据不能改变 aggregate release。
+            record_key_hash=hashlib.sha256(
+                f"cn-a-component:{partition_key}:{data_version}".encode()
+            ).hexdigest(),
+            content_hash=hashlib.sha256(f"{partition_key}:{data_version}".encode()).hexdigest(),
+            source_batch_id=selected_sources[(partition_key, data_version)][1],
+            transform_hash=transform_hash,
+            role="input",
+        )
+        for partition_key, data_version in components
+    )
 
 
 def _record_fenced_aggregate_checkpoint(data_version: UUID) -> None:
